@@ -1,0 +1,15 @@
+/* Pixelify Sans (OFL, variable 400-700) and VT323 (OFL), latin subsets from Google Fonts */
+@font-face {
+  font-family: 'Pixelify Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url(fonts/PixelifySans-latin.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'VT323';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/VT323-latin.woff2) format('woff2');
+}
