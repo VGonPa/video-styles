@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── risograph · three-drum fluorescent overprint, animated ───────────────────────────────
+// A gig poster for "SOUND & SIGNAL" printed in three spot inks (yellow, fluorescent pink, blue) on off-white
+// uncoated stock. Every ink is its own layer: a coverage mask (solid shapes + rotated halftone screens), multiplied
+// by a per-drum density texture (banding, mottle, speckle, roller streaks) and composited onto paper with multiply,
+// so overlaps turn orange / green / purple. Layout A: each drum slides in separately and locks into registration
+// (clack), halftone dots grow to fill the tones, the speaker pumps and pink sound rings ripple out. Transition: the
+// registration drifts apart, then the drums re-print layout B pass by pass (roller sweeps, ink by ink). The layers
+// wobble out of register, snap into a final lock, hold, then the inks fade back to bare paper.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eBack = (u, s = 1.6) => { u = clamp(u); const c3 = s + 1; return 1 + c3 * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const deg = d => d * Math.PI / 180;
+
+const GROT = '"Archivo Black"', MONO = '"Space Mono"';
+// classic riso spot inks; drawing order = drum order
+const INKS = [
+  { name: 'yellow', col: '#FFE800', ang: 0,  cell: 17, seed: 11 },
+  { name: 'pink',   col: '#FF48B0', ang: 75, cell: 16, seed: 23 },
+  { name: 'blue',   col: '#0078BF', ang: 15, cell: 15, seed: 37 },
+];
+const Y = 0, P = 1, B = 2;
+const PAD = 60;                                   // density texture margin (for boil offsets)
+
+// ── timeline ─────────────────────────────────────────────────────────────────────────────
+const T = {
+  inA: [0.30, 0.78, 1.26], slide: 0.72,           // layout A: drum k slides in at inA[k], locks at +slide
+  driftA: 4.45, driftB: 5.05,                     // registration drifts apart
+  sweep: [5.02, 5.44, 5.86], sweepD: 0.46,        // layout B: roller passes, one per ink
+  lock: 7.55, lockD: 0.34,                        // final registration lock
+  fade: [8.75, 8.9, 9.05], fadeD: 0.8,            // inks fade back to paper (blue, pink, yellow → staggered)
+};
+const BOIL = 10;                                   // ink texture "re-prints" 10×/s (flip-book riso feel)
+const bix = t => Math.floor(t * BOIL + 1e-4);
+
+// ── textures ─────────────────────────────────────────────────────────────────────────────
+let PAPER, TOOTH, DENS = [], L, lc;
+function vnoise(r, gw, gh) {                       // smooth value-noise sampler on a gw×gh grid (wraps)
+  const g = new Float32Array(gw * gh); for (let i = 0; i < g.length; i++) g[i] = r();
+  return (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const a = g[((yi % gh + gh) % gh) * gw + ((xi % gw + gw) % gw)], b = g[((yi % gh + gh) % gh) * gw + (((xi + 1) % gw + gw) % gw)];
+    const c = g[(((yi + 1) % gh + gh) % gh) * gw + ((xi % gw + gw) % gw)], d = g[(((yi + 1) % gh + gh) % gh) * gw + (((xi + 1) % gw + gw) % gw)];
+    return lerp(lerp(a, b, sx), lerp(c, d, sx), sy); };
+}
+function buildPaper() {
+  const c = mk(W, H), x = c.getContext('2d'), r = rng(501);
+  const id = x.createImageData(W, H), d = id.data;
+  const n1 = vnoise(r, 64, 64), n2 = vnoise(r, 256, 256), n3 = vnoise(r, 16, 16);
+  for (let y = 0; y < H; y++) for (let i = 0; i < W; i++) {
+    const k = (y * W + i) * 4;
+    const v = (n1(i / 90, y / 90) - .5) * 5 + (n2(i / 7, y / 7) - .5) * 7 + (n3(i / 400, y / 400) - .5) * 6 + (r() - .5) * 7;
+    d[k] = 243 + v; d[k + 1] = 239 + v; d[k + 2] = 228 + v * .9; d[k + 3] = 255;
+  }
+  x.putImageData(id, 0, 0);
+  // fibres
+  for (let i = 0; i < 900; i++) {
+    const px = r() * W, py = r() * H, a = r() * TAU, l = 6 + r() * 26;
+    x.strokeStyle = `rgba(${r() < .5 ? '150,135,110' : '255,255,250'},${.08 + r() * .12})`; x.lineWidth = .6 + r() * .6;
+    x.beginPath(); x.moveTo(px, py); x.quadraticCurveTo(px + Math.cos(a) * l * .5 + (r() - .5) * 6, py + Math.sin(a) * l * .5 + (r() - .5) * 6, px + Math.cos(a) * l, py + Math.sin(a) * l); x.stroke();
+  }
+  // a few flecks of dirt in the stock
+  for (let i = 0; i < 40; i++) { x.fillStyle = `rgba(70,60,50,${.15 + r() * .3})`; x.beginPath(); x.ellipse(r() * W, r() * H, .6 + r() * 1.4, .5 + r(), r() * 3, 0, TAU); x.fill(); }
+  return c;
+}
+function buildTooth() {                             // paper tooth over the ink (multiply, near-white)
+  const c = mk(W, H), x = c.getContext('2d'), r = rng(777), id = x.createImageData(W, H), d = id.data;
+  const n = vnoise(r, 512, 512);
+  for (let y = 0; y < H; y++) for (let i = 0; i < W; i++) {
+    const k = (y * W + i) * 4, v = 255 - Math.max(0, (n(i / 2.2, y / 2.2) - .45)) * 40 - r() * 8;
+    d[k] = d[k + 1] = d[k + 2] = v; d[k + 3] = 255;
+  }
+  x.putImageData(id, 0, 0); return c;
+}
+function buildDensity(ink) {                       // alpha = how much ink this drum lays down at each spot
+  const w = W + PAD * 2, h = H + PAD * 2, c = mk(w, h), x = c.getContext('2d'), r = rng(ink.seed * 97);
+  const id = x.createImageData(w, h), d = id.data;
+  const band = vnoise(r, 1, 64), mott = vnoise(r, 256, 256), fine = vnoise(r, 700, 700), wide = vnoise(r, 8, 8);
+  const streak = new Float32Array(w);               // roller streaks run along the paper feed (vertical)
+  for (let s = 0; s < 7; s++) { const cx = r() * w, sw = 1 + r() * 7, st = .08 + r() * .2; for (let i = Math.max(0, cx - sw * 3 | 0); i < Math.min(w, cx + sw * 3); i++) streak[i] += st * Math.exp(-(((i - cx) / sw) ** 2)); }
+  const side = r() < .5 ? 1 : -1;
+  for (let y = 0; y < h; y++) {
+    const bnd = 1 - (band(0, y / 70) - .5) * .12 - (Math.sin(y / h * TAU * 3.2 + ink.seed) * .5 + .5) * .05;   // drum banding
+    for (let i = 0; i < w; i++) {
+      const k = (y * w + i) * 4;
+      let a = .93 * bnd * (1 - streak[i]) * (1 - .07 * (side > 0 ? i / w : 1 - i / w));
+      a *= 1 - (mott(i / 11, y / 11) - .5) * .22 - (fine(i / 1.6, y / 1.6) - .5) * .18 - (wide(i / 300, y / 300) - .5) * .1;
+      d[k] = d[k + 1] = d[k + 2] = 255; d[k + 3] = clamp(a) * 255;
+    }
+  }
+  x.putImageData(id, 0, 0);
+  // speckle: pin-holes where the ink skipped, plus tiny stray ink spots
+  x.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 15000; i++) { x.fillStyle = `rgba(0,0,0,${.25 + r() * .5})`; const s = r() < .93 ? .5 + r() * .9 : 1.2 + r() * 1.6; x.beginPath(); x.arc(r() * w, r() * h, s, 0, TAU); x.fill(); }
+  // skipped patches (uneven coverage)
+  for (let i = 0; i < 18; i++) { const px = r() * w, py = r() * h, rr = 20 + r() * 70; const g = x.createRadialGradient(px, py, 0, px, py, rr); g.addColorStop(0, `rgba(0,0,0,${.12 + r() * .12})`); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
+  x.globalCompositeOperation = 'source-over';
+  return c;
+}
+
+// ── drawing helpers (all into the current ink layer, opaque white = full coverage) ────────
+// Rotated halftone screen anchored to the paper origin; tone(x,y) ∈ 0..1 → dot area.
+function halftone(c, ink, bb, tone, cellMul = 1) {
+  const cell = ink.cell * cellMul, a = deg(ink.ang), ca = Math.cos(a), sa = Math.sin(a);
+  const [x0, y0, x1, y1] = bb; let umin = 1e9, umax = -1e9, vmin = 1e9, vmax = -1e9;
+  for (const [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) { const u = px * ca + py * sa, v = -px * sa + py * ca; umin = Math.min(umin, u); umax = Math.max(umax, u); vmin = Math.min(vmin, v); vmax = Math.max(vmax, v); }
+  c.beginPath();
+  for (let j = Math.floor(vmin / cell); j <= Math.ceil(vmax / cell); j++) for (let i = Math.floor(umin / cell); i <= Math.ceil(umax / cell); i++) {
+    const u = i * cell, v = j * cell, x = u * ca - v * sa, y = u * sa + v * ca;
+    if (x < x0 - cell || x > x1 + cell || y < y0 - cell || y > y1 + cell) continue;
+    const tv = tone(x, y); if (tv <= .015) continue;
+    const rr = cell * .565 * Math.sqrt(Math.min(tv, 1.25)) * 1.18; c.moveTo(x + rr, y); c.arc(x, y, rr, 0, TAU);
+  }
+  c.fill();
+}
+const circle = (c, x, y, r) => { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); };
+const ring = (c, x, y, r, w, a0 = 0, a1 = TAU) => { c.lineWidth = w; c.beginPath(); c.arc(x, y, r, a0, a1); c.stroke(); };
+function rrect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+const TXT = {};                                   // fitted text metrics (computed once fonts are in)
+function fit(key, str, font, maxW, maxCap) {
+  lc.font = `100px ${font}`; const m = lc.measureText(str);
+  let s = 100 * maxW / m.width; const cap = m.actualBoundingBoxAscent / 100;
+  if (maxCap) s = Math.min(s, maxCap / cap);
+  lc.font = `${s}px ${font}`; const m2 = lc.measureText(str);
+  TXT[key] = { str, size: s, font: `${s}px ${font}`, w: m2.width, asc: m2.actualBoundingBoxAscent, desc: m2.actualBoundingBoxDescent, l: m2.actualBoundingBoxLeft };
+}
+function text(c, key, x, y, align = 'left') { const k = TXT[key]; c.font = k.font; c.textAlign = align; c.textBaseline = 'alphabetic'; c.fillText(k.str, x, y); }
+function mono(c, str, x, y, size, bold, align = 'left', track = 0) {
+  c.font = `${bold ? 700 : 400} ${size}px ${MONO}`; c.textAlign = align; c.textBaseline = 'alphabetic';
+  if (c.letterSpacing !== undefined) c.letterSpacing = track + 'px';
+  c.fillText(str, x, y); if (c.letterSpacing !== undefined) c.letterSpacing = '0px';
+}
+function regMarks(c) {                             // registration targets printed by every drum
+  c.lineWidth = 2.2;
+  for (const [x, y] of [[960, 34], [960, 1046], [34, 540], [1886, 540]]) {
+    c.beginPath(); c.arc(x, y, 13, 0, TAU); c.stroke();
+    c.beginPath(); c.moveTo(x - 22, y); c.lineTo(x + 22, y); c.moveTo(x, y - 22); c.lineTo(x, y + 22); c.stroke();
+  }
+}
+const beat = t => Math.exp(-((t * 2 + 10) % 1) * 7);   // 120 bpm pump
+
+// ── layout A: "SOUND & SIGNAL" poster with a speaker ─────────────────────────────────────
+const SPK = { x: 1440, y: 560 };
+function compA(c, k, t) {
+  const land = T.inA[k] + T.slide, grow = eOut(seg(t, T.inA[k] + .25, land + .9));
+  const pumpA = t > T.inA[B] + T.slide ? beat(t) * (1 - seg(t, T.driftA - .3, T.driftA)) : 0;
+  if (k === Y) {
+    // sun: halftone disc, solid at the top, dissolving to fine dots at the bottom
+    const cx = 1440, cy = 470, R = 430;
+    c.save(); c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.clip();
+    halftone(c, INKS[Y], [cx - R, cy - R, cx + R, cy + R], (x, y) => grow * (1 + .16 * pumpA) * (1.25 - 1.12 * clamp((y - (cy - R * .7)) / (R * 1.75))));
+    c.restore();
+    text(c, 'ampA', 400, 905);
+    // a thin yellow halftone strip under the footer bar
+    halftone(c, INKS[Y], [0, 930, W, 1060], (x, y) => grow * .55 * (1 - x / W * .8));
+  }
+  if (k === P) {
+    text(c, 'soundA', 96, 392);
+    // halftone disc behind the speaker
+    const cx = 1640, cy = 300, R = 215;
+    c.save(); c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.clip();
+    halftone(c, INKS[P], [cx - R, cy - R, cx + R, cy + R], (x, y) => grow * (1.2 - clamp(((x - cx) * -.5 + (y - cy) * .85) / (R * 1.6) + .5) * 1.05));
+    c.restore();
+    // sound rings rippling out of the woofer (after the lock)
+    const on = seg(t, land, land + .5);
+    c.strokeStyle = '#fff'; c.lineCap = 'butt';
+    for (let i = 0; i < 4; i++) {
+      const ph = ((t - land) * .55 + i / 4) % 1; if (t < land) continue;
+      const r = 200 + ph * 260, w = 30 * (1 - ph) * on + 2;
+      c.globalAlpha = clamp(1 - ph * 1.1) * on;
+      ring(c, SPK.x, SPK.y + 90, r, w, deg(-38), deg(38));
+      ring(c, SPK.x, SPK.y + 90, r, w, deg(142), deg(218));
+    }
+    c.globalAlpha = 1;
+    // footer bar with knocked-out mono type
+    c.fillRect(0, 960, W, 76);
+    c.globalCompositeOperation = 'destination-out';
+    mono(c, 'LIVE ELECTRONICS  —  MODULAR  —  AMBIENT  —  TECHNO  —  UNTIL LATE', 960, 1010, 30, true, 'center', 3);
+    c.globalCompositeOperation = 'source-over';
+  }
+  if (k === B) {
+    text(c, 'signalA', 96, 648);
+    mono(c, 'A NIGHT OF LIVE ELECTRONICS', 104, 742, 44, true, 'left', 1);
+    mono(c, 'SAT 14 NOV  ·  DOORS 21:00  ·  THE FOUNDRY HALL', 106, 800, 30, true, 'left', 1);
+    mono(c, 'KILN  /  MOTH ORBIT  /  VERA LUX', 106, 850, 30, false, 'left', 2);
+    // stylised speaker: body with knocked-out drivers
+    const pump = t > land ? beat(t) : 0, s = 1 + .045 * pump;
+    const bx = SPK.x - 170, by = SPK.y - 300;
+    rrect(c, bx, by, 340, 600, 34); c.fill();
+    c.globalCompositeOperation = 'destination-out';
+    circle(c, SPK.x, SPK.y - 150, 74); circle(c, SPK.x, SPK.y + 90, 150);
+    c.fillRect(bx + 40, SPK.y + 262, 260, 10);
+    c.globalCompositeOperation = 'source-over';
+    c.strokeStyle = '#fff';
+    ring(c, SPK.x, SPK.y - 150, 52, 14); circle(c, SPK.x, SPK.y - 150, 22);
+    ring(c, SPK.x, SPK.y + 90, 132 * s, 18); ring(c, SPK.x, SPK.y + 90, 92 * s, 9);
+    circle(c, SPK.x, SPK.y + 90, 44 * s);
+    // cone as halftone, denser toward the centre
+    c.save(); c.beginPath(); c.arc(SPK.x, SPK.y + 90, 120 * s, 0, TAU); c.clip();
+    halftone(c, INKS[B], [SPK.x - 130, SPK.y - 40, SPK.x + 130, SPK.y + 220], (x, y) => grow * (1 - Math.hypot(x - SPK.x, y - SPK.y - 90) / (125 * s)) * .9, .7);
+    c.restore();
+    mono(c, 'No. 026', 1812, 78, 26, true, 'right', 2);
+  }
+  regMarks(c);
+}
+
+// ── layout B: the re-print ───────────────────────────────────────────────────────────────
+function compB(c, k, t) {
+  const p0 = T.sweep[k] + T.sweepD * .6, grow = eInOut(seg(t, p0, p0 + 1.3));
+  if (k === Y) {
+    const cx = 560, cy = 560;
+    halftone(c, INKS[Y], [cx - 640, cy - 640, cx + 640, cy + 640], (x, y) => { const d = Math.hypot(x - cx, y - cy); return d < 300 ? 0 : grow * clamp(1.15 - (d - 330) / 300) * (d < 640 ? 1 : 0); });
+    circle(c, cx, cy, 330);
+  }
+  if (k === P) {
+    text(c, 'soundB', 92, 58 + TXT.soundB.asc);
+    text(c, 'ampB', 1400, 560 + TXT.ampB.asc * .5, 'center');
+    // oscilloscope traces under SOUND and above SIGNAL
+    c.strokeStyle = '#fff'; c.lineWidth = 9; c.lineJoin = 'round';
+    for (const [yy, f, sg] of [[395, 1, 1], [742, 1.3, -1]]) {
+      const reveal = eOut(seg(t, p0 - .1, p0 + .8)) * (W + 40);
+      c.beginPath();
+      for (let x = -20; x <= reveal; x += 6) {
+        const env = .35 + .65 * Math.pow(Math.sin(x / W * Math.PI * 3 + t * 1.3 * sg) * .5 + .5, 2);
+        const yv = yy + Math.sin(x / 38 * f + t * 9 * sg) * 18 * env + Math.sin(x / 11 + t * 4) * 3 * env;
+        x < -10 ? c.moveTo(x, yv) : c.lineTo(x, yv);
+      }
+      c.stroke();
+    }
+  }
+  if (k === B) {
+    text(c, 'signalB', 92, 1024);
+    const cx = 1400, cy = 560, R = 312, pumpB = t > 6.4 ? beat(t) * (1 - seg(t, T.fade[0] - .2, T.fade[0] + .3)) : 0;
+    c.save(); c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.clip();
+    halftone(c, INKS[B], [cx - R, cy - R, cx + R, cy + R], (x, y) => grow * (1 + .14 * pumpB) * (1.18 - Math.hypot(x - cx, y - cy) / R * .95));
+    c.restore();
+    mono(c, 'A NIGHT OF', 560, 492, 34, false, 'center', 4);
+    mono(c, 'LIVE ELECTRONICS', 560, 552, 50, true, 'center', 1);
+    mono(c, 'SAT 14 NOV — 21:00', 560, 616, 34, true, 'center', 2);
+    mono(c, 'THE FOUNDRY HALL', 560, 664, 30, false, 'center', 3);
+    c.save(); c.translate(1806, 540); c.rotate(-Math.PI / 2); mono(c, 'KILN  /  MOTH ORBIT  /  VERA LUX', 0, 11, 30, true, 'center', 4); c.restore();
+  }
+  regMarks(c);
+}
+
+// ── registration offsets ─────────────────────────────────────────────────────────────────
+const START = [[-1500, -30], [1560, 40], [60, -1120]];     // where each drum's layer slides in from
+const DRIFT = [[-46, 22, -.012], [40, -26, .01], [14, 44, .006]];
+const MISB = [[-15, 9, .004], [13, -8, -.003], [-7, -14, .002]];
+function offA(k, t) {
+  const u = seg(t, T.inA[k], T.inA[k] + T.slide), e = eBack(u, 1.25);
+  let dx = START[k][0] * (1 - e), dy = START[k][1] * (1 - e), rot = (1 - e) * (k === B ? 0 : .03 * (k ? 1 : -1));
+  const w = seg(t, T.inA[k] + T.slide, T.inA[k] + T.slide + 1.2) * (1 - seg(t, T.driftA - .2, T.driftA));
+  dx += Math.sin(t * 2.1 + k * 2) * 1.6 * w; dy += Math.cos(t * 1.7 + k) * 1.3 * w;
+  const d = eIn(seg(t, T.driftA, T.driftB)) * .8 + eInOut(seg(t, T.driftA, T.driftB)) * .2;
+  dx += DRIFT[k][0] * d; dy += DRIFT[k][1] * d; rot += DRIFT[k][2] * d;
+  return [dx, dy, rot];
+}
+function offB(k, t) {
+  const l = seg(t, T.lock, T.lock + T.lockD), m = 1 - eBack(l, 2.2);
+  const wob = 1 - seg(t, T.lock - .05, T.lock + .05);
+  const dx = MISB[k][0] * m + Math.sin(t * 3.1 + k * 1.9) * 4 * wob * m;
+  const dy = MISB[k][1] * m + Math.cos(t * 2.6 + k) * 3 * wob * m;
+  return [dx, dy, MISB[k][2] * m];
+}
+
+// ── frame ─────────────────────────────────────────────────────────────────────────────────
+function sweepY(k, t) { return lerp(-60, H + 60, eInOut(seg(t, T.sweep[k], T.sweep[k] + T.sweepD))); }
+function place(c, [dx, dy, rot]) { c.translate(W / 2 + dx, H / 2 + dy); c.rotate(rot); c.translate(-W / 2, -H / 2); }
+function render(t) {
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.drawImage(PAPER, 0, 0);
+  const bi = bix(t), br = rng(9000 + bi);
+  const eY0 = sweepY(Y, t);                              // the first pass clears the old print
+  for (let k = 0; k < 3; k++) {
+    const fade = 1 - eInOut(seg(t, T.fade[2 - k], T.fade[2 - k] + T.fadeD));
+    if (fade <= 0) continue;
+    lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalCompositeOperation = 'source-over'; lc.globalAlpha = 1;
+    lc.clearRect(0, 0, W, H); lc.fillStyle = '#fff'; lc.strokeStyle = '#fff';
+    let any = false;
+    if (t >= T.inA[k] && eY0 < H + 50) {
+      lc.save(); lc.beginPath(); lc.rect(0, eY0, W, H); lc.clip(); place(lc, offA(k, t)); compA(lc, k, t); lc.restore(); any = true;
+    }
+    const eK = sweepY(k, t);
+    if (t >= T.sweep[k]) {
+      lc.save(); lc.beginPath(); lc.rect(0, 0, W, eK); lc.clip(); place(lc, offB(k, t)); compB(lc, k, t); lc.restore(); any = true;
+      if (eK > -40 && eK < H + 40) {                    // wet ink line at the roller edge
+        const g = lc.createLinearGradient(0, eK - 26, 0, eK + 4);
+        g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(.8, 'rgba(255,255,255,.28)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+        lc.fillStyle = g; lc.fillRect(0, eK - 26, W, 30); lc.fillStyle = '#fff';
+      }
+    }
+    if (!any) continue;
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.globalCompositeOperation = 'destination-in';
+    lc.drawImage(DENS[k], -PAD + Math.round((br() - .5) * PAD * 1.6), -PAD + Math.round((br() - .5) * PAD * 1.6));
+    lc.globalCompositeOperation = 'source-in'; lc.fillStyle = INKS[k].col; lc.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = fade; ctx.drawImage(L, 0, 0); ctx.globalAlpha = 1;
+  }
+  // the roller itself: a soft shadowed band riding the sweep edge
+  for (let k = 0; k < 3; k++) {
+    const e = sweepY(k, t); if (t < T.sweep[k] || e < -50 || e > H + 50) continue;
+    ctx.globalCompositeOperation = 'multiply';
+    const g = ctx.createLinearGradient(0, e - 10, 0, e + 70);
+    g.addColorStop(0, 'rgba(90,80,70,0)'); g.addColorStop(.15, 'rgba(90,80,70,.28)'); g.addColorStop(1, 'rgba(90,80,70,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, e - 10, W, 80);
+  }
+  ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = .55; ctx.drawImage(TOOTH, 0, 0); ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  // soft fade in from / out to bare paper at the very ends (paper stays)
+  const fi = 1 - seg(t, 0, .3); if (fi > 0) { ctx.fillStyle = `rgba(243,239,228,${fi})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await Promise.all([`400 100px ${GROT}`, `400 40px ${MONO}`, `700 40px ${MONO}`].map(f => document.fonts.load(f, 'SOUND & SIGNAL A NIGHT OF LIVE 0123456789 —·/ No.')));
+  await document.fonts.ready;
+  L = mk(W, H); lc = L.getContext('2d');
+  fit('soundA', 'SOUND', GROT, 1060); fit('signalA', 'SIGNAL', GROT, 1060); fit('ampA', '&', GROT, 1e9, 560);
+  fit('soundB', 'SOUND', GROT, 1736, 250); fit('signalB', 'SIGNAL', GROT, 1736, 250); fit('ampB', '&', GROT, 1e9, 300);
+  PAPER = buildPaper(); TOOTH = buildTooth(); DENS = INKS.map(buildDensity);
+  render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [];
+  T.inA.forEach((s, k) => { ev.push({ t: s, k: 'slide', d: T.slide, v: 1 - k * .1 }); ev.push({ t: s + T.slide * .62, k: 'clack', v: .8 }); });
+  ev.push({ t: T.driftA, k: 'drift', d: T.driftB - T.driftA + .1 });
+  T.sweep.forEach(s => ev.push({ t: s, k: 'drum', d: T.sweepD }));
+  ev.push({ t: T.lock + .1, k: 'lock' });
+  ev.push({ t: T.fade[0], k: 'outro' });
+  // beat bed while each poster is "live"
+  for (let b = 0; b < 40; b++) { const bt = b * .5; if ((bt > 2.0 && bt < 4.6) || (bt > 6.4 && bt < 8.9)) ev.push({ t: bt, k: 'kick', v: bt < 5 ? .8 : 1 }); }
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
