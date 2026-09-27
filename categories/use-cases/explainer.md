@@ -4,9 +4,9 @@ Use case · Explaining how something works: concepts, science, systems.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (8) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (2) · [Product & Launches](../../categories/use-cases/product.md) (5) · [Social & Short-Form](../../categories/use-cases/social.md) (7) · [Storytelling & Brand](../../categories/use-cases/story.md) (10) · [Data & Results](../../categories/use-cases/data.md) (3) · [News & Current Affairs](../../categories/use-cases/news.md) (1) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (5)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (9) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (2) · [Product & Launches](../../categories/use-cases/product.md) (5) · [Social & Short-Form](../../categories/use-cases/social.md) (7) · [Storytelling & Brand](../../categories/use-cases/story.md) (11) · [Data & Results](../../categories/use-cases/data.md) (3) · [News & Current Affairs](../../categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (5)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (4) · [Nostalgia](../../categories/families/nostalgia.md) (4) · [Technical](../../categories/families/technical.md) (3) · [Experimental](../../categories/families/experimental.md) (1)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (5) · [Nostalgia](../../categories/families/nostalgia.md) (4) · [Technical](../../categories/families/technical.md) (3) · [Experimental](../../categories/families/experimental.md) (1)
 
 <table>
 <tr>
@@ -21,6 +21,9 @@ Use case · Explaining how something works: concepts, science, systems.
 <td width="25%" align="center"><a href="../../styles/pencil-sketch/pencil-sketch.mp4"><img src="../../styles/pencil-sketch/preview.gif" alt="Pencil Sketch" width="100%"></a><br><b>10 · Pencil Sketch</b><br><a href="../../styles/pencil-sketch/pencil-sketch.mp4">video</a> · <a href="../../styles/pencil-sketch">source</a></td>
 <td width="25%" align="center"><a href="../../styles/terminal/terminal.mp4"><img src="../../styles/terminal/preview.gif" alt="Terminal" width="100%"></a><br><b>17 · Terminal</b><br><a href="../../styles/terminal/terminal.mp4">video</a> · <a href="../../styles/terminal">source</a></td>
 </tr>
+<tr>
+<td width="25%" align="center"><a href="../../styles/map-documentary/map-documentary.mp4"><img src="../../styles/map-documentary/preview.gif" alt="Map Documentary" width="100%"></a><br><b>21 · Map Documentary</b><br><a href="../../styles/map-documentary/map-documentary.mp4">video</a> · <a href="../../styles/map-documentary">source</a></td>
+</tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
@@ -33,3 +36,4 @@ Use case · Explaining how something works: concepts, science, systems.
 | 07 | [Blueprint](../../styles/blueprint/) | Engineering drawing | Measurements, technical details, and inner workings | [Hand Drawn](../../categories/families/hand-drawn.md) | [Explainers](../../categories/use-cases/explainer.md), [Product & Launches](../../categories/use-cases/product.md) |
 | 10 | [Pencil Sketch](../../styles/pencil-sketch/) | Graphite sketchbook | Showing how an idea develops | [Texture & Craft](../../categories/families/texture-craft.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Explainers](../../categories/use-cases/explainer.md) |
 | 17 | [Terminal](../../styles/terminal/) | Green phosphor command line | Technical processes and what happens behind the scenes | [Technical](../../categories/families/technical.md) | [Explainers](../../categories/use-cases/explainer.md), [Product & Launches](../../categories/use-cases/product.md) |
+| 21 | [Map Documentary](../../styles/map-documentary/) | Pinned paper map with red string | Journeys, how things spread, and well-researched stories | [Texture & Craft](../../categories/families/texture-craft.md) | [Explainers](../../categories/use-cases/explainer.md), [News & Current Affairs](../../categories/use-cases/news.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
