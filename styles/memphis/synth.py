@@ -1,4 +1,4 @@
-# python3 synth.py events.json out.wav dur  — kısa sentez sesler (pop/blip/bloop/thud/tick/chime/boing/clack)
+# python3 synth.py events.json out.wav dur — short synth sounds (pop/blip/bloop/thud/tick/chime/boing/clack)
 import json, sys, numpy as np, wave
 ev, out, dur = json.load(open(sys.argv[1])), sys.argv[2], float(sys.argv[3])
 SR = 48000; buf = np.zeros(int(SR * (dur + 0.5)))

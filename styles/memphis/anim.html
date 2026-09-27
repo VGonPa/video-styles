@@ -68,7 +68,7 @@
 <style>html,body{margin:0;background:#ffd9ea}</style></head>
 <body><canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// 80'ler Memphis: konu çarkı döner, MÜZİK'te durur → zikzak bant geçişi → konuşma balonu + zıplayan "KONUŞ!"
+// 80s Memphis: plot wheel spins, stops at MUSIC → zigzag bandpass → speech bubble + bouncing “TALK!”
 const W = 1920, H = 1080, cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const DUR = 9.5, FR = "'Rubik', sans-serif", FS = "'Shrikhand', cursive";
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
@@ -243,7 +243,7 @@ function scene2(t) {
     ctx.save(); ctx.translate(710, 470); ctx.rotate(-0.04 + Math.sin(t * 2) * 0.012); ctx.scale(s, s);
     hard(() => { ctx.beginPath(); ctx.roundRect(-470, -220, 940, 420, 60); ctx.moveTo(-300, 190); ctx.lineTo(-380, 330); ctx.lineTo(-180, 196); ctx.closePath(); }, C.cream, C.neon, 22, 22);
     const kp = eBack(seg(t, 4.8, 5.1)); if (kp > 0) { ctx.save(); ctx.translate(-290, -125); ctx.rotate(-0.1); ctx.scale(kp, kp); hardText('Topic:', 0, 0, 84, C.purple, FS, 400, C.ink, 6, 7); ctx.restore(); }
-    // MÜZİK letters drop in
+    // MUSIC letters drop in
     const word = 'MUSIC'; ctx.font = `900 200px ${FR}`; const tw = ctx.measureText(word).width; let x = -tw / 2 + 30;
     // yellow highlighter squiggle under the word
     const hp = seg(t, 5.55, 5.9); if (hp > 0) { ctx.save(); ctx.translate(30, 162); ctx.beginPath(); for (let i = 0; i <= 60 * hp; i++) { const u = i / 60; const X = (u - 0.5) * 640, Y = Math.sin(u * 5 * Math.PI) * 14; i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); } strokeCol(C.yellow, 22, 6); ctx.restore(); }
@@ -263,7 +263,7 @@ function scene2(t) {
     hardText(String(sec), 0, 40, 170, C.neon, FR, 900, C.ink, 8, 9);
     ctx.font = `800 44px ${FR}`; ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.fillText('SECONDS', 0, 105);
     ctx.restore(); } }
-  // KONUŞ! — trampoline letters
+  // TALK! — trampoline letters
   const word = 'SPEAK!'; ctx.font = `900 190px ${FR}`; const tw = ctx.measureText(word).width + 5 * 20; let x = 960 - tw / 2;
   const cols = [C.pink, C.teal, C.yellow, C.purple, C.neon, C.blue];
   for (let i = 0; i < word.length; i++) {

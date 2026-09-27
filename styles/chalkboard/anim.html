@@ -3,62 +3,62 @@
 <body><canvas id="c" width="1920" height="1080"></canvas>
 <script src="common.js"></script>
 <script>
-// KARA TAHTA — tebeşir dokusu, silgi izi, ders anlatımı
+// CHALKBOARD — chalk texture, eraser trace, lecture
 const WHITE = '#f3f0e6', YEL = '#f1d35f', FONT = "'Caveat'";
 const TRAY = 1004;
 
-// ---------- Tahta (bir kez) ----------
+// ---------- Wood (once) ----------
 const board = mk(W, H);
 { const c = board.getContext('2d'), r = rng(11);
   const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#26352e'); g.addColorStop(1, '#1b2621'); c.fillStyle = g; c.fillRect(0, 0, W, H);
-  // büyük ölçekli benekler
+  // large scale spots
   for (let i = 0; i < 140; i++) { const x = r() * W, y = r() * H, rr = 80 + r() * 260, lt = r() < .5;
     const gg = c.createRadialGradient(x, y, 0, x, y, rr); gg.addColorStop(0, lt ? 'rgba(120,150,130,0.05)' : 'rgba(0,0,0,0.07)'); gg.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gg; c.fillRect(x - rr, y - rr, rr * 2, rr * 2); }
-  // eski silgi izleri: yay biçimli çizgili lekeler
+  // old eraser marks: arc-shaped striped spots
   c.lineCap = 'round';
   for (let i = 0; i < 16; i++) { const cx = r() * W, cy = r() * (TRAY - 100), R = 160 + r() * 380, a0 = r() * 6, span = .6 + r() * 1.1, al = 0.018 + r() * 0.03;
     for (let k = 0; k < 26; k++) { const rr = R + (k - 13) * 3.4; c.strokeStyle = `rgba(225,235,225,${al * (0.4 + r() * 0.9)})`; c.lineWidth = 1 + r() * 2.4;
       c.beginPath(); c.arc(cx, cy, rr, a0 + r() * .08, a0 + span - r() * .1); c.stroke(); } }
-  // yatay silme darbeleri
+  // horizontal wipe strokes
   for (let i = 0; i < 10; i++) { const x = r() * W, y = r() * (TRAY - 60), w = 300 + r() * 500, al = 0.015 + r() * 0.022;
     for (let k = 0; k < 20; k++) { c.strokeStyle = `rgba(225,235,225,${al * r()})`; c.lineWidth = 1 + r() * 2; const yy = y + k * 4 + r() * 2; c.beginPath(); c.moveTo(x, yy); c.bezierCurveTo(x + w * .3, yy - 8, x + w * .7, yy + 8, x + w, yy + (r() - .5) * 6); c.stroke(); } }
-  // ince gren
+  // fine grain
   const id = c.getImageData(0, 0, W, H), d = id.data;
   for (let q = 0; q < d.length; q += 4) { const n = (r() - .5) * 9; d[q] += n; d[q + 1] += n; d[q + 2] += n; } c.putImageData(id, 0, 0);
-  // kenar kararması
+  // vignetting
   const v = c.createRadialGradient(960, 480, 520, 960, 540, 1250); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.42)'); c.fillStyle = v; c.fillRect(0, 0, W, H);
-  // ahşap tebeşirlik
+  // wooden chalk holder
   const wg = c.createLinearGradient(0, TRAY, 0, H); wg.addColorStop(0, '#8a5a34'); wg.addColorStop(.12, '#6d4424'); wg.addColorStop(.55, '#58361c'); wg.addColorStop(1, '#3a2312'); c.fillStyle = wg; c.fillRect(0, TRAY, W, H - TRAY);
   for (let k = 0; k < 90; k++) { c.strokeStyle = `rgba(${r() < .5 ? '30,15,5' : '160,110,70'},${0.08 + r() * 0.12})`; c.lineWidth = .6 + r() * 1.4; const y = TRAY + 8 + r() * (H - TRAY - 10); c.beginPath(); c.moveTo(0, y); for (let x = 0; x <= W; x += 120) c.lineTo(x, y + Math.sin(x * .004 + k) * 2.5); c.stroke(); }
   c.fillStyle = 'rgba(0,0,0,0.45)'; c.fillRect(0, TRAY - 3, W, 5);
   c.fillStyle = 'rgba(255,220,180,0.18)'; c.fillRect(0, TRAY + 2, W, 2);
-  // tebeşirlikteki toz + iki tebeşir
+  // powder in chalk + two chalks
   for (let i = 0; i < 1400; i++) { c.fillStyle = `rgba(235,235,225,${r() * 0.25})`; c.fillRect(r() * W, TRAY + 6 + r() * 18, 1 + r() * 2, 1 + r() * 1.5); }
   const chalk = (x, y, l, rot, col) => { c.save(); c.translate(x, y); c.rotate(rot); c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.roundRect(-l / 2 + 4, -6, l, 20, 9); c.fill();
     const cg = c.createLinearGradient(0, -10, 0, 10); cg.addColorStop(0, col); cg.addColorStop(.6, col); cg.addColorStop(1, 'rgba(120,110,90,1)'); c.fillStyle = cg; c.beginPath(); c.roundRect(-l / 2, -10, l, 20, 9); c.fill(); c.restore(); };
   chalk(1480, TRAY + 22, 120, -0.04, '#efece2'); chalk(1622, TRAY + 24, 64, 0.08, '#efd66a');
 }
-// ---------- Tebeşir greni (alfa maskesi, bir kez) ----------
+// ---------- Chalk grain (alpha mask, once) ----------
 const grain = mk(W, H);
 { const c = grain.getContext('2d'), id = c.createImageData(W, H), d = id.data, r = rng(5);
-  // yatay yönlü tahta pürüzü: satır bazlı yavaş değişim + nokta boşlukları
+  // horizontal directional wood roughness: line-based slow change + dot gaps
   const row = new Float32Array(H); for (let y = 0; y < H; y++) row[y] = 0.82 + 0.18 * Math.sin(y * 0.9) * Math.sin(y * 0.13 + 2);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const q = (y * W + x) * 4, n = r();
     let a = row[y] * (0.72 + 0.28 * r()); if (n < 0.16) a *= 0.15 + r() * 0.3; d[q] = d[q + 1] = d[q + 2] = 255; d[q + 3] = Math.min(255, a * 255); }
   c.putImageData(id, 0, 0);
 }
 const L = mk(W, H), lc = L.getContext('2d');
-// silgi damgası (yumuşak kenarlı) ve bulaşma damgası
+// eraser stamp (soft edge) and smudge stamp
 const ER = { w: 250, h: 92 };
 const eStamp = mk(ER.w + 40, ER.h + 40);
 { const c = eStamp.getContext('2d'); c.filter = 'blur(9px)'; c.fillStyle = '#000'; c.beginPath(); c.roundRect(24, 24, ER.w - 8, ER.h - 8, 20); c.fill(); }
 { const c = eStamp.getContext('2d'); }
-// silme maskesi + yatay çizgili bulaşma dokusu
+// wipe mask + horizontal stripe smudge texture
 const M = mk(W, H), mc = M.getContext('2d'), SM = mk(W, H), smc = SM.getContext('2d');
 const streak = mk(W, H);
 { const c = streak.getContext('2d'), r = rng(9); for (let k = 0; k < 2600; k++) { const y = r() * H, x = r() * W, l = 60 + r() * 420; c.strokeStyle = `rgba(235,240,232,${0.15 + r() * 0.85})`; c.lineWidth = .6 + r() * 2.2; c.beginPath(); c.moveTo(x, y); c.lineTo(x + l, y + (r() - .5) * 4); c.stroke(); } }
 
-// ---------- Eylemler ----------
+// ---------- Actions ----------
 const acts = [];
 function stroke(path, t0, t1, o = {}) { path.jitter(o.jit ?? 1.8, acts.length * 31 + 7); acts.push({ kind: 'path', path, t0, t1, color: o.color || WHITE, width: o.width || 8, ease: o.ease || (u => u) }); }
 function text(str, x, y, size, t0, t1, o = {}) { acts.push({ kind: 'text', str, x, y, size, t0, t1, color: o.color || WHITE, align: o.align || 'left', rot: o.rot || 0, w8: o.w8 || 700 }); }
@@ -68,10 +68,10 @@ function arrow(x0, y0, x1, y1, t0, t1, bend, o = {}) {
   const a = Math.atan2(y1 - my, x1 - mx), s = o.head || 30;
   stroke(P().M(x1 + Math.cos(a + 2.6) * s, y1 + Math.sin(a + 2.6) * s).L(x1, y1).L(x1 + Math.cos(a - 2.6) * s, y1 + Math.sin(a - 2.6) * s), t1 - 0.07, t1, o);
 }
-// başlık
+// title
 text('Lesson 1 · Improvisation', 150, 190, 104, 0.3, 1.3, { rot: -0.015 });
 stroke(P().M(146, 222).S([[400, 216], [700, 212], [812, 208]], 16), 1.32, 1.52, { width: 7 });
-// üç adım
+// three steps
 const ROW = 540;
 [[300, 'listen', 1.6], [880, 'think', 2.8], [1470, 'speak', 3.85]].forEach(([x, w, t0], i) => {
   circ(x - 70, ROW - 30, 40, t0, t0 + 0.24, { width: 6 });
@@ -80,12 +80,12 @@ const ROW = 540;
 });
 arrow(565, ROW - 36, 725, ROW - 36, 2.55, 2.78, -12);
 arrow(1150, ROW - 36, 1310, ROW - 36, 3.6, 3.82, -12);
-// silgi: "düşün" silinir
+// eraser: "think" is erased
 const ERASE = { t0: 4.72, t1: 5.95, in0: 4.4, out1: 6.3 };
 const ePath = (() => { const p = P().M(1195, 474);
   const pts = [[690, 492], [1190, 524], [684, 560], [1192, 470], [700, 522], [1186, 574], [780, 506]];
   p.S(pts, 22); return p.done(); })();
-// ekleme: dinle → konuş sarı sıçrama oku, sarı halka, alt not
+// insertion: listen → speak yellow splash arrow, yellow ring, bottom note
 { const p = P().M(330, 420).S([[520, 300], [900, 250], [1260, 290], [1420, 400]], 30);
   stroke(p, 6.2, 6.78, { color: YEL, width: 8, ease: eio2 });
   stroke(P().M(1392, 356).L(1424, 404).L(1368, 412), 6.78, 6.9, { color: YEL, width: 8 }); }
@@ -116,7 +116,7 @@ function drawAct(c, a, t) {
   }
   c.restore();
 }
-// tebeşir tozu parçacıkları (önceden üretilir)
+// chalk dust particles (pre-generated)
 const parts = [];
 function buildParticles() {
   const r = rng(21);
@@ -133,10 +133,10 @@ function drawEraser(x, y, lift) {
   ctx.save(); ctx.translate(x, y); ctx.rotate(-0.05 + Math.sin(x * 0.01) * 0.03);
   const w = ER.w + 10, h = ER.h + 10;
   ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.filter = 'blur(12px)'; ctx.beginPath(); ctx.roundRect(-w / 2 + 16 + lift * 26, -h / 2 + 22 + lift * 30, w, h, 16); ctx.fill(); ctx.filter = 'none';
-  // keçe tabanı
+  // felt base
   ctx.fillStyle = '#5d605c'; ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2 + 14, w, h - 2, 14); ctx.fill();
   ctx.fillStyle = 'rgba(235,235,226,0.5)'; ctx.fillRect(-w / 2 + 8, h / 2 - 5, w - 16, 4); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(-w / 2 + 4, h / 2 - 16, w - 8, 3);
-  // ahşap üst
+  // wooden top
   const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2 - 8); g.addColorStop(0, '#b99670'); g.addColorStop(.45, '#9a774f'); g.addColorStop(1, '#6c5033');
   ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h - 18, 14); ctx.fill();
   ctx.strokeStyle = 'rgba(70,40,15,0.35)'; ctx.lineWidth = 1.4;
@@ -146,7 +146,7 @@ function drawEraser(x, y, lift) {
 }
 
 function render(t) {
-  // 1) tebeşir katmanı
+  // 1) chalk layer
   lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalCompositeOperation = 'source-over'; lc.clearRect(0, 0, W, H);
   for (const a of acts) if (a.t0 < ERASE.t0) drawAct(lc, a, t);
   if (t > ERASE.t0) {
@@ -160,20 +160,20 @@ function render(t) {
   }
   for (const a of acts) if (a.t0 >= ERASE.t0) drawAct(lc, a, t);
   lc.globalCompositeOperation = 'destination-in'; lc.drawImage(grain, 0, 0); lc.globalCompositeOperation = 'source-over';
-  // 2) sahne (yavaş kamera itişi)
+  // 2) scene (slow camera push)
   const s = 1 + 0.045 * eio2(seg(t, 0, 10)), cx = 960, cy = 520;
   ctx.setTransform(s, 0, 0, s, 960 - cx * s, 540 - cy * s);
   ctx.drawImage(board, 0, 0); ctx.drawImage(L, 0, 0);
-  // toz
+  // dust
   for (const p of parts) { const age = t - p.t0; if (age < 0 || age > p.life) continue; const k = age / p.life;
     ctx.fillStyle = `rgba(240,240,230,${p.a * (1 - k)})`; ctx.fillRect(p.x + p.vx * age, p.y + p.vy * age + 90 * age * age, p.s, p.s); }
-  // silgi
+  // eraser
   if (t > ERASE.in0 && t < ERASE.out1) { const [x, y, lift] = eraserPos(t); drawEraser(x, y, lift); }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // giriş/çıkış
+  // input/output
   const fi = 1 - seg(t, 0, 0.3), fo = seg(t, 9.4, 10);
   const a = Math.max(fi, eio2(fo)); if (a > 0) { ctx.fillStyle = `rgba(12,17,15,${a})`; ctx.fillRect(0, 0, W, H); }
 }
-window.ready = loadFont('Caveat', 'Caveat-700', 700).then(() => document.fonts.load(`700 80px ${FONT}`, 'ğüşıöçİĞŞ·')).then(() => { prepText(); buildParticles(); });
+window.ready = loadFont('Caveat', 'Caveat-700', 700).then(() => document.fonts.load(`700 80px ${FONT}`, 'SPEAK LISTEN THINK')).then(() => { prepText(); buildParticles(); });
 window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
 </script></body></html>

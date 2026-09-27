@@ -1,4 +1,4 @@
-// node events.mjs → anim.html içindeki window.events() çıktısını events.json'a yazar (ses için)
+// node events.mjs → writes window.events() output in anim.html to events.json (for audio)
 import { createRequire } from 'module'; import { execSync } from 'child_process'; import path from 'path'; import fs from 'fs';
 const require = createRequire(import.meta.url);
 const { chromium } = require(path.join(execSync('npm root -g').toString().trim(), '@playwright/test'));

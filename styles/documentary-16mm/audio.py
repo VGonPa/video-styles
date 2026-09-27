@@ -1,4 +1,4 @@
-# events.json → ses.wav · projektör tıkırtısı (24/sn, çok hafif), 1 kHz "2-pop", sessiz film piyanosu motifleri, kare kayması takırtısı
+# events.json → audio.wav · projector tick (24/sec, very slight), 1 kHz "2-pop", silent film piano motifs, frameshift clatter
 import json, wave, numpy as np
 SR, DUR = 48000, 10.0
 N = int(SR * DUR); out = np.zeros(N)
@@ -16,7 +16,7 @@ def piano(freq, dur=2.2):
 nt = lambda m: 440 * 2 ** ((m - 69) / 12)
 rs = np.random.default_rng(3)
 t = 0.12
-while t < 9.9:  # projektör: düzensiz aralıklı, kısık tık
+while t < 9.9:  # projector: irregularly spaced, faint click
     add(click(0.05 + 0.02 * rs.random(), 1500 + 400 * rs.random()), t); t += 1 / 24 + rs.normal(0, 0.0015)
 for e in json.load(open('events.json')):
     k, t = e['k'], e['t']
@@ -32,7 +32,7 @@ for e in json.load(open('events.json')):
     elif k == 'low':
         for i, m in enumerate([57, 60, 64, 69]): add(piano(nt(m), 1.2), t + i * 0.09, 0.14)
         add(piano(nt(33), 1.1), t, 0.2)
-# eski optik ses: bant sınırlı
+# legacy optical audio: band limited
 def onepole(x, fc, hp=False):
     a = np.exp(-2 * np.pi * fc / SR); y = np.zeros_like(x); p = 0.0
     for i in range(len(x)): p = (1 - a) * x[i] + a * p; y[i] = p
@@ -41,5 +41,5 @@ out = onepole(onepole(out, 4200), 120, hp=True)
 fade = np.ones(N); fade[-int(0.25 * SR):] = np.linspace(1, 0, int(0.25 * SR)); out *= fade
 out = np.tanh(out * 1.3) * 0.85
 pcm = (np.clip(out, -1, 1) * 32767).astype(np.int16)
-w = wave.open('ses.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(np.repeat(pcm[:, None], 2, axis=1).tobytes()); w.close()
-print('ses.wav ok')
+w = wave.open('audio.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(np.repeat(pcm[:, None], 2, axis=1).tobytes()); w.close()
+print('audio.wav ok')

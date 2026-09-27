@@ -58,8 +58,8 @@
 <style>html,body{margin:0;background:#0b1233}</style></head>
 <body><canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// Kurzgesagt-tarzı bilim anlatımı: "Uzayda ses yayılmaz — havada 343 m/s koşar."
-// window.draw({t}) → JPEG base64. Süre 9.5 sn.
+// Kurzgesagt-style science paraphrase: "Sound does not propagate in space — it travels 343 m/s through air."
+// window.draw({t}) → JPEG base64. Duration 9.5 sec.
 const W = 1920, H = 1080, cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const DUR = 9.5;
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
@@ -74,7 +74,7 @@ function rng(seed) { let s = seed; return () => ((s = (s * 16807) % 2147483647) 
 function off(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 const FT = "'Fredoka', sans-serif", FB = "'Fredoka', sans-serif";
 
-// ---------- palette ----------
+// ---------- on pallet ----------
 const C = {
   sky0: '#0a1030', sky1: '#1c1552', star: '#fff4d8',
   ocean: '#1f86c9', oceanD: '#145a9c', land: '#ffc94d', land2: '#5cd07a', cloud: '#eaf7ff',
@@ -173,7 +173,7 @@ function drawMoon(x, y, r) {
   shadeCircle(x, y, r, 'rgba(25,10,70,0.45)', 'rgba(255,255,255,0.35)', 0.28);
 }
 
-// ---------- speech bubble (irticalen mark, Kurzgesagt-rendered) ----------
+// ---------- speech bubble (extemporaneous mark, Kurzgesagt-rendered) ----------
 function drawBubble(x, y, s, rot = 0, squash = 0) {
   ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s * (1 + squash), s * (1 - squash));
   glow(0, 0, 150, null, 0.25);
@@ -336,7 +336,7 @@ function frame(t) {
 
 window.draw = function (job) { frame(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
 window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`600 80px 'Fredoka'`, 'Uzayda ses yayılmaz ığüşöçİĞŞ'), document.fonts.load(`700 80px 'Fredoka'`, '343 meters'),
+  document.fonts.load(`600 80px 'Fredoka'`, 'Sound cannot travel in space'), document.fonts.load(`700 80px 'Fredoka'`, '343 meters'),
   document.fonts.load(`500 80px 'Fredoka'`, 'In air, each second'), document.fonts.load(`600 30px 'Fredoka'`, 'NO AIR TO VIBRATE')
 ])).then(() => { buildAssets(); buildGrid(); });
 </script></body></html>

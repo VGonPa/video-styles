@@ -1,4 +1,4 @@
-# events.json → ses.wav (48 kHz stereo) · 70'ler: TV aç/kapa bipi, harf "pop"ları, çark tıkları, sıcak akor
+# events.json → audio.wav (48 kHz stereo) · 70s: TV on/off beep, letter pops, wheel clicks, hot chord
 import json, wave, numpy as np
 SR, DUR = 48000, 10.0
 out = np.zeros(int(SR * DUR))
@@ -28,7 +28,7 @@ for e in sorted(ev, key=lambda e: e['t']):
             vib = 1 + 0.004 * np.sin(2 * np.pi * 5.5 * tt)
             s[int(j * 0.06 * SR):] += (np.sin(2 * np.pi * f * vib * tt) + 0.3 * np.sin(4 * np.pi * f * tt))[: n - int(j * 0.06 * SR)] * np.exp(-tt[: n - int(j * 0.06 * SR)] / 0.5)
         add(s * np.minimum(1, tt / 0.01), t, 0.16)
-# eski TV hoparlörü: hafif bant geçiren (basit IIR) + yumuşak sınırlama
+# old TV speaker: light bandpass (simple IIR) + soft limiting
 from math import pi
 def onepole(x, fc, hp=False):
     a = np.exp(-2 * pi * fc / SR); y = np.zeros_like(x); p = 0.0
@@ -38,5 +38,5 @@ out = onepole(onepole(out, 5500), 180, hp=True)
 out = np.tanh(out * 1.4) * 0.8
 pcm = (np.clip(out, -1, 1) * 32767).astype(np.int16)
 st = np.repeat(pcm[:, None], 2, axis=1)
-w = wave.open('ses.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(st.tobytes()); w.close()
-print('ses.wav ok')
+w = wave.open('audio.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(st.tobytes()); w.close()
+print('audio.wav ok')

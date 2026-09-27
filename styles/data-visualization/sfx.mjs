@@ -1,4 +1,4 @@
-// node sfx.mjs → anim.html içindeki window.SFX olaylarını sfx.json'a yazar
+// node sfx.mjs → writes window.SFX events in anim.html to sfx.json
 import { createRequire } from 'module'; import { execSync } from 'child_process'; import fs from 'fs'; import path from 'path';
 const require = createRequire(import.meta.url);
 const { chromium } = require(path.join(execSync('npm root -g').toString().trim(), '@playwright/test'));
@@ -8,4 +8,4 @@ const d = fs.readdirSync(base).filter(d => d.startsWith('chromium_headless_shell
 const browser = await chromium.launch({ executablePath: path.join(base, d, 'chrome-headless-shell-mac-arm64/chrome-headless-shell') });
 const page = await browser.newPage(); await page.goto('file://' + path.join(dir, 'anim.html')); await page.evaluate(() => window.ready);
 fs.writeFileSync(path.join(dir, 'sfx.json'), JSON.stringify(await page.evaluate(() => window.SFX)));
-await browser.close(); console.log('sfx.json yazıldı');
+await browser.close(); console.log('sfx.json written');
