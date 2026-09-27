@@ -1,6 +1,6 @@
-# Experimental
+# Comics & Cartoons
 
-Visual family · Type- and rhythm-driven pieces.
+Visual family · Panels, strips, and cartoon traditions from every decade.
 
 [← All styles](../../README.md)
 
@@ -10,10 +10,10 @@ Visual family · Type- and rhythm-driven pieces.
 
 <table>
 <tr>
-<td width="25%" align="center"><a href="../../styles/kinetic-typography/kinetic-typography.mp4"><img src="../../styles/kinetic-typography/preview.gif" alt="Kinetic Typography" width="100%"></a><br><b>20 · Kinetic Typography</b><br><a href="../../styles/kinetic-typography/kinetic-typography.mp4">video</a> · <a href="../../styles/kinetic-typography">source</a></td>
+<td width="25%" align="center"><a href="../../styles/comic-book/comic-book.mp4"><img src="../../styles/comic-book/preview.gif" alt="Comic Book" width="100%"></a><br><b>16 · Comic Book</b><br><a href="../../styles/comic-book/comic-book.mp4">video</a> · <a href="../../styles/comic-book">source</a></td>
 </tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
 |---|---|---|---|---|---|
-| 20 | [Kinetic Typography](../../styles/kinetic-typography/) | Words in rhythm | Quotes and strong opening lines | [Experimental](../../categories/families/experimental.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Social & Short-Form](../../categories/use-cases/social.md) |
+| 16 | [Comic Book](../../styles/comic-book/) | Newspaper comic panels | Dialogue, humor, and tension | [Comics & Cartoons](../../categories/families/comics.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md) |
