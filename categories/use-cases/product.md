@@ -6,7 +6,7 @@ Use case · Feature announcements, product demos, and launch videos.
 
 **By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (9) · [Social & Short-Form](../../categories/use-cases/social.md) (11) · [Storytelling & Brand](../../categories/use-cases/story.md) (13) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (8)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (6) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (2) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (6) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2)
 
 <table>
 <tr>
@@ -29,7 +29,7 @@ Use case · Feature announcements, product demos, and launch videos.
 | # | Style | Feel | Best for | Family | Use cases |
 |---|---|---|---|---|---|
 | 02 | [Isometric](../../styles/isometric/) | Miniature model world | Showing the parts of a system or process | [Flat Graphics](../../categories/families/flat-graphics.md) | [Explainers](../../categories/use-cases/explainer.md), [Product & Launches](../../categories/use-cases/product.md) |
-| 04 | [Memphis](../../styles/memphis/) | Playful, bouncing 1980s design | Fun announcements and short videos | [Flat Graphics](../../categories/families/flat-graphics.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Product & Launches](../../categories/use-cases/product.md) |
+| 04 | [Memphis](../../styles/memphis/) | Playful, bouncing 1980s design | Fun announcements and short videos | [Art Movements](../../categories/families/art-movements.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Product & Launches](../../categories/use-cases/product.md) |
 | 07 | [Blueprint](../../styles/blueprint/) | Engineering drawing | Measurements, technical details, and inner workings | [Hand Drawn](../../categories/families/hand-drawn.md) | [Explainers](../../categories/use-cases/explainer.md), [Product & Launches](../../categories/use-cases/product.md) |
 | 17 | [Terminal](../../styles/terminal/) | Green phosphor command line | Technical processes and what happens behind the scenes | [Technical](../../categories/families/technical.md) | [Explainers](../../categories/use-cases/explainer.md), [Product & Launches](../../categories/use-cases/product.md) |
 | 18 | [Sci-Fi Interface](../../styles/sci-fi-interface/) | Cool HUD, radar, and analysis | Measurement, scoring, and diagnostics | [Technical](../../categories/families/technical.md) | [Data & Results](../../categories/use-cases/data.md), [Product & Launches](../../categories/use-cases/product.md) |
