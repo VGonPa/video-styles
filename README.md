@@ -82,7 +82,7 @@ The [original brief](BRIEF.md) gave Claude Code (Opus 5.5) a goal, style, and te
 - Playwright renders frames in headless Chromium. ffmpeg turns them into H.264 video; optional sounds are synthesized with ffmpeg or Python.
 - To reproduce a clip, install Node.js, `@playwright/test`, Chromium headless shell, and ffmpeg, then run that style’s `build.sh` when present, or its `render.mjs` directly.
 - To regenerate the previews, run `python3 make_previews.py`. To assemble the catalog, install Pillow and run `python3 combine.py`. Both commands require ffmpeg on your path.
-- Each style's metadata (number, name, visual family, use cases) lives in `styles/<slug>/meta.json`; the use-case and family definitions live in `styles.json`. After editing either, run `python3 build_index.py` to regenerate this gallery and the pages under `categories/`.
+- Each style's metadata (number, name, visual family, use cases) lives in `styles/<slug>/meta.json`; the use-case and family definitions live in `styles.json`. After editing either, run `python3 build_index.py` to regenerate this gallery and the pages under `categories/`, then `python3 check_catalog.py` to verify every style has a valid clip, preview, and index entries.
 - Fonts are stored under each style’s `fonts/` directory. The original README identifies them as Google Fonts under the SIL Open Font License.
 
 The source repository does not include a general software license. This adaptation does not claim a new license for the original code or media.
