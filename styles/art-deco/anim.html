@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── art-deco · "The Aurora Hotel — Grand Opening, 1925" ─────────────────────────────────────────────
+// A lobby wall draws itself in gold line work (seam, stepped ziggurat doorway, fluted pilasters, split sunburst,
+// chevrons) → a gleam sweeps the gold → the elevator doors click and slide open, the camera pushes through the
+// doorway into the invitation card: a sunburst fans open, the stepped frame unfolds from the centre, "THE AURORA"
+// is revealed symmetrically, "HOTEL", the date and fan-flower ornaments bloom → gleam → pinstripe panels close
+// from both sides and part again on the seal: rings draw in, the lettering ring appears, the medallion is pressed
+// and flooded with gold around a cut-out monogram → final gleam, glints, fade to black.
+// Gold = white mask per pass → source-in brushed-gold texture (precomputed) → gleam band → soft bloom.
+// Every frame depends only on t (seeded RNG).
+const W = 1920, H = 1080, DUR = 10, TAU = Math.PI * 2, PI = Math.PI;
+const out = document.getElementById('c'), octx = out.getContext('2d');
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eOut5 = u => 1 - Math.pow(1 - u, 5);
+const eIn = u => u * u * u;
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eSine = u => 0.5 - 0.5 * Math.cos(PI * u);
+const back = (u, s = 1.6) => { const c3 = s + 1; return 1 + c3 * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2); };
+const spring = (u, f = 2, z = 0.4) => { if (u <= 0) return 0; const w = TAU * f, wd = w * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * w * u) * (Math.cos(wd * u) + (z * w / wd) * Math.sin(wd * u)); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const FD = 'Limelight', FP = '"Poiret One"', FM = '"Marcellus SC"', FJ = '"Josefin Sans"';
+const IVORY = '#efe4c8', NAVY = '#0a1326', NAVY2 = '#0e1a33', INK = '#050912';
+
+// ── timeline ──
+const T = {
+  seam: [.1, .65], zig: [.35, 1.35], inset: [.7, 1.45], pil: [.5, 1.55], med: [.85, 1.65], chev: [1.0, 1.8],
+  plaque: [1.15, 1.95], gleamW: [1.8, 2.45], click: 2.3, doors: [2.48, 3.45], push: [2.95, 4.4],
+  sun: [2.55, 4.2], frame: [3.3, 4.45], border: [3.7, 4.7], grand: [4.15, 4.75], title: [4.35, 5.1], flowers: [4.85, 5.9],
+  rule: [5.0, 5.6], hotel: [5.1, 5.75], date: [5.45, 6.05], line2: [5.65, 6.25], gleamT: [6.1, 6.85], glintT: 6.55,
+  close: [6.95, 7.4], swap: 7.45, open: [7.55, 8.05],
+  rays: [7.55, 8.4], rings: [7.75, 8.35], textring: [7.95, 8.5], press: 8.55, gleamS: [8.95, 9.55], glintS: [8.75, 9.25],
+  tag: [8.7, 9.2], fade: [9.4, 10.0],
+};
+
+// ── canvases ──
+const M = mk(W, H), mg = M.getContext('2d');           // gold mask / colourised gold
+const B = mk(480, 270), bg = B.getContext('2d');       // bloom
+let GOLD, BG_WALL, BG_TITLE, GRAIN, VIG, DOORTEX;
+
+function goldTexture() {
+  const c = mk(W, H), g = c.getContext('2d'), r = rng(7);
+  const lg = g.createLinearGradient(0, 0, 900, H * 1.25);
+  const cyc = [['#4f340e', 0], ['#a87a28', .18], ['#e9cd7c', .36], ['#fff4cc', .47], ['#d8ad4f', .58], ['#8a6220', .78], ['#4f340e', 1]];
+  const n = 7;
+  for (let k = 0; k < n; k++) for (const [col, p] of cyc) lg.addColorStop(clamp((k + p) / n), col);
+  g.fillStyle = lg; g.fillRect(0, 0, W, H);
+  // brushed streaks
+  for (let i = 0; i < 2600; i++) {
+    const y = r() * H, x = r() * W, len = 60 + r() * 420, a = .03 + r() * .07;
+    g.fillStyle = r() < .5 ? `rgba(255,245,210,${a})` : `rgba(40,24,0,${a})`;
+    g.fillRect(x, y, len, 1 + (r() < .2));
+  }
+  return c;
+}
+function wallBg() {
+  const c = mk(W, H), g = c.getContext('2d'), r = rng(3);
+  const rg = g.createRadialGradient(960, 560, 80, 960, 560, 1250);
+  rg.addColorStop(0, '#132143'); rg.addColorStop(.55, '#0b1429'); rg.addColorStop(1, '#04070f');
+  g.fillStyle = rg; g.fillRect(0, 0, W, H);
+  for (let x = 0; x < W; x += 16) { g.fillStyle = `rgba(150,170,220,${.018 + .01 * (x / 16 % 2)})`; g.fillRect(x, 0, 1, 1000); }
+  // floor
+  const fg = g.createLinearGradient(0, 1000, 0, H); fg.addColorStop(0, '#0a0f1e'); fg.addColorStop(1, '#020409');
+  g.fillStyle = fg; g.fillRect(0, 1000, W, 80);
+  return c;
+}
+function titleBg() {
+  const c = mk(W, H), g = c.getContext('2d');
+  const rg = g.createRadialGradient(960, 540, 60, 960, 540, 1150);
+  rg.addColorStop(0, '#182a52'); rg.addColorStop(.5, '#0c1731'); rg.addColorStop(1, '#03060d');
+  g.fillStyle = rg; g.fillRect(0, 0, W, H);
+  return c;
+}
+function doorTex() {
+  const c = mk(W, H), g = c.getContext('2d');
+  const lg = g.createLinearGradient(680, 0, 1240, 0);
+  lg.addColorStop(0, '#0b142a'); lg.addColorStop(.5, '#16244a'); lg.addColorStop(.5, '#0c1631'); lg.addColorStop(1, '#0b142a');
+  g.fillStyle = lg; g.fillRect(0, 0, W, H);
+  for (let x = 680; x < 1240; x += 7) { g.fillStyle = 'rgba(160,180,230,.022)'; g.fillRect(x, 0, 1, H); }
+  return c;
+}
+function grain() {
+  const c = mk(W, H), g = c.getContext('2d'), id = g.createImageData(W, H), d = id.data, r = rng(99);
+  for (let i = 0; i < d.length; i += 4) { const v = 128 + (r() - .5) * 70; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
+  g.putImageData(id, 0, 0); return c;
+}
+function vignette() {
+  const c = mk(W, H), g = c.getContext('2d');
+  const rg = g.createRadialGradient(960, 540, 420, 960, 540, 1180);
+  rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(1, 'rgba(0,0,0,.62)');
+  g.fillStyle = rg; g.fillRect(0, 0, W, H); return c;
+}
+
+// ── gold pass: draw white shapes into the mask, colourise, gleam, bloom ──
+function goldPass(target, draw, { gleam = null, bloom = .32, shadow = true, xf = null, tint = null } = {}) {
+  mg.setTransform(1, 0, 0, 1, 0, 0); mg.globalCompositeOperation = 'source-over'; mg.globalAlpha = 1; mg.clearRect(0, 0, W, H);
+  mg.save(); if (xf) mg.setTransform(...xf);
+  mg.fillStyle = '#fff'; mg.strokeStyle = '#fff'; mg.lineCap = 'butt'; mg.lineJoin = 'miter';
+  draw(mg); mg.restore();
+  mg.setTransform(1, 0, 0, 1, 0, 0); mg.globalAlpha = 1;
+  mg.globalCompositeOperation = 'source-in'; mg.drawImage(GOLD, 0, 0);
+  if (tint) { mg.globalCompositeOperation = 'source-atop'; mg.fillStyle = tint; mg.fillRect(0, 0, W, H); }
+  if (gleam !== null && gleam > 0 && gleam < 1) {
+    mg.globalCompositeOperation = 'source-atop';
+    const p = lerp(-500, 2500, gleam);
+    const lg = mg.createLinearGradient(p - 330, -60, p + 330, 200);
+    lg.addColorStop(0, 'rgba(255,250,230,0)'); lg.addColorStop(.3, 'rgba(255,250,230,.18)'); lg.addColorStop(.47, 'rgba(255,252,238,.35)');
+    lg.addColorStop(.5, 'rgba(255,255,248,.95)'); lg.addColorStop(.53, 'rgba(255,252,238,.35)'); lg.addColorStop(.7, 'rgba(255,250,230,.18)'); lg.addColorStop(1, 'rgba(255,250,230,0)');
+    mg.fillStyle = lg; mg.fillRect(0, 0, W, H);
+  }
+  mg.globalCompositeOperation = 'source-over';
+  target.save(); target.setTransform(1, 0, 0, 1, 0, 0);
+  if (shadow) { target.shadowColor = 'rgba(0,0,0,.6)'; target.shadowOffsetY = 3; target.shadowOffsetX = 1; }
+  target.drawImage(M, 0, 0);
+  target.restore();
+  if (bloom > 0) {
+    bg.globalCompositeOperation = 'source-over'; bg.clearRect(0, 0, 480, 270); bg.filter = 'blur(5px)'; bg.drawImage(M, 0, 0, 480, 270); bg.filter = 'none';
+    target.save(); target.setTransform(1, 0, 0, 1, 0, 0); target.globalCompositeOperation = 'lighter'; target.globalAlpha = bloom;
+    target.drawImage(B, 0, 0, W, H); target.restore();
+  }
+}
+
+// ── geometry helpers ──
+function strokePartial(g, pts, u) {
+  if (u <= 0) return;
+  let L = 0; const ls = [];
+  for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); ls.push(l); L += l; }
+  let rem = L * clamp(u);
+  g.beginPath(); g.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length && rem > 0; i++) {
+    const l = ls[i - 1], k = Math.min(1, rem / l);
+    g.lineTo(lerp(pts[i - 1][0], pts[i][0], k), lerp(pts[i - 1][1], pts[i][1], k)); rem -= l;
+  }
+  g.stroke();
+}
+const mirror = (pts, cx = 960) => pts.map(([x, y]) => [2 * cx - x, y]);
+function strokeSym(g, half, u, cx = 960) { strokePartial(g, half, u); strokePartial(g, mirror(half, cx), u); }
+// left half of a stepped (ziggurat) outline, from top centre going left and down.
+// bottom: 'flat' at y=floor, or 'step' mirrored steps.
+function zigHalf({ cx = 960, cy, hw, hh, sw, sh, n, d = 0, bottom = 'step', floor = 0 }) {
+  const P = [], yT = k => cy - hh - k * sh, yB = k => cy + hh + k * sh, xk = k => cx - hw + k * sw;
+  P.push([cx, yT(n) - d]);
+  P.push([xk(n) - d, yT(n) - d]);
+  for (let k = n; k >= 1; k--) { P.push([xk(k) - d, yT(k - 1) - d]); P.push([xk(k - 1) - d, yT(k - 1) - d]); }
+  if (bottom === 'flat') { P.push([xk(0) - d, floor]); P.push([cx, floor]); }
+  else {
+    P.push([xk(0) - d, yB(0) + d]);
+    for (let k = 1; k <= n; k++) { P.push([xk(k) - d, yB(k - 1) + d]); P.push([xk(k) - d, yB(k) + d]); }
+    P.push([cx, yB(n) + d]);
+  }
+  return P;
+}
+function zigPath(g, spec) { const h = zigHalf(spec), m = mirror(h, spec.cx || 960).reverse(); g.beginPath(); g.moveTo(...h[0]); for (const p of h.concat(m)) g.lineTo(...p); g.closePath(); }
+function sunburst(g, cx, cy, r0, r1, N, open, rot, grow = 1, wedge = .34, fan = true, a0 = -PI / 2, span = TAU) {
+  const rr = lerp(r0, r1, grow);
+  if (rr <= r0 + 1) return;
+  for (let i = 0; i < N; i++) {
+    const k = i <= N / 2 ? i : i - N;
+    const a = fan ? a0 + k * (span / N) * open + rot : a0 + i * span / N + rot;
+    const hw = (span / N) * wedge * open;
+    g.beginPath();
+    if (i % 2 === 0) {
+      g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      g.lineTo(cx + Math.cos(a - hw) * rr, cy + Math.sin(a - hw) * rr);
+      g.lineTo(cx + Math.cos(a + hw) * rr, cy + Math.sin(a + hw) * rr);
+      g.closePath(); g.fill();
+    } else {
+      g.moveTo(cx + Math.cos(a) * (r0 + 20), cy + Math.sin(a) * (r0 + 20)); g.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); g.stroke();
+    }
+  }
+}
+function arcSym(g, cx, cy, r, u, top = -PI / 2) { if (u <= 0) return; g.beginPath(); g.arc(cx, cy, r, top - PI * u, top + PI * u); g.stroke(); }
+function chevron(g, cx, y, hw, h) { g.beginPath(); g.moveTo(cx - hw, y); g.lineTo(cx, y + h); g.lineTo(cx + hw, y); g.stroke(); }
+function diamond(g, x, y, s) { g.beginPath(); g.moveTo(x, y - s); g.lineTo(x + s * .7, y); g.lineTo(x, y + s); g.lineTo(x - s * .7, y); g.closePath(); g.fill(); }
+function spacedText(g, txt, x, y, font, ls) { g.font = font; g.letterSpacing = ls + 'px'; g.textAlign = 'center'; g.fillText(txt, x + ls / 2, y); g.letterSpacing = '0px'; }
+function star(g, x, y, s, a) {
+  if (a <= 0) return;
+  g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = a;
+  const rg = g.createRadialGradient(x, y, 0, x, y, s * 1.3); rg.addColorStop(0, 'rgba(255,248,220,.9)'); rg.addColorStop(1, 'rgba(255,230,160,0)');
+  g.fillStyle = rg; g.beginPath(); g.arc(x, y, s * 1.3, 0, TAU); g.fill();
+  g.fillStyle = '#fffbea';
+  for (const [dx, dy, l, w] of [[1, 0, s * 2.4, s * .09], [0, 1, s * 2.4, s * .09], [.707, .707, s * 1.1, s * .06], [.707, -.707, s * 1.1, s * .06]]) {
+    g.beginPath(); g.moveTo(x + dx * l, y + dy * l); g.lineTo(x - dy * w, y + dx * w); g.lineTo(x - dx * l, y - dy * l); g.lineTo(x + dy * w, y - dx * w); g.closePath(); g.fill();
+  }
+  g.restore();
+}
+
+// ── scene 1: lobby wall + elevator doors ──
+const DOOR = { cx: 960, cy: 0, hw: 280, hh: 0, sw: 50, sh: 56, n: 3, bottom: 'flat', floor: 1000 };
+const doorSpec = d => { const s = { ...DOOR, d }; s.cy = 420; return s; };   // sides top at 420, steps up to 252
+const DOOR_TOP = 420 - 3 * 56;
+function wallGold(g, t) {
+  // wall sunburst above doorway (rays, avoiding the plaque)
+  const ur = eOut(seg(t, T.zig[0] + .25, T.zig[1] + .35));
+  g.lineWidth = 1.2; g.globalAlpha = .55;
+  for (let i = 0; i <= 26; i++) {
+    const a = -PI + .2 + i * (PI - .4) / 26; if (Math.abs(a + PI / 2) < .5) continue;
+    const r0 = 240, r1 = lerp(r0, 560 + 40 * (i % 2), ur);
+    g.beginPath(); g.moveTo(960 + Math.cos(a) * r0, DOOR_TOP + Math.sin(a) * r0 * .9); g.lineTo(960 + Math.cos(a) * r1, DOOR_TOP + Math.sin(a) * r1 * .9); g.stroke();
+  }
+  g.globalAlpha = 1;
+  // keep the rays off the plaque and the doorway frame
+  g.save(); g.globalCompositeOperation = 'destination-out'; g.fillRect(530, 56, 860, 120); zigPath(g, doorSpec(74)); g.fill(); g.restore();
+  // ziggurat doorway frame: three staggered lines, drawn from top centre outward both ways
+  [[14, 4], [30, 1.6], [42, 1.6], [60, 1]].forEach(([d, lw], i) => {
+    g.lineWidth = lw; strokeSym(g, zigHalf(doorSpec(d)), eInOut(seg(t, T.zig[0] + i * .1, T.zig[1] + i * .1)));
+  });
+  // pilasters (fluted, grow from the floor), stepped capitals
+  const up = eInOut(seg(t, ...T.pil));
+  for (const px of [300, 1620]) {
+    const top = lerp(1000, 250, up);
+    g.lineWidth = 1.5;
+    for (let k = -3; k <= 3; k++) { g.beginPath(); g.moveTo(px + k * 16, 1000); g.lineTo(px + k * 16, Math.max(top, 300)); g.stroke(); }
+    const uc = seg(t, T.pil[1] - .25, T.pil[1] + .15);
+    if (uc > 0) {
+      g.globalAlpha = eOut(uc);
+      const e = eOut(uc);
+      // stepped setback crown + a small fan, stepped base
+      [[70, 290, 10], [56, 274, 10], [42, 258, 10]].forEach(([hw, y, h]) => g.fillRect(px - hw * e, y, 2 * hw * e, h));
+      g.lineWidth = 1.5; g.beginPath(); g.arc(px, 256, 40 * e, PI, TAU); g.stroke();
+      for (let i = 1; i < 6; i++) { const a = PI + i * PI / 6; g.beginPath(); g.moveTo(px + Math.cos(a) * 12 * e, 256 + Math.sin(a) * 12 * e); g.lineTo(px + Math.cos(a) * 40 * e, 256 + Math.sin(a) * 40 * e); g.stroke(); }
+      g.beginPath(); g.arc(px, 256, 10 * e, PI, TAU); g.fill();
+      [[70, 976, 10], [86, 990, 10]].forEach(([hw, y, h]) => g.fillRect(px - hw * e, y, 2 * hw * e, h));
+      g.globalAlpha = 1;
+    }
+  }
+  // floor rules
+  const uf = eInOut(seg(t, .3, 1.2));
+  g.lineWidth = 3; g.beginPath(); g.moveTo(960 - 960 * uf, 1003); g.lineTo(960 + 960 * uf, 1003); g.stroke();
+  g.lineWidth = 1; g.beginPath(); g.moveTo(960 - 960 * uf, 1016); g.lineTo(960 + 960 * uf, 1016); g.stroke();
+  for (let k = 0; k < 3; k++) { g.globalAlpha = .5 - k * .12; g.beginPath(); g.moveTo(960 - 960 * uf, 1034 + k * 18); g.lineTo(960 + 960 * uf, 1034 + k * 18); g.stroke(); }
+  g.globalAlpha = 1;
+  // plaque frame
+  const upl = eInOut(seg(t, T.plaque[0] - .2, T.plaque[1] - .2));
+  g.lineWidth = 2;
+  strokeSym(g, [[960, 70], [560, 70], [560, 82], [540, 82], [540, 150], [560, 150], [560, 162], [960, 162]], upl);
+  g.lineWidth = 1; strokeSym(g, [[960, 78], [568, 78], [568, 90], [548, 90], [548, 142], [568, 142], [568, 154], [960, 154]], upl);
+}
+function doorGold(g, t) {
+  // seam (the two door edges) grows from the middle out
+  const us = eOut(seg(t, ...T.seam));
+  g.lineWidth = 3; g.beginPath(); g.moveTo(960, 626 - 374 * us); g.lineTo(960, 626 + 374 * us); g.stroke();
+  // everything on the doors is symmetric around the seam; drawn once, split by the door clips
+  g.lineWidth = 2; strokeSym(g, zigHalf(doorSpec(-16)), eInOut(seg(t, ...T.inset)));
+  g.lineWidth = 1; strokeSym(g, zigHalf(doorSpec(-24)), eInOut(seg(t, T.inset[0] + .1, T.inset[1] + .1)));
+  // fluting inside the stepped head
+  const uf = eOut(seg(t, T.inset[0] + .3, T.inset[1] + .3));
+  g.lineWidth = 1;
+  for (let k = 1; k <= 11; k++) for (const s of [-1, 1]) {
+    const x = 960 + s * k * 18; let yTop = DOOR_TOP + 24;
+    const ax = Math.abs(x - 960); if (ax > 130 - 24) yTop = 420 - 2 * 56 + 24; if (ax > 180 - 24) yTop = 420 - 56 + 24; if (ax > 230 - 24) yTop = 420 + 24;
+    const y1 = 408; if (yTop >= y1) continue;
+    g.beginPath(); g.moveTo(x, y1); g.lineTo(x, lerp(y1, yTop, uf)); g.stroke();
+  }
+  // medallion: split sunburst on the seam
+  const um = seg(t, ...T.med), cy = 590;
+  g.lineWidth = 2.5; arcSym(g, 960, cy, 150, eOut(um)); arcSym(g, 960, cy, 150, eOut(um), PI / 2);
+  g.lineWidth = 1.2; arcSym(g, 960, cy, 138, eOut(seg(t, T.med[0] + .1, T.med[1] + .1))); arcSym(g, 960, cy, 138, eOut(seg(t, T.med[0] + .1, T.med[1] + .1)), PI / 2);
+  g.lineWidth = 2; arcSym(g, 960, cy, 46, eOut(um)); arcSym(g, 960, cy, 46, eOut(um), PI / 2);
+  g.lineWidth = 1.4; sunburst(g, 960, cy, 56, 128, 32, 1, PI / 32, eOut5(seg(t, T.med[0] + .2, T.med[1] + .15)), .3, false);
+  // chevrons (downward), top one first
+  for (let k = 0; k < 6; k++) {
+    const u = eOut(seg(t, T.chev[0] + k * .08, T.chev[0] + k * .08 + .45)); if (u <= 0) continue;
+    g.lineWidth = k % 2 ? 1.2 : 3; g.globalAlpha = u;
+    chevron(g, 960, 790 + k * 30, 200 * u, 70 * u);
+  }
+  g.globalAlpha = 1;
+  // kick plate lines
+  const uk = eInOut(seg(t, T.chev[0] + .2, T.chev[1]));
+  g.lineWidth = 1.5; for (let k = 0; k < 3; k++) { g.beginPath(); g.moveTo(960 - 240 * uk, 950 + k * 12); g.lineTo(960 + 240 * uk, 950 + k * 12); g.stroke(); }
+}
+function renderWall(ctx, t, s, ox, oy) {
+  const xf = [s, 0, 0, s, ox, oy];
+  ctx.save(); ctx.setTransform(...xf);
+  // wall with doorway cut out
+  ctx.beginPath(); ctx.rect(-10, -10, W + 20, H + 20); zigPathInto(ctx, doorSpec(0));
+  ctx.save(); ctx.clip('evenodd'); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // wall bg is drawn in screen space scaled with the wall
+  ctx.setTransform(...xf); ctx.drawImage(BG_WALL, 0, 0); ctx.restore();
+  // doors
+  const click = Math.sin(PI * seg(t, T.click, T.click + .12)) * 3;
+  const od = eInOut(seg(t, ...T.doors)) * 300 + click;
+  zigPath(ctx, doorSpec(0)); ctx.save(); ctx.clip();
+  for (const side of [-1, 1]) {
+    ctx.save(); ctx.translate(side * od, 0); ctx.beginPath(); side < 0 ? ctx.rect(0, 0, 960, H) : ctx.rect(960, 0, W, H); ctx.clip();
+    ctx.globalAlpha = eOut(seg(t, 0, .8)); ctx.drawImage(DOORTEX, 0, 0);
+    ctx.restore();
+  }
+  ctx.restore(); ctx.restore();
+  goldPass(ctx, g => wallGold(g, t), { xf, gleam: seg(t, ...T.gleamW), bloom: .3 });
+  // door gold: clipped to each door
+  goldPass(ctx, g => {
+    zigPath(g, doorSpec(0)); g.clip();
+    for (const side of [-1, 1]) {
+      g.save(); g.translate(side * od, 0); g.beginPath(); side < 0 ? g.rect(0, 0, 960, H) : g.rect(960, 0, W, H); g.clip(); doorGold(g, t); g.restore();
+    }
+  }, { xf, gleam: seg(t, T.gleamW[0] + .08, T.gleamW[1] + .08), bloom: .3 });
+  // plaque text (ivory)
+  const up = seg(t, ...T.plaque);
+  if (up > 0) {
+    ctx.save(); ctx.setTransform(...xf); ctx.globalAlpha = eOut(up); ctx.fillStyle = IVORY;
+    spacedText(ctx, 'YOU ARE CORDIALLY INVITED', 960, 129, `36px ${FM}`, lerp(26, 11, eOut(up)));
+    ctx.restore();
+  }
+}
+function zigPathInto(g, spec) { const h = zigHalf(spec), m = mirror(h, 960).reverse(); g.moveTo(...h[0]); for (const p of h.concat(m)) g.lineTo(...p); g.closePath(); }
+
+// ── scene 2: invitation card ──
+const PANEL = { cx: 960, cy: 540, hw: 560, hh: 232, sw: 60, sh: 36, n: 3 };
+let TITLE_PX = 140;
+function titleSun(g, t) {
+  const u = seg(t, ...T.sun);
+  g.globalAlpha = .75; g.lineWidth = 2;
+  sunburst(g, 960, 540, 120, 1250, 56, eOut(u), 0, eOut(seg(t, T.sun[0], T.sun[1] - .3)), .3, true, -PI / 2, TAU);
+  g.globalAlpha = 1; falloff(g, 960, 540);
+}
+function falloff(g, x, y) {
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-in';
+  const rg = g.createRadialGradient(x, y, 250, x, y, 1150); rg.addColorStop(0, 'rgba(0,0,0,.34)'); rg.addColorStop(.5, 'rgba(0,0,0,.18)'); rg.addColorStop(1, 'rgba(0,0,0,.07)');
+  g.fillStyle = rg; g.fillRect(0, 0, W, H); g.restore();
+}
+function flower(g, x, y, s, u) {
+  // stylised deco fountain-flower: stepped fan bloom, stem, paired leaves, stepped plinth
+  if (u <= 0) return;
+  const k = spring(u, 1.6, .45), kl = eOut(seg(u, .25, 1)), kb = eOut(seg(u, 0, .6));
+  g.save(); g.translate(x, y + 150 * s); g.scale(s, s);
+  // plinth
+  g.fillRect(-34 * kb, 0, 68 * kb, 6); g.fillRect(-22 * kb, 11, 44 * kb, 5); g.fillRect(-10 * kb, 21, 20 * kb, 4);
+  g.lineWidth = 2; g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -150 * kb); g.stroke();
+  // leaves (pointed ellipses, alternately filled) growing out from the stem
+  for (const [ly, sz, fill] of [[-38, 42, true], [-78, 34, false]]) for (const sd of [-1, 1]) {
+    g.save(); g.translate(0, ly); g.rotate(sd * -0.75); g.scale(sd * kl, kl);
+    g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(sz * .5, -sz * .32, sz, 0); g.quadraticCurveTo(sz * .5, sz * .32, 0, 0); g.closePath();
+    g.lineWidth = 1.6; fill ? g.fill() : g.stroke(); g.restore();
+  }
+  // bloom
+  g.translate(0, -150); g.scale(k, k);
+  g.lineWidth = 2.2; g.beginPath(); g.arc(0, 0, 72, PI, TAU); g.closePath(); g.stroke();
+  g.lineWidth = 1.2; g.beginPath(); g.arc(0, 0, 62, PI, TAU); g.stroke();
+  for (let i = 0; i < 9; i++) {
+    const a0 = PI + i * PI / 9, a1 = a0 + PI / 9;
+    if (i % 2 === 0) { g.beginPath(); g.moveTo(Math.cos(a0) * 30, Math.sin(a0) * 30); g.arc(0, 0, 56, a0 + .03, a1 - .03); g.lineTo(Math.cos(a1) * 30, Math.sin(a1) * 30); g.arc(0, 0, 30, a1, a0, true); g.fill(); }
+  }
+  g.beginPath(); g.arc(0, 0, 22, PI, TAU); g.closePath(); g.fill();
+  for (let i = 0; i < 5; i++) { const a = PI + (i + .5) * PI / 5; diamond(g, Math.cos(a) * 88, Math.sin(a) * 88, 5); }
+  g.restore();
+}
+function titleGold(g, t) {
+  // stepped frame unfolding from the centres (top and bottom) outward
+  [[0, 3.5], [16, 1.5], [28, 1.5], [-16, 1.2]].forEach(([d, lw], i) => {
+    g.lineWidth = lw; const u = eInOut(seg(t, T.frame[0] + i * .09, T.frame[1] + i * .09));
+    const h = zigHalf({ ...PANEL, d });
+    // split the half into its top and bottom quarter so both grow from centre
+    const mid = h.findIndex(p => p[1] > 540), sm = [h[mid][0], 540];
+    const top = h.slice(0, mid).concat([sm]), bot = h.slice(mid).reverse().concat([sm]);
+    strokeSym(g, top, u); strokeSym(g, bot, u);
+  });
+  // screen border: double rules drawn from top/bottom centre
+  const ub = eInOut(seg(t, ...T.border));
+  g.lineWidth = 2; strokeSym(g, [[960, 34], [34, 34], [34, 540]], ub); strokeSym(g, [[960, 1046], [34, 1046], [34, 540]], ub);
+  g.lineWidth = 1; strokeSym(g, [[960, 46], [46, 46], [46, 540]], ub); strokeSym(g, [[960, 1034], [46, 1034], [46, 540]], ub);
+  const uc = eOut(seg(t, T.border[1] - .3, T.border[1] + .2));
+  if (uc > 0) for (const [x, y] of [[34, 34], [1886, 34], [34, 1046], [1886, 1046]]) { g.globalAlpha = uc; g.fillRect(x - 9, y - 9, 18, 18); g.clearRect(x - 4, y - 4, 8, 8); }
+  g.globalAlpha = 1;
+  // "GRAND OPENING" diamonds + short rules
+  const ug = eOut(seg(t, ...T.grand));
+  if (ug > 0) {
+    g.lineWidth = 1.5;
+    for (const s of [-1, 1]) { diamond(g, 960 + s * 305, 250, 8 * ug); g.beginPath(); g.moveTo(960 + s * 320, 250); g.lineTo(960 + s * lerp(320, 360, ug), 250); g.stroke(); }
+  }
+  // title: symmetric reveal from centre (clip) + settle
+  const ut = seg(t, ...T.title);
+  if (ut > 0) {
+    const w = eInOut(ut) * 560, sc = lerp(1.06, 1, eOut(ut));
+    g.save(); g.beginPath(); g.rect(960 - w, 300, 2 * w, 220); g.clip();
+    g.translate(960, 440); g.scale(sc, sc);
+    g.font = `${TITLE_PX}px ${FD}`; g.letterSpacing = '6px'; g.textAlign = 'center'; g.fillText('THE AURORA', 3, 0); g.letterSpacing = '0px';
+    g.restore();
+    // bright edge bars on the reveal
+    if (ut < 1) { g.globalAlpha = Math.sin(PI * ut); g.fillRect(960 - w - 2, 318, 3, 150); g.fillRect(960 + w - 1, 318, 3, 150); g.globalAlpha = 1; }
+  }
+  // rules either side of HOTEL
+  const ur = eInOut(seg(t, ...T.rule));
+  if (ur > 0) {
+    g.lineWidth = 2; for (const s of [-1, 1]) { g.beginPath(); g.moveTo(960 + s * 180, 548); g.lineTo(960 + s * lerp(180, 470, ur), 548); g.stroke(); }
+    g.lineWidth = 1; for (const s of [-1, 1]) { g.beginPath(); g.moveTo(960 + s * 180, 558); g.lineTo(960 + s * lerp(180, 430, ur), 558); g.stroke(); }
+    for (const s of [-1, 1]) diamond(g, 960 + s * lerp(180, 478, ur), 548, 7);
+  }
+  const uh = seg(t, ...T.hotel);
+  if (uh > 0) { g.globalAlpha = eOut(uh); spacedText(g, 'HOTEL', 960, 575, `64px ${FP}`, lerp(60, 26, eOut(uh))); g.globalAlpha = 1; }
+  // bottom fan ornament + chevrons in the lower step
+  const ul = seg(t, T.line2[0], T.line2[1] + .2);
+  if (ul > 0) {
+    g.save(); g.globalAlpha = eOut(ul); g.lineWidth = 1.6;
+    const k = eOut(ul);
+    for (let i = 0; i < 3; i++) chevron(g, 960, 792 + i * 14, 70 * k, 22 * k);
+    g.restore();
+  }
+  // flowers
+  flower(g, 225, 430, 1.3, seg(t, T.flowers[0], T.flowers[1]));
+  flower(g, 1695, 430, 1.3, seg(t, T.flowers[0] + .12, T.flowers[1] + .12));
+}
+function renderTitle(ctx, t, s) {
+  const xf = [s, 0, 0, s, 960 - 960 * s, 540 - 540 * s];
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(BG_TITLE, 0, 0); ctx.restore();
+  goldPass(ctx, g => titleSun(g, t), { xf, bloom: .25, shadow: false, tint: 'rgba(196,138,44,.5)' });
+  // dark panel (fades in with the frame)
+  const up = eOut(seg(t, T.frame[0] - .1, T.frame[0] + .6));
+  if (up > 0) {
+    ctx.save(); ctx.setTransform(...xf); ctx.globalAlpha = up;
+    const pg = ctx.createLinearGradient(0, 198, 0, 882); pg.addColorStop(0, '#0a1430'); pg.addColorStop(.5, '#081024'); pg.addColorStop(1, '#050a18');
+    ctx.fillStyle = pg; zigPath(ctx, { ...PANEL, d: 28 }); ctx.fill();
+    ctx.restore();
+  }
+  goldPass(ctx, g => titleGold(g, t), { xf, gleam: seg(t, ...T.gleamT), bloom: .34 });
+  // ivory type
+  ctx.save(); ctx.setTransform(...xf); ctx.fillStyle = IVORY;
+  const ug = seg(t, ...T.grand);
+  if (ug > 0) { ctx.globalAlpha = eOut(ug); spacedText(ctx, 'GRAND OPENING', 960, 264, `40px ${FM}`, lerp(34, 14, eOut(ug))); }
+  const ud = seg(t, ...T.date);
+  if (ud > 0) { ctx.globalAlpha = eOut(ud); spacedText(ctx, 'DECEMBER 31  ·  1925', 960, 668 + 10 * (1 - eOut(ud)), `600 38px ${FJ}`, 9); }
+  const u2 = seg(t, ...T.line2);
+  if (u2 > 0) { ctx.globalAlpha = eOut(u2) * .9; spacedText(ctx, "EIGHT O'CLOCK  ·  BLACK TIE", 960, 728 + 10 * (1 - eOut(u2)), `300 30px ${FJ}`, 8); }
+  ctx.restore();
+  // glints on the title
+  const gl = seg(t, T.glintT, T.glintT + .5);
+  if (gl > 0 && gl < 1) { const a = Math.sin(PI * gl); ctx.save(); ctx.setTransform(...xf); star(ctx, 1352, 352, 26 * a, a); star(ctx, 596, 448, 16 * a, a * .8); ctx.restore(); }
+}
+
+// ── transition: pinstripe panels close from both sides and part again ──
+function renderPanels(ctx, t) {
+  const c = eInOut(seg(t, ...T.close)), o = eInOut(seg(t, ...T.open));
+  const k = t < T.swap ? c : 1 - o;
+  if (k <= 0) return;
+  const w = 960 * k;
+  ctx.save();
+  const lg = ctx.createLinearGradient(0, 0, W, 0); lg.addColorStop(0, '#060b18'); lg.addColorStop(.5, '#0f1c3a'); lg.addColorStop(1, '#060b18');
+  ctx.fillStyle = lg; ctx.fillRect(0, 0, w, H); ctx.fillRect(W - w, 0, w, H);
+  ctx.restore();
+  goldPass(ctx, g => {
+    g.lineWidth = 1;
+    for (let x = 12; x < 960; x += 14) { g.globalAlpha = .45; g.fillRect(w - x, 0, 1, H); g.fillRect(W - w + x - 1, 0, 1, H); }
+    g.globalAlpha = 1;
+    g.fillRect(w - 6, 0, 4, H); g.fillRect(W - w + 2, 0, 4, H);
+    // stepped emblem halves on the leading edges
+    for (const s of [-1, 1]) {
+      const ex = s < 0 ? w : W - w;
+      g.beginPath();
+      g.moveTo(ex, 440); g.lineTo(ex + s * 40, 440); g.lineTo(ex + s * 40, 470); g.lineTo(ex + s * 70, 470); g.lineTo(ex + s * 70, 610); g.lineTo(ex + s * 40, 610); g.lineTo(ex + s * 40, 640); g.lineTo(ex, 640);
+      g.lineWidth = 3; g.stroke();
+      diamond(g, ex + s * 22, 540, 14);
+    }
+  }, { gleam: seg(t, T.close[1] - .15, T.open[0] + .35), bloom: .3 });
+}
+
+// ── scene 3: the seal ──
+const SC = { x: 960, y: 470 };
+const RING_TOP = 'THE AURORA HOTEL', RING_BOT = 'EST.  MCMXXV';
+let RING = null;
+function sealGold(g, t) {
+  const { x, y } = SC;
+  const press = t >= T.press;
+  const ug = eOut(seg(t, ...T.rings));
+  g.lineWidth = 1.2; arcSym(g, x, y, 282, ug); arcSym(g, x, y, 282, ug, PI / 2);
+  // dentil ring
+  const ud = seg(t, T.rings[0] + .15, T.rings[1] + .15);
+  for (let i = 0; i < 72; i++) {
+    const a = -PI / 2 + i * TAU / 72, k = i <= 36 ? i : 72 - i;
+    if (k / 36 > ud) continue;
+    g.save(); g.translate(x + Math.cos(a) * 262, y + Math.sin(a) * 262); g.rotate(a); g.fillRect(-6, -5, 12, 10); g.restore();
+  }
+  g.lineWidth = 4; arcSym(g, x, y, 248, ug); arcSym(g, x, y, 248, ug, PI / 2);
+  g.lineWidth = 1.4; arcSym(g, x, y, 238, ug); arcSym(g, x, y, 238, ug, PI / 2);
+  g.lineWidth = 3; arcSym(g, x, y, 176, ug); arcSym(g, x, y, 176, ug, PI / 2);
+  g.lineWidth = 1.2; arcSym(g, x, y, 168, ug); arcSym(g, x, y, 168, ug, PI / 2);
+  // lettering ring
+  const ut = seg(t, ...T.textring);
+  if (ut > 0) {
+    g.font = `30px ${FM}`; g.textAlign = 'center';
+    RING.forEach(({ ch, a, up }, i) => {
+      const al = clamp(ut * RING.length * 1.3 - i * 1.0 - 0) ; if (al <= 0) return;
+      g.globalAlpha = clamp(al); g.save(); g.translate(x + Math.cos(a) * 204, y + Math.sin(a) * 204); g.rotate(up ? a + PI / 2 : a - PI / 2); g.fillText(ch, 0, 10); g.restore();
+    });
+    g.globalAlpha = 1;
+    for (const s of [-1, 1]) diamond(g, x + s * 204, y, 7 * eOut(ut));
+  }
+  // inner disc: outline + monogram stroke before the press; gold flood with cut-out monogram after
+  const fl = press ? eOut(seg(t, T.press, T.press + .28)) : 0;
+  g.font = `250px ${FD}`; g.textAlign = 'center';
+  if (!press) {
+    const um = eOut(seg(t, T.textring[0] + .1, T.press - .05));
+    g.globalAlpha = um; g.lineWidth = 2.5; g.strokeText('A', x, y + 88); g.globalAlpha = 1;
+  } else {
+    g.beginPath(); g.arc(x, y, 160 * fl, 0, TAU); g.fill();
+    g.save(); g.globalCompositeOperation = 'destination-out'; g.fillText('A', x, y + 88); g.restore();
+  }
+  // tag rule
+  const ug2 = eInOut(seg(t, ...T.tag));
+  if (ug2 > 0) { g.lineWidth = 1.5; for (const s of [-1, 1]) { g.beginPath(); g.moveTo(960 + s * 40, 896); g.lineTo(960 + s * lerp(40, 330, ug2), 896); g.stroke(); diamond(g, 960, 896, 7 * ug2); } }
+}
+function renderSeal(ctx, t) {
+  ctx.drawImage(BG_TITLE, 0, 0);
+  // stamp: slight scale-down onto the card at the press
+  const pu = seg(t, T.press - .18, T.press), po = t - T.press;
+  // anticipation: the medallion lifts, then presses down with a damped bounce
+  const s = t < T.press ? 1 + .06 * eSine(pu) : 1 + .06 * Math.exp(-po * 9) * Math.cos(po * 30);
+  const xf = [s, 0, 0, s, SC.x - SC.x * s, SC.y - SC.y * s];
+  // medallion base
+  ctx.save(); ctx.setTransform(...xf);
+  const ub = eOut(seg(t, T.rings[0], T.rings[1]));
+  const rg = ctx.createRadialGradient(SC.x, SC.y - 60, 20, SC.x, SC.y, 290); rg.addColorStop(0, '#15254b'); rg.addColorStop(1, '#070d1d');
+  ctx.globalAlpha = ub; ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(SC.x, SC.y, 290, 0, TAU); ctx.fill();
+  ctx.restore();
+  goldPass(ctx, g => { g.lineWidth = 2; sunburst(g, SC.x, SC.y, 300, 1200, 72, 1, (t - T.swap) * .03, eOut(seg(t, ...T.rays)), .3, false); falloff(g, SC.x, SC.y);
+    // quiet band behind the tagline
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-out'; const bg2 = g.createLinearGradient(0, 780, 0, 1000);
+    bg2.addColorStop(0, 'rgba(0,0,0,0)'); bg2.addColorStop(.35, 'rgba(0,0,0,.75)'); bg2.addColorStop(.8, 'rgba(0,0,0,.75)'); bg2.addColorStop(1, 'rgba(0,0,0,.2)'); g.fillStyle = bg2; g.fillRect(0, 780, W, 220); g.restore();
+  }, { bloom: .2, shadow: false, tint: 'rgba(196,138,44,.5)' });
+  goldPass(ctx, g => sealGold(g, t), { xf, gleam: seg(t, ...T.gleamS), bloom: .36 });
+  // press flash + shockwave ring
+  if (t >= T.press && po < .7) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const a = Math.exp(-po * 6);
+    const fg = ctx.createRadialGradient(SC.x, SC.y, 0, SC.x, SC.y, 420); fg.addColorStop(0, `rgba(255,236,180,${.45 * a})`); fg.addColorStop(1, 'rgba(255,220,150,0)');
+    ctx.fillStyle = fg; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = `rgba(255,232,170,${.7 * a})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(SC.x, SC.y, 300 + po * 700, 0, TAU); ctx.stroke();
+    ctx.restore();
+  }
+  // ivory tagline
+  const ut = seg(t, ...T.tag);
+  if (ut > 0) {
+    ctx.save(); ctx.fillStyle = IVORY; ctx.globalAlpha = eOut(ut);
+    spacedText(ctx, "NEW YEAR'S EVE  ·  1925", 960, 862 + 8 * (1 - eOut(ut)), `300 34px ${FJ}`, lerp(22, 12, eOut(ut)));
+    ctx.globalAlpha = eOut(seg(t, T.tag[0] + .2, T.tag[1] + .2)) * .95;
+    spacedText(ctx, 'THE PLEASURE OF YOUR COMPANY IS REQUESTED', 960, 948, `300 24px ${FJ}`, 7);
+    ctx.restore();
+  }
+  // glints
+  for (const [tg, gx, gy, sz] of [[T.glintS[0], SC.x + 176 * Math.cos(-.8), SC.y + 176 * Math.sin(-.8), 30], [T.glintS[1], SC.x - 248 * Math.cos(.5), SC.y + 248 * Math.sin(.5), 24]]) {
+    const u = seg(t, tg, tg + .45); if (u > 0 && u < 1) { const a = Math.sin(PI * u); star(ctx, gx, gy, sz * a, a); }
+  }
+}
+
+// ── frame ──
+function render(t) {
+  const g = octx; g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  if (t < T.swap) {
+    const up = eInOut(seg(t, ...T.push));
+    renderTitle(g, t, lerp(.62, 1, up));
+    if (up < 1) {
+      const s = lerp(1, 4.6, eIn(up) * .35 + up * .65), fx = 960, fy = 640;
+      renderWall(g, t, s, fx - fx * s, fy - fy * s);
+      // warm light from the doorway while it opens
+      const gl = Math.sin(PI * seg(t, T.doors[0] + .05, T.push[0] + .75)) * .7;
+      if (gl > 0) {
+        g.save(); g.globalCompositeOperation = 'lighter';
+        const rg = g.createRadialGradient(960, 600, 20, 960, 600, 900); rg.addColorStop(0, `rgba(255,214,140,${.28 * gl})`); rg.addColorStop(1, 'rgba(255,200,120,0)');
+        g.fillStyle = rg; g.fillRect(0, 0, W, H); g.restore();
+      }
+    }
+  } else renderSeal(g, t);
+  renderPanels(g, t);
+  // grain + vignette
+  g.save(); g.globalCompositeOperation = 'overlay'; g.globalAlpha = .1; g.drawImage(GRAIN, 0, 0); g.restore();
+  g.drawImage(VIG, 0, 0);
+  // fades
+  const fin = 1 - eOut(seg(t, 0, .45)), fout = eInOut(seg(t, ...T.fade));
+  const f = Math.max(fin, fout);
+  if (f > 0) { g.fillStyle = `rgba(0,0,0,${f})`; g.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await Promise.all([document.fonts.load(`100px ${FD}`, 'THE AURORA A'), document.fonts.load(`64px ${FP}`, 'HOTEL'),
+    document.fonts.load(`40px ${FM}`, 'GRAND OPENING YOU ARE CORDIALLY INVITED THE AURORA HOTEL MCMXXV ·'),
+    document.fonts.load(`600 38px ${FJ}`, "DECEMBER 31 · 1925"), document.fonts.load(`300 30px ${FJ}`, "EIGHT O'CLOCK · BLACK TIE NEW YEAR'S EVE")]);
+  await document.fonts.ready;
+  GOLD = goldTexture(); BG_WALL = wallBg(); BG_TITLE = titleBg(); GRAIN = grain(); VIG = vignette(); DOORTEX = doorTex();
+  // fit the title inside the panel
+  mg.font = `${TITLE_PX}px ${FD}`; mg.letterSpacing = '6px'; const w = mg.measureText('THE AURORA').width; mg.letterSpacing = '0px';
+  if (w > 960) TITLE_PX = Math.floor(TITLE_PX * 960 / w);
+  // lettering ring layout (proportional to glyph widths, full circle)
+  // top text reads clockwise around 12 o'clock, bottom text reads left-to-right (upright) around 6 o'clock
+  mg.font = `30px ${FM}`; const R = 204;
+  const lay = (txt, up) => { const ws = [...txt].map(ch => mg.measureText(ch).width + 6), tot = ws.reduce((a, b) => a + b, 0); let acc = 0;
+    return [...txt].map((ch, i) => { const off = (acc + ws[i] / 2 - tot / 2) / R; acc += ws[i]; return { ch, up, a: up ? -PI / 2 + off : PI / 2 - off }; }); };
+  RING = lay(RING_TOP, true).concat(lay(RING_BOT, false)).filter(r => r.ch !== ' ');
+})();
+window.draw = ({ t }) => { render(t); return out.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => {
+  const ev = [
+    { t: .12, k: 'shimmer', d: .7 }, { t: .4, k: 'shimmer', d: 1.0 }, { t: .85, k: 'shimmer', d: .8 },
+    { t: T.plaque[0], k: 'chime', f: 0 }, { t: T.gleamW[0] + .2, k: 'gleam' },
+    { t: T.click, k: 'click' }, { t: T.doors[0], k: 'door', d: T.doors[1] - T.doors[0] }, { t: T.push[0], k: 'whoosh', d: 1.4 },
+    { t: T.sun[0] + .3, k: 'harp', n: 10, d: 1.2 }, { t: T.title[0], k: 'reveal' }, { t: T.hotel[0], k: 'chime', f: 1 },
+    { t: T.flowers[0], k: 'pluck' }, { t: T.flowers[0] + .12, k: 'pluck' }, { t: T.gleamT[0] + .3, k: 'gleam' }, { t: T.glintT + .15, k: 'glint' },
+    { t: T.close[0], k: 'whoosh', d: .5 }, { t: T.close[1], k: 'meet' }, { t: T.open[0], k: 'whoosh', d: .55 },
+    { t: T.rings[0], k: 'harp', n: 8, d: .7 }, { t: T.press - .16, k: 'rise' }, { t: T.press, k: 'stamp' },
+    { t: T.glintS[0] + .12, k: 'glint' }, { t: T.gleamS[0] + .3, k: 'gleam' }, { t: T.glintS[1] + .12, k: 'glint' },
+  ];
+  // plinks for each chevron on the doors
+  for (let k = 0; k < 6; k += 2) ev.push({ t: T.chev[0] + k * .08, k: 'tick', v: .6 });
+  return ev.sort((a, b) => a.t - b.t);
+};
+window.T = T;
+</script>
+</body></html>
