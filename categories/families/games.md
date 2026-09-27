@@ -1,6 +1,6 @@
-# Experimental
+# Games
 
-Visual family · Type- and rhythm-driven pieces.
+Visual family · Video game looks from arcades to consoles.
 
 [← All styles](../../README.md)
 
@@ -10,10 +10,10 @@ Visual family · Type- and rhythm-driven pieces.
 
 <table>
 <tr>
-<td width="25%" align="center"><a href="../../styles/kinetic-typography/kinetic-typography.mp4"><img src="../../styles/kinetic-typography/preview.gif" alt="Kinetic Typography" width="100%"></a><br><b>20 · Kinetic Typography</b><br><a href="../../styles/kinetic-typography/kinetic-typography.mp4">video</a> · <a href="../../styles/kinetic-typography">source</a></td>
+<td width="25%" align="center"><a href="../../styles/pixel-art/pixel-art.mp4"><img src="../../styles/pixel-art/preview.gif" alt="Pixel Art" width="100%"></a><br><b>14 · Pixel Art</b><br><a href="../../styles/pixel-art/pixel-art.mp4">video</a> · <a href="../../styles/pixel-art">source</a></td>
 </tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
 |---|---|---|---|---|---|
-| 20 | [Kinetic Typography](../../styles/kinetic-typography/) | Words in rhythm | Quotes and strong opening lines | [Experimental](../../categories/families/experimental.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Social & Short-Form](../../categories/use-cases/social.md) |
+| 14 | [Pixel Art](../../styles/pixel-art/) | 16-bit platform game | Progress, milestones, and game-like scenes | [Games](../../categories/families/games.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Storytelling & Brand](../../categories/use-cases/story.md), [Data & Results](../../categories/use-cases/data.md) |
