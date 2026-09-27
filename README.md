@@ -7,9 +7,9 @@ Watch the [complete English catalog](catalog/catalog.mp4), or browse by use case
 This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The examples retain references to irticalen where they are part of the original scene. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
 
 <!-- styles:start -->
-**By use case:** [Explainers](categories/use-cases/explainer.md) (12) · [Tutorials & Training](categories/use-cases/tutorial.md) (6) · [Product & Launches](categories/use-cases/product.md) (11) · [Social & Short-Form](categories/use-cases/social.md) (19) · [Storytelling & Brand](categories/use-cases/story.md) (21) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (4) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (13)
+**By use case:** [Explainers](categories/use-cases/explainer.md) (12) · [Tutorials & Training](categories/use-cases/tutorial.md) (6) · [Product & Launches](categories/use-cases/product.md) (11) · [Social & Short-Form](categories/use-cases/social.md) (19) · [Storytelling & Brand](categories/use-cases/story.md) (21) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (5) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (14)
 
-**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (4) · [Art Movements](categories/families/art-movements.md) (6) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (9) · [Nostalgia](categories/families/nostalgia.md) (8) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (2) · [Polished & Premium](categories/families/polished.md) (2) · [Comics & Cartoons](categories/families/comics.md) (2) · [Games](categories/families/games.md) (3)
+**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (4) · [Art Movements](categories/families/art-movements.md) (6) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (9) · [Nostalgia](categories/families/nostalgia.md) (8) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (3) · [Polished & Premium](categories/families/polished.md) (2) · [Comics & Cartoons](categories/families/comics.md) (2) · [Games](categories/families/games.md) (3)
 
 <table>
 <tr>
@@ -79,6 +79,7 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 <td width="25%" align="center"><a href="styles/bold-captions/bold-captions.mp4"><img src="styles/bold-captions/preview.gif" alt="Bold Captions" width="100%"></a><br><b>46 · Bold Captions</b><br><a href="styles/bold-captions/bold-captions.mp4">video</a> · <a href="styles/bold-captions">source</a></td>
 </tr>
 <tr>
+<td width="25%" align="center"><a href="styles/split-flap/split-flap.mp4"><img src="styles/split-flap/preview.gif" alt="Split-Flap Board" width="100%"></a><br><b>48 · Split-Flap Board</b><br><a href="styles/split-flap/split-flap.mp4">video</a> · <a href="styles/split-flap">source</a></td>
 <td width="25%" align="center"><a href="styles/atomic-wasteland/atomic-wasteland.mp4"><img src="styles/atomic-wasteland/preview.gif" alt="Atomic Wasteland" width="100%"></a><br><b>114 · Atomic Wasteland</b><br><a href="styles/atomic-wasteland/atomic-wasteland.mp4">video</a> · <a href="styles/atomic-wasteland">source</a></td>
 </tr>
 </table>
@@ -129,6 +130,7 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 | 43 | [Manga](styles/manga/) | Inked panels, screentone and speed lines | Tense moments, big reveals, and dramatic countdowns | [Comics & Cartoons](categories/families/comics.md) | [Storytelling & Brand](categories/use-cases/story.md), [Social & Short-Form](categories/use-cases/social.md) |
 | 45 | [Stained Glass](styles/stained-glass/) | Leaded jewel glass, sunlight through | Warm openings, luminous titles and quietly grand stories | [Texture & Craft](categories/families/texture-craft.md) | [Storytelling & Brand](categories/use-cases/story.md), [Intros, Titles & Transitions](categories/use-cases/titles.md) |
 | 46 | [Bold Captions](styles/bold-captions/) | Word-by-word punchy short-form captions | Reels, Shorts and quick tips that must hook fast | [Experimental](categories/families/experimental.md) | [Social & Short-Form](categories/use-cases/social.md), [Tutorials & Training](categories/use-cases/tutorial.md) |
+| 48 | [Split-Flap Board](styles/split-flap/) | Clattering mechanical departures board | Headlines, schedules, announcements and big reveals | [Experimental](categories/families/experimental.md) | [News & Current Affairs](categories/use-cases/news.md), [Intros, Titles & Transitions](categories/use-cases/titles.md) |
 | 114 | [Atomic Wasteland](styles/atomic-wasteland/) | Cheerful 50s mascot, burning world | Dark satire, survival tips, and deadpan corporate optimism | [Games](categories/families/games.md) | [Social & Short-Form](categories/use-cases/social.md), [Explainers](categories/use-cases/explainer.md) |
 <!-- styles:end -->
 
