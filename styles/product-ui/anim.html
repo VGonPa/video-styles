@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── product-ui · SaaS / app launch product demo ─────────────────────────────────────────
+// A fictional habit & workout planner ("Weekflow"). Headline → the desktop app rises in on a soft gradient →
+// the cursor drags a "Strength" session into Wednesday (lift, shrink-to-slot, snap) → the weekly-goal ring completes →
+// camera zooms onto "Reminders" with depth-of-field, the toggle flips, a "Smart reminders" callout pops →
+// the cursor opens the Streak card, which morphs (shared element) into a detail view; counters tick up, the streak
+// rolls 11 → 12, "Personal best" checks in → the whole window morphs into a phone, a reminder banner drops in,
+// logo lockup + tagline → clean fade. Everything is vector, redrawn per t (crisp under zoom); shadows are cached 9-slice sprites.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eOut5 = u => 1 - Math.pow(1 - u, 5);
+const eIn = u => u * u * u;
+const eBack = (u, s = 1.70158) => { const v = u - 1; return 1 + (s + 1) * v * v * v + s * v * v; };
+const spring = (u, k = 7, w = 13) => u <= 0 ? 0 : u >= 1 ? 1 : 1 - Math.exp(-k * u) * Math.cos(w * u) * (1 - u) - 0 * u;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+const F = '"Plus Jakarta Sans"';
+const INK = '#15162B', SUB = '#686C85', MUTED = '#9C9FB4', LINE = '#E8E9F1', FAINT = '#F6F6FA';
+const ACC = '#5B4CF0', ACC_D = '#4436D6', ACC_L = '#EEEBFF', ACC_M = '#C9C2FF';
+const RUN = '#F28A55', YOGA = '#2DB894', SWIM = '#4AA8E8', FLAME = '#FF7A45';
+
+// ── timeline ──
+const T = {
+  badge: .12, h1: .32, h1Up: 1.0, h1UpEnd: 1.6, win: 1.28, winEnd: 2.15,
+  cur0: 1.98, grab: 2.5, press: 2.56, drop: 3.38, ring: 3.52, ringEnd: 4.05,
+  h1Out: 3.75, zoomA: 3.85, zoomAEnd: 4.45, tog: 4.36, callout: 4.58, calloutOut: 5.12,
+  toStreak: 5.15, streakClick: 5.74, morph: 5.8, morphEnd: 6.35,
+  zoomB: 6.42, zoomBEnd: 7.0, roll: 6.78, best: 7.02, pull: 7.42, pullEnd: 7.92,
+  phone: 7.9, phoneEnd: 8.7, lock: 8.3, notif: 8.78, fadeA: 9.35, fadeB: 10.0,
+};
+const WX = 240, WY = 210, WW = 1440, WH = 820;          // desktop window (world coords)
+const PH = { x: 1210, y: 107, w: 400, h: 866, r: 62 };  // phone rect
+// layout (window-relative)
+const LIB = { x: 272, y: 206, w: 300, h: 76, gap: 90 };
+const CAL = { x0: 640, x1: 1408, top: 236, rowH: 118, rows: 3 };
+const colW = (CAL.x1 - CAL.x0) / 7;
+const block = (col, row) => ({ x: CAL.x0 + col * colW + 6, y: CAL.top + row * CAL.rowH + 6, w: colW - 12, h: CAL.rowH - 12 });
+const GOAL = { x: 272, y: 640, w: 400, h: 150 }, REM = { x: 696, y: 640, w: 340, h: 150 }, STK = { x: 1060, y: 640, w: 348, h: 150 };
+const TOG = { x: REM.x + REM.w - 88, y: REM.y + 24, w: 62, h: 34 };
+const MAIN = { x: 240, y: 52, w: 1200, h: 768 };
+const SESS = [
+  { name: 'Morning run', short: 'Run', dur: '30 min', col: RUN, g: 'run' },
+  { name: 'Yoga flow', short: 'Yoga', dur: '20 min', col: YOGA, g: 'yoga' },
+  { name: 'Strength', short: 'Strength', dur: '45 min', col: ACC, g: 'lift' },
+  { name: 'Swim', short: 'Swim', dur: '40 min', col: SWIM, g: 'swim' },
+];
+const PLANNED = [[0, 0, 0, true], [1, 1, 1, true], [4, 0, 3, false]]; // col,row,session,done
+const TARGET = block(2, 2);
+const GRAB = { x: LIB.x + 58, y: LIB.y + 2 * LIB.gap + 38 };
+
+// ── helpers ──
+function rr(g, x, y, w, h, r) { r = Math.max(0, Math.min(r, w / 2, h / 2)); g.beginPath(); g.roundRect(x, y, w, h, r); }
+function tx(g, s, x, y, size, weight = 600, color = INK, align = 'left', ls = 0) {
+  g.font = `${weight} ${size}px ${F}`; g.fillStyle = color; g.textAlign = align; g.textBaseline = 'alphabetic';
+  g.letterSpacing = ls + 'px'; g.fillText(s, x, y); g.letterSpacing = '0px';
+}
+function tw(g, s, size, weight = 600, ls = 0) { g.font = `${weight} ${size}px ${F}`; g.letterSpacing = ls + 'px'; const w = g.measureText(s).width; g.letterSpacing = '0px'; return w; }
+// cached 9-slice soft shadows (blur is computed once per radius/blur pair)
+const SHC = {};
+function shadowSprite(r, b) {
+  const k = r + '_' + b; if (SHC[k]) return SHC[k];
+  const p = Math.ceil(b * 2.4), core = 2 * r + 4, s = core + 2 * p, c = mk(s, s), g = c.getContext('2d');
+  g.shadowColor = 'rgb(28,24,78)'; g.shadowBlur = b; g.shadowOffsetX = 4000; g.fillStyle = '#000';
+  rr(g, p - 4000, p, core, core, r); g.fill();
+  return SHC[k] = { c, p, r, s };
+}
+function shadow(g, x, y, w, h, r, b, a, dy = 0) {
+  if (a <= 0.002) return;
+  r = Math.round(Math.min(r, w / 2, h / 2)); const S = shadowSprite(r, b), p = S.p, cs = p + r + 1;
+  const X = x - p, Y = y - p + dy, Wd = w + 2 * p, Hd = h + 2 * p, mw = Math.max(0, Wd - 2 * cs), mh = Math.max(0, Hd - 2 * cs);
+  const src = [0, cs, S.s - cs], srw = [cs, S.s - 2 * cs, cs], dx = [X, X + cs, X + cs + mw], dw = [cs, mw, cs], dyy = [Y, Y + cs, Y + cs + mh], dh = [cs, mh, cs];
+  g.save(); g.globalAlpha *= a;
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (dw[i] > 0 && dh[j] > 0) g.drawImage(S.c, src[i], src[j], srw[i], srw[j], dx[i], dyy[j], dw[i], dh[j]);
+  g.restore();
+}
+const elev = (g, x, y, w, h, r, k = 1) => { shadow(g, x, y, w, h, r, 36, .10 * k, 18 * k); shadow(g, x, y, w, h, r, 6, .07 * k, 2); };
+function check(g, cx, cy, s, u, color, lw) { // drawn checkmark, u = 0..1
+  if (u <= 0) return; const P = [[-.42, .02], [-.12, .32], [.44, -.3]];
+  const l1 = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), l2 = Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]), L = (l1 + l2) * u;
+  g.save(); g.strokeStyle = color; g.lineWidth = lw; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath(); g.moveTo(cx + P[0][0] * s, cy + P[0][1] * s);
+  if (L <= l1) { const f = L / l1; g.lineTo(cx + lerp(P[0][0], P[1][0], f) * s, cy + lerp(P[0][1], P[1][1], f) * s); }
+  else { g.lineTo(cx + P[1][0] * s, cy + P[1][1] * s); const f = (L - l1) / l2; g.lineTo(cx + lerp(P[1][0], P[2][0], f) * s, cy + lerp(P[1][1], P[2][1], f) * s); }
+  g.stroke(); g.restore();
+}
+function flame(g, cx, cy, s, color) {
+  g.save(); g.translate(cx, cy); g.scale(s / 100, s / 100); g.fillStyle = color; g.beginPath();
+  g.moveTo(0, -50); g.bezierCurveTo(10, -22, 40, -12, 38, 16); g.bezierCurveTo(36, 40, 18, 50, 0, 50); g.bezierCurveTo(-20, 50, -38, 38, -38, 14);
+  g.bezierCurveTo(-38, -4, -26, -14, -18, -26); g.bezierCurveTo(-14, -10, -6, -6, -2, -8); g.bezierCurveTo(-2, -24, -6, -38, 0, -50); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.55)'; g.beginPath(); g.moveTo(2, 4); g.bezierCurveTo(10, 16, 20, 22, 18, 34); g.bezierCurveTo(16, 44, 6, 48, 0, 48);
+  g.bezierCurveTo(-10, 48, -18, 40, -17, 30); g.bezierCurveTo(-16, 20, -6, 16, 2, 4); g.fill(); g.restore();
+}
+function glyph(g, kind, cx, cy, s, color) {
+  g.save(); g.translate(cx, cy); g.strokeStyle = color; g.fillStyle = color; g.lineWidth = s * .13; g.lineCap = 'round'; g.lineJoin = 'round';
+  if (kind === 'run') { g.beginPath(); g.moveTo(-s * .32, -s * .28); g.lineTo(0, 0); g.lineTo(-s * .32, s * .28); g.moveTo(s * .02, -s * .28); g.lineTo(s * .34, 0); g.lineTo(s * .02, s * .28); g.stroke(); }
+  else if (kind === 'yoga') { g.beginPath(); g.arc(0, -s * .2, s * .12, 0, TAU); g.fill(); g.beginPath(); g.moveTo(-s * .36, s * .26); g.quadraticCurveTo(0, s * .02, s * .36, s * .26); g.moveTo(0, -s * .04); g.lineTo(0, s * .14); g.stroke(); }
+  else if (kind === 'lift') { g.beginPath(); g.moveTo(-s * .24, 0); g.lineTo(s * .24, 0); g.stroke(); rr(g, -s * .4, -s * .2, s * .12, s * .4, s * .04); g.fill(); rr(g, s * .28, -s * .2, s * .12, s * .4, s * .04); g.fill(); }
+  else if (kind === 'swim') { g.beginPath(); for (let k = 0; k < 2; k++) { const yy = -s * .1 + k * s * .24; g.moveTo(-s * .36, yy); g.bezierCurveTo(-s * .2, yy - s * .14, -s * .06, yy + s * .14, s * .06, yy); g.bezierCurveTo(s * .18, yy - s * .14, s * .3, yy + s * .1, s * .38, yy); } g.stroke(); }
+  else if (kind === 'bell') { g.beginPath(); g.moveTo(-s * .3, s * .18); g.quadraticCurveTo(-s * .26, -s * .36, 0, -s * .36); g.quadraticCurveTo(s * .26, -s * .36, s * .3, s * .18); g.closePath(); g.fill(); g.beginPath(); g.arc(0, s * .28, s * .08, 0, TAU); g.fill(); }
+  else if (kind === 'today') { g.beginPath(); g.arc(0, 0, s * .32, 0, TAU); g.stroke(); g.beginPath(); g.moveTo(0, -s * .16); g.lineTo(0, 0); g.lineTo(s * .12, s * .08); g.stroke(); }
+  else if (kind === 'plan') { rr(g, -s * .34, -s * .28, s * .68, s * .6, s * .1); g.stroke(); g.beginPath(); g.moveTo(-s * .34, -s * .08); g.lineTo(s * .34, -s * .08); g.moveTo(-s * .16, -s * .4); g.lineTo(-s * .16, -s * .2); g.moveTo(s * .16, -s * .4); g.lineTo(s * .16, -s * .2); g.stroke(); }
+  else if (kind === 'stats') { g.beginPath(); g.moveTo(-s * .26, s * .3); g.lineTo(-s * .26, s * .02); g.moveTo(0, s * .3); g.lineTo(0, -s * .3); g.moveTo(s * .26, s * .3); g.lineTo(s * .26, -s * .1); g.stroke(); }
+  else if (kind === 'lib') { rr(g, -s * .32, -s * .3, s * .64, s * .24, s * .06); g.stroke(); rr(g, -s * .32, s * .06, s * .64, s * .24, s * .06); g.stroke(); }
+  else if (kind === 'gear') { g.beginPath(); g.arc(0, 0, s * .14, 0, TAU); g.stroke(); for (let i = 0; i < 6; i++) { const a = i * TAU / 6; g.beginPath(); g.moveTo(Math.cos(a) * s * .24, Math.sin(a) * s * .24); g.lineTo(Math.cos(a) * s * .34, Math.sin(a) * s * .34); g.stroke(); } }
+  g.restore();
+}
+function logoMark(g, x, y, s) {
+  const gr = g.createLinearGradient(x, y, x + s, y + s); gr.addColorStop(0, '#7A6BFF'); gr.addColorStop(1, ACC_D);
+  rr(g, x, y, s, s, s * .28); g.fillStyle = gr; g.fill();
+  g.save(); g.strokeStyle = '#fff'; g.lineWidth = s * .12; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath();
+  g.moveTo(x + s * .22, y + s * .36); g.lineTo(x + s * .36, y + s * .68); g.lineTo(x + s * .5, y + s * .44); g.lineTo(x + s * .64, y + s * .68); g.lineTo(x + s * .78, y + s * .36); g.stroke(); g.restore();
+}
+function avatar(g, cx, cy, r, ini, bg, fg) { g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.fillStyle = bg; g.fill(); tx(g, ini, cx, cy + r * .36, r * .9, 700, fg, 'center'); }
+function toggle(g, x, y, w, h, u) {
+  const on = u; rr(g, x, y, w, h, h / 2);
+  g.fillStyle = on > 0 ? mixHex('#DADCE6', ACC, on) : '#DADCE6'; g.fill();
+  const r = h / 2 - 4, kx = lerp(x + 4 + r, x + w - 4 - r, eBack(clamp(on), 1.4)), stretch = Math.sin(Math.PI * clamp(on)) * 8;
+  shadow(g, kx - r - stretch / 2, y + 4, 2 * r + stretch, 2 * r, r, 4, .25, 1.5);
+  rr(g, kx - r - stretch / 2, y + 4, 2 * r + stretch, 2 * r, r); g.fillStyle = '#fff'; g.fill();
+}
+function mixHex(a, b, u) { const p = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)); const A = p(a), B = p(b); return `rgb(${A.map((v, i) => Math.round(lerp(v, B[i], u))).join(',')})`; }
+
+// ── background (precomputed) ──
+let BG = null;
+function buildBG() {
+  const c = mk(W, H), g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, W, H); gr.addColorStop(0, '#F5F3FF'); gr.addColorStop(.55, '#F7F8FC'); gr.addColorStop(1, '#EAF1FF');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  // dotted grid with radial falloff
+  const d = mk(W, H), dg = d.getContext('2d'); dg.fillStyle = 'rgba(80,80,140,.16)';
+  for (let y = 18; y < H; y += 36) for (let x = 18; x < W; x += 36) { dg.beginPath(); dg.arc(x, y, 1.4, 0, TAU); dg.fill(); }
+  dg.globalCompositeOperation = 'destination-in'; const rg = dg.createRadialGradient(W / 2, H * .45, 100, W / 2, H * .45, 1000);
+  rg.addColorStop(0, 'rgba(0,0,0,.9)'); rg.addColorStop(1, 'rgba(0,0,0,0)'); dg.fillStyle = rg; dg.fillRect(0, 0, W, H);
+  g.drawImage(d, 0, 0);
+  return c;
+}
+function drawBG(g, t) {
+  g.drawImage(BG, 0, 0);
+  const blob = (x, y, r, col, a) => { const rg = g.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, col.replace('A', a)); rg.addColorStop(1, col.replace('A', 0)); g.fillStyle = rg; g.fillRect(x - r, y - r, 2 * r, 2 * r); };
+  blob(420 + 60 * Math.sin(t * .5), 260 + 30 * Math.cos(t * .4), 620, 'rgba(124,108,255,A)', .20);
+  blob(1560 - 50 * Math.sin(t * .45), 820 + 30 * Math.sin(t * .6), 700, 'rgba(90,170,255,A)', .16);
+  blob(1500 + 40 * Math.cos(t * .3), 180, 420, 'rgba(255,140,190,A)', .08);
+}
+
+// ── desktop app ──
+function libCard(g, x, y, w, h, s, lift = 0) {
+  if (lift > 0) { shadow(g, x, y, w, h, 14, 34, .24 * lift, 22 * lift); shadow(g, x, y, w, h, 14, 8, .1 * lift, 4); }
+  elev(g, x, y, w, h, 14, .35 * (1 - lift));
+  rr(g, x, y, w, h, 14); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = lift > 0 ? mixHex('#E8E9F1', ACC, lift * .6) : LINE; g.lineWidth = lift > 0 ? 1.5 : 1; g.stroke();
+  rr(g, x + 14, y + 14, 48, 48, 12); g.fillStyle = s.col + '22'; g.fill(); glyph(g, s.g, x + 38, y + 38, 26, s.col);
+  tx(g, s.name, x + 78, y + 35, 18, 700, INK); tx(g, s.dur, x + 78, y + 58, 14, 500, SUB);
+  // drag handle
+  g.fillStyle = '#C5C8D6'; for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) { g.beginPath(); g.arc(x + w - 30 + j * 8, y + 30 + i * 8, 1.8, 0, TAU); g.fill(); }
+}
+function calBlock(g, b, s, done, a = 1, glow = 0) {
+  g.save(); g.globalAlpha *= a;
+  rr(g, b.x, b.y, b.w, b.h, 12); g.fillStyle = mixHex('#FFFFFF', s.col, .12); g.fill();
+  rr(g, b.x, b.y, 4, b.h, 2); g.save(); rr(g, b.x, b.y, b.w, b.h, 12); g.clip(); g.fillStyle = s.col; g.fillRect(b.x, b.y, 4, b.h); g.restore();
+  tx(g, s.short, b.x + 14, b.y + 30, 15, 700, INK); tx(g, s.dur, b.x + 14, b.y + 50, 13, 500, SUB);
+  glyph(g, s.g, b.x + 26, b.y + b.h - 26, 20, s.col);
+  if (done) { g.beginPath(); g.arc(b.x + b.w - 20, b.y + 20, 9, 0, TAU); g.fillStyle = s.col; g.fill(); check(g, b.x + b.w - 20, b.y + 20, 11, 1, '#fff', 2.2); }
+  if (glow > 0) { rr(g, b.x - 4 * glow, b.y - 4 * glow, b.w + 8 * glow, b.h + 8 * glow, 14); g.strokeStyle = `rgba(91,76,240,${.5 * (1 - glow)})`; g.lineWidth = 3; g.stroke(); }
+  g.restore();
+}
+function ring(g, cx, cy, r, lw, p) {
+  g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.strokeStyle = '#EDEBFA'; g.lineWidth = lw; g.stroke();
+  if (p > 0) { g.save(); g.lineCap = 'round'; const gr = g.createLinearGradient(cx - r, cy - r, cx + r, cy + r); gr.addColorStop(0, '#8A7CFF'); gr.addColorStop(1, ACC_D);
+    g.strokeStyle = gr; g.lineWidth = lw; g.beginPath(); g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + TAU * p); g.stroke(); g.restore(); }
+}
+function card(g, b, r = 18) { elev(g, b.x, b.y, b.w, b.h, r, .45); rr(g, b.x, b.y, b.w, b.h, r); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = LINE; g.lineWidth = 1; g.stroke(); }
+
+function drawDesktop(g, t, S) {
+  // S: state { drag, ringP, planned4, tog, morph }
+  g.save(); rr(g, 0, 0, WW, WH, 20); g.clip();
+  drawDesktopChrome(g);
+  drawDesktopMain(g, t, S);
+  g.restore();
+}
+function drawDesktopChrome(g) {
+  g.fillStyle = '#fff'; g.fillRect(0, 0, WW, WH);
+  // title bar
+  g.fillStyle = '#FBFBFD'; g.fillRect(0, 0, WW, 52); g.fillStyle = LINE; g.fillRect(0, 51, WW, 1);
+  for (let i = 0; i < 3; i++) { g.beginPath(); g.arc(26 + i * 22, 26, 6.5, 0, TAU); g.fillStyle = '#E1E2EA'; g.fill(); }
+  rr(g, WW / 2 - 150, 13, 300, 26, 8); g.fillStyle = '#F0F1F6'; g.fill(); tx(g, 'weekflow.app/plan', WW / 2, 31, 13, 500, MUTED, 'center');
+  // sidebar
+  g.fillStyle = FAINT; g.fillRect(0, 52, 240, WH - 52); g.fillStyle = LINE; g.fillRect(239, 52, 1, WH - 52);
+  logoMark(g, 26, 78, 34); tx(g, 'Weekflow', 72, 102, 20, 800, INK, 'left', -.3);
+  const nav = [['today', 'Today'], ['plan', 'Plan'], ['stats', 'Stats'], ['lib', 'Library'], ['gear', 'Settings']];
+  nav.forEach(([k, l], i) => { const y = 150 + i * 50; const act = i === 1;
+    if (act) { rr(g, 16, y - 4, 208, 42, 11); g.fillStyle = ACC_L; g.fill(); }
+    glyph(g, k, 44, y + 17, 22, act ? ACC : '#8F92A8'); tx(g, l, 68, y + 23, 16, act ? 700 : 500, act ? ACC_D : '#50546C'); });
+  rr(g, 16, WH - 170, 208, 88, 14); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = LINE; g.stroke();
+  tx(g, 'Pro tip', 32, WH - 140, 13, 700, ACC); tx(g, 'Plan on Sunday,', 32, WH - 118, 13, 500, SUB); tx(g, 'win the week.', 32, WH - 100, 13, 500, SUB);
+  avatar(g, 40, WH - 40, 18, 'MR', '#FFD9C7', '#B4542B'); tx(g, 'Maya Reyes', 68, WH - 44, 14, 700, INK); tx(g, 'Pro plan', 68, WH - 26, 12, 500, MUTED);
+}
+function drawDesktopMain(g, t, S) {
+  // header
+  tx(g, 'This week', 272, 112, 34, 800, INK, 'left', -.6);
+  const pl = S.planned4 ? '4 of 4 sessions planned' : '3 of 4 sessions planned';
+  tx(g, 'Sep 28 – Oct 4  ·  ' + pl, 272, 142, 16, 500, SUB);
+  rr(g, 1030, 84, 176, 42, 12); g.fillStyle = '#F2F2F7'; g.fill(); rr(g, 1034, 88, 84, 34, 9); g.fillStyle = '#fff'; g.fill();
+  shadow(g, 1034, 88, 84, 34, 9, 4, .08, 1); rr(g, 1034, 88, 84, 34, 9); g.fillStyle = '#fff'; g.fill();
+  tx(g, 'Week', 1076, 111, 14, 700, INK, 'center'); tx(g, 'Month', 1162, 111, 14, 600, MUTED, 'center');
+  shadow(g, 1224, 84, 184, 42, 12, 10, .22, 5); rr(g, 1224, 84, 184, 42, 12); g.fillStyle = ACC; g.fill();
+  tx(g, '+  New session', 1316, 111, 15, 700, '#fff', 'center');
+  // library
+  tx(g, 'LIBRARY', LIB.x, 190, 12, 700, MUTED, 'left', 1.4); tx(g, 'Drag to plan', LIB.x + LIB.w, 190, 12, 600, ACC, 'right');
+  SESS.forEach((s, i) => { const y = LIB.y + i * LIB.gap;
+    if (i === 2 && S.drag > 0) { rr(g, LIB.x, y, LIB.w, LIB.h, 14); g.setLineDash([6, 6]); g.strokeStyle = '#CFD2E0'; g.lineWidth = 1.5; g.stroke(); g.setLineDash([]); g.fillStyle = FAINT; g.fill();
+      if (S.drop > 0) { g.save(); g.globalAlpha = S.drop; libCard(g, LIB.x, y, LIB.w, LIB.h, s); g.restore(); } return; }
+    libCard(g, LIB.x, y, LIB.w, LIB.h, s); });
+  // calendar
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  days.forEach((d, i) => { const cx = CAL.x0 + i * colW + colW / 2, today = i === 2;
+    tx(g, d.toUpperCase(), cx, 196, 12, 700, today ? ACC : MUTED, 'center', 1.2);
+    if (today) { g.beginPath(); g.arc(cx, 216, 15, 0, TAU); g.fillStyle = ACC; g.fill(); }
+    tx(g, String(28 + i > 30 ? 28 + i - 30 : 28 + i), cx, 222, 16, 700, today ? '#fff' : INK, 'center'); });
+  rr(g, CAL.x0, CAL.top, CAL.x1 - CAL.x0, CAL.rowH * 3, 16); g.fillStyle = '#FCFCFE'; g.fill(); g.strokeStyle = LINE; g.lineWidth = 1; g.stroke();
+  g.fillStyle = 'rgba(91,76,240,.04)'; g.fillRect(CAL.x0 + 2 * colW, CAL.top, colW, CAL.rowH * 3);
+  g.fillStyle = LINE; for (let i = 1; i < 7; i++) g.fillRect(Math.round(CAL.x0 + i * colW), CAL.top + 1, 1, CAL.rowH * 3 - 2);
+  for (let j = 1; j < 3; j++) g.fillRect(CAL.x0 + 1, CAL.top + j * CAL.rowH, CAL.x1 - CAL.x0 - 2, 1);
+  ['AM', 'NOON', 'PM'].forEach((l, j) => tx(g, l, CAL.x0 - 12, CAL.top + j * CAL.rowH + 24, 11, 700, '#B2B5C6', 'right', 1));
+  PLANNED.forEach(([c, r, si, done]) => calBlock(g, block(c, r), SESS[si], done));
+  // drop target highlight while dragging
+  if (S.hover > 0 && S.drop < 1) { const b = TARGET; rr(g, b.x, b.y, b.w, b.h, 12); g.fillStyle = `rgba(91,76,240,${.08 * S.hover})`; g.fill(); g.setLineDash([7, 6]); g.lineDashOffset = -t * 30; g.strokeStyle = `rgba(91,76,240,${.7 * S.hover})`; g.lineWidth = 2; g.stroke(); g.setLineDash([]); }
+  if (S.drop >= 1) calBlock(g, TARGET, SESS[2], false, 1, S.glow);
+  // bottom cards
+  card(g, GOAL); ring(g, GOAL.x + 76, GOAL.y + 75, 42, 11, S.ringP);
+  tx(g, Math.round(S.ringP * 100) + '%', GOAL.x + 76, GOAL.y + 81, 17, 800, INK, 'center');
+  tx(g, 'Weekly goal', GOAL.x + 142, GOAL.y + 52, 14, 600, SUB);
+  tx(g, S.planned4 ? '4 of 4' : '3 of 4', GOAL.x + 142, GOAL.y + 90, 30, 800, INK, 'left', -.5);
+  tx(g, S.ringDone > 0 ? 'Week fully planned' : 'sessions planned', GOAL.x + 142, GOAL.y + 116, 14, S.ringDone > 0 ? 700 : 500, S.ringDone > 0 ? ACC : SUB);
+  if (S.ringDone > 0) { const k = eBack(S.ringDone, 2.2), bx = GOAL.x + 108, by = GOAL.y + 42; g.save(); g.translate(bx, by); g.scale(k, k);
+    g.beginPath(); g.arc(0, 0, 13, 0, TAU); g.fillStyle = ACC; g.fill(); g.lineWidth = 3; g.strokeStyle = '#fff'; g.stroke(); check(g, 0, 0, 14, seg(S.ringDone, .3, 1), '#fff', 2.6); g.restore(); }
+  card(g, REM); g.beginPath(); g.arc(REM.x + 46, REM.y + 46, 22, 0, TAU); g.fillStyle = S.tog > .5 ? ACC_L : '#F1F2F6'; g.fill();
+  glyph(g, 'bell', REM.x + 46, REM.y + 46, 26, S.tog > .5 ? ACC : '#9A9DB2');
+  tx(g, 'Reminders', REM.x + 24, REM.y + 104, 19, 800, INK);
+  tx(g, S.tog > .5 ? 'On · nudge 30 min before' : 'Off', REM.x + 24, REM.y + 128, 14, 500, S.tog > .5 ? ACC : SUB);
+  toggle(g, TOG.x, TOG.y, TOG.w, TOG.h, S.tog);
+  // streak card (base)
+  drawStreakCard(g, STK, 1);
+}
+function drawStreakCard(g, b, a) {
+  g.save(); g.globalAlpha *= a; card(g, b);
+  g.beginPath(); g.arc(b.x + 46, b.y + 46, 22, 0, TAU); g.fillStyle = '#FFEFE6'; g.fill(); flame(g, b.x + 46, b.y + 46, 26, FLAME);
+  tx(g, 'Streak', b.x + 80, b.y + 52, 14, 600, SUB);
+  tx(g, 'day streak', b.x + 82, b.y + 122, 15, 600, SUB);
+  const bars = [.4, .55, .35, .7, .6, .85, 1];
+  bars.forEach((v, i) => { const bh = 56 * v, x = b.x + 214 + i * 16; rr(g, x, b.y + 126 - bh, 9, bh, 4.5); g.fillStyle = i === 6 ? ACC : ACC_M; g.fill(); });
+  tx(g, 'Open  ›', b.x + b.w - 24, b.y + 52, 13, 700, ACC, 'right');
+  g.restore();
+}
+// streak number: 11 → 12 digit roll (shared element between card, detail and phone)
+function streakNum(g, x, y, size, roll, align = 'left', color = INK) {
+  g.font = `800 ${size}px ${F}`; g.letterSpacing = (-size * .03) + 'px';
+  const w1 = g.measureText('1').width, w2 = g.measureText('2').width, wl = lerp(w1, w2, eOut(roll)), wt = w1 + wl;
+  const x0 = align === 'center' ? x - wt / 2 : x;
+  g.fillStyle = color; g.textAlign = 'left'; g.fillText('1', x0, y);
+  g.save(); g.beginPath(); g.rect(x0 + w1 - 4, y - size * .8, wl + size * .3, size * .83); g.clip();
+  const r = eBack(clamp(roll), 1.3), dy = size * 1.05;
+  const ga = g.globalAlpha;
+  if (roll < 1) { g.globalAlpha = ga * (1 - clamp(roll * 1.6)); g.fillText('1', x0 + w1, y - r * dy); }
+  if (roll > 0) { g.globalAlpha = ga * clamp(roll * 1.8); g.fillText('2', x0 + w1, y + (1 - r) * dy); }
+  g.globalAlpha = ga;
+  g.restore(); g.letterSpacing = '0px';
+  return wt;
+}
+// detail view (inside main area; alpha a)
+function drawDetail(g, t, a) {
+  if (a <= 0) return; g.save(); g.globalAlpha *= a; const sl = (1 - eOut(a)) * 24; g.translate(0, sl);
+  tx(g, '‹', 276, 116, 30, 600, SUB); tx(g, 'Stats', 298, 112, 16, 600, SUB); tx(g, '/  Streak', 346, 112, 16, 700, INK);
+  rr(g, 1300, 84, 108, 40, 12); g.strokeStyle = LINE; g.lineWidth = 1.2; g.stroke(); tx(g, 'Share', 1354, 110, 14, 700, INK, 'center');
+  g.beginPath(); g.arc(314, 226, 34, 0, TAU); g.fillStyle = '#FFEFE6'; g.fill(); flame(g, 314, 226, 40, FLAME);
+  tx(g, 'day streak', 282, 516, 30, 700, SUB, 'left', -.3);
+  // personal best pill
+  const pb = seg(t, T.best, T.best + .35);
+  if (pb > 0) { const k = eBack(pb, 2); g.save(); g.translate(282, 570); g.scale(k, k); g.globalAlpha *= clamp(pb * 3);
+    rr(g, 0, -22, 210, 44, 22); g.fillStyle = ACC_L; g.fill(); g.beginPath(); g.arc(22, 0, 13, 0, TAU); g.fillStyle = ACC; g.fill();
+    check(g, 22, 0, 14, seg(t, T.best + .08, T.best + .36), '#fff', 2.6); tx(g, 'Personal best', 44, 6, 17, 700, ACC_D); g.restore(); }
+  // minutes chart card
+  const C = { x: 740, y: 160, w: 668, h: 430 }; rr(g, C.x, C.y, C.w, C.h, 20); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = LINE; g.lineWidth = 1; g.stroke();
+  tx(g, 'Active minutes', C.x + 32, C.y + 44, 15, 600, SUB);
+  const mins = Math.round(1240 * eOut(seg(t, T.morphEnd - .1, T.morphEnd + .8)));
+  const ms = mins.toLocaleString('en-US'); tx(g, ms, C.x + 32, C.y + 100, 46, 800, INK, 'left', -1);
+  tx(g, 'min this month', C.x + 44 + tw(g, ms, 46, 800, -1), C.y + 100, 17, 600, SUB);
+  rr(g, C.x + C.w - 132, C.y + 26, 100, 32, 16); g.fillStyle = '#E7F7F0'; g.fill(); tx(g, '▲ 18%', C.x + C.w - 82, C.y + 48, 14, 800, '#1E9A6E', 'center');
+  const data = [.42, .6, .35, .72, .5, .64, .3, .58, .78, .46, .7, .62, .84, 1], bx0 = C.x + 36, bw = 26, gap = (C.w - 72 - 14 * bw) / 13, base = C.y + C.h - 44, maxH = 230;
+  g.fillStyle = LINE; for (let k = 0; k < 3; k++) g.fillRect(C.x + 32, base - maxH * (k + 1) / 3, C.w - 64, 1);
+  data.forEach((v, i) => { const u = eBack(seg(t, T.morphEnd - .05 + i * .035, T.morphEnd + .4 + i * .035), 1.2), h = Math.max(0, maxH * v * u);
+    if (h > 0) { rr(g, bx0 + i * (bw + gap), base - h, bw, h, 7); g.fillStyle = i === 13 ? ACC : ACC_M; g.fill(); } });
+  g.fillStyle = '#D9DBE6'; g.fillRect(C.x + 32, base, C.w - 64, 1.5);
+  tx(g, 'Sep 21', bx0, base + 28, 12, 600, MUTED); tx(g, 'Today', bx0 + 13 * (bw + gap) + bw, base + 28, 12, 700, ACC, 'right');
+  // week row
+  tx(g, 'This week', 282, 668, 15, 600, SUB);
+  ['M', 'T', 'W', 'T', 'F', 'S', 'S'].forEach((d, i) => { const cx = 312 + i * 158, cy = 728, u = seg(t, T.morphEnd + i * .06, T.morphEnd + .3 + i * .06);
+    const done = i < 2 || (i === 2 && t > T.roll + .2);
+    g.beginPath(); g.arc(cx, cy, 28, 0, TAU);
+    if (done) { g.fillStyle = ACC; g.fill(); check(g, cx, cy, 28, i === 2 ? seg(t, T.roll + .2, T.roll + .45) : u, '#fff', 4); }
+    else { g.strokeStyle = i === 2 ? ACC : LINE; g.lineWidth = i === 2 ? 3 : 2; g.stroke(); }
+    tx(g, d, cx, cy + 58, 13, 700, i === 2 ? ACC : MUTED, 'center'); });
+  g.restore();
+}
+// phone screen (phone-relative, 400×866)
+function drawPhone(g, t, a, hideNum) {
+  if (a <= 0) return; g.save(); g.globalAlpha *= a;
+  g.fillStyle = '#fff'; g.fillRect(0, 0, PH.w, PH.h);
+  const hg = g.createLinearGradient(0, 0, 0, 420); hg.addColorStop(0, '#F3F0FF'); hg.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = hg; g.fillRect(0, 0, PH.w, 420);
+  tx(g, '9:41', 44, 50, 17, 700, INK);
+  g.fillStyle = INK; for (let i = 0; i < 4; i++) { rr(g, 300 + i * 6, 44 - (4 + i * 3), 4, 4 + i * 3, 1); g.fill(); }
+  rr(g, 334, 34, 26, 13, 4); g.strokeStyle = INK; g.lineWidth = 1.5; g.stroke(); rr(g, 336, 36, 18, 9, 2); g.fillStyle = INK; g.fill();
+  tx(g, 'Streak', 28, 132, 30, 800, INK, 'left', -.5); avatar(g, 352, 122, 20, 'MR', '#FFD9C7', '#B4542B');
+  g.beginPath(); g.arc(200, 196, 36, 0, TAU); g.fillStyle = '#FFEFE6'; g.fill(); flame(g, 200, 196, 42, FLAME);
+  tx(g, 'day streak', 200, 402, 22, 700, SUB, 'center');
+  rr(g, 114, 424, 172, 36, 18); g.fillStyle = ACC_L; g.fill(); g.beginPath(); g.arc(134, 442, 10, 0, TAU); g.fillStyle = ACC; g.fill(); check(g, 134, 442, 11, 1, '#fff', 2.2); tx(g, 'Personal best', 150, 447, 14, 700, ACC_D);
+  ['M', 'T', 'W', 'T', 'F', 'S', 'S'].forEach((d, i) => { const cx = 50 + i * 50, cy = 520;
+    g.beginPath(); g.arc(cx, cy, 18, 0, TAU); if (i < 3) { g.fillStyle = ACC; g.fill(); check(g, cx, cy, 18, 1, '#fff', 3); } else { g.strokeStyle = LINE; g.lineWidth = 2; g.stroke(); }
+    tx(g, d, cx, cy + 40, 12, 700, MUTED, 'center'); });
+  rr(g, 20, 590, 360, 170, 22); g.fillStyle = FAINT; g.fill();
+  tx(g, 'Next up', 40, 626, 13, 700, MUTED, 'left', .6);
+  rr(g, 40, 642, 52, 52, 14); g.fillStyle = ACC + '22'; g.fill(); glyph(g, 'lift', 66, 668, 28, ACC);
+  tx(g, 'Strength', 108, 664, 19, 800, INK); tx(g, 'Wed · 6:30 PM · 45 min', 108, 688, 14, 500, SUB);
+  rr(g, 40, 712, 320, 30, 10); g.fillStyle = '#fff'; g.fill(); glyph(g, 'bell', 60, 727, 16, ACC); tx(g, 'Smart reminder on', 76, 732, 13, 700, ACC_D);
+  // tab bar
+  g.fillStyle = LINE; g.fillRect(0, 790, PH.w, 1);
+  ['today', 'plan', 'stats', 'gear'].forEach((k, i) => glyph(g, k, 62 + i * 92, 826, 26, i === 2 ? ACC : '#A2A5B8'));
+  rr(g, 140, 850, 120, 5, 3); g.fillStyle = INK; g.fill();
+  g.restore();
+}
+function notif(g, u) {
+  if (u <= 0) return; const y = lerp(-120, 64, eBack(u, 1.1));
+  g.save(); g.globalAlpha *= clamp(u * 2.5);
+  shadow(g, 14, y, 372, 84, 22, 24, .2, 10);
+  rr(g, 14, y, 372, 84, 22); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = LINE; g.lineWidth = 1; g.stroke();
+  logoMark(g, 30, y + 18, 48); tx(g, 'WEEKFLOW', 92, y + 34, 11, 800, MUTED, 'left', 1); tx(g, 'now', 368, y + 34, 12, 600, MUTED, 'right');
+  tx(g, 'Strength in 30 min', 92, y + 58, 16, 800, INK); tx(g, 'Your best time to train', 92, y + 76, 13, 500, SUB);
+  g.restore();
+}
+
+// ── cursor path ──
+const CUR = [ // t, x, y (window-relative); moves ease between keys
+  [T.cur0, 1300, 930], [T.grab, GRAB.x, GRAB.y], [T.press + .1, GRAB.x, GRAB.y],
+  [T.drop - .04, TARGET.x + TARGET.w / 2, TARGET.y + TARGET.h / 2], [T.drop + .28, TARGET.x + TARGET.w / 2 + 14, TARGET.y + TARGET.h / 2 + 8],
+  [T.tog - .1, TOG.x + TOG.w / 2 + 2, TOG.y + TOG.h / 2 + 2], [T.toStreak, TOG.x + TOG.w / 2 + 6, TOG.y + TOG.h / 2 + 14],
+  [T.streakClick - .06, STK.x + 170, STK.y + 88], [T.streakClick + .5, STK.x + 230, STK.y + 150],
+];
+const CLICKS = [{ t: T.press, up: T.drop, drag: true }, { t: T.tog - .04, up: T.tog + .08 }, { t: T.streakClick - .04, up: T.streakClick + .08 }];
+function cursorPos(t) {
+  if (t <= CUR[0][0]) return { x: CUR[0][1], y: CUR[0][2] };
+  for (let i = 0; i < CUR.length - 1; i++) { const [t0, x0, y0] = CUR[i], [t1, x1, y1] = CUR[i + 1];
+    if (t <= t1) { const u = eInOut(seg(t, t0, t1)), dx = x1 - x0, dy = y1 - y0, arc = Math.sin(Math.PI * u) * .12;
+      return { x: lerp(x0, x1, u) - dy * arc, y: lerp(y0, y1, u) + dx * arc }; } }
+  const l = CUR[CUR.length - 1]; return { x: l[1], y: l[2] };
+}
+function pressAmt(t) { let p = 0; for (const c of CLICKS) p = Math.max(p, seg(t, c.t - .02, c.t + .06) * (1 - seg(t, c.up, c.up + .1))); return p; }
+function drawCursor(g, x, y, s, press, a) {
+  if (a <= 0) return; g.save(); g.globalAlpha = a; g.translate(x, y); g.scale(s * (1 - .14 * press), s * (1 - .14 * press));
+  const P = () => { g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 33); g.lineTo(8, 25.5); g.lineTo(13.5, 38); g.lineTo(19, 35.5); g.lineTo(13.5, 23.5); g.lineTo(24, 23.5); g.closePath(); };
+  g.save(); g.shadowColor = 'rgba(20,20,60,.35)'; g.shadowBlur = 8; g.shadowOffsetY = 3; P(); g.fillStyle = '#fff'; g.fill(); g.restore();
+  g.lineJoin = 'round'; P(); g.lineWidth = 4; g.strokeStyle = '#fff'; g.stroke(); g.fillStyle = '#111225'; g.fill();
+  g.restore();
+}
+
+// ── camera ──
+const TOGW = { x: WX + REM.x + REM.w / 2, y: WY + REM.y + 50 };
+const CAM = [[0, 960, 540, 1], [T.zoomA, 960, 540, 1], [T.zoomAEnd, TOGW.x - 30, TOGW.y + 4, 1.95], [T.toStreak, TOGW.x - 10, TOGW.y + 8, 2.0],
+  [T.streakClick, WX + STK.x + STK.w / 2 - 70, WY + STK.y + 40, 1.6], [T.morphEnd, 960, 600, 1.0], [T.zoomB, 960, 600, 1.0],
+  [T.zoomBEnd, WX + 420, WY + 450, 1.6], [T.pull, WX + 426, WY + 452, 1.64], [T.pullEnd, 960, 540, 1]];
+function camera(t) {
+  if (t <= CAM[0][0]) return { x: CAM[0][1], y: CAM[0][2], z: CAM[0][3] };
+  for (let i = 0; i < CAM.length - 1; i++) { const a = CAM[i], b = CAM[i + 1];
+    if (t <= b[0]) { const u = eInOut(seg(t, a[0], b[0])); const z = Math.exp(lerp(Math.log(a[3]), Math.log(b[3]), u)); return { x: lerp(a[1], b[1], u), y: lerp(a[2], b[2], u), z }; } }
+  const l = CAM[CAM.length - 1]; return { x: l[1], y: l[2], z: l[3] };
+}
+
+// ── compositing buffers ──
+const SC = mk(W, H), sg = SC.getContext('2d');
+const SM = mk(W / 4, H / 4), smg = SM.getContext('2d');
+const DF = mk(W, H), dfg = DF.getContext('2d');
+const WL = mk(WW, WH), WLg = WL.getContext('2d');
+
+function state(t) {
+  const drag = seg(t, T.press, T.drop), drop = seg(t, T.drop, T.drop + .01);
+  return {
+    drag: t >= T.press ? 1 : 0, dragP: drag, drop, hover: seg(drag, .55, .85),
+    glow: seg(t, T.drop + .05, T.drop + .6), planned4: t >= T.drop + .1,
+    ringP: lerp(.75, 1, eInOut(seg(t, T.ring, T.ringEnd))), ringDone: seg(t, T.ringEnd, T.ringEnd + .35),
+    tog: seg(t, T.tog + .02, T.tog + .3),
+  };
+}
+function render(t) {
+  const S = state(t), cam = camera(t), cp = cursorPos(t);
+  const g = sg; g.setTransform(1, 0, 0, 1, 0, 0); drawBG(g, t);
+  g.save(); g.translate(W / 2, H / 2); g.scale(cam.z, cam.z); g.translate(-cam.x, -cam.y);
+  // window intro
+  const wi = seg(t, T.win, T.winEnd), we = spring(wi, 6, 9) * 0 + eOut5(wi);
+  const ph = seg(t, T.phone, T.phoneEnd), pe = eInOut(ph);
+  if (wi > 0) {
+    const ws = lerp(.9, 1, we), wy = lerp(170, 0, we);
+    // window rect (morphs into phone)
+    const R = { x: lerp(WX, PH.x, pe), y: lerp(WY, PH.y, pe), w: lerp(WW, PH.w, pe), h: lerp(WH, PH.h, pe), r: lerp(20, PH.r, pe) };
+    g.save(); g.globalAlpha = clamp(wi * 3);
+    g.translate(R.x + R.w / 2, R.y + R.h / 2 + wy); g.scale(ws, ws); g.translate(-R.w / 2, -R.h / 2);
+    shadow(g, 0, 0, R.w, R.h, R.r, 70, .20, 44); shadow(g, 0, 0, R.w, R.h, R.r, 14, .10, 6);
+    g.save(); rr(g, 0, 0, R.w, R.h, R.r); g.clip(); g.fillStyle = '#fff'; g.fillRect(0, 0, R.w, R.h);
+    const da = 1 - seg(ph, 0, .45);
+    if (da > 0) {
+      const off = ph > 0, gw = off ? WLg : g;
+      if (off) { WLg.setTransform(1, 0, 0, 1, 0, 0); WLg.clearRect(0, 0, WW, WH); }
+      else { g.save(); g.globalAlpha *= da; const k = R.w / WW; g.scale(k, k); }
+      { const g = gw;
+      if (t < T.morphEnd) drawDesktop(g, t, S); else { g.save(); rr(g, 0, 0, WW, WH, 20); g.clip(); drawDesktopChrome(g); g.restore(); }
+      // streak card → detail morph (shared element)
+      const m = eInOut(seg(t, T.morph, T.morphEnd));
+      if (t >= T.morph) {
+        const M = { x: lerp(STK.x, MAIN.x, m), y: lerp(STK.y, MAIN.y, m), w: lerp(STK.w, MAIN.w, m), h: lerp(STK.h, MAIN.h, m), r: lerp(18, 0, m) };
+        const lift = Math.sin(Math.PI * m);
+        g.save(); rr(g, 0, 0, WW, WH, 20); g.clip();
+        shadow(g, M.x, M.y, M.w, M.h, M.r, 50, .22 * lift, 24 * lift);
+        g.save(); rr(g, M.x, M.y, M.w, M.h, M.r); g.clip(); g.fillStyle = '#fff'; g.fillRect(M.x, M.y, M.w, M.h);
+        g.save(); g.translate(M.x - STK.x, M.y - STK.y); drawStreakCard(g, STK, 1 - seg(m, 0, .3)); g.restore();
+        drawDetail(g, t, seg(m, .45, 1)); g.restore(); g.restore();
+      }
+      // the streak number itself (shared element)
+      const nm = eInOut(seg(t, T.morph, T.morphEnd)), rollU = seg(t, T.roll, T.roll + .32);
+      const nx = lerp(STK.x + 80, 280, nm), ny = lerp(STK.y + 100, 470, nm), ns = lerp(46, 210, nm);
+      const pop = 1 + .07 * Math.sin(Math.PI * seg(t, T.roll + .25, T.roll + .6));
+      if (ph <= 0) { g.save(); g.translate(nx, ny); g.scale(pop, pop); streakNum(g, 0, 0, ns, rollU); g.restore(); }
+      // dragged card (on top)
+      if (S.dragP > 0 && S.drop < 1) {
+        const p = S.dragP, sh = eInOut(seg(p, .45, .95)), cpw = cursorPos(t);
+        const w = lerp(LIB.w, TARGET.w, sh), h = lerp(LIB.h, TARGET.h, sh), ox = lerp(58, TARGET.w / 2, sh), oy = lerp(38, TARGET.h / 2, sh);
+        const lift = seg(t, T.press, T.press + .15) * (1 - seg(p, .9, 1)), tilt = Math.sin(Math.PI * seg(p, 0, .8)) * .04;
+        g.save(); g.translate(cpw.x, cpw.y); g.rotate(tilt); g.scale(1 + .04 * lift, 1 + .04 * lift);
+        if (sh < .5) libCard(g, -ox, -oy, w, h, SESS[2], lift);
+        else { shadow(g, -ox, -oy, w, h, 12, 30, .16 * lift, 16 * lift); calBlock(g, { x: -ox, y: -oy, w, h }, SESS[2], false); }
+        g.restore();
+      }
+      }
+      if (off) { g.save(); g.globalAlpha *= da; const k = R.w / WW; g.scale(k, k); g.drawImage(WL, 0, 0); g.restore(); }
+      else g.restore();
+    }
+    // phone content + bezel
+    const pa = seg(ph, .4, 1);
+    if (pa > 0) { g.save(); const kp = Math.min(R.w / PH.w, R.h / PH.h); g.translate((R.w - PH.w * kp) / 2, 0); g.scale(kp, kp); drawPhone(g, t, pa); notif(g, seg(t, T.notif, T.notif + .45)); g.restore(); }
+    g.restore();
+    // phone shared number
+    if (ph > 0) { /* drawn in window-local space after bezel */ }
+    if (pe > 0) { rr(g, -6 * pe, -6 * pe, R.w + 12 * pe, R.h + 12 * pe, R.r + 6 * pe); g.lineWidth = 12 * pe; g.strokeStyle = '#17182B'; g.stroke();
+      rr(g, R.w / 2 - 58, 16, 116, 34, 17); g.fillStyle = `rgba(10,10,20,${pe})`; g.fill(); }
+    if (ph > 0 && ph < 1 || pa > 0) {
+      // shared "12" morph: desktop detail (scaled) → phone position
+      const k = R.w / WW, wt = tw(g, '12', 210, 800, -6.3);
+      const dx = (280 + wt / 2) * k, dy = 470 * k;
+      const kp = Math.min(R.w / PH.w, R.h / PH.h), fx = lerp(dx, (R.w - PH.w * kp) / 2 + PH.w / 2 * kp, pe), fy = lerp(dy, 372 * kp, pe), fs = lerp(210 * k, 150 * kp, pe);
+      streakNum(g, fx, fy, fs, 1, 'center');
+    }
+    g.restore();
+  }
+  // click ripples (world)
+  for (const c of CLICKS) { const u = seg(t, c.t, c.t + .5); if (u > 0 && u < 1 && !c.drag) { g.beginPath(); g.arc(WX + CUR_AT(c.t).x, WY + CUR_AT(c.t).y, 8 + 34 * eOut(u), 0, TAU); g.strokeStyle = `rgba(91,76,240,${.55 * (1 - u)})`; g.lineWidth = 3 * (1 - u) + 1; g.stroke(); g.fillStyle = `rgba(91,76,240,${.12 * (1 - u)})`; g.fill(); } }
+  { const u = seg(t, T.press, T.press + .3); if (u > 0 && u < 1) { const q = CUR_AT(T.press); g.beginPath(); g.arc(WX + q.x, WY + q.y, 6 + 22 * eOut(u), 0, TAU); g.strokeStyle = `rgba(91,76,240,${.5 * (1 - u)})`; g.lineWidth = 2.5; g.stroke(); } }
+  g.restore();
+
+  // ── depth of field: blur + dim everything outside the focus ellipse ──
+  const dof = clamp((cam.z - 1.12) / .45);
+  const o = ctx; o.setTransform(1, 0, 0, 1, 0, 0); o.drawImage(SC, 0, 0);
+  if (dof > 0.001) {
+    smg.filter = 'blur(3px)'; smg.drawImage(SC, 0, 0, W / 4, H / 4); smg.filter = 'none';
+    dfg.globalCompositeOperation = 'source-over'; dfg.clearRect(0, 0, W, H); dfg.imageSmoothingQuality = 'high'; dfg.drawImage(SM, 0, 0, W, H);
+    dfg.fillStyle = 'rgba(236,236,246,.35)'; dfg.fillRect(0, 0, W, H);
+    dfg.globalCompositeOperation = 'destination-out'; dfg.save(); dfg.translate(W / 2, H / 2); dfg.scale(1, .6);
+    const rg = dfg.createRadialGradient(0, 0, 400, 0, 0, 800); rg.addColorStop(0, 'rgba(0,0,0,1)'); rg.addColorStop(1, 'rgba(0,0,0,0)');
+    dfg.fillStyle = rg; dfg.fillRect(-W, -H * 2, W * 2, H * 4); dfg.restore(); dfg.globalCompositeOperation = 'source-over';
+    o.globalAlpha = dof; o.drawImage(DF, 0, 0); o.globalAlpha = 1;
+  }
+  // ── screen-space overlays ──
+  const toScr = (wx, wy) => ({ x: W / 2 + (wx - cam.x) * cam.z, y: H / 2 + (wy - cam.y) * cam.z });
+  drawHeadline(o, t);
+  // callout: Smart reminders
+  const cu = seg(t, T.callout, T.callout + .4), co = seg(t, T.calloutOut, T.calloutOut + .25);
+  if (cu > 0 && co < 1) {
+    const a = toScr(WX + REM.x + REM.w / 2, WY + REM.y - 8), k = eBack(cu, 1.8) * (1 - .15 * co);
+    o.save(); o.globalAlpha = clamp(cu * 3) * (1 - co); o.translate(a.x, a.y - 24 - 14 * co); o.scale(k, k);
+    const bw = 420, bh = 96; shadow(o, -bw / 2, -bh - 14, bw, bh, 20, 30, .3, 14);
+    rr(o, -bw / 2, -bh - 14, bw, bh, 20); o.fillStyle = INK; o.fill();
+    o.beginPath(); o.moveTo(-12, -15); o.lineTo(0, 0); o.lineTo(12, -15); o.closePath(); o.fill();
+    o.beginPath(); o.arc(-bw / 2 + 48, -bh / 2 - 14, 22, 0, TAU); o.fillStyle = ACC; o.fill(); glyph(o, 'bell', -bw / 2 + 48, -bh / 2 - 14, 24, '#fff');
+    tx(o, 'Smart reminders', -bw / 2 + 86, -bh / 2 - 20, 25, 800, '#fff', 'left', -.3);
+    tx(o, 'Nudges you at your best time to train', -bw / 2 + 86, -bh / 2 + 6, 15, 500, '#B9BBD0');
+    o.restore();
+  }
+  // cursor (screen space, mild zoom scaling)
+  const ca = seg(t, T.cur0, T.cur0 + .2) * (1 - seg(t, T.streakClick + .25, T.streakClick + .5));
+  if (ca > 0) { const s = toScr(WX + cp.x, WY + cp.y); drawCursor(o, s.x, s.y, 1.25 * Math.pow(cam.z, .45), pressAmt(t), ca); }
+  drawLockup(o, t);
+  // fade to background
+  const f = seg(t, T.fadeA, T.fadeB); if (f > 0) { o.fillStyle = `rgba(246,245,252,${eInOut(f)})`; o.fillRect(0, 0, W, H); }
+  const fi = 1 - seg(t, 0, .35); if (fi > 0) { o.fillStyle = `rgba(246,245,252,${fi})`; o.fillRect(0, 0, W, H); }
+}
+function CUR_AT(t) { return cursorPos(t); }
+function drawHeadline(o, t) {
+  const up = eInOut(seg(t, T.h1Up, T.h1UpEnd)), out = seg(t, T.h1Out, T.h1Out + .3);
+  if (out >= 1) return;
+  o.save(); o.globalAlpha = 1 - out;
+  const cy = lerp(560, 124, up), sc = lerp(1, .5, up);
+  o.translate(W / 2, cy); o.scale(sc, sc);
+  // badge
+  const bu = seg(t, T.badge, T.badge + .4), ba = bu * (1 - seg(t, T.h1Up, T.h1Up + .3));
+  if (ba > 0) { o.save(); o.globalAlpha *= ba; o.translate(0, -150 + 16 * (1 - eOut(bu)));
+    const txt = 'Weekflow 2.0 is here', bw = tw(o, txt, 22, 700) + 110; rr(o, -bw / 2, -26, bw, 52, 26); o.fillStyle = '#fff'; o.fill(); o.strokeStyle = '#E3E0FB'; o.lineWidth = 1.5; o.stroke();
+    rr(o, -bw / 2 + 8, -18, 58, 36, 18); o.fillStyle = ACC; o.fill(); tx(o, 'NEW', -bw / 2 + 37, 7, 14, 800, '#fff', 'center', 1);
+    tx(o, txt, -bw / 2 + 78, 8, 22, 700, INK); o.restore(); }
+  const words = [['Plan', INK], ['your', INK], ['week', INK], ['in', INK], ['10', ACC], ['seconds.', ACC]], size = 104, sp = 26;
+  const ws = words.map(([w]) => tw(o, w, size, 800, -3)); const total = ws.reduce((a, b) => a + b, 0) + sp * (words.length - 1);
+  let x = -total / 2;
+  words.forEach(([w, c], i) => { const u = seg(t, T.h1 + i * .075, T.h1 + .5 + i * .075), e = eOut5(u);
+    if (u > 0) { o.save(); o.globalAlpha *= clamp(u * 2.2); o.translate(0, 46 * (1 - e)); tx(o, w, x, 36, size, 800, c, 'left', -3); o.restore(); }
+    x += ws[i] + sp; });
+  const su = seg(t, T.h1 + .55, T.h1 + .95) * (1 - seg(t, T.h1Up, T.h1Up + .25));
+  if (su > 0) { o.save(); o.globalAlpha *= su; tx(o, 'Drag, drop, done. Your training week, organized.', 0, 118 + 12 * (1 - eOut(su)), 32, 500, SUB, 'center'); o.restore(); }
+  o.restore();
+}
+function drawLockup(o, t) {
+  const u0 = seg(t, T.lock, T.lock + .5); if (u0 <= 0) return;
+  const x = 250;
+  o.save(); const k = eBack(u0, 1.8); o.translate(x + 48, 380); o.scale(k, k); o.globalAlpha = clamp(u0 * 3);
+  shadow(o, -48, -48, 96, 96, 27, 20, .25, 10); logoMark(o, -48, -48, 96); o.restore();
+  const it = (i, d = .5) => seg(t, T.lock + .12 + i * .09, T.lock + .12 + i * .09 + d);
+  const a1 = it(0), a2 = it(1), a3 = it(2);
+  if (a1 > 0) { o.save(); o.globalAlpha = a1; o.translate(0, 30 * (1 - eOut5(a1))); tx(o, 'Weekflow', x - 4, 560, 112, 800, INK, 'left', -4); o.restore(); }
+  if (a2 > 0) { o.save(); o.globalAlpha = a2; o.translate(0, 30 * (1 - eOut5(a2))); tx(o, 'Plan less. ', x, 640, 50, 600, SUB); tx(o, 'Move more.', x + tw(o, 'Plan less. ', 50, 600), 640, 50, 700, ACC); o.restore(); }
+  if (a3 > 0) { o.save(); o.globalAlpha = a3; o.translate(0, 24 * (1 - eOut5(a3)));
+    let px = x; for (const s of ['Web', 'iOS', 'Android']) { const w = tw(o, s, 18, 700) + 40; rr(o, px, 684, w, 42, 21); o.fillStyle = '#fff'; o.fill(); o.strokeStyle = '#DCDDEA'; o.lineWidth = 1.2; o.stroke(); tx(o, s, px + w / 2, 711, 18, 700, INK, 'center'); px += w + 12; }
+    o.restore(); }
+}
+
+window.ready = (async () => {
+  await Promise.all(['500', '600', '700', '800'].map(w => document.fonts.load(`${w} 40px ${F}`, 'Plan your week in 10 seconds. 0123456789 –·›‹✓▲')));
+  await document.fonts.ready;
+  BG = buildBG(); render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [{ t: T.badge, k: 'pop', v: .6 }, { t: T.win, k: 'whoosh', d: .8 }, { t: T.h1Up, k: 'whoosh', d: .6, v: .5 },
+    { t: T.press, k: 'click' }, { t: T.press + .06, k: 'lift' }, { t: T.drop, k: 'drop' }, { t: T.drop + .02, k: 'click', v: .6 },
+    { t: T.ringEnd, k: 'chime' }, { t: T.zoomA, k: 'whoosh', d: .6 }, { t: T.tog - .04, k: 'click' }, { t: T.tog + .05, k: 'tick' },
+    { t: T.callout, k: 'pop' }, { t: T.toStreak + .05, k: 'whoosh', d: .55, v: .6 }, { t: T.streakClick - .04, k: 'click' }, { t: T.morph, k: 'whoosh', d: .55 },
+    { t: T.zoomB, k: 'whoosh', d: .55, v: .7 }, { t: T.roll, k: 'roll' }, { t: T.best + .05, k: 'chime', v: 1.1 }, { t: T.pull, k: 'whoosh', d: .5, v: .6 },
+    { t: T.phone, k: 'whoosh', d: .8 }, { t: T.lock, k: 'pop', v: .8 }, { t: T.notif, k: 'ding' }, { t: T.lock + .1, k: 'chord' }];
+  for (let i = 0; i < 9; i++) ev.push({ t: T.ring + i * .055, k: 'tick', v: .35 });
+  let last = -1; for (let f = Math.round((T.morphEnd - .1) * 30); f < (T.morphEnd + .8) * 30; f++) { const tt = f / 30, n = Math.floor(1240 * eOut(seg(tt, T.morphEnd - .1, T.morphEnd + .8)) / 90); if (n !== last) { if (last >= 0) ev.push({ t: tt, k: 'tick', v: .25 }); last = n; } }
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
