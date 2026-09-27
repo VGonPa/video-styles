@@ -4,9 +4,9 @@ Use case · Origin stories, manifestos, and brand films.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (12) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (5) · [Product & Launches](../../categories/use-cases/product.md) (10) · [Social & Short-Form](../../categories/use-cases/social.md) (16) · [Storytelling & Brand](../../categories/use-cases/story.md) (16) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (11)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (12) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (5) · [Product & Launches](../../categories/use-cases/product.md) (10) · [Social & Short-Form](../../categories/use-cases/social.md) (16) · [Storytelling & Brand](../../categories/use-cases/story.md) (17) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (12)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (3) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (1) · [Games](../../categories/families/games.md) (3)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (4) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (1) · [Games](../../categories/families/games.md) (3)
 
 <table>
 <tr>
@@ -33,6 +33,9 @@ Use case · Origin stories, manifestos, and brand films.
 <td width="25%" align="center"><a href="../../styles/retro-desktop/retro-desktop.mp4"><img src="../../styles/retro-desktop/preview.gif" alt="Retro Desktop" width="100%"></a><br><b>35 · Retro Desktop</b><br><a href="../../styles/retro-desktop/retro-desktop.mp4">video</a> · <a href="../../styles/retro-desktop">source</a></td>
 <td width="25%" align="center"><a href="../../styles/art-deco/art-deco.mp4"><img src="../../styles/art-deco/preview.gif" alt="Art Deco" width="100%"></a><br><b>37 · Art Deco</b><br><a href="../../styles/art-deco/art-deco.mp4">video</a> · <a href="../../styles/art-deco">source</a></td>
 </tr>
+<tr>
+<td width="25%" align="center"><a href="../../styles/ukiyo-e/ukiyo-e.mp4"><img src="../../styles/ukiyo-e/preview.gif" alt="Ukiyo-e" width="100%"></a><br><b>38 · Ukiyo-e</b><br><a href="../../styles/ukiyo-e/ukiyo-e.mp4">video</a> · <a href="../../styles/ukiyo-e">source</a></td>
+</tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
@@ -53,3 +56,4 @@ Use case · Origin stories, manifestos, and brand films.
 | 34 | [VHS Camcorder](../../styles/vhs-camcorder/) | 90s home video on a VCR | Nostalgic memories, throwbacks, and found-footage hooks | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md) |
 | 35 | [Retro Desktop](../../styles/retro-desktop/) | Mid-90s desktop on a CRT | Nostalgic stories, tech humor, and step-by-step computer tutorials | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Tutorials & Training](../../categories/use-cases/tutorial.md) |
 | 37 | [Art Deco](../../styles/art-deco/) | Gold sunbursts, stepped frames, symmetry | Gala invitations, elegant openers, and period brand stories | [Art Movements](../../categories/families/art-movements.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
+| 38 | [Ukiyo-e](../../styles/ukiyo-e/) | Woodblock waves, washi and seal | Calm, crafted stories and elegant title openers | [Art Movements](../../categories/families/art-movements.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
