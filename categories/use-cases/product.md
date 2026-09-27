@@ -4,9 +4,9 @@ Use case · Feature announcements, product demos, and launch videos.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (9) · [Social & Short-Form](../../categories/use-cases/social.md) (11) · [Storytelling & Brand](../../categories/use-cases/story.md) (13) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (8)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (10) · [Social & Short-Form](../../categories/use-cases/social.md) (12) · [Storytelling & Brand](../../categories/use-cases/story.md) (13) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (8)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (2) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (4) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (1) · [Games](../../categories/families/games.md) (1)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (2) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (5) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (1) · [Games](../../categories/families/games.md) (1)
 
 <table>
 <tr>
@@ -23,6 +23,7 @@ Use case · Feature announcements, product demos, and launch videos.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/liquid-motion/liquid-motion.mp4"><img src="../../styles/liquid-motion/preview.gif" alt="Liquid Motion" width="100%"></a><br><b>31 · Liquid Motion</b><br><a href="../../styles/liquid-motion/liquid-motion.mp4">video</a> · <a href="../../styles/liquid-motion">source</a></td>
+<td width="25%" align="center"><a href="../../styles/frutiger-aero/frutiger-aero.mp4"><img src="../../styles/frutiger-aero/preview.gif" alt="Frutiger Aero" width="100%"></a><br><b>33 · Frutiger Aero</b><br><a href="../../styles/frutiger-aero/frutiger-aero.mp4">video</a> · <a href="../../styles/frutiger-aero">source</a></td>
 </tr>
 </table>
 
@@ -37,3 +38,4 @@ Use case · Feature announcements, product demos, and launch videos.
 | 23 | [Product UI](../../styles/product-ui/) | Polished SaaS app demo with cursor, zooms and callouts | Feature launches, app walkthroughs, and onboarding | [Technical](../../categories/families/technical.md) | [Product & Launches](../../categories/use-cases/product.md), [Tutorials & Training](../../categories/use-cases/tutorial.md) |
 | 28 | [Neo-Brutalism](../../styles/neo-brutalism/) | Chunky UI cards, hard shadows | App launches, product promos, and punchy social clips | [Flat Graphics](../../categories/families/flat-graphics.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Product & Launches](../../categories/use-cases/product.md) |
 | 31 | [Liquid Motion](../../styles/liquid-motion/) | Gooey blobs in warm flowing gradients | Wellness brands, calm title cards, and soft product intros | [Polished & Premium](../../categories/families/polished.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Product & Launches](../../categories/use-cases/product.md) |
+| 33 | [Frutiger Aero](../../styles/frutiger-aero/) | Glossy bubbles, blue skies, green grass | Cheerful app launches, playful promos, and nostalgic social posts | [Nostalgia](../../categories/families/nostalgia.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Product & Launches](../../categories/use-cases/product.md) |
