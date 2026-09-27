@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Build the English catalog video from the twenty translated style clips."""
+"""Build the English catalog video from the style clips listed in styles.json."""
 
 from pathlib import Path
+import json
 import subprocess
 import sys
 
@@ -11,28 +12,9 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "_catalog_build"
 OUTPUT = ROOT / "catalog" / "catalog.mp4"
-STYLES = [
-    ("kurzgesagt", "Kurzgesagt", "FLAT GRAPHICS"),
-    ("isometric", "Isometric", "FLAT GRAPHICS"),
-    ("bauhaus", "Bauhaus", "FLAT GRAPHICS"),
-    ("memphis", "Memphis", "FLAT GRAPHICS"),
-    ("whiteboard", "Whiteboard", "HAND DRAWN"),
-    ("chalkboard", "Chalkboard", "HAND DRAWN"),
-    ("blueprint", "Blueprint", "HAND DRAWN"),
-    ("single-line", "Single Line", "HAND DRAWN"),
-    ("paper-cutout", "Paper Cutout", "TEXTURE & CRAFT"),
-    ("pencil-sketch", "Pencil Sketch", "TEXTURE & CRAFT"),
-    ("linocut", "Linocut", "TEXTURE & CRAFT"),
-    ("clay", "Clay", "TEXTURE & CRAFT"),
-    ("retro-1970s", "1970s Retro", "NOSTALGIA"),
-    ("pixel-art", "Pixel Art", "NOSTALGIA"),
-    ("documentary-16mm", "16 mm Documentary", "NOSTALGIA"),
-    ("comic-book", "Comic Book", "NOSTALGIA"),
-    ("terminal", "Terminal", "TECHNICAL"),
-    ("sci-fi-interface", "Sci-Fi Interface", "TECHNICAL"),
-    ("data-visualization", "Data Visualization", "TECHNICAL"),
-    ("kinetic-typography", "Kinetic Typography", "EXPERIMENTAL"),
-]
+MANIFEST = json.loads((ROOT / "styles.json").read_text())
+STYLES = [(s["slug"], s["name"], MANIFEST["families"][s["family"]]["title"].upper())
+          for s in MANIFEST["styles"]]
 
 
 def run(*args):
@@ -86,7 +68,7 @@ def main():
         card((group, label, ""), png)
         encode_card(png, mp4, 1.4)
         entries.extend((mp4, clip))
-        print(f"{number:02d}/20 {title}", flush=True)
+        print(f"{number:02d}/{len(STYLES)} {title}", flush=True)
 
     png = BUILD / "end.png"
     mp4 = BUILD / "end.mp4"
