@@ -7,9 +7,9 @@ Watch the [complete English catalog](catalog/catalog.mp4), or browse by use case
 This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The examples retain references to irticalen where they are part of the original scene. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
 
 <!-- styles:start -->
-**By use case:** [Explainers](categories/use-cases/explainer.md) (10) · [Tutorials & Training](categories/use-cases/tutorial.md) (4) · [Product & Launches](categories/use-cases/product.md) (8) · [Social & Short-Form](categories/use-cases/social.md) (9) · [Storytelling & Brand](categories/use-cases/story.md) (11) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (7)
+**By use case:** [Explainers](categories/use-cases/explainer.md) (11) · [Tutorials & Training](categories/use-cases/tutorial.md) (4) · [Product & Launches](categories/use-cases/product.md) (8) · [Social & Short-Form](categories/use-cases/social.md) (9) · [Storytelling & Brand](categories/use-cases/story.md) (11) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (7)
 
-**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (5) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (6) · [Nostalgia](categories/families/nostalgia.md) (4) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (1) · [Polished & Premium](categories/families/polished.md) (1)
+**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (6) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (6) · [Nostalgia](categories/families/nostalgia.md) (4) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (1) · [Polished & Premium](categories/families/polished.md) (1)
 
 <table>
 <tr>
@@ -51,6 +51,7 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 <tr>
 <td width="25%" align="center"><a href="styles/risograph/risograph.mp4"><img src="styles/risograph/preview.gif" alt="Risograph" width="100%"></a><br><b>26 · Risograph</b><br><a href="styles/risograph/risograph.mp4">video</a> · <a href="styles/risograph">source</a></td>
 <td width="25%" align="center"><a href="styles/neo-brutalism/neo-brutalism.mp4"><img src="styles/neo-brutalism/preview.gif" alt="Neo-Brutalism" width="100%"></a><br><b>28 · Neo-Brutalism</b><br><a href="styles/neo-brutalism/neo-brutalism.mp4">video</a> · <a href="styles/neo-brutalism">source</a></td>
+<td width="25%" align="center"><a href="styles/infographic/infographic.mp4"><img src="styles/infographic/preview.gif" alt="Infographic Explainer" width="100%"></a><br><b>29 · Infographic Explainer</b><br><a href="styles/infographic/infographic.mp4">video</a> · <a href="styles/infographic">source</a></td>
 </tr>
 </table>
 
@@ -82,6 +83,7 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 | 24 | [3Blue1Brown](styles/3blue1brown/) | Manim-style math on black | Math intuition, visual proofs, and step-by-step derivations | [Technical](categories/families/technical.md) | [Explainers](categories/use-cases/explainer.md), [Tutorials & Training](categories/use-cases/tutorial.md), [Data & Results](categories/use-cases/data.md) |
 | 26 | [Risograph](styles/risograph/) | Fluorescent overprint with halftone dots | Event posters, bold titles, and punchy social hooks | [Texture & Craft](categories/families/texture-craft.md) | [Social & Short-Form](categories/use-cases/social.md), [Intros, Titles & Transitions](categories/use-cases/titles.md) |
 | 28 | [Neo-Brutalism](styles/neo-brutalism/) | Chunky UI cards, hard shadows | App launches, product promos, and punchy social clips | [Flat Graphics](categories/families/flat-graphics.md) | [Social & Short-Form](categories/use-cases/social.md), [Product & Launches](categories/use-cases/product.md) |
+| 29 | [Infographic Explainer](styles/infographic/) | Flat icons, counters and simple characters | Fast explainers with stats, steps, and everyday examples | [Flat Graphics](categories/families/flat-graphics.md) | [Explainers](categories/use-cases/explainer.md) |
 <!-- styles:end -->
 
 Each linked directory contains an `anim.html` source file, an English MP4, and an English preview GIF.
