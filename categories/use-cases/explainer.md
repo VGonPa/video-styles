@@ -4,9 +4,9 @@ Use case · Explaining how something works: concepts, science, systems.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (10) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (8) · [Social & Short-Form](../../categories/use-cases/social.md) (9) · [Storytelling & Brand](../../categories/use-cases/story.md) (11) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (7)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (8) · [Social & Short-Form](../../categories/use-cases/social.md) (9) · [Storytelling & Brand](../../categories/use-cases/story.md) (11) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (7)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (5) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (6) · [Nostalgia](../../categories/families/nostalgia.md) (4) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (1)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (6) · [Nostalgia](../../categories/families/nostalgia.md) (4) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (1)
 
 <table>
 <tr>
@@ -24,6 +24,7 @@ Use case · Explaining how something works: concepts, science, systems.
 <tr>
 <td width="25%" align="center"><a href="../../styles/map-documentary/map-documentary.mp4"><img src="../../styles/map-documentary/preview.gif" alt="Map Documentary" width="100%"></a><br><b>21 · Map Documentary</b><br><a href="../../styles/map-documentary/map-documentary.mp4">video</a> · <a href="../../styles/map-documentary">source</a></td>
 <td width="25%" align="center"><a href="../../styles/3blue1brown/3blue1brown.mp4"><img src="../../styles/3blue1brown/preview.gif" alt="3Blue1Brown" width="100%"></a><br><b>24 · 3Blue1Brown</b><br><a href="../../styles/3blue1brown/3blue1brown.mp4">video</a> · <a href="../../styles/3blue1brown">source</a></td>
+<td width="25%" align="center"><a href="../../styles/infographic/infographic.mp4"><img src="../../styles/infographic/preview.gif" alt="Infographic Explainer" width="100%"></a><br><b>29 · Infographic Explainer</b><br><a href="../../styles/infographic/infographic.mp4">video</a> · <a href="../../styles/infographic">source</a></td>
 </tr>
 </table>
 
@@ -39,3 +40,4 @@ Use case · Explaining how something works: concepts, science, systems.
 | 17 | [Terminal](../../styles/terminal/) | Green phosphor command line | Technical processes and what happens behind the scenes | [Technical](../../categories/families/technical.md) | [Explainers](../../categories/use-cases/explainer.md), [Product & Launches](../../categories/use-cases/product.md) |
 | 21 | [Map Documentary](../../styles/map-documentary/) | Pinned paper map with red string | Journeys, how things spread, and well-researched stories | [Texture & Craft](../../categories/families/texture-craft.md) | [Explainers](../../categories/use-cases/explainer.md), [News & Current Affairs](../../categories/use-cases/news.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
 | 24 | [3Blue1Brown](../../styles/3blue1brown/) | Manim-style math on black | Math intuition, visual proofs, and step-by-step derivations | [Technical](../../categories/families/technical.md) | [Explainers](../../categories/use-cases/explainer.md), [Tutorials & Training](../../categories/use-cases/tutorial.md), [Data & Results](../../categories/use-cases/data.md) |
+| 29 | [Infographic Explainer](../../styles/infographic/) | Flat icons, counters and simple characters | Fast explainers with stats, steps, and everyday examples | [Flat Graphics](../../categories/families/flat-graphics.md) | [Explainers](../../categories/use-cases/explainer.md) |
