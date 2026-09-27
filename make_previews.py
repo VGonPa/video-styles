@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Generate English animated GIF previews from the MP4 clips (all styles in styles.json, or the slugs given as arguments)."""
+"""Generate English animated GIF previews from the MP4 clips (all styles with a meta.json, or the slugs given as arguments)."""
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-import json
 import subprocess
 import sys
+
+import manifest
 
 ROOT = Path(__file__).resolve().parent / 'styles'
 
@@ -24,7 +25,7 @@ def render(folder):
 
 
 if __name__ == '__main__':
-    slugs = sys.argv[1:] or [s['slug'] for s in json.loads((ROOT.parent / 'styles.json').read_text())['styles']]
+    slugs = sys.argv[1:] or [s['slug'] for s in manifest.load()['styles']]
     folders = [ROOT / slug for slug in slugs]
     with ThreadPoolExecutor(max_workers=3) as pool:
         list(pool.map(render, folders))

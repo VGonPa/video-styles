@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Generate the README gallery and the use-case / family pages from styles.json."""
+"""Generate the README gallery and the use-case / family pages from the style manifest."""
 
 from pathlib import Path
-import json
+import manifest
 
-ROOT = Path(__file__).resolve().parent
-MANIFEST = json.loads((ROOT / "styles.json").read_text())
+ROOT = manifest.ROOT
+MANIFEST = manifest.load()
 START, END = "<!-- styles:start -->", "<!-- styles:end -->"
 COLUMNS = 4
 
