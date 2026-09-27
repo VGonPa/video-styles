@@ -4,9 +4,9 @@ Use case · Reels, Shorts, ads, hooks, and quick announcements.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (10) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (8) · [Social & Short-Form](../../categories/use-cases/social.md) (8) · [Storytelling & Brand](../../categories/use-cases/story.md) (11) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (6)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (10) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (8) · [Social & Short-Form](../../categories/use-cases/social.md) (9) · [Storytelling & Brand](../../categories/use-cases/story.md) (11) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (7)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (5) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (5) · [Nostalgia](../../categories/families/nostalgia.md) (4) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (1)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (5) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (6) · [Nostalgia](../../categories/families/nostalgia.md) (4) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (1)
 
 <table>
 <tr>
@@ -19,6 +19,9 @@ Use case · Reels, Shorts, ads, hooks, and quick announcements.
 <td width="25%" align="center"><a href="../../styles/pixel-art/pixel-art.mp4"><img src="../../styles/pixel-art/preview.gif" alt="Pixel Art" width="100%"></a><br><b>14 · Pixel Art</b><br><a href="../../styles/pixel-art/pixel-art.mp4">video</a> · <a href="../../styles/pixel-art">source</a></td>
 <td width="25%" align="center"><a href="../../styles/comic-book/comic-book.mp4"><img src="../../styles/comic-book/preview.gif" alt="Comic Book" width="100%"></a><br><b>16 · Comic Book</b><br><a href="../../styles/comic-book/comic-book.mp4">video</a> · <a href="../../styles/comic-book">source</a></td>
 <td width="25%" align="center"><a href="../../styles/kinetic-typography/kinetic-typography.mp4"><img src="../../styles/kinetic-typography/preview.gif" alt="Kinetic Typography" width="100%"></a><br><b>20 · Kinetic Typography</b><br><a href="../../styles/kinetic-typography/kinetic-typography.mp4">video</a> · <a href="../../styles/kinetic-typography">source</a></td>
+<td width="25%" align="center"><a href="../../styles/risograph/risograph.mp4"><img src="../../styles/risograph/preview.gif" alt="Risograph" width="100%"></a><br><b>26 · Risograph</b><br><a href="../../styles/risograph/risograph.mp4">video</a> · <a href="../../styles/risograph">source</a></td>
+</tr>
+<tr>
 <td width="25%" align="center"><a href="../../styles/neo-brutalism/neo-brutalism.mp4"><img src="../../styles/neo-brutalism/preview.gif" alt="Neo-Brutalism" width="100%"></a><br><b>28 · Neo-Brutalism</b><br><a href="../../styles/neo-brutalism/neo-brutalism.mp4">video</a> · <a href="../../styles/neo-brutalism">source</a></td>
 </tr>
 </table>
@@ -32,4 +35,5 @@ Use case · Reels, Shorts, ads, hooks, and quick announcements.
 | 14 | [Pixel Art](../../styles/pixel-art/) | 16-bit platform game | Progress, milestones, and game-like scenes | [Nostalgia](../../categories/families/nostalgia.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Storytelling & Brand](../../categories/use-cases/story.md), [Data & Results](../../categories/use-cases/data.md) |
 | 16 | [Comic Book](../../styles/comic-book/) | Newspaper comic panels | Dialogue, humor, and tension | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md) |
 | 20 | [Kinetic Typography](../../styles/kinetic-typography/) | Words in rhythm | Quotes and strong opening lines | [Experimental](../../categories/families/experimental.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Social & Short-Form](../../categories/use-cases/social.md) |
+| 26 | [Risograph](../../styles/risograph/) | Fluorescent overprint with halftone dots | Event posters, bold titles, and punchy social hooks | [Texture & Craft](../../categories/families/texture-craft.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
 | 28 | [Neo-Brutalism](../../styles/neo-brutalism/) | Chunky UI cards, hard shadows | App launches, product promos, and punchy social clips | [Flat Graphics](../../categories/families/flat-graphics.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Product & Launches](../../categories/use-cases/product.md) |
