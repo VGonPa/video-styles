@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#16061a}canvas{display:block}#g{display:none}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<canvas id="g" width="1920" height="1080"></canvas>
+<script>
+// ── liquid-motion · "Breathe in. Flow out." ────────────────────────────────────────────────────────
+// A coral drop gathers at the top edge, falls and blooms into a warm mesh-gradient field → plum blobs
+// seep out of the field, drift and merge into one slow, breathing body with "Breathe in." formed inside it →
+// a lilac drop lands and floods the frame (liquid wipe) → "Flow out." melts into place letter by letter →
+// the letters liquefy back into peach blobs that gather into one calm sphere, which dissolves into the field.
+// Everything is one WebGL2 fragment shader: metaball fields (Σ r²/d², analytic gradient → soft satin
+// shading), domain-warped Shepard mesh gradients, noisy-edged bloom/flood fronts, and text fields made of
+// precomputed blurred glyph textures (sharp / small blur / big blur) re-thresholded per frame → gooey edges.
+// Grain + dither against banding. The frame depends only on t.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2, CX = 960, CY = 540;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const gc = document.getElementById('g');
+const gl = gc.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false });
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eSine = u => 0.5 - 0.5 * Math.cos(Math.PI * u);
+
+// ── timeline ──
+const T = {
+  bead: 0.12, release: 0.58, impact: 1.0, bloomEnd: 3.1,
+  blobs: 1.45, gather: 2.15, body: 3.35, wordA: 3.15, inhale: 3.4,
+  lbead: 4.2, lrelease: 4.52, flood: 4.86, floodEnd: 6.2,
+  wordB: 5.35, melt: 7.0, sphere: 8.2, dissolve: 8.95, fadeA: 9.35, fadeB: 9.98
+};
+const TB = { t0: T.wordB, st: 0.085, dur: 1.0, mt0: T.melt, mst: 0.05, mdur: 0.85 };
+const HIDE = [0, 0, 0, 0];
+
+// drop that hangs from the top edge, falls with gravity (tail balls lag → teardrop) and splashes
+function dropLayer(t, x, yHang, yHit, tBead, tRel, tHit) {
+  const b = [];
+  if (t < tBead) return [HIDE, HIDE, HIDE, HIDE, HIDE, HIDE];
+  const g = (tt) => { const s = clamp((tt - tRel) / (tHit - tRel)); return yHang + (yHit - yHang) * s * s; };
+  if (t < tHit) {
+    const grow = eOut(seg(t, tBead, tRel));
+    const sag = eSine(seg(t, tBead, tRel + 0.05));
+    const neck = 1 - eOut(seg(t, tRel, tRel + 0.22));
+    b.push([x, t < tRel ? yHang - 14 + 26 * sag : g(t), 36 * grow, 0]);      // head
+    b.push([x, -10 - 30 * (1 - neck), 44 * neck, 0]);                          // the surface it pulls away from
+    b.push([x, t < tRel ? yHang - 30 + 14 * sag : g(t - 0.028), 23 * grow * (t < tRel ? 0.6 : 1), 0]);
+    b.push([x, t < tRel ? yHang - 44 : g(t - 0.055), 13 * grow * (t < tRel ? 0.4 : 1), 0]);
+    b.push(HIDE, HIDE);
+    return b;
+  }
+  // splash: six droplets thrown out and absorbed
+  const u = seg(t, tHit, tHit + 0.55);
+  if (u >= 1) return [HIDE, HIDE, HIDE, HIDE, HIDE, HIDE];
+  for (let i = 0; i < 6; i++) {
+    const a = -Math.PI / 2 + (i - 2.5) * 0.62 + (i % 2 ? 0.12 : -0.08);
+    const d = (60 + 70 * ((i * 37) % 5) / 5) * eOut(u) + 24 * eOut(clamp(u * 4));
+    const r = (i < 2 ? 30 : 17) * Math.pow(1 - u, 1.4) * (i === 0 ? 1.2 : 1);
+    b.push([x + Math.cos(a) * d * 1.6, yHit + Math.sin(a) * d * 0.55 + 40 * u * u, r, 0]);
+  }
+  return b;
+}
+function layerA(t) {
+  if (t < 3) return dropLayer(t, CX, 40, 560, T.bead, T.release, T.impact);
+  return dropLayer(t, 1500, 40, 330, T.lbead, T.lrelease, T.flood);
+}
+
+// plum blobs: seep out of the bloom, drift, merge into one breathing body
+const BIRTH = [[360, 300], [1580, 250], [1650, 840], [300, 830], [1010, 170], [930, 930]];
+const BODY = [[690, 562, 142], [818, 518, 172], [960, 552, 194], [1098, 522, 168], [1226, 566, 140], [925, 598, 122]];
+function layerB(t) {
+  const inh = eInOut(seg(t, T.inhale, T.inhale + 1.4));
+  const sc = 1 + 0.07 * inh;
+  const ORDER = [2, 1, 3, 0, 4, 5];                  // merge one after another, center first
+  return BODY.map(([tx, ty, tr], i) => {
+    const born = eOut(seg(t, T.blobs + i * 0.1, T.blobs + i * 0.1 + 0.9));
+    const o = ORDER.indexOf(i);
+    const u = eInOut(seg(t, T.gather - 0.25 + o * 0.16, T.body - 0.55 + o * 0.16));
+    const bx = BIRTH[i][0] + 50 * Math.sin(t * 0.9 + i * 1.7), by = BIRTH[i][1] + 40 * Math.cos(t * 0.8 + i * 2.3);
+    // swirl in along a curved path around the center
+    const vx = bx - tx, vy = by - ty, th = 0.9 * (1 - u) * (i % 2 ? 1 : -1);
+    const rx = (vx * Math.cos(th) - vy * Math.sin(th)) * (1 - u), ry = (vx * Math.sin(th) + vy * Math.cos(th)) * (1 - u);
+    const wob = 6 + u * 26;
+    let x = tx + rx + wob * Math.sin(t * 1.25 + i * 1.3), y = ty + ry + wob * Math.cos(t * 1.1 + i * 2.1);
+    x = CX + (x - CX) * sc; y = CY + (y - CY) * sc;
+    const lobe = 1 + 0.11 * u * Math.sin(t * 1.7 + i * 2.2);
+    return [x, y, lerp(tr * 0.62, tr, u) * born * sc * lobe, 0];
+  });
+}
+// text A sits inside the body and breathes with it
+const textAXf = t => 1 + 0.07 * eInOut(seg(t, T.inhale, T.inhale + 1.4));
+
+// peach layer: two ambient drops after the flood + six drops pulled out of the melting letters → one sphere
+let LET = { c: [], n: 0 };            // letter centers of "Flow out." (px)
+const AMB = [[430, 840, 44], [1560, 240, 34]];
+function layerC(t) {
+  const out = [];
+  const rEnd = 235 / Math.sqrt(8);                   // eight balls on one center → sphere of radius 235
+  const breathe = 1 + 0.035 * Math.sin(TAU * (t - T.sphere) / 1.6) * seg(t, T.sphere - 0.3, T.sphere + 0.2);
+  const dis = eInOut(seg(t, T.dissolve, T.fadeB));
+  const grow = 1 + 0.35 * dis;
+  const pick = [0, 2, 3, 5, 6, 7];                  // F o w · o u t
+  for (let k = 0; k < 6; k++) {
+    const li = pick[k], lx = LET.c[li] || CX;
+    const born = eOut(seg(t, T.melt + 0.12 + k * 0.05, T.melt + 0.62 + k * 0.05));
+    const u = eInOut(seg(t, T.melt + 0.45 + k * 0.06, T.sphere + k * 0.02));
+    const x = lerp(lx, CX, u), y = lerp(560, CY, u) + 30 * Math.sin(Math.PI * u) * (k % 2 ? 1 : -1);
+    out.push([x, y, lerp(46, rEnd, u) * born * breathe * grow, 0]);
+  }
+  for (let k = 0; k < 2; k++) {
+    const [ax, ay, ar] = AMB[k];
+    const born = eOut(seg(t, 5.7 + k * 0.3, 6.6 + k * 0.3));
+    const u = eInOut(seg(t, T.melt + 0.3, T.sphere + 0.05));
+    const x = lerp(ax + 40 * Math.sin(t * 0.7 + k * 2), CX, u), y = lerp(ay + 30 * Math.cos(t * 0.6 + k), CY, u);
+    out.push([x, y, lerp(ar, rEnd, u) * born * breathe * grow, 0]);
+  }
+  return out;
+}
+
+// ── WebGL ──
+const VS = `#version 300 es
+in vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }`;
+const FS = `#version 300 es
+precision highp float;
+out vec4 o;
+uniform vec2 uRes; uniform float uT, uFrame;
+uniform vec4 uA[6]; uniform vec3 uAe, uAc;
+uniform vec4 uB[6]; uniform float uBa;
+uniform vec4 uC[8]; uniform float uCa, uCw;
+uniform vec4 uBloom; uniform vec4 uFlood; uniform vec4 uRing[2];
+uniform sampler2D uTxA, uTxB;
+uniform float uTAp, uTAs;
+uniform float uLetC[12]; uniform int uLetN;
+uniform float uTB0, uTBst, uTBdur, uTBmode, uTBa;
+uniform float uBg;
+
+float hash(uvec3 v){ v = v*1664525u + 1013904223u; v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y; v ^= v >> 16u; v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y; return float(v.x & 0xffffffu) / 16777215.; }
+vec3 pal(int k, int i){
+  if(k==0){ // warm bloom: peach, coral, rose-lilac, apricot, dusty plum
+    if(i==0) return vec3(1.00,0.79,0.66); if(i==1) return vec3(0.97,0.46,0.43);
+    if(i==2) return vec3(0.80,0.60,0.86); if(i==3) return vec3(1.00,0.66,0.50); return vec3(0.56,0.27,0.50);
+  }
+  // evening flood: lilac, deep plum, mauve, indigo plum, rose
+  if(i==0) return vec3(0.74,0.60,0.93); if(i==1) return vec3(0.29,0.10,0.30);
+  if(i==2) return vec3(0.62,0.33,0.60); if(i==3) return vec3(0.17,0.07,0.24); return vec3(0.90,0.55,0.68);
+}
+vec3 mesh(vec2 p, float t, int k){
+  vec2 q = p / uRes.y;
+  q += 0.075*vec2(sin(q.y*3.1 + t*0.33) + sin(q.x*1.7 - t*0.21), cos(q.x*2.6 - t*0.29) + sin(q.y*2.2 + t*0.26));
+  q += 0.035*vec2(sin(q.y*6.3 - t*0.47 + q.x), cos(q.x*5.7 + t*0.41 - q.y));
+  vec3 acc = vec3(0.); float ws = 0.;
+  for(int i=0;i<5;i++){
+    float fi = float(i) + float(k)*3.7;
+    vec2 c = vec2(0.89, 0.5) + vec2(0.66*sin(t*0.12 + fi*1.9), 0.36*cos(t*0.10 + fi*2.7));
+    vec2 d = q - c; float w = 1. / pow(dot(d, d) + 0.035, 1.6);
+    acc += pal(k, i) * w; ws += w;
+  }
+  return acc / ws;
+}
+float edgeNoise(float ang, float t, float s){
+  return s*(0.55*sin(ang*5. + t*0.9) + 0.3*sin(ang*11. - t*1.7 + 1.3) + 0.15*sin(ang*23. + t*2.3));
+}
+void balls6(vec4 b[6], vec2 p, out float f, out vec2 g){
+  f = 0.; g = vec2(0.);
+  for(int i=0;i<6;i++){ vec2 d = p - b[i].xy; float r2 = b[i].z*b[i].z; float dd = dot(d,d) + 1.; f += r2/dd; g += -2.*r2*d/(dd*dd); }
+}
+void balls8(vec4 b[8], vec2 p, out float f, out vec2 g){
+  f = 0.; g = vec2(0.);
+  for(int i=0;i<8;i++){ vec2 d = p - b[i].xy; float r2 = b[i].z*b[i].z; float dd = dot(d,d) + 1.; f += r2/dd; g += -2.*r2*d/(dd*dd); }
+}
+// soft satin shading of a metaball body (height h = 1 - 1/f → paraboloid per ball)
+vec3 satin(vec3 edge, vec3 core, vec3 warm, float f, vec2 g, float scale){
+  float h = clamp(1. - 1./max(f, 1e-3), 0., 1.);
+  vec2 gh = g / max(f*f, 1e-3);
+  vec3 n = normalize(vec3(-gh*scale, 1.));
+  vec3 L = normalize(vec3(-0.42, -0.62, 0.66));
+  float dif = dot(n, L);
+  float sheen = pow(max(dot(reflect(-L, n), vec3(0.,0.,1.)), 0.), 5.);
+  vec3 c = mix(edge, core, smoothstep(0.0, 0.9, h));
+  c = mix(c, warm, clamp(dif - 0.55, 0., 1.)*0.55);   // lit side drifts warm
+  c *= 0.86 + 0.20*dif;
+  c += sheen*0.07*vec3(1.,0.95,0.92);
+  c += (1. - n.z)*0.08*core;                    // soft inner rim
+  return c;
+}
+float aa(float f, float th, float soft){ f = min(f, th*4.); float w = fwidth(f)*1.1 + soft; return smoothstep(th - w, th + w, f); }   // clamp: fields spike at ball centers
+
+void main(){
+  vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  float t = uT;
+  // base: dark plum night
+  vec2 vc = (p - uRes*0.5) / uRes.y;
+  vec3 col = mix(vec3(0.17,0.06,0.16), vec3(0.075,0.025,0.08), smoothstep(0.1, 0.95, length(vc*vec2(0.9,1.2))));
+  col *= uBg;
+  // bloom: warm mesh gradient spreading from the first drop
+  if(uBloom.z > 0.){
+    vec2 d = p - uBloom.xy; float r = length(d); float ang = atan(d.y, d.x);
+    float R = uBloom.z + edgeNoise(ang, t, 18. + 0.05*uBloom.z);
+    float m = smoothstep(R + 2.5, R - 2.5, r);
+    if(m > 0.){
+      vec3 mc = mesh(p, t, 0);
+      float rim = exp(-pow((R - r)/55., 2.)) * uBloom.w;
+      mc = mix(mc, vec3(1.0,0.60,0.52), rim*0.6);
+      col = mix(col, mc, m);
+    }
+  }
+  // plum body (layer B) + "Breathe in." inside it
+  {
+    float f; vec2 g; balls6(uB, p, f, g);
+    float fs, gsx; vec2 gs; balls6(uB, p - vec2(14., 30.), fs, gs);
+    float sh = smoothstep(0.35, 1.1, fs) * 0.22 * uBa;
+    col *= 1. - sh;
+    float m = aa(f, 1., 0.) * uBa;
+    if(m > 0.){
+      vec3 bc = satin(vec3(0.30,0.08,0.28), vec3(0.52,0.17,0.43), vec3(0.80,0.33,0.46), f, g, 110.);
+      // text formed inside the body: blurred field re-thresholded → gooey, then sharp
+      vec2 tp = (p - vec2(960., 540.)) / uTAs + vec2(960., 540.);
+      vec4 tx = texture(uTxA, tp / uRes);
+      float pA = uTAp;
+      float tf = mix(tx.b*1.75, mix(tx.g, tx.r, smoothstep(0.5, 1., pA)), smoothstep(0.15, 0.85, pA)) * smoothstep(0., 0.3, pA);
+      float tm = aa(tf, 0.5, 0.);
+      vec3 tcol = mix(vec3(1.0,0.86,0.76), vec3(1.0,0.93,0.86), clamp((620. - p.y)/160., 0., 1.));
+      bc = mix(bc, tcol, tm);
+      col = mix(col, bc, m);
+    }
+  }
+  // flood: evening mesh gradient poured from the lilac drop (liquid wipe)
+  if(uFlood.z > 0.){
+    vec2 d = p - uFlood.xy; float r = length(d); float ang = atan(d.y, d.x);
+    float R = uFlood.z + edgeNoise(ang + 0.8, t*1.2, 24. + 0.06*uFlood.z);
+    float m = smoothstep(R + 2.5, R - 2.5, r);
+    // soft shadow ahead of the front
+    col *= 1. - 0.25*smoothstep(R + 60., R, r)*(1. - m);
+    if(m > 0.){
+      vec3 mc = mesh(p, t + 3., 1);
+      float rim = exp(-pow((R - r)/70., 2.)) * uFlood.w;
+      mc = mix(mc, vec3(0.86,0.76,1.0), rim*0.55);
+      col = mix(col, mc, m);
+    }
+  }
+  // ripple rings
+  for(int i=0;i<2;i++){
+    if(uRing[i].w > 0.){
+      float r = length(p - uRing[i].xy);
+      col += vec3(1.0,0.9,0.85) * exp(-pow((r - uRing[i].z)/7., 2.)) * uRing[i].w*0.6;
+      col += vec3(1.0,0.8,0.75) * exp(-pow((r - uRing[i].z + 22.)/26., 2.)) * uRing[i].w*0.25;
+    }
+  }
+  // falling drops (layer A)
+  {
+    float f; vec2 g; balls6(uA, p, f, g);
+    float m = aa(f, 1., 0.);
+    if(m > 0.) col = mix(col, satin(uAe, uAc, uAc, f, g, 60.), m);
+  }
+  // peach layer: "Flow out." (melting letters) + drops → sphere
+  {
+    float f; vec2 g; balls8(uC, p, f, g);
+    float tf = 0.;
+    if(uTBa > 0.){
+      // continuous letter index from the letter centers → per-column progress
+      float s = 0.;
+      for(int i=0;i<11;i++){
+        if(i + 1 >= uLetN) break;
+        float a = uLetC[i], b = uLetC[i+1];
+        if(p.x >= a) s = float(i) + clamp((p.x - a)/(b - a), 0., 1.);
+      }
+      float u = clamp((t - uTB0 - s*uTBst)/uTBdur, 0., 1.);
+      float e = uTBmode < 0.5 ? 1. - pow(1. - u, 3.) : 1. - u*u;
+      float dir = uTBmode < 0.5 ? 1. : -1.;
+      float cn = 0.5 + 0.5*sin(p.x*0.047 + s*1.7)*sin(p.x*0.013 + 2.);
+      float up = (1. - e)*(1. - e)*(150. + 110.*cn);
+      float sy = 1. + (1. - e)*0.9;
+      float xs = p.x + (1. - e)*9.*sin(p.y*0.03 + t*3.);
+      float ys = 540. + (p.y - 540. + dir*up)/sy + 5.*e*sin(p.x*0.011 - t*1.9);   // slow wave through the settled word
+      vec4 tx = texture(uTxB, vec2(xs, ys) / uRes);
+      tf = mix(tx.b*1.8, mix(tx.g, tx.r, smoothstep(0.55, 1., e)), smoothstep(0.1, 0.8, e)) * smoothstep(0., 0.3, e) * uTBa;
+      // shadow of the letters
+      vec4 txs = texture(uTxB, vec2(xs - 10., ys - 22.) / uRes);
+      float tfs = txs.b * smoothstep(0.3, 1., e) * uTBa;
+      col *= 1. - 0.22*smoothstep(0.1, 0.6, tfs);
+    }
+    float fs; vec2 gs; balls8(uC, p - vec2(12., 26.), fs, gs);
+    col *= 1. - smoothstep(0.35, 1.1, fs)*0.2*uCa;
+    float F = f + 2.*tf;
+    vec2 G = g + 2.*vec2(dFdx(tf), -dFdy(tf))*0.6;
+    float m = aa(F, 1., uCw) * uCa;
+    if(m > 0.){
+      vec3 pc = satin(vec3(0.97,0.55,0.47), vec3(1.0,0.86,0.74), vec3(1.0,0.93,0.86), F, G, 110.);
+      col = mix(col, pc, m);
+    }
+  }
+  // vignette + grain (also dithers the gradients)
+  col *= 1. - 0.18*smoothstep(0.35, 1.05, length(vc*vec2(0.85, 1.1)));
+  uvec3 hv = uvec3(uvec2(gl_FragCoord.xy), uint(uFrame) / 2u + 7u);   // grain refreshes at 15 fps
+  float n = hash(hv) + hash(hv + uvec3(0u, 0u, 977u)) - 1.;
+  col += n*0.02;
+  o = vec4(clamp(col, 0., 1.), 1.);
+}`;
+let prog; const U = {};
+function initGL() {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  for (const n of ['uRes', 'uT', 'uFrame', 'uA', 'uAe', 'uAc', 'uB', 'uBa', 'uC', 'uCa', 'uCw', 'uBloom', 'uFlood', 'uRing', 'uTxA', 'uTxB',
+    'uTAp', 'uTAs', 'uLetC', 'uLetN', 'uTB0', 'uTBst', 'uTBdur', 'uTBmode', 'uTBa', 'uBg']) U[n] = gl.getUniformLocation(prog, n);
+  gl.viewport(0, 0, W, H);
+}
+// glyph field texture: R = sharp, G = small blur, B = big blur (computed once)
+function textTexture(unit, str, font, dy) {
+  const layer = (blur) => {
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+    x.fillStyle = '#000'; x.fillRect(0, 0, W, H);
+    x.filter = blur ? `blur(${blur}px)` : 'none';
+    x.font = font; x.textAlign = 'center'; x.textBaseline = 'alphabetic'; x.fillStyle = '#fff';
+    x.fillText(str, CX, CY + dy);
+    return x.getImageData(0, 0, W, H).data;
+  };
+  const r = layer(0), g = layer(5), b = layer(20);
+  const px = new Uint8Array(W * H * 4);
+  for (let i = 0; i < W * H; i++) { px[i * 4] = r[i * 4]; px[i * 4 + 1] = g[i * 4]; px[i * 4 + 2] = b[i * 4]; px[i * 4 + 3] = 255; }
+  const tex = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+const FONT_A = '500 142px "Fraunces"', FONT_B = 'italic 600 250px "Fraunces"';
+const STR_A = 'Breathe in.', STR_B = 'Flow out.';
+function measureLetters() {
+  ctx.font = FONT_B; const full = ctx.measureText(STR_B).width, x0 = CX - full / 2;
+  const c = [];
+  for (let i = 0; i < STR_B.length; i++) {
+    const a = ctx.measureText(STR_B.slice(0, i)).width, b = ctx.measureText(STR_B.slice(0, i + 1)).width;
+    c.push(x0 + (a + b) / 2);
+  }
+  LET = { c, n: c.length };
+}
+function setup() {
+  initGL();
+  // vertical centering: cap-height-ish offsets so the words sit on the frame center
+  textTexture(0, STR_A, FONT_A, 48);
+  textTexture(1, STR_B, FONT_B, 84);
+  gl.uniform1i(U.uTxA, 0); gl.uniform1i(U.uTxB, 1);
+  measureLetters();
+  gl.uniform1fv(U.uLetC, new Float32Array([...LET.c, ...Array(12 - LET.n).fill(99999)]));
+  gl.uniform1i(U.uLetN, LET.n);
+}
+
+function frameGL(t) {
+  gl.uniform2f(U.uRes, W, H); gl.uniform1f(U.uT, t); gl.uniform1f(U.uFrame, Math.round(t * 30));
+  gl.uniform1f(U.uBg, 0.55 + 0.45 * eOut(seg(t, 0, 0.9)));
+  const A = layerA(t);
+  gl.uniform4fv(U.uA, A.flat());
+  if (t < 3) { gl.uniform3f(U.uAe, 0.93, 0.36, 0.35); gl.uniform3f(U.uAc, 1.0, 0.70, 0.58); }
+  else { gl.uniform3f(U.uAe, 0.58, 0.44, 0.88); gl.uniform3f(U.uAc, 0.90, 0.83, 1.0); }
+  // bloom and flood fronts
+  const ub = seg(t, T.impact, T.bloomEnd);
+  gl.uniform4f(U.uBloom, CX, 560, t < T.impact ? 0 : 2300 * (1 - Math.pow(1 - ub, 2.6)), 1 - ub);
+  const uf = seg(t, T.flood, T.floodEnd);
+  gl.uniform4f(U.uFlood, 1500, 330, t < T.flood ? 0 : 2400 * eInOut(Math.pow(uf, 0.8)) + 30 * seg(t, T.flood, T.flood + 0.1), 1 - uf);
+  // ripple rings at each impact
+  const ring = (t0, x, y, d, R, a) => { const u = seg(t, t0, t0 + d); return t < t0 || u >= 1 ? [0, 0, 0, 0] : [x, y, R * eOut(u), a * Math.pow(1 - u, 1.5)]; };
+  const r1 = t < 3 ? ring(T.impact, CX, 560, 1.3, 1000, 0.55) : ring(T.flood, 1500, 330, 1.2, 900, 0.5);
+  const r2 = t < 3 ? ring(T.impact + 0.16, CX, 560, 1.3, 700, 0.35) : ring(T.flood + 0.15, 1500, 330, 1.2, 640, 0.3);
+  gl.uniform4fv(U.uRing, [...r1, ...r2]);
+  // plum body + word A
+  gl.uniform4fv(U.uB, layerB(t).flat());
+  gl.uniform1f(U.uBa, t < T.floodEnd + 0.2 ? 1 : 0);
+  gl.uniform1f(U.uTAp, eSine(seg(t, T.wordA, T.wordA + 1.15)));
+  gl.uniform1f(U.uTAs, textAXf(t));
+  // peach layer + word B
+  gl.uniform4fv(U.uC, layerC(t).flat());
+  const dis = eInOut(seg(t, T.dissolve, T.fadeB));
+  gl.uniform1f(U.uCa, 1 - dis);
+  gl.uniform1f(U.uCw, 1.4 * dis * dis);
+  const melting = t >= TB.mt0;
+  gl.uniform1f(U.uTB0, melting ? TB.mt0 : TB.t0); gl.uniform1f(U.uTBst, melting ? TB.mst : TB.st);
+  gl.uniform1f(U.uTBdur, melting ? TB.mdur : TB.dur); gl.uniform1f(U.uTBmode, melting ? 1 : 0);
+  gl.uniform1f(U.uTBa, t < TB.t0 || t > TB.mt0 + 1.6 ? 0 : 1);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+function render(t) {
+  frameGL(t);
+  ctx.globalAlpha = 1; ctx.drawImage(gc, 0, 0);
+  // closing line under the sphere
+  const ca = eSine(seg(t, T.sphere + 0.1, T.sphere + 0.6)) * (1 - eSine(seg(t, T.dissolve + 0.25, T.fadeA + 0.35)));
+  if (ca > 0) {
+    ctx.save(); ctx.globalAlpha = ca * 0.85; ctx.font = '500 28px "Manrope"'; ctx.letterSpacing = '10px';
+    ctx.fillStyle = '#fbe6dc'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('A MINUTE OF STILLNESS', CX + 5, 872 - 8 * ca); ctx.restore();
+  }
+  const fade = eInOut(seg(t, T.fadeA, T.fadeB));
+  if (fade > 0) { ctx.globalAlpha = fade; ctx.fillStyle = '#16061a'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+}
+
+window.ready = (async () => {
+  await Promise.all([document.fonts.load(FONT_A, STR_A), document.fonts.load(FONT_B, STR_B), document.fonts.load('500 25px "Manrope"', 'A MINUTE OF STILLNESS')]);
+  await document.fonts.ready;
+  setup(); render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [
+    { t: T.bead + 0.1, k: 'swell', d: 0.5, v: 0.4 }, { t: T.release, k: 'plip', f: 1.0 },
+    { t: T.impact, k: 'drop' }, { t: T.impact + 0.02, k: 'bloom', d: 2.2 },
+    { t: T.gather + 0.1, k: 'flow', d: 1.3 },
+    { t: 2.95, k: 'goo', f: 0.9 }, { t: 3.12, k: 'goo', f: 1.1 }, { t: 3.3, k: 'goo', f: 0.8 },
+    { t: T.wordA + 0.1, k: 'shimmer' }, { t: T.inhale, k: 'breath', d: 1.5 },
+    { t: T.lrelease, k: 'plip', f: 1.25 }, { t: T.flood, k: 'drop', v: 0.8 }, { t: T.flood + 0.02, k: 'flood', d: 1.4 },
+    { t: T.melt, k: 'flow', d: 1.2, v: 0.8 },
+    { t: T.melt + 0.45, k: 'goo', f: 1.0 }, { t: T.melt + 0.8, k: 'goo', f: 0.85 }, { t: T.sphere - 0.1, k: 'goo', f: 0.7 },
+    { t: T.sphere, k: 'chord' }, { t: T.dissolve, k: 'exhale', d: 1.0 }
+  ];
+  for (let i = 0; i < LET.n; i++) if (STR_B[i] !== ' ') ev.push({ t: TB.t0 + i * TB.st + 0.55, k: 'drip', f: [1.0, 1.19, 1.33, 1.5, 1, 1.12, 1.26, 1.5, 1.78][i] });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
