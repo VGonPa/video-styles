@@ -4,9 +4,9 @@ Visual family · Styles borrowed from art and design history.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (12) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (5) · [Product & Launches](../../categories/use-cases/product.md) (10) · [Social & Short-Form](../../categories/use-cases/social.md) (17) · [Storytelling & Brand](../../categories/use-cases/story.md) (17) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (4) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (12)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (12) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (5) · [Product & Launches](../../categories/use-cases/product.md) (11) · [Social & Short-Form](../../categories/use-cases/social.md) (17) · [Storytelling & Brand](../../categories/use-cases/story.md) (18) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (4) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (12)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (5) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (1) · [Games](../../categories/families/games.md) (3)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (1) · [Games](../../categories/families/games.md) (3)
 
 <table>
 <tr>
@@ -17,6 +17,7 @@ Visual family · Styles borrowed from art and design history.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/constructivism/constructivism.mp4"><img src="../../styles/constructivism/preview.gif" alt="Constructivism" width="100%"></a><br><b>39 · Constructivism</b><br><a href="../../styles/constructivism/constructivism.mp4">video</a> · <a href="../../styles/constructivism">source</a></td>
+<td width="25%" align="center"><a href="../../styles/art-nouveau/art-nouveau.mp4"><img src="../../styles/art-nouveau/preview.gif" alt="Art Nouveau" width="100%"></a><br><b>40 · Art Nouveau</b><br><a href="../../styles/art-nouveau/art-nouveau.mp4">video</a> · <a href="../../styles/art-nouveau">source</a></td>
 </tr>
 </table>
 
@@ -27,3 +28,4 @@ Visual family · Styles borrowed from art and design history.
 | 37 | [Art Deco](../../styles/art-deco/) | Gold sunbursts, stepped frames, symmetry | Gala invitations, elegant openers, and period brand stories | [Art Movements](../../categories/families/art-movements.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
 | 38 | [Ukiyo-e](../../styles/ukiyo-e/) | Woodblock waves, washi and seal | Calm, crafted stories and elegant title openers | [Art Movements](../../categories/families/art-movements.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
 | 39 | [Constructivism](../../styles/constructivism/) | Red wedges and shouting diagonals | Calls to action, manifestos, and loud announcements | [Art Movements](../../categories/families/art-movements.md) | [Social & Short-Form](../../categories/use-cases/social.md), [News & Current Affairs](../../categories/use-cases/news.md) |
+| 40 | [Art Nouveau](../../styles/art-nouveau/) | Whiplash vines, mosaic halos, pastel lithograph | Perfume and beauty launches, storybook openers, heritage brands | [Art Movements](../../categories/families/art-movements.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Product & Launches](../../categories/use-cases/product.md) |
