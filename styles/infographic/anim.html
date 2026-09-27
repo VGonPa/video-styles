@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── Infographic Explainer · faceless-channel style ─────────────────────────────────────
+// "What happens when you skip sleep?" A dot-eyed character pops in (squash & stretch) and yawns; a battery
+// slides in and drains 100 → 20 %; the camera pans laterally to the next "station" while he walks (walk loop,
+// background motion-blurred); a pictogram row fills "1 in 3 adults"; another pan: a focus bar drops and the
+// counter runs to −40 %; the camera zooms into the brain in his thought bubble, which becomes the next background:
+// memory cards fly out of a filing drawer; a whip slide to night: he sleeps, Zzz rise, the battery recharges and
+// a clean end card settles. Flat solid colours, round-cornered vector shapes, one highlight colour (orange).
+// Everything is a pure function of t (seeded RNG only).
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const buf = document.createElement('canvas'); buf.width = W; buf.height = H; const bx = buf.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, d) => clamp((t - a) / d);
+const eio = u => { u = clamp(u); return u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; };
+const eo = u => 1 - Math.pow(1 - clamp(u), 3);
+const ei = u => Math.pow(clamp(u), 3);
+const back = (u, s = 1.9) => { u = clamp(u) - 1; return 1 + (s + 1) * u * u * u + s * u * u; };
+const smooth = u => { u = clamp(u); return u * u * (3 - 2 * u); };
+// squash & stretch after a pop: returns [sx, sy]
+const squash = (t, t0, amp = 0.22) => { const u = t - t0; if (u < 0) return [1, 1]; const q = amp * Math.sin(u * 17) * Math.exp(-u * 6.5); return [1 + q, 1 - q]; };
+function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let r = Math.imul(s ^ (s >>> 15), 1 | s); r ^= r + Math.imul(r ^ (r >>> 7), 61 | r); return ((r ^ (r >>> 14)) >>> 0) / 4294967296; }; }
+
+// ── palette: restrained flat + one highlight ──
+const BG = '#E4EDF0', FLOOR = '#C7D6DC', FLOORL = '#B5C7CF', INK = '#22313F', MUTE = '#7F97A6', PALE = '#A9BDC8';
+const BLUE = '#3F7CAC', BLUE_D = '#2F6690', WHITE = '#FFFFFF', HI = '#FF6B35', HI_D = '#E0521F';
+const SKIN = '#F1C7A2', SKIN_D = '#E0AD86', HAIR = '#2A2F3A', PANTS = '#2F3E52', BRAIN = '#F2A9B7', BRAIN_D = '#DD8397';
+const NIGHT = '#1D2A40', NIGHT_L = '#2A3A57', MOON = '#F6EBCB';
+const F = (w, px) => `${w} ${px}px Fredoka`;
+const GROUND = 860;
+
+// ── timeline (s) ──
+const T = {
+  title: 0.1, pop: 0.22, yawn: 0.72, yawnDur: 0.8, batt: 1.0, drain: 1.35, drainDur: 0.95,
+  pan1: 2.3, panDur: 0.78, stat: 2.95, picto: 3.05, pictoGap: 0.06, hl: 3.7, hlGap: 0.14,
+  pan2: 4.2, bubble: 4.9, focus: 5.05, focusDur: 0.8, zoom: 5.95, zoomDur: 0.72,
+  drawer: 6.75, cards: 6.9, whip: 7.95, whipDur: 0.36, charge: 8.55, chargeDur: 0.9, end: 8.9,
+};
+const ST = [0, 1920, 3840];                          // world x of each station (camera left edge)
+
+// ── camera (scene 1): lateral pans between stations ──
+function camX(t) {
+  const a = eio(seg(t, T.pan1, T.panDur)), b = eio(seg(t, T.pan2, T.panDur));
+  return ST[0] + a * 1920 + b * 1920;
+}
+// character world x: walks with the camera during each pan
+function charX(t) {
+  const a = eio(seg(t, T.pan1 - 0.05, T.panDur + 0.12)), b = eio(seg(t, T.pan2 - 0.05, T.panDur + 0.12));
+  return lerp(lerp(700, 1920 + 430, a), 3840 + 520, b);
+}
+const walking = t => (t > T.pan1 - 0.1 && t < T.pan1 + T.panDur + 0.12) || (t > T.pan2 - 0.1 && t < T.pan2 + T.panDur + 0.12);
+
+// ── helpers ──
+function rr(x, X, Y, w, h, r) { x.beginPath(); x.roundRect(X, Y, w, h, r); }
+function text(x, s, X, Y, font, col, align = 'center', base = 'alphabetic', track = 0) {
+  x.font = font; x.fillStyle = col; x.textAlign = align; x.textBaseline = base;
+  if (track) x.letterSpacing = track + 'px'; x.fillText(s, X, Y); if (track) x.letterSpacing = '0px';
+}
+function circle(x, X, Y, r, col) { x.beginPath(); x.arc(X, Y, r, 0, TAU); x.fillStyle = col; x.fill(); }
+
+// ── the character (front view, dot eyes, mitten hands) ─────────────────────────────
+// pose: armL/armR {a: shoulder angle (0 = hanging, + = outward), e: elbow bend}, liftL/liftR (0..1 foot lift),
+// bob (px), lean, tilt (head), look (eye shift −1..1), yawn (0..1), blink (0..1)
+const dir = (side, a) => [side * Math.sin(a), Math.cos(a)];
+function drawArm(x, side, arm) {
+  const S = [side * 48, -272], d1 = dir(side, arm.a), E = [S[0] + d1[0] * 64, S[1] + d1[1] * 64];
+  const d2 = dir(side, arm.a + arm.e), Hd = [E[0] + d2[0] * 58, E[1] + d2[1] * 58];
+  x.strokeStyle = BLUE_D; x.lineWidth = 26; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.beginPath(); x.moveTo(S[0], S[1]); x.lineTo(E[0], E[1]); x.lineTo(Hd[0], Hd[1]); x.stroke();
+  circle(x, Hd[0], Hd[1], 18, SKIN);
+}
+function drawLeg(x, side, lift) {
+  const Hp = [side * 25, -150], Ft = [side * 30, -14 - lift * 34], K = [side * (29 + lift * 16), (Hp[1] + Ft[1]) / 2 - lift * 6];
+  x.strokeStyle = PANTS; x.lineWidth = 32; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.beginPath(); x.moveTo(Hp[0], Hp[1]); x.lineTo(K[0], K[1]); x.lineTo(Ft[0], Ft[1]); x.stroke();
+  x.fillStyle = INK; x.beginPath(); x.ellipse(Ft[0] + side * 9, Ft[1] + 4, 28, 14, 0, Math.PI, 0); x.lineTo(Ft[0] + side * 9 + 28, Ft[1] + 10);
+  x.lineTo(Ft[0] + side * 9 - 28, Ft[1] + 10); x.fill();
+}
+function drawHead(x, p) {
+  x.save(); x.translate(0, -300); x.rotate(p.tilt || 0); x.translate(0, 300);
+  x.fillStyle = SKIN; x.fillRect(-14, -318, 28, 26);                         // neck
+  circle(x, -60, -360, 13, SKIN_D); circle(x, 60, -360, 13, SKIN_D);         // ears
+  circle(x, 0, -362, 62, SKIN);
+  // hair cap
+  x.fillStyle = HAIR; x.beginPath(); x.arc(0, -362, 64, Math.PI * 1.06, Math.PI * 1.94);
+  x.quadraticCurveTo(38, -398, 10, -392); x.quadraticCurveTo(-30, -402, -61, -383); x.closePath(); x.fill();
+  const lx = (p.look || 0) * 9, yw = p.yawn || 0, bl = Math.max(p.blink || 0, clamp((yw - 0.35) / 0.3));
+  x.fillStyle = INK; x.strokeStyle = INK; x.lineCap = 'round';
+  for (const s of [-1, 1]) {
+    if (bl < 0.5) { x.beginPath(); x.ellipse(s * 22 + lx, -356, 8, 8 * (1 - bl * 1.6), 0, 0, TAU); x.fill(); }
+    else { x.lineWidth = 5; x.beginPath(); x.arc(s * 22 + lx, -360, 9, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  }
+  if (yw > 0.02) { x.fillStyle = '#5A2A2A'; x.beginPath(); x.ellipse(lx * 0.6, -322, 9 + 7 * yw, 3 + 19 * yw, 0, 0, TAU); x.fill(); }
+  x.restore();
+}
+function drawChar(x, X, Y, s, p, sq = [1, 1]) {
+  x.save(); x.translate(X, Y); x.scale(s * sq[0], s * sq[1]); x.translate(0, -(p.bob || 0));
+  // soft flat shadow
+  x.fillStyle = 'rgba(34,49,63,0.13)'; x.beginPath(); x.ellipse(0, (p.bob || 0), 78 - (p.bob || 0) * 0.8, 12, 0, 0, TAU); x.fill();
+  x.rotate(p.lean || 0);
+  drawLeg(x, -1, p.liftL || 0); drawLeg(x, 1, p.liftR || 0);
+  x.fillStyle = BLUE; rr(x, -58, -300, 116, 168, 34); x.fill();            // torso
+  x.fillStyle = BLUE_D; rr(x, -58, -160, 116, 28, [0, 0, 20, 20]); x.fill();    // hem
+  x.fillStyle = SKIN; x.beginPath(); x.moveTo(-16, -300); x.lineTo(0, -278); x.lineTo(16, -300); x.fill(); // collar V
+  drawArm(x, -1, p.armL || { a: 0.12, e: 0.05 }); drawArm(x, 1, p.armR || { a: 0.12, e: 0.05 });
+  drawHead(x, p);
+  x.restore();
+}
+const BLINKS = [1.9, 3.3, 4.75, 5.55];
+function blinkAt(t) { let b = 0; for (const bt of BLINKS) { const u = (t - bt) / 0.14; if (u > 0 && u < 1) b = Math.sin(u * Math.PI); } return b; }
+function poseAt(t) {
+  const idle = Math.sin(t * 3.1);
+  const p = { armL: { a: 0.12 + idle * 0.02, e: 0.05 }, armR: { a: 0.12 - idle * 0.02, e: 0.05 }, bob: 2 + idle * 2, blink: blinkAt(t), look: 0.3 };
+  // yawn: anticipation dip → big stretch (arms up, head back) → settle
+  const yu = seg(t, T.yawn, T.yawnDur);
+  if (yu > 0 && yu < 1) {
+    const up = Math.sin(Math.PI * clamp(yu * 1.15)) , dip = Math.sin(Math.PI * clamp(yu / 0.2)) * (yu < 0.2 ? 1 : 0);
+    p.yawn = smooth(Math.sin(Math.PI * clamp((yu - 0.08) / 0.85)));
+    p.armL = { a: lerp(0.12, 2.45, up), e: lerp(0.05, 0.3, up) }; p.armR = { a: lerp(0.12, 2.45, up), e: lerp(0.05, 0.3, up) };
+    p.tilt = -0.05 * up; p.bob = 2 - dip * 10 + up * 10; p.look = 0;
+  }
+  // point at battery
+  const pt = smooth(seg(t, T.batt + 0.25, 0.25)) * (1 - smooth(seg(t, T.pan1 - 0.25, 0.2)));
+  if (pt > 0) { p.armR = { a: lerp(p.armR.a, 1.45 + idle * 0.04, pt), e: lerp(p.armR.e, -0.25, pt) }; p.look = lerp(p.look, 1, pt); }
+  // present the pictograms
+  const pr = smooth(seg(t, T.picto - 0.1, 0.25)) * (1 - smooth(seg(t, T.pan2 - 0.25, 0.2)));
+  if (pr > 0) { p.armR = { a: lerp(p.armR.a, 1.9 + idle * 0.05, pr), e: lerp(p.armR.e, -0.55, pr) }; p.look = lerp(p.look, 1, pr); }
+  // scratch head (gesture loop, 2 poses)
+  const sc = smooth(seg(t, T.bubble - 0.05, 0.25));
+  if (sc > 0) { const w = Math.sin(t * 19) * 0.12; p.armR = { a: lerp(p.armR.a, 2.55 + w, sc), e: lerp(p.armR.e, 1.55 - w, sc) }; p.tilt = 0.08 * sc; p.look = lerp(p.look, 0.8, sc); }
+  if (walking(t)) {
+    const ph = t * 15; const k = smooth(Math.min(seg(t, T.pan1 - 0.1, 0.12), 1 - seg(t, T.pan1 + T.panDur, 0.12))) +
+      smooth(Math.min(seg(t, T.pan2 - 0.1, 0.12), 1 - seg(t, T.pan2 + T.panDur, 0.12)));
+    p.liftL = Math.max(0, Math.sin(ph)) * k; p.liftR = Math.max(0, -Math.sin(ph)) * k;
+    p.bob += Math.abs(Math.sin(ph)) * 10 * k;
+    p.armL = { a: lerp(p.armL.a, 0.18 + 0.22 * Math.sin(ph), k), e: lerp(p.armL.e, 0.35, k) };
+    p.armR = { a: lerp(p.armR.a, 0.18 - 0.22 * Math.sin(ph), k), e: lerp(p.armR.e, 0.35, k) };
+    p.lean = 0.05 * k; p.look = lerp(p.look, 1, k);
+  }
+  return p;
+}
+
+// ── icons ──
+function battery(x, cx, cy, w, h, level, fg, bg, blinkLow) {
+  const bw = 16;
+  x.fillStyle = fg; rr(x, cx + w / 2 - 2, cy - h * 0.2, 28, h * 0.4, 8); x.fill();
+  rr(x, cx - w / 2, cy - h / 2, w, h, 34); x.fill();
+  x.fillStyle = bg; rr(x, cx - w / 2 + bw, cy - h / 2 + bw, w - 2 * bw, h - 2 * bw, 20); x.fill();
+  const iw = w - 2 * bw - 20, ih = h - 2 * bw - 20, ix = cx - w / 2 + bw + 10, iy = cy - h / 2 + bw + 10;
+  let col = level > 0.3 ? BLUE : HI;
+  if (level <= 0.3 && blinkLow && Math.sin(blinkLow * 16) < -0.3) col = HI_D;
+  if (level > 0.005) { x.fillStyle = col; rr(x, ix, iy, Math.max(24, iw * level), ih, 14); x.fill(); }
+  // segment ticks
+  x.fillStyle = bg; for (let k = 1; k < 5; k++) x.fillRect(ix + iw * k / 5 - 4, iy, 8, ih);
+}
+function picto(x, cx, base, s, col) {
+  x.fillStyle = col;
+  circle(x, cx, base - 150 * s, 24 * s, col);
+  rr(x, cx - 34 * s, base - 118 * s, 68 * s, 76 * s, [30 * s, 30 * s, 10 * s, 10 * s]); x.fill();
+  rr(x, cx - 28 * s, base - 50 * s, 24 * s, 50 * s, 10 * s); x.fill();
+  rr(x, cx + 4 * s, base - 50 * s, 24 * s, 50 * s, 10 * s); x.fill();
+}
+function brain(x, cx, cy, r) {
+  const lobes = [[-0.52, -0.2, 0.5], [-0.15, -0.5, 0.52], [0.3, -0.45, 0.5], [0.58, -0.05, 0.46], [0.42, 0.33, 0.44], [-0.05, 0.3, 0.52], [-0.5, 0.25, 0.44]];
+  x.fillStyle = BRAIN; x.beginPath();
+  for (const [a, b, c] of lobes) { x.moveTo(cx + a * r + c * r, cy + b * r); x.arc(cx + a * r, cy + b * r, c * r, 0, TAU); }
+  x.fill();
+  // stem
+  x.beginPath(); x.roundRect(cx + 0.05 * r, cy + 0.55 * r, 0.26 * r, 0.42 * r, 0.12 * r); x.fill();
+  x.strokeStyle = BRAIN_D; x.lineWidth = r * 0.075; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(cx - 0.02 * r, cy - 0.78 * r); x.bezierCurveTo(cx - 0.18 * r, cy - 0.4 * r, cx + 0.14 * r, cy - 0.2 * r, cx - 0.04 * r, cy + 0.2 * r); x.stroke();
+  x.beginPath(); x.moveTo(cx - 0.72 * r, cy - 0.05 * r); x.bezierCurveTo(cx - 0.5 * r, cy - 0.3 * r, cx - 0.35 * r, cy + 0.05 * r, cx - 0.22 * r, cy - 0.12 * r); x.stroke();
+  x.beginPath(); x.moveTo(cx + 0.28 * r, cy - 0.72 * r); x.bezierCurveTo(cx + 0.35 * r, cy - 0.45 * r, cx + 0.6 * r, cy - 0.4 * r, cx + 0.6 * r, cy - 0.2 * r); x.stroke();
+  x.beginPath(); x.moveTo(cx + 0.2 * r, cy + 0.12 * r); x.bezierCurveTo(cx + 0.4 * r, cy + 0.05 * r, cx + 0.5 * r, cy + 0.3 * r, cx + 0.78 * r, cy + 0.18 * r); x.stroke();
+  x.beginPath(); x.moveTo(cx - 0.62 * r, cy + 0.42 * r); x.bezierCurveTo(cx - 0.4 * r, cy + 0.3 * r, cx - 0.3 * r, cy + 0.6 * r, cx - 0.1 * r, cy + 0.5 * r); x.stroke();
+}
+function plant(x, cx) {
+  x.fillStyle = '#6E9E8B';
+  for (const [a, l] of [[-0.5, 120], [-0.15, 150], [0.2, 140], [0.55, 110]]) {
+    x.save(); x.translate(cx, GROUND - 90); x.rotate(a); x.beginPath(); x.ellipse(0, -l / 2, 22, l / 2, 0, 0, TAU); x.fill(); x.restore();
+  }
+  x.fillStyle = PANTS; x.beginPath(); x.moveTo(cx - 55, GROUND - 100); x.lineTo(cx + 55, GROUND - 100); x.lineTo(cx + 40, GROUND); x.lineTo(cx - 40, GROUND); x.fill();
+}
+function lamp(x, cx) {
+  x.fillStyle = PANTS; x.fillRect(cx - 5, GROUND - 330, 10, 330); rr(x, cx - 45, GROUND - 14, 90, 14, 7); x.fill();
+  x.fillStyle = PALE; x.beginPath(); x.moveTo(cx - 40, GROUND - 330); x.lineTo(cx + 40, GROUND - 330); x.lineTo(cx + 62, GROUND - 420); x.lineTo(cx - 62, GROUND - 420); x.fill();
+}
+
+// ── scene 1: the room with three stations (world coordinates) ──
+function drawWorld(x, t) {
+  x.fillStyle = BG; x.fillRect(-4000, -1000, 16000, 3000);
+  // wall stripe
+  x.fillStyle = '#D9E5E9'; x.fillRect(-4000, 700, 16000, GROUND - 700);
+  x.fillStyle = FLOOR; x.fillRect(-4000, GROUND, 16000, 400);
+  x.fillStyle = FLOORL; x.fillRect(-4000, GROUND, 16000, 10);
+  // station 1 props: night window
+  x.save(); x.translate(0, 60);
+  x.fillStyle = WHITE; rr(x, 150, 170, 280, 300, 22); x.fill();
+  x.fillStyle = NIGHT; rr(x, 168, 188, 244, 264, 12); x.fill();
+  circle(x, 330, 260, 38, MOON); circle(x, 312, 248, 34, NIGHT);
+  x.fillStyle = WHITE; x.fillRect(286, 188, 8, 264); x.fillRect(168, 316, 244, 8);
+  for (const [sx, sy] of [[205, 225], [240, 390], [370, 400], [215, 300]]) circle(x, sx, sy, 4, MOON);
+  x.restore();
+  plant(x, 1720); lamp(x, 3840 + 200);
+  // station 3: wall clock
+  const ccx = 3840 + 1620, ccy = 250; circle(x, ccx, ccy, 92, WHITE); circle(x, ccx, ccy, 78, BG);
+  x.strokeStyle = INK; x.lineWidth = 10; x.lineCap = 'round';
+  const ha = -Math.PI / 2 + TAU * 3 / 12 + t * 0.4, ma = -Math.PI / 2 + t * 4.6;
+  x.beginPath(); x.moveTo(ccx, ccy); x.lineTo(ccx + Math.cos(ha) * 40, ccy + Math.sin(ha) * 40); x.stroke();
+  x.lineWidth = 7; x.beginPath(); x.moveTo(ccx, ccy); x.lineTo(ccx + Math.cos(ma) * 60, ccy + Math.sin(ma) * 60); x.stroke();
+  circle(x, ccx, ccy, 9, HI);
+  drawStation1(x, t); drawStation2(x, t); drawStation3(x, t);
+}
+function drawStation1(x, t) {
+  const u = seg(t, T.batt, 0.5); if (u <= 0) return;
+  const X0 = 1300, Y0 = 470, sl = back(u, 1.6), dx = (1 - sl) * 900;
+  x.save(); x.translate(X0 + dx, Y0); x.rotate((1 - eo(u)) * 0.15);
+  const lvl = lerp(1, 0.2, eo(seg(t, T.drain, T.drainDur)));
+  battery(x, 0, 0, 400, 190, lvl, INK, WHITE, t);
+  x.restore();
+  const tu = eo(seg(t, T.batt + 0.12, 0.4));
+  x.globalAlpha = tu;
+  text(x, 'ENERGY', X0 + dx, Y0 - 140 + (1 - tu) * 20, F(600, 38), MUTE, 'center', 'alphabetic', 8);
+  const pct = Math.round(lerp(100, 20, eo(seg(t, T.drain, T.drainDur))));
+  text(x, pct + '%', X0 + dx, Y0 + 205, F(700, 96), lvl <= 0.3 ? HI : INK);
+  x.globalAlpha = 1;
+}
+function drawStation2(x, t) {
+  const O = 1920; const tu = seg(t, T.stat, 0.45); if (tu <= 0) return;
+  // headline: "1 in 3 adults"
+  const hs = back(tu, 2.2), [qx, qy] = squash(t, T.stat + 0.3, 0.12);
+  x.save(); x.translate(O + 1290, 330); x.scale(hs * qx, hs * qy);
+  x.font = F(700, 132); const w1 = x.measureText('1 in 3').width; x.font = F(600, 96); const w2 = x.measureText(' adults').width;
+  text(x, '1 in 3', -(w1 + w2) / 2, 40, F(700, 132), HI, 'left');
+  text(x, ' adults', -(w1 + w2) / 2 + w1, 40, F(600, 96), INK, 'left');
+  x.restore();
+  const su = eo(seg(t, T.stat + 0.15, 0.4)); x.globalAlpha = su;
+  text(x, 'sleep less than 7 hours a night', O + 1290, 432 + (1 - su) * 24, F(500, 54), '#5E7686');
+  x.globalAlpha = 1;
+  // pictogram row: 3 groups of 3, one in each highlighted
+  for (let i = 0; i < 9; i++) {
+    const g = Math.floor(i / 3), cx = O + 870 + i * 104 + g * 44, pu = seg(t, T.picto + i * T.pictoGap, 0.4);
+    if (pu <= 0) continue;
+    const s = back(pu, 2.4), hl = i % 3 === 0 ? seg(t, T.hl + g * T.hlGap, 0.18) : 0;
+    const [sx, sy] = hl > 0 ? squash(t, T.hl + g * T.hlGap, 0.2) : [1, 1];
+    x.save(); x.translate(cx, 780); x.scale(s * sx, s * sy);
+    picto(x, 0, 0, 1.0, hl > 0.5 ? HI : PALE);
+    x.restore();
+  }
+}
+function drawStation3(x, t) {
+  const O = 3840;
+  // focus bar
+  const fu = seg(t, T.focus - 0.35, 0.45); if (fu > 0) {
+    const X = O + 1000, Y = 610, BW = 760, sl = back(fu, 1.4);
+    x.save(); x.translate((1 - sl) * 700, 0);
+    text(x, 'FOCUS', X, Y - 40, F(600, 38), MUTE, 'left', 'alphabetic', 8);
+    x.fillStyle = WHITE; rr(x, X, Y, BW, 84, 42); x.fill();
+    const du = eio(seg(t, T.focus, T.focusDur)), lvl = lerp(1, 0.6, du);
+    // the lost 40% flashes orange then drains
+    if (du > 0 && du < 1.2) { x.fillStyle = HI; x.globalAlpha = 1 - seg(t, T.focus + T.focusDur, 0.4); rr(x, X + 10, Y + 10, BW - 20, 64, 32); x.fill(); x.globalAlpha = 1; }
+    x.fillStyle = BLUE; rr(x, X + 10, Y + 10, (BW - 20) * lvl, 64, 32); x.fill();
+    // 60% marker
+    if (du > 0) { x.fillStyle = INK; x.fillRect(X + 10 + (BW - 20) * lvl - 3, Y - 8, 6, 100); }
+    const n = Math.round(40 * eo(seg(t, T.focus, T.focusDur)));
+    const [qx, qy] = squash(t, T.focus + T.focusDur, 0.18);
+    x.save(); x.translate(X + BW - 10, Y + 230); x.scale(qx, qy);
+    text(x, '−' + n + '%', 0, 0, F(700, 150), HI, 'right'); x.restore();
+    x.restore();
+  }
+  // thought bubble with the brain
+  const bu = seg(t, T.bubble, 0.45); if (bu > 0) {
+    const bxp = O + 850, byp = 330, s = back(bu, 2.0), [qx, qy] = squash(t, T.bubble + 0.25, 0.15);
+    const hx = charX(t) + 75, hy = GROUND - 525;
+    for (const [k, r] of [[0.25, 12], [0.5, 20]]) { const d = seg(t, T.bubble - 0.12 + k * 0.2, 0.2); circle(x, lerp(hx, bxp - 130, k), lerp(hy, byp + 110, k), r * back(d), WHITE); }
+    x.save(); x.translate(bxp, byp); x.scale(s * qx, s * qy);
+    x.fillStyle = WHITE; x.beginPath();
+    for (const [a, b, r] of [[-110, 10, 90], [-40, -60, 95], [60, -55, 95], [120, 15, 85], [50, 75, 90], [-60, 70, 85]]) { x.moveTo(a + r, b); x.arc(a, b, r, 0, TAU); }
+    x.fill();
+    brain(x, 0, 0, 92);
+    x.restore();
+  }
+}
+
+// ── scene 2: inside the brain — memory cards fall out of the filing drawer ──
+const CARDS = (() => { const r = rng(29); const a = []; for (let i = 0; i < 18; i++) a.push({
+  t0: T.cards + i * 0.052 + r() * 0.03, vx: lerp(-1250, 1250, r()), vy: lerp(-900, -680, r()), w0: lerp(-9, 9, r()), r0: lerp(-0.4, 0.4, r()),
+  hl: i % 5 === 2, sway: r() * TAU }); return a; })();
+function card(x, hl) {
+  x.fillStyle = hl ? HI : WHITE; rr(x, -95, -52, 58, 22, 8); x.fill(); rr(x, -95, -40, 190, 116, 14); x.fill();
+  x.fillStyle = hl ? '#FFD3C0' : '#D5E0E6'; rr(x, -72, -14, 120, 12, 6); x.fill(); rr(x, -72, 12, 144, 12, 6); x.fill(); rr(x, -72, 38, 90, 12, 6); x.fill();
+}
+function drawScene2(x, t) {
+  x.fillStyle = BRAIN; x.fillRect(0, 0, W, H);
+  // giant gyri — continuation of the zoomed icon
+  x.strokeStyle = '#EC9CAC'; x.lineWidth = 70; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(-100, 250); x.bezierCurveTo(300, 60, 500, 420, 820, 160); x.stroke();
+  x.beginPath(); x.moveTo(1250, -80); x.bezierCurveTo(1350, 250, 1750, 150, 2000, 380); x.stroke();
+  x.beginPath(); x.moveTo(-80, 900); x.bezierCurveTo(250, 760, 380, 1100, 640, 980); x.stroke();
+  x.beginPath(); x.moveTo(1400, 1150); x.bezierCurveTo(1500, 850, 1800, 980, 2000, 820); x.stroke();
+  const e = eo(seg(t, T.zoom + T.zoomDur - 0.05, 0.4));
+  // headline
+  x.globalAlpha = eo(seg(t, 6.75, 0.35));
+  const tagu = back(seg(t, 6.7, 0.4), 2);
+  x.save(); x.translate(960, 150); x.scale(tagu, tagu); x.fillStyle = INK; rr(x, -150, -40, 300, 72, 36); x.fill();
+  text(x, 'MEMORY', 0, 12, F(600, 40), WHITE, 'center', 'alphabetic', 8); x.restore();
+  text(x, 'New memories don’t get filed', 960, 272 + (1 - eo(seg(t, 6.8, 0.4))) * 30, F(600, 80), INK);
+  x.globalAlpha = 1;
+  // cabinet
+  const cy = lerp(1150, 0, back(seg(t, T.zoom + T.zoomDur - 0.1, 0.5), 1.5));
+  x.save(); x.translate(0, cy);
+  x.fillStyle = PANTS; rr(x, 730, 520, 460, 470, 26); x.fill();
+  const dr = back(seg(t, T.drawer, 0.3), 2.5);               // drawer pulls out toward camera (grows)
+  const shake = Math.sin(t * 60) * 4 * (1 - seg(t, T.drawer, 0.6)) * (t > T.drawer ? 1 : 0);
+  // lower drawer
+  x.fillStyle = '#3B4D66'; rr(x, 760, 780, 400, 180, 18); x.fill(); x.fillStyle = PALE; rr(x, 915, 855, 90, 24, 12); x.fill();
+  // top drawer
+  x.save(); x.translate(960 + shake, 650); x.scale(1 + 0.1 * dr, 1 + 0.1 * dr); x.translate(0, 30 * dr);
+  x.fillStyle = '#16202E'; rr(x, -190, -118 - 50 * dr, 380, 60 * dr + 10, 10); x.fill();  // inside of the open drawer
+  x.fillStyle = '#3B4D66'; rr(x, -200, -110, 400, 190, 18); x.fill(); x.fillStyle = PALE; rr(x, -45, -30, 90, 24, 12); x.fill();
+  x.restore();
+  x.restore();
+  // flying cards
+  const G = 2200;
+  for (const c of CARDS) {
+    const u = t - c.t0; if (u <= 0) continue;
+    const px = 960 + c.vx * u + Math.sin(c.sway + u * 7) * 26 * u, py = 560 + c.vy * u + 0.5 * G * u * u;
+    if (py > H + 200) continue;
+    const s = Math.min(1, 0.35 + u * 4);
+    x.save(); x.translate(px, py); x.rotate(c.r0 + c.w0 * u * 0.4); x.scale(s, s * (0.75 + 0.25 * Math.cos(c.sway + u * 9)));
+    card(x, c.hl); x.restore();
+  }
+}
+
+// ── scene 3: night — asleep, battery recharges, end card ──
+const STARS = (() => { const r = rng(7); const a = []; for (let i = 0; i < 38; i++) a.push([r() * W, r() * 560, 2 + r() * 3.5, r() * TAU]); return a; })();
+function drawScene3(x, t) {
+  x.fillStyle = NIGHT; x.fillRect(0, 0, W, H);
+  for (const [sx, sy, r, ph] of STARS) { x.globalAlpha = 0.45 + 0.4 * Math.sin(t * 3 + ph); circle(x, sx, sy, r, MOON); }
+  x.globalAlpha = 1;
+  circle(x, 250, 170, 82, MOON); circle(x, 282, 148, 74, NIGHT);
+  x.fillStyle = NIGHT_L; x.fillRect(0, GROUND, W, H - GROUND);
+  // bed
+  const B = { x: 330, w: 860 };
+  x.fillStyle = '#34496B'; rr(x, B.x - 20, GROUND - 330, 44, 330, 18); x.fill();         // headboard
+  rr(x, B.x + B.w - 24, GROUND - 190, 40, 190, 16); x.fill();                             // footboard
+  rr(x, B.x, GROUND - 150, B.w, 70, 16); x.fill();                                        // frame
+  x.fillStyle = '#DDE7EE'; rr(x, B.x + 10, GROUND - 200, B.w - 30, 62, 22); x.fill();    // mattress
+  x.fillStyle = WHITE; x.beginPath(); x.ellipse(B.x + 120, GROUND - 228, 100, 42, 0, 0, TAU); x.fill();
+  // head on the pillow (lying: rotated), closed eyes
+  x.save(); x.translate(B.x + 150, GROUND - 262); x.rotate(-Math.PI / 2 + 0.12);
+  x.translate(0, 362); drawHead(x, { blink: 1, look: 0 }); x.restore();
+  // blanket, breathing
+  const br = Math.sin(t * 2.6) * 6;
+  x.fillStyle = BLUE; x.beginPath(); x.moveTo(B.x + 215, GROUND - 150);
+  x.lineTo(B.x + 215, GROUND - 250 - br); x.quadraticCurveTo(B.x + 330, GROUND - 300 - br * 1.4, B.x + 520, GROUND - 268 - br);
+  x.quadraticCurveTo(B.x + 700, GROUND - 240, B.x + 790, GROUND - 262); x.quadraticCurveTo(B.x + 845, GROUND - 270, B.x + 845, GROUND - 210);
+  x.lineTo(B.x + 845, GROUND - 150); x.closePath(); x.fill();
+  x.fillStyle = BLUE_D; rr(x, B.x + 215, GROUND - 170, 630, 20, 10); x.fill();
+  // Zzz
+  for (let i = 0; i < 6; i++) {
+    const t0 = T.whip + 0.35 + i * 0.42, u = (t - t0) / 1.5; if (u <= 0 || u >= 1) continue;
+    const zx = B.x + 210 + u * 110 + Math.sin(u * 6 + i) * 22, zy = GROUND - 330 - u * 240, s = 64 + 70 * u;
+    x.globalAlpha = Math.min(1, u * 5) * (1 - smooth((u - 0.6) / 0.4));
+    x.save(); x.translate(zx, zy); x.rotate(-0.15 + 0.1 * Math.sin(u * 5)); text(x, i % 2 ? 'z' : 'Z', 0, 0, F(700, s), i % 3 === 1 ? HI : WHITE); x.restore();
+  }
+  x.globalAlpha = 1;
+  // battery recharges
+  const cu = seg(t, T.charge, T.chargeDur), lvl = lerp(0.2, 1, eio(cu));
+  const bxp = 1500, byp = 640, [qx, qy] = squash(t, T.charge + T.chargeDur, 0.14);
+  x.save(); x.translate(bxp, byp); x.scale(qx, qy); battery(x, 0, 0, 320, 150, lvl, '#E4EDF0', NIGHT, 0);
+  // bolt
+  if (cu > 0 && cu < 1.3) { x.globalAlpha = clamp(cu * 4) * (1 - seg(t, T.charge + T.chargeDur + 0.1, 0.3)); x.fillStyle = MOON;
+    x.beginPath(); x.moveTo(12, -70); x.lineTo(-30, 8); x.lineTo(-2, 8); x.lineTo(-14, 70); x.lineTo(32, -12); x.lineTo(4, -12); x.closePath(); x.fill(); x.globalAlpha = 1; }
+  x.restore();
+  text(x, Math.round(lvl * 100) + '%', bxp, byp + 160, F(700, 76), lvl > 0.3 ? WHITE : HI);
+  // end card text
+  const e1 = back(seg(t, T.end, 0.5), 1.6), e2 = back(seg(t, T.end + 0.22, 0.45), 2.2);
+  if (e1 > 0) {
+    x.globalAlpha = clamp(seg(t, T.end, 0.25));
+    text(x, 'Sleep is your recharge.', 1190, 210 + (1 - e1) * 60, F(700, 104), WHITE);
+    x.globalAlpha = 1;
+  }
+  if (e2 > 0) {
+    x.save(); x.translate(1190, 316); x.scale(e2, e2);
+    x.font = F(600, 50); const tw = x.measureText('Most adults need 7–9 hours').width;
+    x.fillStyle = HI; rr(x, -tw / 2 - 36, -44, tw + 72, 88, 44); x.fill();
+    text(x, 'Most adults need 7–9 hours', 0, 17, F(600, 50), WHITE); x.restore();
+  }
+}
+
+// ── HUD: topic chip (screen space) ──
+function drawHUD(x, t) {
+  const a = back(seg(t, T.title, 0.5), 1.4), out = ei(seg(t, T.zoom - 0.25, 0.3));
+  if (a <= 0 || out >= 1) return;
+  const y = 64 - out * 200, xo = (1 - a) * -1300;
+  x.font = F(600, 46); const s = 'What happens when you skip sleep?', tw = x.measureText(s).width;
+  x.fillStyle = WHITE; rr(x, 70 + xo, y, tw + 130, 92, 46); x.fill();
+  circle(x, 116 + xo, y + 46, 26, HI);
+  // little moon glyph in the dot
+  circle(x, 116 + xo, y + 46, 12, WHITE); circle(x, 122 + xo, y + 40, 11, HI);
+  text(x, s, 160 + xo, y + 62, F(600, 46), INK, 'left');
+}
+
+// ── motion-blurred copy of the buffer (horizontal) ──
+function blurBlit(dx) {
+  const n = Math.min(14, Math.max(1, Math.ceil(Math.abs(dx) / 10)));
+  if (n === 1) { ctx.drawImage(buf, 0, 0); return; }
+  for (let i = 0; i < n; i++) { ctx.globalAlpha = 1 / (i + 1); ctx.drawImage(buf, -dx / 2 + dx * i / (n - 1), 0); }
+  ctx.globalAlpha = 1;
+}
+
+function scene1(x, t, withChar) {
+  x.save(); x.translate(-camX(t), 0); drawWorld(x, t);
+  if (withChar) drawCharAt(x, t);
+  x.restore();
+}
+function drawCharAt(x, t) {
+  const pu = seg(t, T.pop, 0.4); if (pu <= 0) return;
+  const s = 1.18 * back(pu, 2.2) , q = squash(t, T.pop + 0.3, 0.25);
+  drawChar(x, charX(t), GROUND, s, poseAt(t), q);
+}
+
+function render(t) {
+  const x = ctx; x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1;
+  const zEnd = T.zoom + T.zoomDur;
+  if (t < T.zoom) {
+    // scene 1 with pans: blur the room by camera velocity, keep the character sharp
+    const v = (camX(t + 1 / 60) - camX(t - 1 / 60)) * 30 / 30 * 0.9;
+    bx.setTransform(1, 0, 0, 1, 0, 0); scene1(bx, t, false);
+    x.fillStyle = BG; x.fillRect(0, 0, W, H); blurBlit(-v);
+    x.save(); x.translate(-camX(t), 0); drawCharAt(x, t); x.restore();
+    drawHUD(x, t);
+  } else if (t < zEnd + 0.02) {
+    // zoom into the brain: it becomes the next background
+    const u = seg(t, T.zoom, T.zoomDur), z = Math.exp(Math.log(20) * ei(u * 0.92 + 0.08 * u) );
+    const P = [lerp(camX(t) + 960, 3840 + 850, eio(u)), lerp(540, 330, eio(u))];
+    x.save(); x.translate(960, 540); x.scale(z, z); x.translate(-P[0], -P[1]);
+    drawWorld(x, t); drawCharAt(x, t); x.restore();
+    drawHUD(x, t);
+    const f = smooth(seg(t, zEnd - 0.2, 0.2));
+    if (f > 0) { x.globalAlpha = f; drawScene2(x, t); x.globalAlpha = 1; }
+  } else if (t < T.whip) {
+    drawScene2(x, t);
+  } else {
+    // whip slide to the night scene
+    const u = seg(t, T.whip, T.whipDur), o = eio(u) * W;
+    const v = (eio(seg(t + 1 / 60, T.whip, T.whipDur)) - eio(seg(t - 1 / 60, T.whip, T.whipDur))) * W * 0.9;
+    bx.setTransform(1, 0, 0, 1, 0, 0);
+    if (u < 1) { bx.save(); bx.translate(-o, 0); drawScene2(bx, t); bx.restore(); }
+    bx.save(); bx.translate(W - o, 0); drawScene3(bx, t); bx.restore();
+    x.fillStyle = NIGHT; x.fillRect(0, 0, W, H); blurBlit(-v);
+  }
+}
+
+window.ready = (async () => {
+  await document.fonts.load(F(700, 80), 'What happens 0123456789%−–’ adults ENERGY FOCUS MEMORY Sleep z');
+  await document.fonts.load(F(600, 80), 'abc'); await document.fonts.load(F(500, 80), 'abc');
+  await document.fonts.ready;
+  render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [];
+  ev.push({ t: T.title, k: 'swish', d: 0.35 }, { t: T.pop + 0.08, k: 'pop', v: 1 }, { t: T.yawn + 0.05, k: 'yawn' });
+  ev.push({ t: T.batt, k: 'swish', d: 0.3 }, { t: T.batt + 0.3, k: 'pop', v: 0.7 });
+  for (let i = 0; i <= 8; i++) ev.push({ t: T.drain + T.drainDur * (1 - Math.cbrt(1 - i / 8)), k: 'blip', f: 900 - i * 55, v: 0.5 });
+  ev.push({ t: T.drain + T.drainDur + 0.02, k: 'low' });
+  for (const p of [T.pan1, T.pan2]) { ev.push({ t: p - 0.05, k: 'whoosh', d: T.panDur + 0.1 });
+    for (let k = 0; k < 6; k++) ev.push({ t: p + k * Math.PI / 15 * 1.0, k: 'step' }); }
+  ev.push({ t: T.stat + 0.1, k: 'pop', v: 0.8 });
+  for (let i = 0; i < 9; i++) ev.push({ t: T.picto + i * T.pictoGap + 0.12, k: 'tick', f: 520 + i * 30 });
+  for (let g = 0; g < 3; g++) ev.push({ t: T.hl + g * T.hlGap, k: 'ding', n: g });
+  ev.push({ t: T.bubble + 0.05, k: 'pop', v: 0.9 });
+  for (let i = 0; i < 10; i++) ev.push({ t: T.focus + T.focusDur * (1 - Math.cbrt(1 - i / 10)), k: 'blip', f: 700 - i * 30, v: 0.4 });
+  ev.push({ t: T.focus + T.focusDur, k: 'thud' });
+  ev.push({ t: T.zoom, k: 'riser', d: T.zoomDur + 0.1 }, { t: T.zoom + T.zoomDur, k: 'pop', v: 0.6 });
+  ev.push({ t: T.drawer, k: 'drawer' });
+  for (const c of CARDS) ev.push({ t: c.t0, k: 'flip' });
+  ev.push({ t: T.whip - 0.04, k: 'whoosh', d: T.whipDur + 0.1 });
+  for (let i = 0; i < 4; i++) ev.push({ t: T.whip + 0.35 + i * 0.42, k: 'zzz' });
+  ev.push({ t: T.charge, k: 'charge', d: T.chargeDur }, { t: T.end, k: 'chord' });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
