@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── vector-arcade · early-80s vector-display attract mode for the fictional game "ORBITAL" ─────────────
+// CRT warm-up dot → the title flies together stroke by stroke, the O is a ringed wireframe planet, then the
+// letters extrude into 3D and sway → the title rushes at the camera into a tempest-style wireframe web →
+// PLAYER 1: the ship turns, fires and splits rotating wireframe asteroids, score rolls up → a stray rock hits
+// the ship, it bursts into line segments → GAME OVER, high-score table, initials entry → INSERT COIN blinks →
+// the beam collapses to a line, then to a dot, and the afterglow fades.
+// Everything is drawn as glowing beam lines (additive), with phosphor persistence (the scene is re-drawn at a
+// few past instants with decaying intensity), a cheap small-canvas bloom, slight deflection wobble and flicker.
+// The font is a hand-built stroke (vector) font — no raster type anywhere.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eBack = (u, s = 1.9) => 1 + (s + 1) * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash = n => { let x = Math.imul(n | 0, 0x9E3779B1) ^ 0x5bd1e995; x = Math.imul(x ^ x >>> 15, 0x85ebca6b); x ^= x >>> 13; return ((x >>> 0) % 10000) / 10000; };
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+// phosphor colours (P31-ish white-blue, cyan, green)
+const COL = ['#e6eeff', '#56f0ff', '#62ff93'];
+const WHITE = 0, CYAN = 1, GREEN = 2;
+
+// ── timeline ─────────────────────────────────────────────────────────────────────────────────
+const T = { title: 0.45, planet: 0.95, extrude: 1.8, sub: 1.72, fly: 2.72, tunnel: 2.82, game: 3.82, player: 3.86,
+  crash: 6.12, over: 6.72, table: 7.22, init: 7.55, coin: 8.35, off: 9.35 };
+
+// ── stroke font (4 × 6 grid, y down) ───────────────────────────────────────────────────────────
+const G = {
+  A: [[0,6,0,2,2,0,4,2,4,6],[0,4,4,4]], B: [[0,6,0,0,3,0,4,1,4,2,3,3,0,3],[3,3,4,4,4,5,3,6,0,6]],
+  C: [[4,0,0,0,0,6,4,6]], D: [[0,0,2,0,4,2,4,4,2,6,0,6,0,0]], E: [[4,0,0,0,0,6,4,6],[0,3,3,3]],
+  F: [[4,0,0,0,0,6],[0,3,3,3]], G: [[4,1,4,0,0,0,0,6,4,6,4,3,2,3]], H: [[0,0,0,6],[4,0,4,6],[0,3,4,3]],
+  I: [[0,0,4,0],[2,0,2,6],[0,6,4,6]], J: [[4,0,4,6,2,6,0,4]], K: [[0,0,0,6],[4,0,0,3,4,6]], L: [[0,0,0,6,4,6]],
+  M: [[0,6,0,0,2,2,4,0,4,6]], N: [[0,6,0,0,4,6,4,0]], O: [[0,0,4,0,4,6,0,6,0,0]], P: [[0,6,0,0,4,0,4,3,0,3]],
+  Q: [[0,0,4,0,4,4,2,6,0,6,0,0],[2,4,4,6]], R: [[0,6,0,0,4,0,4,3,0,3,4,6]], S: [[4,0,0,0,0,3,4,3,4,6,0,6]],
+  T: [[0,0,4,0],[2,0,2,6]], U: [[0,0,0,6,4,6,4,0]], V: [[0,0,2,6,4,0]], W: [[0,0,0,6,2,4,4,6,4,0]],
+  X: [[0,0,4,6],[4,0,0,6]], Y: [[0,0,2,2,4,0],[2,2,2,6]], Z: [[0,0,4,0,0,6,4,6]],
+  0: [[0,0,4,0,4,6,0,6,0,0],[4,0,0,6]], 1: [[1,1,2,0,2,6]], 2: [[0,0,4,0,4,3,0,3,0,6,4,6]], 3: [[0,0,4,0,4,6,0,6],[0,3,4,3]],
+  4: [[0,0,0,3,4,3],[4,0,4,6]], 5: [[4,0,0,0,0,3,4,3,4,6,0,6]], 6: [[0,0,0,6,4,6,4,3,0,3]], 7: [[0,0,4,0,4,6]],
+  8: [[0,0,4,0,4,6,0,6,0,0],[0,3,4,3]], 9: [[4,3,0,3,0,0,4,0,4,6]], '-': [[0.5,3,3.5,3]], '.': [[2,5.5,2,6]],
+  ':': [[2,1.4,2,2],[2,4.4,2,5]], '_': [[0,6.8,4,6.8]], '/': [[0,6,4,0]],
+  '©': [[2,0,3.4,0.6,4,2,4,4,3.4,5.4,2,6,0.6,5.4,0,4,0,2,0.6,0.6,2,0],[2.9,2,1.3,2,1.3,4,2.9,4]]
+};
+const ADV = 6;                                     // advance in grid units
+const textW = (s, sc) => (s.length * ADV - 2) * sc;
+
+// ── emit layer: polylines in screen space ────────────────────────────────────────────────────
+let OUT = [];                                      // [{p:Float32Array-like, c, a}]
+let GAIN = 1, NOW = 0, POST = null;                // sample gain, sample time, global post-transform
+function wob(x, y) {                               // deflection wobble (deterministic in time)
+  return [x + 0.55 * Math.sin(y * 0.013 + NOW * 37) + 0.35 * Math.sin(x * 0.021 - NOW * 23),
+          y + 0.45 * Math.sin(x * 0.011 + NOW * 29) + 0.3 * Math.sin(y * 0.017 + NOW * 41)];
+}
+function line(pts, c, a = 1) {                     // pts: flat [x,y,x,y...]
+  if (a * GAIN < 0.01 || pts.length < 4) return;
+  const p = new Array(pts.length);
+  for (let i = 0; i < pts.length; i += 2) {
+    let x = pts[i], y = pts[i + 1];
+    if (POST) [x, y] = POST(x, y);
+    [x, y] = wob(x, y); p[i] = x; p[i + 1] = y;
+  }
+  OUT.push({ p, c, a: a * GAIN });
+}
+function dot(x, y, c, a = 1, r = 1.6) { line([x - r, y, x + r, y + 0.01], c, a); }
+
+// 3D: rotate + perspective project; returns null if behind the near plane
+function proj(v, cam) {
+  const z = v[2] + cam.d; if (z < 30) return null;
+  const s = cam.f / z; return [cam.cx + v[0] * s, cam.cy + v[1] * s, s];
+}
+function rotY(v, a) { const c = Math.cos(a), s = Math.sin(a); return [v[0] * c + v[2] * s, v[1], -v[0] * s + v[2] * c]; }
+function rotX(v, a) { const c = Math.cos(a), s = Math.sin(a); return [v[0], v[1] * c - v[2] * s, v[1] * s + v[2] * c]; }
+function rotZ(v, a) { const c = Math.cos(a), s = Math.sin(a); return [v[0] * c - v[1] * s, v[0] * s + v[1] * c, v[2]]; }
+function line3(vs, cam, c, a = 1) {                // polyline of 3D points, split where clipped
+  let cur = [];
+  for (const v of vs) { const q = proj(v, cam); if (!q) { if (cur.length >= 4) line(cur, c, a); cur = []; continue; } cur.push(q[0], q[1]); }
+  if (cur.length >= 4) line(cur, c, a);
+}
+
+// text: (str, x, y) = top-left, or centred with align 'c', right with 'r'. reveal: 0..1 beam draw-on
+function text(str, x, y, sc, c, a = 1, align = 'l', reveal = 1) {
+  const w = textW(str, sc); if (align === 'c') x -= w / 2; else if (align === 'r') x -= w;
+  const strokes = [];
+  for (let i = 0; i < str.length; i++) { const g = G[str[i]]; if (!g) continue;
+    for (const s of g) { const p = []; for (let k = 0; k < s.length; k += 2) p.push(x + (i * ADV + s[k]) * sc, y + s[k + 1] * sc); strokes.push(p); } }
+  if (reveal >= 1) { for (const p of strokes) line(p, c, a); return; }
+  let total = 0; const lens = strokes.map(p => { let l = 0; for (let k = 2; k < p.length; k += 2) l += Math.hypot(p[k] - p[k - 2], p[k + 1] - p[k - 1]); total += l; return l; });
+  let left = total * reveal;
+  for (let s = 0; s < strokes.length && left > 0; s++) {
+    const p = strokes[s]; if (lens[s] <= left) { line(p, c, a); left -= lens[s]; continue; }
+    const q = [p[0], p[1]];
+    for (let k = 2; k < p.length; k += 2) { const l = Math.hypot(p[k] - p[k - 2], p[k + 1] - p[k - 1]);
+      if (l <= left) { q.push(p[k], p[k + 1]); left -= l; } else { const u = left / l; q.push(lerp(p[k - 2], p[k], u), lerp(p[k - 1], p[k + 1], u)); left = 0; break; } }
+    line(q, c, a); dot(q[q.length - 2], q[q.length - 1], WHITE, 1.4, 2.2);   // hot beam head
+  }
+}
+
+// ── title "ORBITAL" (O = ringed planet) ─────────────────────────────────────────────────────────
+const TS = 34, TITLE = 'ORBITAL';
+const TSEGS = [];                                  // individual segments with fly-in params
+const OGAP = 3;                                    // extra grid units around the planet "O"
+const TW = textW(TITLE, TS) + OGAP * TS, gx = i => i * ADV + (i > 0 ? OGAP : 0);
+{ const r = rng(7), x0 = -TW / 2, y0 = -3 * TS; let idx = 0;
+  for (let i = 0; i < TITLE.length; i++) { if (TITLE[i] === 'O') continue;
+    for (const s of G[TITLE[i]]) for (let k = 2; k < s.length; k += 2) {
+      TSEGS.push({ a: [x0 + (gx(i) + s[k - 2]) * TS, y0 + s[k - 1] * TS], b: [x0 + (gx(i) + s[k]) * TS, y0 + s[k + 1] * TS],
+        ang: r() * TAU, dist: 500 + r() * 700, rot: (r() - .5) * 7, z: (r() - .5) * 900, ord: r() }); idx++; } }
+  TSEGS.sort((p, q) => p.ord - q.ord); TSEGS.forEach((s, i) => s.t0 = T.title + i * 0.036); }
+const O_C = [-TW / 2 + 2.6 * TS, 0];   // planet centre (glyph slot 0)
+const segLand = s => s.t0 + 0.42;
+function titleCam(t) {
+  const push = eIn(seg(t, T.fly, T.fly + 0.5));
+  return { f: 1100, d: 1100 - 1080 * push, cx: 960, cy: 430 };
+}
+function titleRot(t) {                             // sway after extrusion
+  const u = eInOut(seg(t, T.extrude, T.extrude + 0.6));
+  return { y: u * 0.16 * Math.sin((t - T.extrude) * 1.6 - 0.3) + u * 0.05, x: u * 0.07 * Math.sin((t - T.extrude) * 1.2) };
+}
+function xf(v, rot) { return rotX(rotY(v, rot.y), rot.x); }
+function drawTitle(t) {
+  if (t < T.title || t > T.fly + 0.55) return;
+  const cam = titleCam(t), rot = titleRot(t), gl = 1 + 0.9 * seg(t, T.fly, T.fly + 0.45);
+  const D = 64 * eBack(seg(t, T.extrude, T.extrude + 0.45), 2.2);
+  for (const s of TSEGS) {
+    const u = seg(t, s.t0, s.t0 + 0.42); if (u <= 0) continue;
+    const e = eBack(u, 1.5), off = 1 - e, fl = Math.max(0, 1 - (t - segLand(s)) / 0.3) * (u >= 1 ? 1 : 0);
+    const mx = (s.a[0] + s.b[0]) / 2, my = (s.a[1] + s.b[1]) / 2;
+    const ox = Math.cos(s.ang) * s.dist * off, oy = Math.sin(s.ang) * s.dist * off, oz = s.z * off, ra = s.rot * off;
+    const P = q => { const dx = q[0] - mx, dy = q[1] - my, c = Math.cos(ra), sn = Math.sin(ra);
+      return [mx + ox + dx * c - dy * sn, my + oy + dx * sn + dy * c, oz]; };
+    const a = P(s.a), b = P(s.b), al = Math.min(1, u * 3) * gl;
+    line3([xf(a, rot), xf(b, rot)], cam, WHITE, al + fl * 1.2);
+    if (D > 0.5) {
+      const a2 = [a[0], a[1], D], b2 = [b[0], b[1], D];
+      line3([xf(a2, rot), xf(b2, rot)], cam, CYAN, 0.55 * gl);
+      line3([xf(a, rot), xf(a2, rot)], cam, CYAN, 0.4 * gl); line3([xf(b, rot), xf(b2, rot)], cam, CYAN, 0.4 * gl);
+    }
+  }
+  // planet
+  const pu = seg(t, T.planet, T.planet + 0.55); if (pu <= 0) return;
+  const R = 2.75 * TS * eBack(pu, 2.0), spin = t * 0.9, tilt = -0.42;
+  const C = [O_C[0] + 2 * 0 , O_C[1], 0];
+  const sp = v => xf([C[0] + v[0], C[1] + v[1], C[2] + v[2]], rot);
+  const pa = Math.min(1, pu * 2) * gl;
+  for (let k = 1; k < 6; k++) {                    // latitudes
+    const la = -Math.PI / 2 + k * Math.PI / 6, pts = [];
+    for (let j = 0; j <= 32; j++) { const th = j / 32 * TAU; pts.push(sp(rotZ([R * Math.cos(la) * Math.cos(th), R * Math.sin(la), R * Math.cos(la) * Math.sin(th)], tilt * .5))); }
+    line3(pts, cam, WHITE, pa * 0.8);
+  }
+  for (let k = 0; k < 12; k++) {                   // meridians (spinning)
+    const lo = spin + k * Math.PI / 6, pts = [];
+    for (let j = 0; j <= 24; j++) { const la = -Math.PI / 2 + j / 24 * Math.PI; pts.push(sp(rotZ([R * Math.cos(la) * Math.cos(lo), R * Math.sin(la), R * Math.cos(la) * Math.sin(lo)], tilt * .5))); }
+    line3(pts, cam, WHITE, pa * 0.55);
+  }
+  const ru = eBack(seg(t, T.planet + 0.25, T.planet + 0.8), 1.6);
+  for (const [rr, a] of [[1.55, 1], [1.72, .6]]) {         // rings
+    const pts = []; for (let j = 0; j <= 64; j++) { const th = j / 64 * TAU; pts.push(sp(rotZ(rotX([R * rr * ru * Math.cos(th), 0, R * rr * ru * Math.sin(th)], 0.32), tilt))); }
+    line3(pts, cam, CYAN, pa * a * Math.min(1, ru * 2));
+  }
+  const mo = t * 2.4, mv = sp(rotZ(rotX([R * 2.1 * ru * Math.cos(mo), 0, R * 2.1 * ru * Math.sin(mo)], 0.32), tilt));   // moon
+  const mq = proj(mv, cam); if (mq && ru > 0.2) dot(mq[0], mq[1], WHITE, 1.4 * gl, 3);
+}
+function drawSubtitle(t) {
+  if (t < T.sub || t > T.fly + 0.25) return;
+  const a = 1 - seg(t, T.fly, T.fly + 0.2);
+  const u = seg(t, T.sub, T.sub + 0.35);
+  const w = 1100 * eOut(u);
+  line([960 - w / 2, 690, 960 + w / 2, 690], CYAN, 0.7 * a);
+  text('© 1981 NOVATRON', 960, 722, 6.5, GREEN, a, 'c', seg(t, T.sub + 0.15, T.sub + 0.55));
+  if (t > T.sub + 0.35) text('1 COIN  1 PLAY', 960, 800, 4.2, WHITE, a * 0.8 * (Math.floor(t * 4) % 2 ? .45 : 1), 'c', seg(t, T.sub + .35, T.sub + .6));
+}
+// warm-up dot
+function drawWarm(t) {
+  if (t > 0.7) return;
+  const u = seg(t, 0.05, 0.25), f = 1 - seg(t, 0.35, 0.7);
+  if (u <= 0) return;
+  const r = 2 + 10 * eOut(u);
+  dot(960, 430, WHITE, 2.2 * f, r);
+  line([960 - 240 * eOut(u) * f, 430, 960 + 240 * eOut(u) * f, 430], CYAN, 0.6 * f * (1 - u * .4));
+}
+
+// ── tunnel (tempest-like web) ────────────────────────────────────────────────────────────────
+const NS = 16, TR = 470;
+const webV = i => { const th = i / NS * TAU; const r = TR * (1 + 0.16 * Math.cos(4 * th)); return [r * Math.cos(th), r * Math.sin(th) * 0.8]; };
+function tunnelZ(t) { const u = t - T.tunnel; return 900 * u + 2600 * u * u; }
+function drawTunnel(t) {
+  const a0 = seg(t, T.tunnel, T.tunnel + 0.3) * (1 - seg(t, T.game - 0.25, T.game + 0.05)); if (a0 <= 0) return;
+  const tr = tunnelZ(t), roll = (t - T.tunnel) * 0.55, cam = { f: 900, d: 0, cx: 960 + 40 * Math.sin((t - T.tunnel) * 3), cy: 540 };
+  const GAP = 260, ZF = 4200, ringZ = [];
+  for (let j = 0; j < 20; j++) { const z = ((j * GAP - tr) % ZF + ZF) % ZF + 60; ringZ.push(z); }
+  ringZ.sort((p, q) => p - q);
+  const V = i => webV(i % NS);
+  for (const z of ringZ) {
+    const df = clamp(1 - (z - 400) / (ZF - 400)) ** 1.2, pts = [];
+    for (let i = 0; i <= NS; i++) { const v = V(i); pts.push(rotZ([v[0], v[1], z], roll)); }
+    line3(pts, cam, CYAN, a0 * (0.25 + 0.95 * df));
+  }
+  for (let i = 0; i < NS; i++) { const v = V(i);   // lanes
+    for (let k = 0; k < 4; k++) { const z1 = 80 + k * 1000, z2 = z1 + 1000, df = 1 - k / 4;
+      line3([rotZ([v[0], v[1], z1], roll), rotZ([v[0], v[1], z2], roll)], cam, WHITE, a0 * 0.45 * df); } }
+  // spikes/stars rushing past
+  const r = rng(99);
+  for (let i = 0; i < 70; i++) { const ang = r() * TAU, rad = 90 + r() * 360, z0 = r() * ZF;
+    const z = ((z0 - tr * 1.2) % ZF + ZF) % ZF + 40; const q = proj(rotZ([rad * Math.cos(ang), rad * Math.sin(ang) * .8, z], roll), cam);
+    if (q) dot(q[0], q[1], i % 3 ? WHITE : GREEN, a0 * clamp(1.4 - z / ZF), 1.2 + 2 * clamp(1 - z / 1500)); }
+  // far flash (tunnel end opens)
+  const fl = seg(t, T.game - 0.3, T.game - 0.05) * (1 - seg(t, T.game - 0.05, T.game + 0.2));
+  if (fl > 0) for (let k = 0; k < 3; k++) { const rr = 40 + 700 * eOut(fl) + k * 60, pts = [];
+    for (let i = 0; i <= 40; i++) { const th = i / 40 * TAU; pts.push(960 + rr * Math.cos(th), 540 + rr * Math.sin(th) * .8); } line(pts, WHITE, fl * (1.2 - k * .3)); }
+}
+
+// ── game: ship, asteroids, bullets ─────────────────────────────────────────────────────────────
+const BUL = 1500, TC = T.crash;
+const shipDisp = t => { const u1 = eInOut(seg(t, 4.0, 4.7)), u2 = eInOut(seg(t, 5.25, 5.95));
+  return [820 + 80 * u1 + 60 * u2, 600 - 30 * u1 - 30 * u2]; };
+const thrustOn = t => (t > 3.98 && t < 4.5) || (t > 5.23 && t < 5.75);
+const SIZE = [82, 46, 26], PTS = [20, 50, 100];
+const WR = 150, wrap = (v, m) => ((v + WR) % (m + 2 * WR) + (m + 2 * WR)) % (m + 2 * WR) - WR;
+// icosahedron base
+const ICO = (() => { const p = (1 + Math.sqrt(5)) / 2, v = [[-1,p,0],[1,p,0],[-1,-p,0],[1,-p,0],[0,-1,p],[0,1,p],[0,-1,-p],[0,1,-p],[p,0,-1],[p,0,1],[-p,0,-1],[-p,0,1]];
+  const n = v.map(q => { const l = Math.hypot(...q); return q.map(c => c / l); }); const e = [];
+  for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) { const d = Math.hypot(n[i][0] - n[j][0], n[i][1] - n[j][1], n[i][2] - n[j][2]); if (d < 1.1) e.push([i, j]); }
+  return { v: n, e }; })();
+const OCT = (() => { const v = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1],[.58,.58,.58],[-.58,-.58,-.58]]; const n = v.map(q => { const l = Math.hypot(...q); return q.map(c => c / l); });
+  const e = [[0,2],[2,1],[1,3],[3,0],[0,4],[4,1],[1,5],[5,0],[2,4],[4,3],[3,5],[5,2],[6,0],[6,2],[6,4],[7,1],[7,3],[7,5]]; return { v: n, e }; })();
+const OCT6 = { v: OCT.v.slice(0, 6), e: OCT.e.slice(0, 12) };
+const ROCKS = {};                                   // id → rock
+function mkRock(id, lvl, p0, v, tb, seed) {
+  const r = rng(seed), geo = lvl === 0 ? ICO : lvl === 1 ? OCT : OCT6; const jit = geo.v.map(() => 0.72 + r() * 0.5);
+  ROCKS[id] = { geo, id, lvl, p0, v, tb, td: Infinity, jit, ax: [r() - .5, r() - .5, r() - .5], sp: (r() < .5 ? -1 : 1) * (0.5 + r() * 0.8), ph: r() * TAU, seed };
+}
+const rockPos = (k, t) => [wrap(k.p0[0] + k.v[0] * (t - k.tb), W), wrap(k.p0[1] + k.v[1] * (t - k.tb), H)];
+mkRock('A', 0, [430, 250], [38, 20], T.game, 11); mkRock('B', 0, [1480, 290], [-34, 28], T.game, 12);
+mkRock('C', 0, [1430, 850], [-44, -18], T.game, 13); mkRock('E', 0, [330, 860], [46, -24], T.game, 14);
+mkRock('F', 0, [1760, 560], [-20, 36], T.game, 15);
+{ // the stray rock: aims at the ship at TC
+  const tb = 4.55, s = shipDisp(TC), p0 = [1380, -120], dir = [s[0] - p0[0], s[1] - p0[1]], L = Math.hypot(...dir);
+  const stop = L - (SIZE[1] + 16); mkRock('D', 1, p0, [dir[0] / L * stop / (TC - tb), dir[1] / L * stop / (TC - tb)], tb, 16); }
+const SHOTS = [[4.30, 'A'], [4.54, 'B'], [4.80, 'A0'], [5.00, 'B1'], [5.18, 'A1'], [5.37, 'C'], [5.56, 'A00'], [5.74, 'C0'], [5.90, 'B10'], [6.04, 'E']];
+const BULLETS = [], BOOMS = [], SCORE_EV = [];
+const SS = 1.55, SHIP = [[30, 0, -18, -16], [30, 0, -18, 16], [-11, -10, -11, 10]].map(q => q.map(c => c * SS));
+const shipNose = (t, ang) => { const s = shipDisp(t); return [s[0] + Math.cos(ang) * 30 * SS, s[1] + Math.sin(ang) * 30 * SS]; };
+function kill(k, t, dirx) {
+  k.td = t; const p = rockPos(k, t); BOOMS.push({ t, p, lvl: k.lvl, seed: k.seed }); SCORE_EV.push([t, PTS[k.lvl]]);
+  if (k.lvl < 2) { const r = rng(k.seed * 7 + 3);
+    for (let c = 0; c < 2; c++) { const a = Math.atan2(k.v[1], k.v[0]) + (c ? 1 : -1) * (0.9 + r() * 0.6), sp = 70 + r() * 70 + k.lvl * 30;
+      mkRock(k.id + c, k.lvl + 1, p, [k.v[0] * .5 + Math.cos(a) * sp, k.v[1] * .5 + Math.sin(a) * sp], t, k.seed * 10 + c + 1); } }
+}
+const AIM = [];                                    // [ts, angle]
+{ let prevAng = -0.3;
+  for (const [ts, id] of SHOTS) { const k = ROCKS[id]; if (!k || k.tb > ts) { console.error('bad shot', id); continue; }
+    const s0 = shipDisp(ts); let th = ts + 0.2;
+    for (let i = 0; i < 6; i++) { const p = rockPos(k, th); th = ts + Math.hypot(p[0] - s0[0], p[1] - s0[1]) / BUL; }
+    const p = rockPos(k, th); let ang = Math.atan2(p[1] - s0[1], p[0] - s0[0]);
+    while (ang - prevAng > Math.PI) ang -= TAU; while (ang - prevAng < -Math.PI) ang += TAU; prevAng = ang;
+    AIM.push([ts, ang]); const n = shipNose(ts, ang); BULLETS.push({ ts, th, a: n, b: p });
+    const hitT = th; th = hitT; kill(k, hitT); }
+  kill(ROCKS.D, TC); }
+function shipAng(t) {
+  if (t <= AIM[0][0] - 0.22) return -0.3 + 0.1 * Math.sin((t - T.game) * 2);
+  let prev = [AIM[0][0] - 0.22, -0.3 + 0.1 * Math.sin((AIM[0][0] - 0.22 - T.game) * 2)];
+  for (const a of AIM) { if (t <= a[0]) { const st = Math.max(prev[0], a[0] - 0.2); return t < st ? prev[1] : lerp(prev[1], a[1], eInOut(seg(t, st, a[0] - 0.02))); } prev = a; }
+  return prev[1];
+}
+const scoreAt = t => SCORE_EV.reduce((s, e) => s + (t >= e[0] ? e[1] : 0), 0);
+const FINAL = scoreAt(99);
+function drawRock(k, t, a) {
+  const p = rockPos(k, t), R = SIZE[k.lvl], ang = k.ph + k.sp * (t - k.tb);
+  const l = Math.hypot(...k.ax), ax = k.ax.map(c => c / l);
+  const pv = k.geo.v.map((v, i) => { let q = v.map(c => c * R * k.jit[i]);
+    q = rotY(rotX(q, ax[0] * ang + 0.4), ax[1] * ang + ang * .6); q = rotZ(q, ax[2] * ang); return [p[0] + q[0] * (1 + q[2] / 1600), p[1] + q[1] * (1 + q[2] / 1600), q[2]]; });
+  for (const [i, j] of k.geo.e) { const zf = 0.55 + 0.45 * clamp(((pv[i][2] + pv[j][2]) / 2 / R + 1) / 2); line([pv[i][0], pv[i][1], pv[j][0], pv[j][1]], WHITE, a * zf); }
+}
+function drawShip(t, a) {
+  const s = shipDisp(t), ang = shipAng(t);
+  let rec = 0; for (const b of BULLETS) if (t >= b.ts && t < b.ts + 0.12) rec = 5 * (1 - (t - b.ts) / 0.12);
+  const c = Math.cos(ang), sn = Math.sin(ang), X = (x, y) => [s[0] + (x - rec) * c - y * sn, s[1] + (x - rec) * sn + y * c];
+  for (const q of SHIP) line([...X(q[0], q[1]), ...X(q[2], q[3])], WHITE, a * 1.15);
+  if (thrustOn(t)) { const fl = 14 + 14 * hash(Math.floor(t * 30) * 3 + 1); line([...X(-11 * SS, -6 * SS), ...X((-11 - fl) * SS, 0), ...X(-11 * SS, 6 * SS)], WHITE, a * 0.9); }
+}
+function drawGame(t) {
+  if (t < T.game - 0.05) return;
+  const ga = seg(t, T.game - 0.05, T.game + 0.25);
+  const bg = 1 - 0.9 * seg(t, T.over - 0.1, T.over + 0.5);     // rocks keep drifting dimly behind the table
+  const off = 1 - seg(t, T.off - 0.2, T.off);
+  // rocks
+  for (const id in ROCKS) { const k = ROCKS[id]; if (t < k.tb || t >= k.td) continue;
+    const pop = k.lvl === 0 && k.tb === T.game ? eBack(seg(t, T.game, T.game + 0.4), 2) : 1;
+    if (pop < 1) { const save = POST, p = rockPos(k, t); POST = (x, y) => { const o = save ? save(x, y) : [x, y]; return [p[0] + (o[0] - p[0]) * pop, p[1] + (o[1] - p[1]) * pop]; };
+      drawRock(k, t, 0.85 * ga * bg); POST = save; } else drawRock(k, t, 0.85 * ga * bg); }
+  // bullets
+  for (const b of BULLETS) { if (t < b.ts || t > b.th) continue; const u = (t - b.ts) / (b.th - b.ts);
+    dot(lerp(b.a[0], b.b[0], u), lerp(b.a[1], b.b[1], u), WHITE, 1.8, 2.4); }
+  // explosions: dot debris
+  for (const e of BOOMS) { const dt = t - e.t; if (dt < 0 || dt > 0.8) continue; const r = rng(e.seed * 31 + 5), n = 10 + (2 - e.lvl) * 5;
+    for (let i = 0; i < n; i++) { const a = r() * TAU, sp = 90 + r() * 260, d = sp * (dt - dt * dt * 0.45);
+      dot(e.p[0] + Math.cos(a) * d, e.p[1] + Math.sin(a) * d, i % 4 ? WHITE : GREEN, 1.4 * (1 - dt / 0.8) * bg, 1.6); } }
+  // ship
+  if (t < TC) drawShip(t, ga);
+  else { // ship bursts into line segments + shock rings
+    const dt = t - TC, s = shipDisp(TC), ang = shipAng(TC), c = Math.cos(ang), sn = Math.sin(ang), r = rng(404);
+    const X = (x, y) => [s[0] + x * c - y * sn, s[1] + x * sn + y * c];
+    for (const q of [...SHIP, [-18, -16, -11, -10].map(c => c * SS), [-18, 16, -11, 10].map(c => c * SS)]) {
+      const A = X(q[0], q[1]), B = X(q[2], q[3]), m = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+      const da = Math.atan2(m[1] - s[1], m[0] - s[0]) + (r() - .5), sp = 60 + r() * 90, rot = (r() - .5) * 9 * dt, d = sp * dt * (1.6 - dt * .5);
+      const hx = (B[0] - A[0]) / 2, hy = (B[1] - A[1]) / 2, cr = Math.cos(rot), sr = Math.sin(rot);
+      const cx = m[0] + Math.cos(da) * d, cy = m[1] + Math.sin(da) * d, fa = clamp(1 - dt / 1.6);
+      line([cx - hx * cr + hy * sr, cy - hx * sr - hy * cr, cx + hx * cr - hy * sr, cy + hx * sr + hy * cr], WHITE, fa * 1.3 * off);
+    }
+    for (let i = 0; i < 34; i++) { const a = r() * TAU, sp = 120 + r() * 420, d = sp * (dt - dt * dt * .35);
+      if (dt < 1.1) dot(s[0] + Math.cos(a) * d, s[1] + Math.sin(a) * d, i % 3 ? WHITE : CYAN, 1.6 * (1 - dt / 1.1), 1.8); }
+    for (let k = 0; k < 2; k++) { const u = seg(dt, k * 0.07, 0.5 + k * .07); if (u <= 0 || u >= 1) continue;
+      const rr = 20 + 380 * eOut(u), pts = []; for (let i = 0; i <= 48; i++) { const th = i / 48 * TAU; pts.push(s[0] + rr * Math.cos(th), s[1] + rr * Math.sin(th)); }
+      line(pts, k ? CYAN : WHITE, (1 - u) * 1.3); }
+  }
+  // HUD
+  const ha = ga * (1 - seg(t, T.over - 0.15, T.over + 0.2));
+  if (ha > 0) {
+    const sc = scoreAt(t), pop = SCORE_EV.reduce((m, e) => Math.max(m, t >= e[0] ? 1 - (t - e[0]) / 0.18 : 0), 0);
+    text(String(sc).padStart(2, '0'), 360, 52, 7 + pop * 0.8, GREEN, 1.05 * ha + pop * .4, 'r');
+    text('HI ' + String(TABLE[0][1]), 960, 52, 5, WHITE, 0.85 * ha, 'c');
+    const lives = t < TC + 0.3 ? 1 : 0;
+    for (let i = 0; i < lives; i++) { const x = 330 - i * 40, y = 132, X = (px, py) => [x + py * .5, y - px * .5];
+      for (const q of SHIP) line([...X(q[0], q[1]), ...X(q[2], q[3])], WHITE, ha * (t > TC ? (Math.floor(t * 12) % 2) : 1)); }
+    text('00', 1560, 52, 5, GREEN, 0.5 * ha, 'l');
+  }
+  if (t > T.player && t < T.player + 0.62 && Math.floor((t - T.player) * 6.5) % 2 === 0) text('PLAYER 1', 960, 330, 9, WHITE, 1.1, 'c');
+}
+
+// ── high-score table ─────────────────────────────────────────────────────────────────────────
+const TABLE = [['NOV', 0], ['ZAP', 0], ['ACE', 0], ['JET', 0], ['RAY', 0]];
+const ME = 2, INIT = 'ACE', CYC = ['XYZA', 'YZABC', 'ABCDE'];
+function initStep(t) {                             // returns [slotIdx, letterIdx] and state
+  const per = 0.24, ti = t - T.init; if (ti < 0) return { slot: -1 };
+  let acc = 0; for (let s = 0; s < 3; s++) { const n = CYC[s].length, d = n * 0.055 + per;
+    if (ti < acc + d) return { slot: s, letter: CYC[s][Math.min(n - 1, Math.floor((ti - acc) / 0.055))] }; acc += d; }
+  return { slot: 3 };
+}
+function drawTable(t) {
+  if (t < T.over) return;
+  const off = 1;
+  text('GAME OVER', 960, 170, 15, WHITE, 1.25, 'c', eOut(seg(t, T.over, T.over + 0.55)));
+  const ta = seg(t, T.table, T.table + 0.2);
+  if (t > T.table) {
+    const hs = seg(t, T.table, T.table + 0.4);
+    text('NEW HIGH SCORE', 960, 318, 5.5, GREEN, 1, 'c', hs);
+    text('ENTER YOUR INITIALS', 960, 370, 4, WHITE, 0.7, 'c', seg(t, T.table + .15, T.table + .5));
+  }
+  const st = initStep(t);
+  for (let i = 0; i < TABLE.length; i++) {
+    const t0 = T.table + 0.08 + i * 0.07, u = seg(t, t0, t0 + 0.28); if (u <= 0) continue;
+    const y = 470 + i * 78, me = i === ME;
+    let fl = me && st.slot === 3 ? 1 + 0.9 * (Math.floor((t - T.init) * 8) % 2) : 1;
+    const c = me ? CYAN : GREEN;
+    text((i + 1) + '.', 640, y, 7, WHITE, 0.8, 'l', u);
+    text(String(TABLE[i][1]), 1060, y, 7, c, fl, 'r', u);
+    if (!me) text(TABLE[i][0], 1150, y, 7, c, 1, 'l', u);
+    else { for (let s = 0; s < 3; s++) { const x = 1150 + s * ADV * 7;
+        let ch = s < st.slot || st.slot === 3 ? INIT[s] : s === st.slot ? st.letter : '';
+        if (ch) text(ch, x, y, 7, c, fl * (s === st.slot ? 1.3 : 1), 'l', u);
+        if (s === st.slot && Math.floor(t * 7) % 2 === 0) line([x, y + 50, x + 28, y + 50], WHITE, 1.1);
+        else if (st.slot === -1 || s > st.slot && st.slot < 3) line([x, y + 50, x + 28, y + 50], WHITE, 0.35 * u); } }
+  }
+  if (t > T.coin) {
+    const on = Math.floor((t - T.coin) * 2.6) % 2 === 0;
+    const u = seg(t, T.coin, T.coin + 0.3);
+    if (on) text('INSERT COIN', 960, 900, 9, CYAN, 1.2, 'c', u);
+    text('CREDITS 0', 1860, 1010, 4, GREEN, 0.6 * u, 'r');
+  }
+}
+
+// ── scene & rendering ────────────────────────────────────────────────────────────────────────
+let FT = 0;                                        // frame time (power-off squash applies to the whole persistence stack)
+function scene(t) {
+  NOW = t;
+  // CRT power-off: squash to a line, then a dot
+  const o1 = seg(FT, T.off, T.off + 0.22), o2 = seg(FT, T.off + 0.18, T.off + 0.4);
+  POST = o1 > 0 ? (x, y) => [960 + (x - 960) * (1 - 0.998 * eIn(o2) ** 0.6), 540 + (y - 540) * (1 - 0.996 * eOut(o1))] : null;
+  const base = GAIN; GAIN = base * (1 + 1.2 * o1) * (1 - seg(t, T.off + 0.45, DUR - 0.05));
+  drawWarm(t); drawTitle(t); drawSubtitle(t); drawTunnel(t); drawGame(t); drawTable(t);
+  if (o2 > 0.6) dot(960, 540, WHITE, 2 * (1 - seg(t, T.off + 0.45, DUR - 0.05)), 4 + 6 * (1 - o2));
+  GAIN = base; POST = null;
+}
+const TRAIL = [[0, 1], [0.016, 0.36], [0.034, 0.2], [0.056, 0.12], [0.085, 0.075], [0.13, 0.045], [0.19, 0.025]];
+let BEAM, BCTX, SM, SCTX, MD, MCTX, GLASS;
+function buildGlass() {
+  const c = mk(W, H), g = c.getContext('2d');
+  const v = g.createRadialGradient(960, 540, 300, 960, 540, 1150);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(0.75, 'rgba(0,0,0,0.25)'); v.addColorStop(1, 'rgba(0,0,0,0.85)');
+  g.fillStyle = v; g.fillRect(0, 0, W, H);
+  // faint curved glass reflection
+  g.save(); g.translate(600, 250); g.rotate(-0.2); g.scale(2.2, 1);
+  const r = g.createRadialGradient(0, 0, 0, 0, 0, 330);
+  r.addColorStop(0, 'rgba(160,190,220,0.03)'); r.addColorStop(0.6, 'rgba(160,190,220,0.012)'); r.addColorStop(1, 'rgba(160,190,220,0)');
+  g.fillStyle = r; g.fillRect(-400, -400, 800, 800); g.restore();
+  return c;
+}
+function stroke(g, o, w, alpha, col) {
+  g.globalAlpha = Math.min(1, alpha); g.strokeStyle = col; g.lineWidth = w; g.beginPath();
+  const p = o.p; g.moveTo(p[0], p[1]); for (let i = 2; i < p.length; i += 2) g.lineTo(p[i], p[i + 1]); g.stroke();
+}
+function render(t) {
+  FT = t; const fi = Math.round(t * 30), flick = 0.93 + 0.07 * hash(fi * 13 + 7) + (hash(fi * 5 + 1) > 0.965 ? -0.12 : 0);
+  const g = BCTX; g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  g.globalCompositeOperation = 'lighter'; g.lineCap = 'round'; g.lineJoin = 'round';
+  for (let s = TRAIL.length - 1; s >= 0; s--) {
+    const [dt, gn] = TRAIL[s], ts = t - dt; if (ts < 0) continue;
+    OUT = []; GAIN = gn * flick; scene(ts);
+    for (const o of OUT) {
+      const col = COL[o.c];
+      if (s === 0) {
+        stroke(g, o, 7, o.a * 0.10, col);
+        stroke(g, o, 3.2, o.a * 0.42, col);
+        stroke(g, o, 1.7, o.a * 0.9, col);
+        stroke(g, o, 0.9, o.a * 0.55, '#ffffff');
+        if (o.a > 1) stroke(g, o, 12, (o.a - 1) * 0.12, col);
+        const p = o.p; g.globalAlpha = Math.min(1, o.a * 0.7); g.fillStyle = '#ffffff';   // beam dwell at endpoints
+        g.fillRect(p[0] - 1.3, p[1] - 1.3, 2.6, 2.6); g.fillRect(p[p.length - 2] - 1.3, p[p.length - 1] - 1.3, 2.6, 2.6);
+      } else stroke(g, o, 2.2, o.a * 0.8, col);
+    }
+  }
+  GAIN = 1;
+  // bloom: two small blurred copies added back
+  SCTX.globalCompositeOperation = 'source-over'; SCTX.filter = 'none'; SCTX.fillStyle = '#000'; SCTX.fillRect(0, 0, SM.width, SM.height);
+  SCTX.filter = 'blur(7px)'; SCTX.drawImage(BEAM, 0, 0, SM.width, SM.height); SCTX.filter = 'none';
+  MCTX.globalCompositeOperation = 'source-over'; MCTX.filter = 'none'; MCTX.fillStyle = '#000'; MCTX.fillRect(0, 0, MD.width, MD.height);
+  MCTX.filter = 'blur(2.5px)'; MCTX.drawImage(BEAM, 0, 0, MD.width, MD.height); MCTX.filter = 'none';
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.fillStyle = '#020304'; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(BEAM, 0, 0);
+  ctx.globalAlpha = 0.9; ctx.drawImage(MD, 0, 0, W, H);
+  ctx.globalAlpha = 1.0; ctx.drawImage(SM, 0, 0, W, H);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.drawImage(GLASS, 0, 0);
+}
+{ TABLE[ME][1] = FINAL; TABLE[0][1] = FINAL * 4 + 450; TABLE[1][1] = Math.round(FINAL * 1.7 / 10) * 10; TABLE[3][1] = Math.round(FINAL * 0.62 / 10) * 10; TABLE[4][1] = Math.round(FINAL * 0.35 / 10) * 10; }
+window.ready = (async () => {
+  BEAM = mk(W, H); BCTX = BEAM.getContext('2d');
+  SM = mk(480, 270); SCTX = SM.getContext('2d'); MD = mk(960, 540); MCTX = MD.getContext('2d');
+  GLASS = buildGlass(); render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [{ t: 0.04, k: 'on' }, { t: T.planet, k: 'planet' }, { t: T.extrude, k: 'swell' }, { t: T.fly - 0.05, k: 'warp', d: T.game - T.fly + 0.1 },
+    { t: T.game - 0.05, k: 'flash' }, { t: TC, k: 'shipboom' }, { t: T.over, k: 'over' }, { t: T.off, k: 'off' }];
+  let last = -1; for (const s of TSEGS) { const tl = segLand(s); if (tl - last > 0.045) { ev.push({ t: tl, k: 'zap', v: 0.7 + 0.3 * s.ord }); last = tl; } }
+  for (const b of BULLETS) ev.push({ t: b.ts, k: 'fire' });
+  for (const e of BOOMS) if (Math.abs(e.t - TC) > 1e-6) ev.push({ t: e.t, k: 'boom', v: e.lvl });
+  for (let bt = T.game + 0.2, i = 0; bt < TC; i++) { ev.push({ t: bt, k: 'beat', v: i % 2 }); bt += Math.max(0.24, 0.5 - i * 0.03); }
+  ev.push({ t: 3.98, k: 'thrust', d: 0.52 }, { t: 5.23, k: 'thrust', d: 0.52 });
+  let prev = ''; for (let tt = T.init; tt < T.coin; tt += 1 / 60) { const s = initStep(tt), key = s.slot + (s.letter || ''); if (key !== prev && s.slot >= 0) { ev.push({ t: tt, k: s.slot === 3 ? 'confirm' : 'blip' }); } prev = key; }
+  for (let tt = T.coin; tt < T.off; tt += 1 / 2.6 * 2) ev.push({ t: tt, k: 'coin' });
+  for (let i = 0; i < 5; i++) ev.push({ t: T.table + 0.08 + i * 0.07, k: 'tick' });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
