@@ -4,9 +4,9 @@ Use case · Step-by-step teaching: onboarding, courses, how-to guides.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (12) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (5) · [Product & Launches](../../categories/use-cases/product.md) (11) · [Social & Short-Form](../../categories/use-cases/social.md) (18) · [Storytelling & Brand](../../categories/use-cases/story.md) (21) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (4) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (13)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (12) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (11) · [Social & Short-Form](../../categories/use-cases/social.md) (19) · [Storytelling & Brand](../../categories/use-cases/story.md) (21) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (4) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (13)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (9) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (2) · [Games](../../categories/families/games.md) (3)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (9) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (2) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (2) · [Games](../../categories/families/games.md) (3)
 
 <table>
 <tr>
@@ -17,6 +17,7 @@ Use case · Step-by-step teaching: onboarding, courses, how-to guides.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/retro-desktop/retro-desktop.mp4"><img src="../../styles/retro-desktop/preview.gif" alt="Retro Desktop" width="100%"></a><br><b>35 · Retro Desktop</b><br><a href="../../styles/retro-desktop/retro-desktop.mp4">video</a> · <a href="../../styles/retro-desktop">source</a></td>
+<td width="25%" align="center"><a href="../../styles/bold-captions/bold-captions.mp4"><img src="../../styles/bold-captions/preview.gif" alt="Bold Captions" width="100%"></a><br><b>46 · Bold Captions</b><br><a href="../../styles/bold-captions/bold-captions.mp4">video</a> · <a href="../../styles/bold-captions">source</a></td>
 </tr>
 </table>
 
@@ -27,3 +28,4 @@ Use case · Step-by-step teaching: onboarding, courses, how-to guides.
 | 23 | [Product UI](../../styles/product-ui/) | Polished SaaS app demo with cursor, zooms and callouts | Feature launches, app walkthroughs, and onboarding | [Technical](../../categories/families/technical.md) | [Product & Launches](../../categories/use-cases/product.md), [Tutorials & Training](../../categories/use-cases/tutorial.md) |
 | 24 | [3Blue1Brown](../../styles/3blue1brown/) | Manim-style math on black | Math intuition, visual proofs, and step-by-step derivations | [Technical](../../categories/families/technical.md) | [Explainers](../../categories/use-cases/explainer.md), [Tutorials & Training](../../categories/use-cases/tutorial.md), [Data & Results](../../categories/use-cases/data.md) |
 | 35 | [Retro Desktop](../../styles/retro-desktop/) | Mid-90s desktop on a CRT | Nostalgic stories, tech humor, and step-by-step computer tutorials | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Tutorials & Training](../../categories/use-cases/tutorial.md) |
+| 46 | [Bold Captions](../../styles/bold-captions/) | Word-by-word punchy short-form captions | Reels, Shorts and quick tips that must hook fast | [Experimental](../../categories/families/experimental.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Tutorials & Training](../../categories/use-cases/tutorial.md) |
