@@ -1,4 +1,4 @@
-# sfx.json → sfx.wav (48 kHz stereo) — terminal: tuş tıkı, bip, CRT açılış/kapanış
+# sfx.json → sfx.wav (48 kHz stereo) — terminal: key click, beep, CRT power on/off
 import json, numpy as np, wave, os
 SR = 48000; DUR = 9.0
 d = os.path.dirname(os.path.abspath(__file__))

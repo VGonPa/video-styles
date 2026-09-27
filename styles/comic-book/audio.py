@@ -1,4 +1,4 @@
-# events.json → ses.wav · çizgi roman: panel "tık"ları, balon "boing"i, tahta blok TIK/TAK, mantar "POP", zil
+# events.json → audio.wav · comic: panel 'clicks', balloon 'boings', wooden block 'POP', cork 'POP', bell
 import json, wave, numpy as np
 SR, DUR = 48000, 10.0
 N = int(SR * DUR); out = np.zeros(N)
@@ -24,5 +24,5 @@ for e in json.load(open('events.json')):
     elif k == 'ding': add(bell(1320), t, 0.18); add(bell(1760), t + 0.12, 0.12)
 out = np.tanh(out * 1.3) * 0.85
 pcm = (np.clip(out, -1, 1) * 32767).astype(np.int16)
-w = wave.open('ses.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(np.repeat(pcm[:, None], 2, axis=1).tobytes()); w.close()
-print('ses.wav ok')
+w = wave.open('audio.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(np.repeat(pcm[:, None], 2, axis=1).tobytes()); w.close()
+print('audio.wav ok')

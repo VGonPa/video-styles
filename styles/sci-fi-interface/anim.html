@@ -3,10 +3,10 @@
 <body style="margin:0;background:#05090c"><canvas id="c" width="1920" height="1080"></canvas>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-//  hud — soğuk, neonsuz bilim-kurgu arayüzü. window.draw({t}) → JPEG base64
-//  Hikâye: halkalar kurulur → radar taraması bir konuşmayı analiz eder, etiketler
-//  kilitlenir → ses halkası "açılıp" zaman çizgisine dönüşür → tarama kafası
-//  duraksama/dolgu sözcüklerini işaretler → FLUENCY 87 → arayüz geri çekilir.
+//  hud — a cold, neon-free sci-fi interface. window.draw({t}) → JPEG base64
+//  Story: rings are set → radar scan analyzes a conversation, tags it
+//  locks → audio ring “opens” to timeline → scan head
+//  marks pause/filler words → FLUENCY 87 → interface retracts.
 // ─────────────────────────────────────────────────────────────────────────────
 const W = 1920, H = 1080, CX = 960, CY = 540, DUR = 9.0;
 const cv = document.getElementById('c'); const ctx = cv.getContext('2d');
@@ -24,11 +24,11 @@ const ice = a => `rgba(${ICE[0]},${ICE[1]},${ICE[2]},${a})`, wh = a => `rgba(238
 const DISP = "'Chakra Petch', sans-serif", MONO = "'Martian Mono', monospace";
 function F(size, w, fam, ls = 0) { ctx.font = `${w} ${size}px ${fam}`; ctx.letterSpacing = ls + 'px'; }
 
-// ── zaman çizelgesi ──────────────────────────────────────────────────────────
+// ── timeline ───────────────────────────── ─────────────────────────────
 const T = { ring0: 0.15, scan0: 1.15, scan1: 4.05, done: 4.1, un0: 4.45, un1: 5.35, head0: 5.55, head1: 7.15, res: 7.2, out0: 8.1, end: 8.95 };
 const R1 = 118, R2 = 180, R3 = 292, R4 = 332, R5 = 396;
 const NB = 120;
-// konuşma zarfı: üç duraksama boşluğu
+// speech adverb: three pause spaces
 const PAUSES = [{ i: 30, w: 3, lab: '0,6 sec' }, { i: 65, w: 4, lab: '1,1 sec' }, { i: 97, w: 2, lab: '0,4 sec' }];
 const FILLERS = [{ i: 46, lab: '“um”' }, { i: 81, lab: '“well”' }];
 const AMP = []; for (let i = 0; i < NB; i++) {
@@ -42,7 +42,7 @@ const CALL = [
   { deg: 220, lab: 'AUDIO LEVEL', val: '-14', unit: 'dB' },
 ];
 const sweepAng = t => -Math.PI / 2 + TAU * eIO(seg(t, T.scan0, T.scan1));
-const passT = deg => { // taramanın o açıyı geçtiği an
+const passT = deg => { // the moment the scan crosses that angle
   const f = (((deg + 90) % 360) + 360) % 360 / 360; let lo = 0, hi = 1; for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; eIO(m) < f ? lo = m : hi = m; }
   return T.scan0 + lo * (T.scan1 - T.scan0); };
 CALL.forEach(c => c.t = passT(c.deg));
@@ -60,20 +60,20 @@ SFX.push({ t: T.done, k: 'ping' }, { t: T.un0, k: 'low' });
 [...PAUSES, ...FILLERS].forEach(p => SFX.push({ t: p.t, k: 'mark' }));
 SFX.push({ t: T.res + 0.05, k: 'chime' }, { t: T.out0, k: 'tick' });
 
-// ── yardımcı çizimler ────────────────────────────────────────────────────────
+// ── auxiliary drawings ──────────────────────────── ────────────────────────────
 function arc(r, a0, a1, lw, col) { if (a1 <= a0) return; ctx.beginPath(); ctx.arc(CX, CY, r, a0, a1); ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.stroke(); }
 function line(x0, y0, x1, y1, lw, col) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.stroke(); }
-const GLY = 'ABCÇDEFGĞHIİJKLMNOÖPRSŞTUÜVYZ0123456789';
+const GLY = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 function decode(str, p, t, seed = 0) {
   if (p >= 1) return str; if (p <= 0) return '';
   const n = str.length, shown = Math.ceil(n * clamp(p * 1.4)); let out = '';
   for (let i = 0; i < shown; i++) { const lock = p > 0.3 + 0.7 * i / n;
     out += lock || str[i] === ' ' ? str[i] : GLY[Math.floor(hash(i * 13 + Math.floor(t * 24) * 7 + seed) * GLY.length)]; }
   return out; }
-// ring draw-in / retract: 0..1 görünen yay kesri, retract saat yönünün tersine siler
+// ring draw-in / retract: 0..1 apparent arc fraction, retract deletes counterclockwise
 function ringVis(t, tin, tout) { return { a: eOut(seg(t, tin, tin + 0.55)), e: eIO(seg(t, tout, tout + 0.45)) }; }
 
-// ── statik katman: nokta ızgarası + vinyet ───────────────────────────────────
+// ── static layer: dot grid + vignette ───────────────────────────────────
 let BG;
 function prep() {
   BG = mk(W, H); const g = BG.getContext('2d');
@@ -85,7 +85,7 @@ function prep() {
   g.fillStyle = v; g.fillRect(0, 0, W, H);
 }
 
-// ── çerçeve UI (köşe parantezleri, başlık, zaman kodu) ───────────────────────
+// ── frame UI (corners, title, timecode) ───────────────────────
 function frameUI(t) {
   const pin = eBack(seg(t, 0.45, 0.95)), pout = eIn(seg(t, T.out0 + 0.35, T.end - 0.1));
   const off = (1 - pin) * 60 + pout * 50, a = clamp(pin * 1.2) * (1 - pout);
@@ -102,63 +102,63 @@ function frameUI(t) {
   ctx.textAlign = 'right'; F(15, 400, MONO, 2); ctx.fillStyle = ice(0.8);
   const tc = Math.max(0, t - 0.7); const fr = Math.floor((tc % 1) * 30);
   if (pt > 0) ctx.fillText(`T+00:0${Math.floor(tc)}:${String(fr).padStart(2, '0')}`, W - 196, 157);
-  // alt satır: durum
+  // bottom line: status
   ctx.textAlign = 'left'; F(14, 300, MONO, 3); ctx.fillStyle = ice(0.6);
   const st = t < T.scan0 ? 'SYSTEM INITIALIZING' : t < T.done ? 'RADIAL SCAN' : t < T.head0 ? 'MAPPING TO TIMELINE' : t < T.res ? 'LINEAR SCAN' : 'ANALYSIS COMPLETE';
   if (pt > 0) ctx.fillText(decode(st, seg(t, 0.8, 1.3), t, 3), 196, H - 146);
-  // sağ alt: küçük seviye çubukları
+  // bottom right: small dipsticks
   for (let k = 0; k < 16; k++) { const lv = 0.5 + 0.5 * Math.sin(t * 7 + k * 0.9) * hash(k + Math.floor(t * 12)); ctx.fillStyle = ice(0.25 + 0.55 * lv);
     const h = 4 + 16 * lv; ctx.fillRect(W - 196 - (16 - k) * 7, H - 146 - h, 3, h); }
   ctx.globalAlpha = 1;
 }
 
-// ── sahne A: radyal analiz ───────────────────────────────────────────────────
-function sceneA(t, un) {           // un: açılma ilerlemesi (halka dışındaki öğeler için solma)
+// ── stage A: radial analysis ───────────────────────── ──────────────────────────
+function sceneA(t, un) {           // un: unfolding progress (fading for elements outside the ring)
   const fade = 1 - eOut(seg(t, T.un0 - 0.15, T.un0 + 0.35));
   if (fade <= 0) return;
   ctx.save(); ctx.globalAlpha = fade;
   const rot = t * 0.1;
-  // ince iç halka
+  // thin inner ring
   { const v = ringVis(t, T.ring0, T.un0 - 0.2); arc(R1, -Math.PI / 2 + TAU * v.e, -Math.PI / 2 + TAU * v.a, 1.5, ice(0.7)); }
-  // tick halkası (R3) — dönüyor
+  // tick ring (R3) — rotating
   { const v = ringVis(t, T.ring0 + 0.12, T.un0 - 0.25); const n = 180;
     for (let k = 0; k < n; k++) { const f = k / n; if (v.a <= 0 || f > v.a || f < v.e) continue; const ang = -Math.PI / 2 + TAU * f + rot * 0.6;
       const L = k % 15 === 0 ? 16 : k % 5 === 0 ? 10 : 5; const c = Math.cos(ang), s = Math.sin(ang);
       line(CX + c * R3, CY + s * R3, CX + c * (R3 + L), CY + s * (R3 + L), k % 15 === 0 ? 2 : 1, ice(k % 15 === 0 ? 0.9 : 0.45)); } }
-  // kesikli halka (R4) — ters yönde
+  // broken ring (R4) — in reverse direction
   { const v = ringVis(t, T.ring0 + 0.24, T.un0 - 0.3); const n = 12;
     for (let k = 0; k < n; k++) { const f0 = k / n, f1 = f0 + 0.058; const a0 = Math.max(f0, v.e), a1 = Math.min(f1, v.a); if (a1 <= a0) continue;
       arc(R4, -Math.PI / 2 + TAU * a0 - rot, -Math.PI / 2 + TAU * a1 - rot, 1.5, ice(0.6)); } }
-  // dış derece skalası (R5)
+  // outer rating scale (R5)
   { const v = ringVis(t, T.ring0 + 0.36, T.un0 - 0.35); arc(R5, -Math.PI / 2 + TAU * v.e, -Math.PI / 2 + TAU * v.a, 1, ice(0.3));
     F(12, 300, MONO, 1); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (let d = 0; d < 360; d += 30) { const f = d / 360; if (v.a <= 0 || f > v.a || f < v.e) continue; const ang = -Math.PI / 2 + d * D2R;
       if (CALL.some(c => Math.abs(((c.deg - (d - 90)) % 360 + 540) % 360 - 180) < 14)) continue;
       ctx.fillStyle = ice(0.55); ctx.fillText(String(d).padStart(3, '0'), CX + Math.cos(ang) * (R5 + 20), CY + Math.sin(ang) * (R5 + 20)); } }
-  // segmentli seviye yayları (sol + sağ)
+  // segmented level springs (left + right)
   { const v = seg(t, 0.7, 1.1); const vo = seg(t, T.un0 - 0.35, T.un0);
     for (const side of [0, 1]) { const base = side ? 0 : Math.PI; const lvl = 0.35 + 0.55 * Math.abs(Math.sin(t * (side ? 3.1 : 2.3) + side));
       for (let k = 0; k < 18; k++) { const f = k / 17; if (v <= 0 || f > v || f < vo) continue; const a0 = base - 22 * D2R + f * 44 * D2R;
         arc(362, a0, a0 + 1.6 * D2R, 8, f < lvl ? ice(0.85) : ice(0.18)); } } }
-  // artı işareti
+  // plus sign
   { const p = eOut(seg(t, 0.3, 0.85)), q = eIO(seg(t, T.un0 - 0.4, T.un0)); const r0 = R1 + 12, r1 = lerp(r0, R5 + 70, p * (1 - q));
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) line(CX + dx * r0, CY + dy * r0, CX + dx * r1, CY + dy * r1, 1, ice(0.35)); }
-  // radar izi (konik degrade) + tarama çizgisi
+  // radar signature (conical gradient) + scanline
   if (t > T.scan0 && t < T.scan1 + 0.3) {
     const sw = sweepAng(t), fa = 1 - seg(t, T.scan1, T.scan1 + 0.3);
     const g = ctx.createConicGradient(sw - 0.9, CX, CY); g.addColorStop(0, ice(0)); g.addColorStop(0.9 / TAU, ice(0.13 * fa)); g.addColorStop(0.9 / TAU + 0.001, ice(0)); g.addColorStop(1, ice(0));
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(CX, CY, R4, 0, TAU); ctx.arc(CX, CY, R1, 0, TAU, true); ctx.fill();
     line(CX + Math.cos(sw) * R1, CY + Math.sin(sw) * R1, CX + Math.cos(sw) * R4, CY + Math.sin(sw) * R4, 1.5, wh(0.9 * fa)); }
-  // halka tamamlandı "ping"
+  // ring completed "ping"
   if (t > T.done && t < T.done + 0.6) { const p = eOut(seg(t, T.done, T.done + 0.6)); arc(lerp(R1, R5 + 40, p), 0, TAU, 1.2, wh(0.6 * (1 - p))); }
-  // merkez sayaç
+  // center counter
   { const a = seg(t, T.scan0 - 0.2, T.scan0 + 0.1) * (1 - seg(t, T.un0 - 0.2, T.un0 + 0.1));
     if (a > 0) { ctx.globalAlpha = fade * a; const pct = Math.round(100 * seg(t, T.scan0, T.scan1));
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       F(62, 500, DISP, 0); ctx.fillStyle = WH; ctx.fillText('%' + pct, CX, CY + 18);
       F(13, 300, MONO, 3); ctx.fillStyle = ice(0.75); ctx.fillText(t < T.done ? 'TARANIYOR' : 'TAMAM', CX, CY + 48);
       ctx.globalAlpha = fade; } }
-  // çağrı etiketleri
+  // call tags
   for (const c of CALL) callout(c, t);
   ctx.restore();
 }
@@ -185,28 +185,28 @@ function callout(c, t) {
   ctx.restore();
 }
 
-// ── ses halkası ↔ zaman çizgisi (yay uzunluğunu koruyan açılma) ─────────────
+// ── sound loop ↔ timeline (unfolding that preserves arc length) ─────────────
 function spectrum(t) {
-  const p = eIO(seg(t, T.un0, T.un1));                    // eğrilik 1/R → 0
-  const pp = eIO(seg(t, T.un0 + 0.35, T.un1 + 0.15));     // uzama + aşağı kayma
+  const p = eIO(seg(t, T.un0, T.un1));                    // curvature 1/R → 0
+  const pp = eIO(seg(t, T.un0 + 0.35, T.un1 + 0.15));     // extension + sliding down
   const inA = seg(t, 0.4, 0.95);
   const outP = seg(t, T.out0, T.out0 + 0.7);
   const kap = (1 - p) / R2, ytop = lerp(CY - R2, YTL, pp), sc = lerp(1, LF / L0, pp);
   const sw = sweepAng(t), sweeping = t < T.scan1 + 0.05;
   const hx = headX(t);
-  // taban çizgisi
+  // baseline
   const pts = [];
   for (let k = 0; k <= 240; k++) { const s = (k / 240 - 0.5) * L0 * sc; pts.push(pos(s, kap, ytop, sc)); }
   const baseA = inA * (1 - outP);
   if (baseA > 0) { ctx.beginPath(); const lim = 1 - eIO(outP);
     let first = true; for (let k = 0; k <= 240; k++) { const f = Math.abs(k / 240 - 0.5) * 2; if (f > lim) continue; const [x, y] = pts[k]; first ? ctx.moveTo(x, y) : ctx.lineTo(x, y); first = false; }
-    // yay çizimi halkada girişte saat yönünde
+    // arc drawing clockwise at the entrance in the ring
     ctx.lineWidth = 1.2; ctx.strokeStyle = ice(0.55 * (t < 1 ? inA : 1)); if (t > 0.4) ctx.stroke(); }
   for (let i = 0; i < NB; i++) {
     const s = ((i + 0.5) / NB - 0.5) * L0 * sc; const [x, y, nx, ny] = pos(s, kap, ytop, sc);
-    // halkada: taramanın geçtiği yerde belirir
-    const angA = Math.PI / 2 + TAU * (i + 0.5) / NB;   // alt → sol → üst → sağ
-    const rel = ((angA + Math.PI / 2) % TAU + TAU) % TAU;           // üstten saat yönünde
+    // in ring: appears where the scan occurs
+    const angA = Math.PI / 2 + TAU * (i + 0.5) / NB;   // bottom → left → top → right
+    const rel = ((angA + Math.PI / 2) % TAU + TAU) % TAU;           // clockwise from top
     const swept = sweeping ? clamp(((sw + Math.PI / 2) - rel) / 0.25) : 1;
     let live = AMP[i] * (0.72 + 0.28 * Math.sin(t * 5.5 + i * 0.8)); live = lerp(live, AMP[i], p);
     const di = 1 - Math.abs(i / NB - 0.5) * 2; const shrink = 1 - eIO(seg(outP, di * 0.5, di * 0.5 + 0.5));
@@ -219,25 +219,25 @@ function spectrum(t) {
   }
 }
 function pos(s, kap, ytop, sc) {
-  const k = kap / sc;    // uzamayla birlikte eğrilik de yayılır
+  const k = kap / sc;    // curvature spreads with elongation
   if (k < 1e-7) return [CX + s, ytop, 0, -1];
   const ph = s * k; return [CX + Math.sin(ph) / k, ytop + (1 - Math.cos(ph)) / k, Math.sin(ph), -Math.cos(ph)];
 }
 
-// ── sahne B: doğrusal tarama ─────────────────────────────────────────────────
+// ── scene B: linear scan ──────────────────────── ─────────────────────────
 function sceneB(t) {
   if (t < T.un1 - 0.1) return;
   const outP = seg(t, T.out0, T.out0 + 0.6); const A = 1 - eIn(outP);
   ctx.save(); ctx.globalAlpha = A;
   const x0 = CX - LF / 2, x1 = CX + LF / 2, yAx = YTL + 118;
-  // zaman ekseni
+  // time axis
   const ap = eOut(seg(t, T.un1 - 0.05, T.un1 + 0.45));
   line(x0, yAx, lerp(x0, x1, ap), yAx, 1, ice(0.35));
   F(13, 300, MONO, 2); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   for (let k = 0; k <= 12; k++) { const x = lerp(x0, x1, k / 12); const tk = seg(t, T.un1 + k * 0.03, T.un1 + 0.2 + k * 0.03); if (tk <= 0) continue;
     line(x, yAx, x, yAx + (k % 3 === 0 ? 12 : 6) * tk, 1, ice(0.5));
     if (k % 3 === 0) { ctx.fillStyle = ice(0.6 * tk); ctx.fillText(`${k * 5} SN`, x, yAx + 20); } }
-  // tarama kafası
+  // scan head
   if (t > T.head0 - 0.15 && t < T.head1 + 0.35) {
     const hx = headX(t), a = seg(t, T.head0 - 0.15, T.head0) * (1 - seg(t, T.head1, T.head1 + 0.35));
     ctx.globalAlpha = A * a; line(hx, YTL - 120, hx, yAx, 1.5, wh(0.95));
@@ -245,9 +245,9 @@ function sceneB(t) {
     F(14, 400, MONO, 1); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = wh(0.9);
     const secs = ((hx - x0) / LF * 60).toFixed(1).replace('.', ','); ctx.fillText(secs + ' sec', hx + 10, YTL - 124);
     ctx.globalAlpha = A; }
-  // işaretler
+  // signs
   for (const p of PAUSES) marker(t, p, 'pause'); for (const f of FILLERS) marker(t, f, 'fill');
-  // sayaçlar
+  // counters
   const cp = eOut(seg(t, T.un1, T.un1 + 0.4));
   if (cp > 0) { ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     const nP = PAUSES.filter(p => t >= p.t).length, nF = FILLERS.filter(p => t >= p.t).length;
@@ -255,7 +255,7 @@ function sceneB(t) {
       ctx.globalAlpha = A * cp; F(14, 300, MONO, 3); ctx.fillStyle = ice(0.75); ctx.fillText(lab, x, y);
       F(40, 500, DISP, 0); ctx.fillStyle = WH; ctx.fillText(String(n).padStart(2, '0'), x, y + 44); });
     ctx.globalAlpha = A; }
-  // sonuç
+  // result
   if (t > T.res) {
     const rp = seg(t, T.res, T.res + 0.7), n = Math.round(87 * eOut(rp)); const a = eOut(seg(t, T.res, T.res + 0.25));
     const rx = x1; ctx.globalAlpha = A * a; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
@@ -281,7 +281,7 @@ function marker(t, m, kind) {
     line(x, y + 10, x, lerp(y + 10, YTL - 12, lp), 1, ice(0.6));
     F(20, 500, DISP, 1); ctx.fillStyle = wh(lp); ctx.fillText(m.lab, x, y - 16); }
 }
-// son: merkez nokta
+// end: center point
 function endDot(t) {
   const a = t < 1 ? eOut(seg(t, 0, 0.25)) * (1 - seg(t, 0.45, 0.7)) : t > T.out0 + 0.4 ? seg(t, T.out0 + 0.4, T.out0 + 0.6) * (1 - eOut(seg(t, T.out0 + 0.7, T.end))) : 0;
   if (a <= 0) return; const y = t < 1 ? CY : YTL; ctx.globalAlpha = a; ctx.fillStyle = WH; ctx.beginPath(); ctx.arc(CX, y, 3.5, 0, TAU); ctx.fill();
@@ -296,12 +296,12 @@ function render(t) {
   sceneB(t);
   frameUI(t);
   endDot(t);
-  // giriş/çıkış kararması
+  // input/output fadeout
   const fadeIn = 1 - seg(t, 0, 0.35), fadeOut = seg(t, T.end - 0.25, DUR - 0.02);
   const k = Math.max(fadeIn * 0.85, fadeOut * 0.9); if (k > 0) { ctx.fillStyle = `rgba(3,6,8,${k})`; ctx.fillRect(0, 0, W, H); }
 }
 window.draw = function (job) { render(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
 window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`500 40px 'Chakra Petch'`, 'FLUENCYŞÜĞİÖÇ0123'), document.fonts.load(`600 40px 'Chakra Petch'`, 'FLUENCYŞÜĞİÖÇ'),
-  document.fonts.load(`300 12px 'Martian Mono'`, 'AKIŞÜĞİÖÇ0123'), document.fonts.load(`400 12px 'Martian Mono'`, 'AKIŞÜĞİÖÇ0123')])).then(prep);
+  document.fonts.load(`500 40px 'Chakra Petch'`, 'FLUENCY0123'), document.fonts.load(`600 40px 'Chakra Petch'`, 'FLUENCY'),
+  document.fonts.load(`300 12px 'Martian Mono'`, 'FLOW0123'), document.fonts.load(`400 12px 'Martian Mono'`, 'FLOW0123')])).then(prep);
 </script></body></html>

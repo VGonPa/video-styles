@@ -1,4 +1,4 @@
-// ---- ortak yardımcılar ----
+// ---- common auxiliaries ----
 const W = 1920, H = 1080;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
@@ -19,7 +19,7 @@ function loadFont(fam, file, weight, style = 'normal') {
     document.fonts.add(f); return f.load();
   }));
 }
-// Polyline yolu: noktalar + kümülatif uzunluk
+// Polyline path: points + cumulative length
 class Path {
   constructor() { this.p = []; }
   M(x, y) { this.p.push([x, y]); return this; }
@@ -27,7 +27,7 @@ class Path {
   C(x1, y1, x2, y2, x, y, n = 40) { const [a, b] = this.p[this.p.length - 1]; for (let i = 1; i <= n; i++) { const t = i / n, u = 1 - t; this.p.push([u*u*u*a + 3*u*u*t*x1 + 3*u*t*t*x2 + t*t*t*x, u*u*u*b + 3*u*u*t*y1 + 3*u*t*t*y2 + t*t*t*y]); } return this; }
   Q(x1, y1, x, y, n = 30) { const [a, b] = this.p[this.p.length - 1]; for (let i = 1; i <= n; i++) { const t = i / n, u = 1 - t; this.p.push([u*u*a + 2*u*t*x1 + t*t*x, u*u*b + 2*u*t*y1 + t*t*y]); } return this; }
   A(cx, cy, rx, ry, a0, a1, n) { n = n || Math.max(8, Math.ceil(Math.abs(a1 - a0) * Math.max(rx, ry) / 4)); for (let i = 0; i <= n; i++) { const a = lerp(a0, a1, i / n); const q = [cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]; if (i === 0 && this.p.length) this.L(q[0], q[1]); else this.p.push(q); } return this; }
-  // Catmull-Rom (centripetal) noktalardan geçen eğri
+  // Curve passing through Catmull-Rom (centripetal) points
   S(pts, n = 16) { const P = this.p.length ? [this.p[this.p.length - 1], ...pts] : pts; if (!this.p.length) this.p.push(P[0]);
     for (let i = 0; i < P.length - 1; i++) { const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)];
       const d = (a, b) => Math.pow(Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-3, 0.5);
@@ -47,7 +47,7 @@ class Path {
   at(s) { s = clamp(s, 0, this.len); let lo = 0, hi = this.cum.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (this.cum[m] < s) lo = m; else hi = m; }
     const f = (s - this.cum[lo]) / ((this.cum[hi] - this.cum[lo]) || 1); const a = this.p[lo], b = this.p[hi];
     return { x: lerp(a[0], b[0], f), y: lerp(a[1], b[1], f), ang: Math.atan2(b[1] - a[1], b[0] - a[0]), i: lo }; }
-  // [s0,s1] aralığını ctx yoluna ekler
+  // Adds range [s0,s1] to ctx path
   trace(c, s0, s1) { if (s1 <= s0) return null; const A = this.at(s0), B = this.at(s1); c.moveTo(A.x, A.y);
     for (let i = A.i + 1; i <= B.i; i++) c.lineTo(this.p[i][0], this.p[i][1]); c.lineTo(B.x, B.y); return B; }
   resample(N) { this.done(); const q = []; for (let i = 0; i < N; i++) { const a = this.at(this.len * i / (N - 1)); q.push([a.x, a.y]); } const o = new Path(); o.p = q; return o.done(); }

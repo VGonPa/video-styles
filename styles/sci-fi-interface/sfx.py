@@ -1,4 +1,4 @@
-# sfx.json → sfx.wav — hud: temiz sinüs blip'leri, halka tıkları, tamamlanma çanı
+# sfx.json → sfx.wav — hud: clean sine blips, ring ticks, completion bell
 import json, numpy as np, wave, os
 SR = 48000; DUR = 9.0
 d = os.path.dirname(os.path.abspath(__file__)); ev = json.load(open(os.path.join(d, 'sfx.json')))

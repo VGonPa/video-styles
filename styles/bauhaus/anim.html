@@ -22,7 +22,7 @@
 <style>html,body{margin:0;background:#eee8dc}</style></head>
 <body><canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// Swiss / Bauhaus: ızgara üzerinde üç temel form = doğaçlamanın üç adımı (DÜŞÜN · KUR · KONUŞ) → 60 saniyelik mekanik geri sayım.
+// Swiss / Bauhaus: three basic forms on the grid = three steps of improvisation (THINK · SETUP · TALK) → 60-second mechanical countdown.
 const W = 1920, H = 1080, cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const DUR = 9.5, FF = "'Archivo', sans-serif";
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
@@ -84,7 +84,7 @@ function triShape(x, cyC, side, rot) { // equilateral, rotation about centroid
   ctx.fillStyle = K.ink; ctx.beginPath(); ctx.moveTo(0, -h * 2 / 3); ctx.lineTo(side / 2, h / 3); ctx.lineTo(0, h / 3); ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function poster(t) {
-  // headline
+  // headlines
   maskedLetters('IMPROVISE.', M - 6, 292, 212, 'expanded', 0.55, t, K.ink, 0.045, -6);
   // side note, top right
   const sn = eExpoOut(seg(t, 1.5, 2.1));
@@ -93,7 +93,7 @@ function poster(t) {
     ctx.fillStyle = K.red; ctx.fillRect(W - M - 26, 250, 26 * sn, 26); }
   // baseline rule
   const bl = eExpoOut(seg(t, 0.45, 1.1)); ctx.fillStyle = K.ink; ctx.fillRect(M, BASE, (W - 2 * M) * bl, 8);
-  // circle rolls in along the baseline
+  // circle rolls along the baseline
   const cp = seg(t, 0.75, 1.75), cx = lerp(-220, SH.c.x, eBackS(cp)); const act1 = eExpoInOut(seg(t, 2.85, 3.15));
   if (cp > 0) circleShape(cx, BASE - SH.c.r, SH.c.r, (cx - SH.c.x) / SH.c.r - Math.PI * 0.75 + act1 * Math.PI / 2);
   // square drops and rotates into place
@@ -116,7 +116,7 @@ function poster(t) {
     ctx.fillStyle = K.red; ctx.fillRect(ix, 960, 60 * eExpoOut(ip), 10); }
 }
 
-// ---------- scene 2 : the 60-second clock ----------
+// ---------- scene 2: the 60-second clock ----------
 const CLK = { x: 1350, y: 540, r: 330 };
 function clockScene(t) {
   ctx.fillStyle = K.red; ctx.fillRect(0, 0, W, H);

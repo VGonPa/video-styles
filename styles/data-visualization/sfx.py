@@ -1,4 +1,4 @@
-# sfx.json → sfx.wav — veri: veri noktası başına yükselen yumuşak tık (kalem/klavye değil, marimba benzeri), not için "tok"
+# sfx.json → sfx.wav — data: rising soft click per data point (not pen/keyboard, marimba-like), “tok” for note
 import json, numpy as np, wave, os
 SR = 48000; DUR = 9.0
 d = os.path.dirname(os.path.abspath(__file__)); ev = json.load(open(os.path.join(d, 'sfx.json')))
@@ -8,7 +8,7 @@ def sine(n, f): return np.sin(2 * np.pi * f * np.arange(n) / SR)
 def add(t, x, g): i = int(t * SR); out[i:i + len(x)] += x[:len(out) - i] * g
 for e in ev:
     k, t = e['k'], e['t']
-    if k == 'dot':   # veri azaldıkça perde iner
+    if k == 'dot':   # the curtain decreases as the data decreases
         f = 880 * 2 ** (-(e['v']) / 14); n = int(0.35 * SR); add(t, (sine(n, f) + 0.25 * sine(n, 4 * f)) * env(n, 0.002, 0.06), 0.07)
     elif k == 'tick': n = int(0.2 * SR); add(t, (sine(n, 660) + 0.2 * sine(n, 2640)) * env(n, 0.002, 0.05), 0.07)
     elif k == 'tock': n = int(0.5 * SR); add(t, (sine(n, 392) + 0.3 * sine(n, 1176)) * env(n, 0.003, 0.12), 0.12)

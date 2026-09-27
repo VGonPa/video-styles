@@ -1,4 +1,4 @@
-# kısa sentez sesler (hışırtı/whoosh yok): python3 sfx.py events.json out.wav dur
+# short synth sounds (no whoosh/whoosh): python3 sfx.py events.json out.wav stop
 import json, sys, numpy as np, wave
 SR = 48000
 ev, outp, dur = json.load(open(sys.argv[1])), sys.argv[2], float(sys.argv[3])
@@ -25,7 +25,7 @@ S = {
 for e in ev:
     x = S[e['type']](e.get('gain', 1), e.get('f')) * e.get('gain', 1)
     i = int(e['t'] * SR); buf[i:i + len(x)] += x[:len(buf) - i]
-# hafif oda yankısı (sıcaklık)
+# slight room echo (temperature)
 out = buf.copy()
 for dl, g in ((0.043, .18), (0.071, .12), (0.113, .07)): k = int(dl * SR); out[k:] += buf[:-k] * g
 out = out[:int(SR * dur)]; m = np.max(np.abs(out)) or 1; out = out / m * 0.5

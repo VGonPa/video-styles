@@ -1,4 +1,4 @@
-# sfx.json → sfx.wav — kinetik: tahta tık / tok vuruşlar; duvar kısmında hece benzeri hızlanan pıtırtı
+# sfx.json → sfx.wav — kinetic: wooden knock / knock knocks; syllable-like accelerating patter on the wall part
 import json, numpy as np, wave, os
 SR = 48000; DUR = 9.0
 d = os.path.dirname(os.path.abspath(__file__)); ev = json.load(open(os.path.join(d, 'sfx.json')))
@@ -6,7 +6,7 @@ out = np.zeros(int(SR * DUR) + SR); rng = np.random.default_rng(11)
 def env(n, a=0.001, dec=0.03): t = np.arange(n) / SR; return np.minimum(1, t / a) * np.exp(-t / dec)
 def sine(n, f): return np.sin(2 * np.pi * f * np.arange(n) / SR)
 def hsh(v): s = np.sin(v * 127.1 + 311.7) * 43758.5453; return s - np.floor(s)
-def wood(f, dec=0.025):   # tahta blok: iki kısmi + kısa gürültü
+def wood(f, dec=0.025):   # wooden block: two partial + short noise
     n = int(0.25 * SR); return (sine(n, f) + 0.45 * sine(n, f * 2.76) * env(n, 0.0005, dec * 0.4)) * env(n, 0.0008, dec) + 0.15 * rng.standard_normal(n) * env(n, 0.0002, 0.002)
 def add(t, x, g): i = int(t * SR); out[i:i + len(x)] += x[:len(out) - i] * g
 for e in ev:

@@ -3,10 +3,10 @@
 <body style="margin:0;background:#ebe5d7"><canvas id="c" width="1920" height="1080"></canvas>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-//  kinetik-tipografi — yalnız kelimeler. window.draw({t}) → JPEG base64
-//  "Önce susarsın. Sonra bir kelime gelir. Sonra bir tane daha.
-//   Ve bir bakmışsın — konuşuyorsun."
-//  Sessizlik = küçük/ince/boşluk; konuşma = büyük/kalın/yoğun. Son: nokta → sessizlik.
+//  kinetic-typography — words alone. window.draw({t}) → JPEG base64
+//  "First you are silent. Then a word comes. Then another.
+//   And next thing you know — you're talking.”
+//  Silence = small/thin/space; speech = big/thick/dense. End: period → silence.
 // ─────────────────────────────────────────────────────────────────────────────
 const W = 1920, H = 1080, DUR = 9.0;
 const cv = document.getElementById('c'); const ctx = cv.getContext('2d');
@@ -22,13 +22,13 @@ const BG = '#ebe5d7', INK = '#15130f', RED = '#d8402f';
 const GRO = "'Bricolage Grotesque', sans-serif", SER = "'Instrument Serif', serif";
 const inkA = a => `rgba(21,19,15,${a})`;
 
-const T = { once: 0.25, sus: 0.8, cam1: 1.72, sonra: 1.95, kelime: 2.22, gelir: 2.6, cam2: 3.0, g3: [3.22, 3.42, 3.6, 3.8],
+const T = { first: 0.25, silence: 0.8, cam1: 1.72, then: 1.95, word: 2.22, arrives: 2.6, cam2: 3.0, g3: [3.22, 3.42, 3.6, 3.8],
   wall0: 4.15, wall1: 5.45, wallOut: 5.65, ve: 5.95, veUp: 6.5, kon: 6.62, wgt0: 6.8, wgt1: 7.65, dot: 7.4, out: 8.05, end: 8.95 };
 
-// ── kelime çizici ────────────────────────────────────────────────────────────
+// ── word plotter ────────────────────────────── ──────────────────────────────
 function font(o) { ctx.font = `${o.it ? 'italic ' : ''}${Math.round(o.w || 400)} ${o.size}px ${o.fam}`; ctx.letterSpacing = (o.ls || 0) + 'px'; }
 function measure(str, o) { font(o); return ctx.measureText(str).width; }
-function word(str, x, y, o) {   // x: hizalama noktası, y: taban çizgisi
+function word(str, x, y, o) {   // x: alignment point, y: baseline
   const a = o.a === undefined ? 1 : o.a; if (a <= 0.003) return;
   font(o); const w = ctx.measureText(str).width; const al = o.align || 'center';
   const x0 = al === 'center' ? x - w / 2 : al === 'right' ? x - w : x;
@@ -37,34 +37,34 @@ function word(str, x, y, o) {   // x: hizalama noktası, y: taban çizgisi
   ctx.translate(ox, oy); ctx.scale(s * (o.sx || 1), s * (o.sy || 1)); ctx.translate(-ox, -oy);
   ctx.fillText(str, x0, y); ctx.restore(); return w;
 }
-// giriş: aşağıdan yükselip oturma (overshoot ile)
+// entry: rising from below and sitting (with overshoot)
 const rise = (t, t0, d = 0.45, dist = 40) => { const p = seg(t, t0, t0 + d); return { a: clamp(p * 2.2), dy: (1 - eBack(p, 1.2)) * dist }; };
 
-// ── kamera: satır grupları yukarı akar ───────────────────────────────────────
+// ── camera: row groups flow up ───────────────────────────────────────
 const G1 = 540, G2 = 1240, G3 = 1940;
 function camY(t) { if (t < T.cam1) return G1; if (t < T.cam2) return lerp(G1, G2, eIO(seg(t, T.cam1, T.cam1 + 0.5))); return lerp(G2, G3, eIO(seg(t, T.cam2, T.cam2 + 0.5))); }
 const groupA = (gy, cy) => 1 - 0.85 * clamp(Math.abs(gy - cy) / 600);
 
 function group1(t, cy) {
   const off = 540 - cy, ga = groupA(G1, cy); if (off < -1100) return;
-  const r = rise(t, T.once, 0.55, 34);
+  const r = rise(t, T.first, 0.55, 34);
   word('First', 960, G1 - 20 + off + r.dy, { fam: SER, it: true, size: 92, a: r.a * ga });
-  // susarsın: ince, küçük, harf aralığı yavaşça açılır (sessizlik uzar)
-  const p = seg(t, T.sus, T.sus + 0.6);
-  word('silence.', 960, G1 + 78 + off, { fam: GRO, w: 200, size: 40, ls: lerp(3, 26, eOut(seg(t, T.sus, T.cam1 + 0.3))), a: eOut(p) * ga * 0.9 });
+  // you become silent: thin, small, letter spacing slowly opens (silence becomes longer)
+  const p = seg(t, T.silence, T.silence + 0.6);
+  word('silence.', 960, G1 + 78 + off, { fam: GRO, w: 200, size: 40, ls: lerp(3, 26, eOut(seg(t, T.silence, T.cam1 + 0.3))), a: eOut(p) * ga * 0.9 });
 }
 function group2(t, cy) {
   const off = 540 - cy, ga = groupA(G2, cy); if (off > 1100 || off < -1100) return;
-  const r1 = rise(t, T.sonra, 0.45, 30);
+  const r1 = rise(t, T.then, 0.45, 30);
   word('Then one', 960, G2 - 150 + off + r1.dy, { fam: SER, it: true, size: 72, a: r1.a * ga });
-  // kelime: ölçekle patlar, inerken kalınlaşır
-  const p = seg(t, T.kelime - 0.08, T.kelime + 0.42), s = lerp(0.55, 1, eBack(p, 2.2)), w = lerp(300, 760, eOut(seg(t, T.kelime, T.kelime + 0.35)));
+  // word: bursts with scale, thickens as it descends
+  const p = seg(t, T.word - 0.08, T.word + 0.42), s = lerp(0.55, 1, eBack(p, 2.2)), w = lerp(300, 760, eOut(seg(t, T.word, T.word + 0.35)));
   const kw = word('word', 960, G2 + 70 + off, { fam: GRO, w, size: 230, ls: -6, s, a: clamp(p * 4) * ga });
   const kw8 = measure('word', { fam: GRO, w: 760, size: 230, ls: -6 });
-  const q = seg(t, T.gelir, T.gelir + 0.4);
+  const q = seg(t, T.arrives, T.arrives + 0.4);
   word('arrives.', 960 + kw8 / 2 - 6 + (1 - eOut5(q)) * 60, G2 + 160 + off, { fam: GRO, w: 300, size: 64, align: 'right', a: clamp(q * 2) * ga });
 }
-// G3: "Sonra bir tane daha." — her kelime bir öncekinden büyük ve kalın
+// G3: “And then another.” — each word is bigger and bolder than the previous one
 const G3W = [['Then', { fam: SER, it: true, size: 76 }], ['one', { fam: GRO, w: 300, size: 96, ls: -2 }], ['word', { fam: GRO, w: 560, size: 136, ls: -4 }], ['more.', { fam: GRO, w: 800, size: 176, ls: -6 }]];
 function g3Layout() { const gap = 34; const ws = G3W.map(([s, o]) => measure(s, o)); const tot = ws.reduce((a, b) => a + b, 0) + gap * 3;
   let x = 960 - tot / 2; return ws.map(w => { const cx = x + w / 2; x += w + gap; return cx; }); }
@@ -72,11 +72,11 @@ let G3X;
 function group3(t, cy, fade) {
   const off = 540 - cy; if (off > 1100) return;
   G3W.forEach(([s, o], i) => { const t0 = T.g3[i]; const p = seg(t, t0 - 0.06, t0 + 0.3); if (p <= 0) return;
-    const sc = lerp(1.35, 1, eOut5(p));   // "çakılma": büyükten oturur
+    const sc = lerp(1.35, 1, eOut5(p));   // "crashing": sits from the big one
     word(s, G3X[i], G3 + 50 + off + (1 - eOut5(p)) * -18, { ...o, s: sc * (1 - 0.06 * fade), a: clamp(p * 3) * (1 - fade) }); });
 }
 
-// ── duvar: "bir kelime daha" ritmi hızlanarak ekranı doldurur ────────────────
+// ── wall: “one more word” rhythm accelerates to fill the screen ────────────────
 const WALL = []; const TOK = [['one', 300], ['word', 520], ['more', 800]];
 function buildWall() {
   const rows = [-3, -2, -1, 1, 2, 3]; const size = 78, gap = 40;
@@ -95,10 +95,10 @@ function wall(t) {
     word(o.s, o.x + drift, o.y, { fam: GRO, w: o.w, size: o.size, ls: -2, s: lerp(0.7, 1, eBack(p, 1.8)), a: clamp(p * 3) * depth * (1 - out) }); }
 }
 
-// ── final: "Ve bir bakmışsın —" + "konuşuyorsun." ────────────────────────────
+// ── finale: "And next thing you know, you're talking —" + "." ────────────────────────────
 const KON = [...'you speak']; let KSIZE = 200;
 function finale(t) {
-  // Ve bir bakmışsın —
+  // And next thing you know —
   if (t > T.ve - 0.05) { const p = seg(t, T.ve, T.ve + 0.45), u = eIO(seg(t, T.veUp, T.veUp + 0.45)), o = seg(t, T.out, T.out + 0.35);
     word('And suddenly —', 960, lerp(560, 400, u) + (1 - eOut(p)) * 24, { fam: SER, it: true, size: lerp(96, 66, u), a: eOut(p) * lerp(1, 0.75, u) * (1 - o) }); }
   if (t < T.kon) return;
@@ -110,14 +110,14 @@ function finale(t) {
   const dotX = 960 + tot * breath / 2 - dotW * breath / 2;
   ctx.save(); ctx.fillStyle = INK; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   KON.forEach((c, i) => { const t0 = T.kon + i * 0.042, p = seg(t, t0, t0 + 0.5); const w = adv[i] * breath;
-    // çıkış: harfler soldan sağa taban çizgisine doğru ezilip susar
+    // exit: letters are crushed from left to right towards the baseline
     const q = eIn(seg(t, T.out + i * 0.028, T.out + 0.26 + i * 0.028));
     const cx = x + w / 2;
     if (p > 0 && q < 1) { ctx.save(); ctx.globalAlpha = clamp(p * 3) * (1 - q * q);
       const dy = (1 - eBack(p, 1.6)) * 120; ctx.translate(cx, y + dy); const sy = lerp(1.25, 1, eOut(p)) * breath * (1 - q); ctx.scale(breath * (1 + 0.08 * q), sy);
       ctx.fillText(c, -adv[i] / 2, 0); ctx.restore(); }
     x += w; });
-  // kırmızı nokta: patlar, sonunda merkeze gelip küçülerek söner (sessizliğe dönüş)
+  // red dot: explodes, eventually shrinks to the center and fades out (returns to silence)
   const dp = seg(t, T.dot, T.dot + 0.4);
   if (dp > 0) { const m = eIO(seg(t, T.out + 0.5, T.out + 0.8)); const f = seg(t, T.out + 0.72, T.end);
     const r0 = KSIZE * (wgt / 800 * 0.075 + 0.045);
@@ -129,14 +129,14 @@ function finale(t) {
 let PAPER;
 function prep() {
   G3X = g3Layout(); buildWall();
-  // konuşuyorsun. kalın hâlinde ~1640 px genişliğe otursun
+  // you are talking. In bold, it should fit ~1640 px width
   const o = { fam: GRO, w: 800, size: 200, ls: -7 }; const w = measure('you speak.', o); KSIZE = Math.round(200 * 1640 / w);
   PAPER = mk(W, H); const g = PAPER.getContext('2d'); g.fillStyle = BG; g.fillRect(0, 0, W, H);
   const im = g.getImageData(0, 0, W, H); for (let i = 0; i < im.data.length; i += 4) { const n = (Math.random() - 0.5) * 9; im.data[i] += n; im.data[i + 1] += n; im.data[i + 2] += n * 0.9; }
   g.putImageData(im, 0, 0);
   const v = g.createRadialGradient(960, 540, 300, 960, 540, 1150); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(60,45,25,0.16)'); g.fillStyle = v; g.fillRect(0, 0, W, H);
-  // ses olayları
-  window.SFX = [{ t: T.once, k: 'tick', v: 0.6 }, { t: T.sus, k: 'soft' }, { t: T.sonra, k: 'tick', v: 0.7 }, { t: T.kelime, k: 'knock' }, { t: T.gelir, k: 'tick', v: 0.6 }];
+  // audio events
+  window.SFX = [{ t: T.first, k: 'tick', v: 0.6 }, { t: T.silence, k: 'soft' }, { t: T.then, k: 'tick', v: 0.7 }, { t: T.word, k: 'knock' }, { t: T.arrives, k: 'tick', v: 0.6 }];
   T.g3.forEach((t, i) => SFX.push({ t, k: 'wood', v: i }));
   WALL.forEach((o, k) => { if (k % 2 === 0) SFX.push({ t: o.t, k: 'patter', v: k }); });
   KON.forEach((c, i) => SFX.push({ t: T.kon + i * 0.042 + 0.12, k: 'patter', v: 100 + i }));

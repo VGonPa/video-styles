@@ -4,16 +4,16 @@
 </head><body>
 <canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// ── piksel · 16-bit platform oyunu ─────────────────────────────────────
-// 320×180 düşük çözünürlükte çizilir, en yakın komşu ile 6× büyütülür (keskin pikseller).
-// Başlık ekranı → SNES mozaik geçişi → Bölüm 1-1: mikrofon "Miko" koşar, S-Ö-Z harf paralarını toplar,
-// "?" bloğuna kafa atar, "Susku"yu ezer → "KELİME TAMAM!" (palet döngüsü) → daire kapanışı.
+// ── pixels · 16-bit platform game ─────────────────────────────────────
+// Drawn at 320×180 low resolution, enlarged 6× with nearest neighbor (sharp pixels).
+// Title screen → SNES mosaic transition → Chapter 1-1: microphone "Miko" runs, collects S-A-Y letter coins,
+// hits a question block, defeats Silence → "LEVEL CLEAR!" (palette cycle) → circular iris closes.
 const W = 1920, H = 1080, LW = 320, LH = 180, K = 6, DUR = 10.0;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.imageSmoothingEnabled = false; return c; };
 const LO = mk(LW, LH), L = LO.getContext('2d');
 const MOS = mk(LW, LH);
-const P = { // sınırlı palet (18 renk)
+const P = { // limited palette (18 colors)
   ink: '#0d0b1a', navy: '#1f2350', blue: '#2e4a9e', sky: '#4f8fe0', sky2: '#8fd0ff', cloud: '#e8f6ff',
   dgreen: '#2b6b3a', green: '#45a347', lgreen: '#9be05a', ddirt: '#6b3e26', dirt: '#a8683a', sand: '#e0a060',
   gold: '#ffd23f', orange: '#ff7a2f', red: '#d7263d', silver: '#b9c2d0', gray: '#6d7891', white: '#ffffff', purple: '#5b3f8c'
@@ -25,7 +25,7 @@ function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let
 const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 const px = (x, cx, cy, col) => { x.fillStyle = col; x.fillRect(cx | 0, cy | 0, 1, 1); };
 
-// ── piksel yazı: el çizimi 5×7 kalın bitmap font (Türkçe büyük harfler tam boy + üstte nokta/altta çengel) ──
+// ── pixel text: hand-drawn 5×7 bold bitmap font (Turkish capital letters full size + dot above/hook below) ──
 const G = {
   A: '.###.|#...#|#...#|#####|#...#|#...#|#...#', B: '####.|#...#|#...#|####.|#...#|#...#|####.', C: '.###.|#...#|#....|#....|#....|#...#|.###.',
   E: '#####|#....|#....|####.|#....|#....|#####', I: '.###.|..#..|..#..|..#..|..#..|..#..|.###.', K: '#...#|#..#.|#.#..|##...|#.#..|#..#.|#...#',
@@ -43,14 +43,14 @@ const G = {
   '8': '.###.|#...#|#...#|.###.|#...#|#...#|.###.', '9': '.###.|#...#|#...#|.####|....#|....#|.###.', '-': '.....|.....|.....|####.|.....|.....|.....',
   '+': '.....|..#..|..#..|#####|..#..|..#..|.....', '!': '.##..|.##..|.##..|.##..|.##..|.....|.##..'
 };
-const ACC = { 'İ': ['I', [[2, -2], [3, -2]]], 'Ö': ['O', [[0, -2], [1, -2], [4, -2], [5, -2]]], 'Ü': ['U', [[0, -2], [1, -2], [4, -2], [5, -2]]], 'Ş': ['S', [[2, 7], [3, 7], [1, 8], [2, 8]]], 'Ç': ['C', [[2, 7], [3, 7], [1, 8], [2, 8]]] };
+const ACC = {};
 const TXT = {};
 function textBmp(str, size, colFn, outline = P.ink, shadow = true) {
   const key = str + size + outline + shadow + colFn.name;
   if (TXT[key]) return TXT[key];
   const s = size >= 16 ? 2 : 1, chars = [...str];
   const adv = ch => ch === ' ' ? 4 : (G[ch] && G[ch].indexOf('|') > 5) ? 8 : 7;
-  const gw = chars.reduce((a, ch) => a + adv(ch), 0) - 1, gh = 11; // 2 satır üst işaret + 7 gövde + 2 alt çengel
+  const gw = chars.reduce((a, ch) => a + adv(ch), 0) - 1, gh = 11; // 2 lines top hook + 7 body + 2 bottom hook
   const w = gw * s + 6, h = gh * s + 6, top = 3 + 2 * s;
   const mask = new Uint8Array(w * h), set = (i, j) => { for (let b = 0; b < s; b++) for (let a = 0; a < s; a++) { const X = 3 + i * s + a, Y = top + j * s + b; if (X >= 0 && Y >= 0 && X < w && Y < h) mask[Y * w + X] = 1; } };
   let cx = 0;
@@ -83,28 +83,28 @@ function drawText(x, str, size, cx, top, colFn, align = 'center', outline = P.in
 const cWhite = function white() { return P.white; };
 const cGold = function gold(j, s) { const u = j / s; return u < 0.35 ? P.gold : u < 0.7 ? P.orange : P.red; };
 const cGray = function gray() { return P.silver; };
-const cCycle = []; // palet döngüsü: 6 kayık gradyan
+const cCycle = []; // pallet cycle: 6 boat gradient
 for (let k = 0; k < 6; k++) { const pal = [P.gold, P.orange, P.red, P.white, P.sky2, P.lgreen]; cCycle.push({ [`cyc${k}`]: function (j) { return pal[(Math.floor(j / 2) + k) % pal.length]; } }[`cyc${k}`]); }
 
-// ── sprite üreticileri ──
+// ── sprite generators ──
 function genMic({ sx = 1, sy = 1, legs = 0, air = false, happy = false }) {
   const c = mk(28, 40), x = c.getContext('2d'), cx = 14, bottom = 39;
   const feetTop = bottom - 1, hl = R(8 * sy), handleTop = feetTop - hl, bandTop = handleTop - 2;
   const rx = 8.2 * sx, ry = 8.2 * sy, hcx = cx, hcy = bandTop - ry + 0.3;
-  // ayaklar
+  // feet
   const F = air ? [[-5, -1], [2, 0]] : [[[-5, 0], [2, -1]], [[-2, 0], [0, -1]], [[-4, -1], [3, 0]], [[-1, -1], [-2, 0]]][legs];
   F.forEach(([fx, fy]) => {
     for (let i = 0; i < 4; i++) { px(x, cx + fx + i, feetTop + fy, P.red); px(x, cx + fx + i, feetTop + fy + 1, P.ink); }
     px(x, cx + fx + 1, feetTop + fy - 1, P.ink);
   });
-  // sap
+  // handle
   for (let r = 0; r < hl; r++) {
     const w = R(9 - r * 3 / Math.max(1, hl)), x0 = cx - Math.ceil(w / 2);
     for (let i = 0; i < w; i++) px(x, x0 + i, handleTop + r, i === 0 ? P.ink : i === 1 ? P.silver : i === w - 1 ? P.ink : P.gray);
   }
-  // kırmızı bilezik
+  // red bracelet
   for (let r = 0; r < 2; r++) for (let i = -6; i <= 5; i++) px(x, cx + i, bandTop + r, (i === -6 || i === 5) ? P.ink : r ? P.red : P.orange);
-  // baş (elips), üst yarı düz gümüş, alt yarı ızgara
+  // head (ellipse), upper half plain silver, lower half grid
   const inside = (i, j) => { const dx = (i + 0.5 - hcx) / rx, dy = (j + 0.5 - hcy) / ry; return dx * dx + dy * dy <= 1; };
   for (let j = 0; j < 40; j++) for (let i = 0; i < 28; i++) {
     if (!inside(i, j)) continue;
@@ -116,7 +116,7 @@ function genMic({ sx = 1, sy = 1, legs = 0, air = false, happy = false }) {
     px(x, i, j, col);
   }
   px(x, R(hcx - rx * 0.5), R(hcy - ry * 0.55), P.white); px(x, R(hcx - rx * 0.5) - 1, R(hcy - ry * 0.3), P.white); px(x, R(hcx - rx * 0.5), R(hcy - ry * 0.3), P.white);
-  // gözler (sağa bakar)
+  // eyes (looking right)
   const ey = R(hcy - 2);
   [[R(hcx), 0], [R(hcx) + 4, 0]].forEach(([ex]) => {
     if (happy) { px(x, ex, ey + 1, P.ink); px(x, ex + 1, ey, P.ink); px(x, ex + 2, ey + 1, P.ink); return; }
@@ -145,7 +145,7 @@ function genEnemy(frame, flat = false) {
     const edge = !inside(i - 1, j) || !inside(i + 1, j) || !inside(i, j - 1) || j === bottom;
     px(x, i, j, edge ? P.ink : (j < bottom - h * 0.6 && i < cx) ? P.silver : P.gray);
   }
-  if (!flat) { // uykulu gözler + "şşş" ağız
+  if (!flat) { // sleepy eyes + "shhh" mouth
     const ey = bottom - R(h * 0.6);
     for (let i = 0; i < 3; i++) { px(x, cx - 5 + i, ey, P.ink); px(x, cx + 1 + i, ey, P.ink); }
     for (let i = 0; i < 2; i++) px(x, cx - 1 + i, ey + 3, P.ink);
@@ -229,7 +229,7 @@ function genHills() {
     const top = R(152 - hts[i]); if (hts[i] <= 0) continue;
     for (let j = top; j < LH; j++) px(x, i, j, j === top ? P.ink : j < top + 2 ? P.lgreen : (((i + j) % 2 === 0) && j < top + 5) ? P.lgreen : P.green);
   }
-  // çalılar
+  // bushes
   [[100, 7], [300, 9], [470, 6]].forEach(([bx, br]) => { for (let j = -br; j <= 0; j++) for (let i = -br * 1.6; i <= br * 1.6; i++) {
     const d = (i / (br * 1.6)) ** 2 + (j / br) ** 2; if (d <= 1) px(x, bx + i, 148 + j, d > 0.8 ? P.ink : j < -br * 0.5 ? P.lgreen : P.dgreen); } });
   return c;
@@ -245,7 +245,7 @@ function genClouds() {
   return c;
 }
 function genLogo() {
-  // irticalen işareti: konuşma balonu + 3 elmas, piksel ızgarada
+  // extemporaneous sign: speech bubble + 3 diamonds in pixel grid
   const c = mk(34, 34), x = c.getContext('2d'), k = 30 / 92;
   const bubble = [[0, 0], [92, 0], [92, 70], [40, 70], [14, 94], [14, 70], [0, 70]].map(([a, b]) => [a * k + 2, b * k + 2]);
   const inPoly = (pX, pY, poly) => { let inn = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if (((yi > pY) !== (yj > pY)) && (pX < (xj - xi) * (pY - yi) / (yj - yi) + xi)) inn = !inn; } return inn; };
@@ -262,10 +262,10 @@ function genLogo() {
 }
 
 let SPR = {};
-// ── zamanlama ve fizik ──
+// ── timing and physics ──
 const T_TITLE_OUT = 2.3, T_LEVEL = 2.95, T_WIN = 7.75, T_IRIS = 9.2;
 const GROUND = 148, SPEED = 92;
-const charX = t => { // dünya x (ayak merkezi)
+const charX = t => { // world x (center of foot)
   const t0 = T_LEVEL + 0.05; if (t < t0) return -24;
   const tr = Math.min(t, T_WIN) - t0; let xw = -24 + SPEED * tr;
   if (t > T_WIN) { const d = Math.min(t - T_WIN, 0.35); xw += SPEED * (d - d * d / (2 * 0.35)); }
@@ -273,7 +273,7 @@ const charX = t => { // dünya x (ayak merkezi)
 };
 const CAM_LOCK = 7.35;
 const camX = t => Math.max(0, Math.min(charX(t), charX(CAM_LOCK)) - 110);
-const JUMPS = [ // [kalkış, süre, yükseklik]
+const JUMPS = [ // [departure, duration, altitude]
   [3.85, 0.62, 44], [4.72, 0.5, 26], [5.72, 0.56, 34], [6.28, 0.32, 14], [6.78, 0.7, 58], [8.05, 0.42, 18], [8.55, 0.42, 18]
 ];
 function jumpState(t) {
@@ -309,29 +309,29 @@ function score(t) {
   return s;
 }
 
-// ── sahneler ──
+// ── scenes ──
 function drawTitle(t) {
   L.drawImage(SPR.nightSky, 0, 0);
-  // yıldızlar (4 kareli pırıltı)
+  // stars (4 square glitter)
   const r = rng(99);
   for (let n = 0; n < 34; n++) {
     const sxp = R(r() * LW), syp = R(r() * 120), ph = Math.floor(t * 8 + r() * 8) % 8;
     px(L, sxp, syp, ph < 5 ? P.silver : P.white);
     if (ph === 6) { px(L, sxp - 1, syp, P.sky2); px(L, sxp + 1, syp, P.sky2); px(L, sxp, syp - 1, P.sky2); px(L, sxp, syp + 1, P.sky2); }
   }
-  // zemin silueti
+  // ground silhouette
   L.drawImage(SPR.hills, -R(t * 6) % 640, 18); L.drawImage(SPR.hills, -R(t * 6) % 640 + 640, 18);
   L.fillStyle = P.ink; L.fillRect(0, 168, LW, 12);
   L.fillStyle = 'rgba(13,11,26,0.55)'; L.fillRect(0, 100, LW, 80);
-  // logo düşer, zıplar (tam sayı konumlar)
+  // logo falls, jumps (integer positions)
   const u = seg(t, 0.35, 1.05);
   const drop = u < 1 ? (u < 0.6 ? -80 * (1 - (u / 0.6) ** 2) : -10 * Math.sin((u - 0.6) / 0.4 * Math.PI) * (1 - (u - 0.6) / 0.4)) : 0;
   if (t > 0.35) {
     L.drawImage(SPR.logo, 160 - 17, R(28 + drop));
-    drawText(L, 'İRTİCALEN', 16, 160, R(70 + drop), cGold);
+    drawText(L, 'IRTICALEN', 16, 160, R(70 + drop), cGold);
   }
   if (t > 1.1) drawText(L, 'SPEAKING ADVENTURE', 8, 160, 96, cWhite);
-  // "BAŞLA" yanıp söner; seçilince hızlı yanıp söner
+  // "START" flashes; flashes quickly when selected
   const sel = t >= 1.85;
   const vis = sel ? Math.floor(t * 16) % 2 === 0 : Math.floor(t * 2.5) % 2 === 0;
   if (t > 1.2 && vis) {
@@ -344,26 +344,26 @@ function drawLevel(t) {
   const cam = camX(t);
   L.drawImage(SPR.sky, 0, 0);
   const par = (img, f, y) => { const o = -((R(cam * f) % 640) + 640) % 640; L.drawImage(img, o, y); L.drawImage(img, o + 640, y); };
-  par(SPR.clouds, 0.15, 8 + (Math.floor(t * 2) % 2)); // bulutlar yavaşça "nefes alır"
+  par(SPR.clouds, 0.15, 8 + (Math.floor(t * 2) % 2)); // clouds "breathe" slowly
   par(SPR.mount, 0.3, 0); par(SPR.hills, 0.55, 0);
-  // zemin
+  // ground
   const go = -((R(cam) % 16) + 16) % 16;
   for (let gx = go; gx < LW; gx += 16) L.drawImage(SPR.ground, gx, GROUND);
-  // tuğla sırası + ? bloğu
+  // row of bricks + ? block
   const bx = R(BLOCK.x - cam), by = BLOCK.y;
   const bumpU = seg(t, BLOCK.t, BLOCK.t + 0.16), bumpY = bumpU > 0 && bumpU < 1 ? -R(Math.sin(bumpU * Math.PI) * 5) : 0;
   L.drawImage(SPR.brick, bx - 32, by); L.drawImage(SPR.brick, bx - 16, by); L.drawImage(SPR.brick, bx + 16, by); L.drawImage(SPR.brick, bx + 32, by);
   const used = t >= BLOCK.t;
   L.drawImage(used ? SPR.blockUsed : SPR.block, bx, by + bumpY);
-  if (!used) L.drawImage(SPR.q[Math.floor(t * 6) % 3], bx, by); // "?" rengi döner (palet döngüsü)
-  // blok parası
+  if (!used) L.drawImage(SPR.q[Math.floor(t * 6) % 3], bx, by); // "?" turns color (palette cycle)
+  // block coin
   if (t >= BLOCK.t && t < BLOCK.t + 0.45) {
     const u = (t - BLOCK.t) / 0.45, cy = by - 14 - R(34 * Math.sin(u * Math.PI * 0.9));
     L.drawImage(SPR.coin['A'][Math.floor(t * 18) % 6], bx, cy);
   }
-  // paralar
+  // coins
   COINS.forEach(c => { if (t < c.t) L.drawImage(SPR.coin[c.L][Math.floor(t * 10) % 6], R(c.x - cam) - 8, R(c.y + Math.sin(t * 5) * 1.2) - 8); });
-  // düşman
+  // enemy
   if (t < ENEMY.land + 0.5) {
     const exs = R(enemyX(t) - cam);
     if (t < ENEMY.land) L.drawImage(SPR.enemy[Math.floor(t * 5) % 2], exs - 12, GROUND - 18);
@@ -376,31 +376,31 @@ function drawLevel(t) {
   const landed = JUMPS.map(j => j[0] + j[1]).find(te => t >= te && t < te + 0.1);
   const pre = JUMPS.map(j => j[0]).find(t0 => t >= t0 - 0.066 && t < t0);
   if (js) { yOff = R(js.y); spr = js.vy > 60 ? SPR.micStretch : SPR.micAir; }
-  else if (pre !== undefined || landed !== undefined) spr = SPR.micSquash; // hazırlık / iniş ezilmesi
+  else if (pre !== undefined || landed !== undefined) spr = SPR.micSquash; // preparation / landing crush
   else if (t > T_WIN + 0.35) spr = SPR.micHappy;
   else spr = SPR.micRun[Math.floor(t * 12) % 4];
   const mx = R(charX(t) - cam);
   L.drawImage(spr, mx - 14, GROUND - 40 - yOff);
-  // puan fırlamaları
+  // score jumps
   const pops = [[COINS[0].t, COINS[0].x, COINS[0].y, '+100'], [BLOCK.t + 0.45, BLOCK.x + 8, BLOCK.y - 40, '+100'], [ENEMY.land, charX(ENEMY.land), GROUND - 34, '+200'], [COINS[1].t, COINS[1].x, COINS[1].y, '+100']];
   pops.forEach(([pt, pxw, pyw, s]) => {
     const d = t - pt; if (d < 0 || d > 0.7) return; if (d > 0.45 && Math.floor(d * 20) % 2) return;
     drawText(L, s, 8, R(pxw - cam), R(pyw - 6 - d * 26), cWhite);
   });
-  // pırıltılar (para alınca 4 köşeli yıldız)
+  // sparkles (4-pointed star when receiving money)
   [[COINS[0].t, COINS[0].x, COINS[0].y], [COINS[1].t, COINS[1].x, COINS[1].y], [BLOCK.t + 0.45, BLOCK.x + 8, BLOCK.y - 44]].forEach(([pt, xw, yw]) => {
     const d = t - pt; if (d < 0 || d > 0.3) return; const r = 3 + R(d * 30);
     [[r, 0], [-r, 0], [0, r], [0, -r], [R(r * 0.6), R(r * 0.6)], [-R(r * 0.6), R(r * 0.6)], [R(r * 0.6), -R(r * 0.6)], [-R(r * 0.6), -R(r * 0.6)]].forEach(([dx, dy]) => px(L, R(xw - cam + dx), R(yw + dy), Math.floor(d * 20) % 2 ? P.gold : P.white));
   });
   drawHUD(t);
-  // bölüm kartı
+  // partition card
   if (t > T_LEVEL + 0.1 && t < T_LEVEL + 1.3) {
     const u = seg(t, T_LEVEL + 0.1, T_LEVEL + 0.3), v = seg(t, T_LEVEL + 1.05, T_LEVEL + 1.3);
     const yy = R(-20 + 66 * u - 90 * v);
     L.fillStyle = P.ink; L.fillRect(96, yy - 5, 128, 20); L.fillStyle = P.navy; L.fillRect(97, yy - 4, 126, 18);
     drawText(L, 'LEVEL 1-1', 8, 160, yy + 1, cWhite);
   }
-  // kazanma
+  // win
   if (t > T_WIN + 0.15) drawWin(t);
 }
 function drawHUD(t) {
@@ -419,7 +419,7 @@ function drawHUD(t) {
 }
 function drawWin(t) {
   const u = seg(t, T_WIN + 0.15, T_WIN + 0.5);
-  // konfeti
+  // confetti
   const r = rng(5);
   for (let n = 0; n < 60; n++) {
     const x0 = r() * LW, sp = 30 + r() * 50, ph = r() * 6, col = [P.gold, P.red, P.sky2, P.lgreen, P.white][n % 5];
@@ -427,7 +427,7 @@ function drawWin(t) {
     const xx = R(x0 + Math.sin(t * 4 + ph) * 4);
     L.fillStyle = col; L.fillRect(xx, R(yy), Math.floor(t * 8 + ph) % 2 ? 2 : 1, Math.floor(t * 8 + ph) % 2 ? 1 : 2);
   }
-  // pano (tam sayı adımlarla büyür)
+  // clipboard (grows in integer steps)
   const bw = R(236 * Math.min(1, u * 1.15 - (u > 0.87 ? (u - 0.87) * 1.15 : 0))), bh = R(38 * u);
   if (bw < 4) return;
   const bx = 160 - Math.floor(bw / 2), by = 40 - Math.floor(bh / 2) + 8;
@@ -436,16 +436,16 @@ function drawWin(t) {
   L.fillStyle = P.navy; L.fillRect(bx, by, bw, bh);
   if (u >= 1) drawText(L, 'LEVEL CLEAR!', 16, 160, 38, cCycle[Math.floor(t * 12) % 6]);
 }
-// SNES mozaik: blok boyutu büyür, sonra küçülür
+// SNES mosaic: block size grows, then shrinks
 function mosaic(b) {
   if (b <= 1) return;
   const w = Math.ceil(LW / b), h = Math.ceil(LH / b), m = MOS.getContext('2d');
   m.imageSmoothingEnabled = false; m.clearRect(0, 0, LW, LH);
-  // her bloğun sol-üst pikselini örnekle
+  // sample the top-left pixel of each block
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) m.drawImage(LO, i * b, j * b, 1, 1, i * b, j * b, b, b);
   L.drawImage(MOS, 0, 0);
 }
-function fadeSteps(v) { // 8 kademeli karartma (donanım parlaklık kaydı gibi)
+function fadeSteps(v) { // 8-stage dimming (like hardware brightness recording)
   const s = Math.floor(clamp(v) * 8) / 8; if (s <= 0) return;
   L.fillStyle = `rgba(0,0,0,${s})`; L.fillRect(0, 0, LW, LH);
 }

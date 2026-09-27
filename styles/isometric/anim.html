@@ -36,7 +36,7 @@
 <style>html,body{margin:0;background:#efe4d6}</style></head>
 <body><canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// İzometrik minyatür dünya: bir konuşma stüdyosu parça parça kurulur, kamera geri çekilir → her konu küçük bir dünya.
+// Isometric miniature world: a speaking studio is set up piece by piece, the camera pulls back → each subject is a small world.
 const W = 1920, H = 1080, cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const DUR = 9.5, FF = "'Space Grotesk', sans-serif";
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
@@ -110,7 +110,7 @@ function drop(t, t0, o, dur = 0.42) {
 }
 function withOT(o, fn) { if (!o) return; const prev = OT; OT = o; ctx.globalAlpha = o.alpha ?? 1; fn(); ctx.globalAlpha = 1; OT = prev; }
 
-// ---------- palette ----------
+// ---------- on pallet ----------
 const PAL = { bg: '#efe4d6', wood: '#e9b07c', slab: '#d69a68', wallA: '#86c3c3', wallB: '#a9d7cf', rug: '#ef7a63', desk: '#f5efe6', chair: '#f2b544',
   shelf: '#c98a5c', laptop: '#c9ccd8', screen: '#23263b', mic: '#3b3f58', lamp: '#ff8a6b', plant: '#5fb07a', pot: '#e7d6c3', coral: '#ff7b6b', cream: '#fff6ea', ink: '#23263b' };
 
@@ -246,7 +246,7 @@ function room(t, local) {
     box(3.9, 3.9, 1.8, 5.5, 5.7, 2.1, PAL.chair);
     box(5.2, 3.9, 2.1, 5.5, 5.7, 4.3, PAL.chair);
   });
-  // plant
+  // plants
   withOT(drop(T, 2.3, [1.3, 9.0, 0], 0.36), () => {
     shadow(0.7, 8.4, 1.9, 9.6, 3.5, 0, 0.12);
     cyl(1.3, 9.0, 0, 1.4, 0.62, PAL.pot);
@@ -270,7 +270,7 @@ function room(t, local) {
   }
 }
 
-// ---------- neighbour mini-worlds ----------
+// ---------- neighbor mini-worlds ----------
 const TILES = [
   { g: [-1, -1], slab: '#9fcf8c', word: 'Nature', f: t => { for (const [x, y, h] of [[3, 3, 3], [6.5, 4, 4], [4, 7, 2.6], [7.5, 7.5, 3.4]]) { cyl(x, y, 0, h * 0.4, 0.3, '#a8744f'); cone(x, y, h * 0.35, h * 1.2, 1.2, '#4f9e6a'); } } },
   { g: [0, -1], slab: '#f2d2a9', word: 'Family', f: t => { box(2.5, 2.5, 0, 7.5, 7, 3.5, '#fff1de'); poly([[2.3, 2.3, 3.5], [7.7, 2.3, 3.5], [7.7, 4.75, 6], [2.3, 4.75, 6]], '#ff8f6f'); poly([[2.3, 4.75, 6], [7.7, 4.75, 6], [7.7, 7.2, 3.5], [2.3, 7.2, 3.5]], sh('#ff8f6f', 0.2)); poly([[7.7, 2.3, 3.5], [7.7, 4.75, 6], [7.7, 7.2, 3.5]], sh('#fff1de', 0.3)); onFace([7.51, 5.8, 2.4], [0, -1, 0], [0, 0, -1], () => { ctx.fillStyle = '#6d8bd8'; ctx.fillRect(0, 0, 120, 240); }); } },
@@ -356,6 +356,6 @@ function frame(t) {
 
 window.draw = function (job) { frame(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
 window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`700 60px 'Space Grotesk'`, 'Every topic is a little world. Space tourism KONU Doğa Müzik Yemek Tatil Tarih Spor Bilim Aile ığüşöçİĞŞ'),
+  document.fonts.load(`700 60px 'Space Grotesk'`, 'Every topic is a little world. Space tourism Nature Music Food Travel History Sports Science Family'),
   document.fonts.load(`500 60px 'Space Grotesk'`, 'abc')])).then(buildBG);
 </script></body></html>

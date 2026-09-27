@@ -1,4 +1,4 @@
-# events.json → ses.wav · çiptun: kare dalga zıplama/para/kafa/ezme, başlık seçimi, zafer arpeji
+# events.json → audio.wav · chiptun: square wave jump/money/head/smash, title selection, victory arpeggio
 import json, wave, numpy as np
 SR, DUR = 48000, 10.0
 out = np.zeros(int(SR * DUR))
@@ -32,5 +32,5 @@ for e in json.load(open('events.json')):
     elif k == 'iris': add(sq([(880, 220)], [0.5], 0.5, 0.3), t, 0.1)
 out = np.tanh(out * 1.2) * 0.85
 pcm = (np.clip(out, -1, 1) * 32767).astype(np.int16)
-w = wave.open('ses.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(np.repeat(pcm[:, None], 2, axis=1).tobytes()); w.close()
-print('ses.wav ok')
+w = wave.open('audio.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(np.repeat(pcm[:, None], 2, axis=1).tobytes()); w.close()
+print('audio.wav ok')

@@ -3,13 +3,13 @@
 <body><canvas id="c" width="1920" height="1080"></canvas>
 <script src="common.js"></script>
 <script>
-// TEK ÇİZGİ — kopmayan tek bir mürekkep çizgisi: konuşma balonu → mikrofon → "merhaba"
+// SINGLE LINE — a single line of ink that does not break: speech bubble → microphone → “hello”
 const PAPER = '#f3eee4', INK = '#1e1c19', ACC = '#c4502f';
-const HY = 742;               // ufuk çizgisi
-const N = 2600;               // morph için ortak nokta sayısı
+const HY = 742;               // skyline
+const N = 2600;               // number of common points for morph
 const X0 = -80, X1 = 2000;
 
-// --- Kâğıt dokusu (bir kez) ---
+// --- Paper texture (once) ---
 const paper = mk(W, H);
 { const c = paper.getContext('2d'); c.fillStyle = PAPER; c.fillRect(0, 0, W, H);
   const g = c.createRadialGradient(960, 520, 500, 960, 540, 1300); g.addColorStop(0, 'rgba(255,252,245,0.22)'); g.addColorStop(1, 'rgba(120,100,70,0.13)');
@@ -17,18 +17,18 @@ const paper = mk(W, H);
   const id = c.getImageData(0, 0, W, H), d = id.data, r = rng(7);
   for (let k = 0; k < d.length; k += 4) { const n = (r() - .5) * 10; d[k] += n; d[k + 1] += n; d[k + 2] += n; }
   c.putImageData(id, 0, 0);
-  // lif izleri
+  // fiber traces
   c.strokeStyle = 'rgba(110,90,60,0.05)'; c.lineWidth = 1;
   for (let i = 0; i < 900; i++) { const x = r() * W, y = r() * H, a = r() * Math.PI, l = 6 + r() * 22; c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + Math.cos(a) * l * .5 + (r() - .5) * 6, y + Math.sin(a) * l * .5 + (r() - .5) * 6, x + Math.cos(a) * l, y + Math.sin(a) * l); c.stroke(); }
 }
 
-// --- Şekiller: hepsi soldan girer, ufukta ilerler, şekli çizer, sağdan çıkar ---
+// --- Shapes: all enter from the left, move on the horizon, draw the shape, exit from the right ---
 function shapeBubble() {
   const p = P().M(640, HY);
-  p.S([[760, HY - 4], [820, HY - 40], [850, 640]], 20);             // kuyruğun sol kenarı
+  p.S([[760, HY - 4], [820, HY - 40], [850, 640]], 20);             // left edge of tail
   const L = 700, R = 1220, T = 300, B = 640;
   p.S([[760, B], [L + 10, B - 8], [L, B - 80], [L - 4, 470], [L + 2, T + 80], [L + 22, T + 14], [L + 80, T], [960, T - 6], [R - 80, T], [R - 16, T + 18], [R, T + 80], [R + 4, 470], [R, B - 80], [R - 14, B - 10], [R - 80, B], [1040, B + 2]], 18);
-  // alt kenar kuyruğa kadar sürer, sonra ince bir V ile üç elmasa uzanır (kesişme yok)
+  // the lower edge extends to the tail, then extends into three diamonds in a thin V (no intersection)
   const cy = 450, dx = 112, s = 34;
   p.S([[1000, B + 1], [930, B], [914, 628], [960, 560], [1040, 510], [1060 + 6, cy + s + 2]], 18);
   for (let k = 1; k >= -1; k--) { const cx = 960 + k * dx; p.S([[cx + 3, cy + s], [cx + s, cy], [cx, cy - s], [cx - s, cy], [cx - 3, cy + s], ...(k > -1 ? [[cx - dx * .5, cy + s + 8]] : [])], 10); }
@@ -38,11 +38,11 @@ function shapeBubble() {
 function shapeMic() {
   const p = P().M(760, HY);
   p.S([[840, HY - 2], [880, HY - 28], [960, HY - 34], [1040, HY - 28], [1080, HY - 2]], 16);   // taban kavisi
-  p.S([[1010, HY - 6], [962, HY - 30], [958, 660], [960, 600]], 16);      // gövde çubuğu
+  p.S([[1010, HY - 6], [962, HY - 30], [958, 660], [960, 600]], 16);      // body bar
   p.S([[958, 578], [900, 572], [858, 530], [852, 470]], 16);              // U tutucu, sol kol
   const cx = 960, top = 196, bot = 520, hw = 92;
   p.S([[cx - hw, 470], [cx - hw, 300], [cx - hw + 10, 236], [cx - 40, top + 4], [cx, top], [cx + 40, top + 4], [cx + hw - 10, 236], [cx + hw, 300], [cx + hw, 470], [cx + hw - 12, bot - 12], [cx + 40, bot], [cx, bot + 2], [cx - 40, bot], [cx - hw + 8, bot - 18], [cx - hw + 2, 440]], 16);
-  const ys = [262, 298, 334, 370];                                        // ızgara zikzakları
+  const ys = [262, 298, 334, 370];                                        // grid zigzags
   p.S([[cx - hw + 6, 380], [cx - hw + 20, ys[3]]], 10);
   ys.slice().reverse().forEach((y, i) => { const lt = i % 2 === 0; p.S(lt ? [[cx + hw - 20, y], [cx + hw - 22, y - 36]] : [[cx - hw + 22, y], [cx - hw + 22, y - 36]], 12); });
   p.S([[cx + 30, 232], [cx + hw + 14, 330], [cx + 108, 470], [1062, 530], [1010, 574], [962, 580]], 18);
@@ -72,11 +72,11 @@ function build(sh) {
 }
 const SH = [shapeBubble(), shapeMic(), shapeWord()].map(build);
 
-// kalınlık (kalem baskısı) — yay uzunluğuna bağlı yavaş dalga
+// thickness (pen pressure) — slow wave dependent on arc length
 const WID = new Float32Array(N); { for (let i = 0; i < N; i++) { const u = i / N; WID[i] = 5.6 + 1.2 * Math.sin(u * 37.0) * Math.sin(u * 11.3 + 1) + 0.6 * Math.sin(u * 91); } }
 
 function strokePts(pts, i0, i1) {
-  // değişken kalınlıklı çizim (parçalar hâlinde)
+  // variable thickness drawing (in pieces)
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = INK;
   const CH = 6;
   for (let a = Math.max(0, Math.floor(i0)); a < i1 - 1; a += CH) {
@@ -97,7 +97,7 @@ const TL = { in0: 0.35, in1: 3.0, m1a: 3.35, m1b: 4.75, m2a: 5.1, m2b: 6.65, out
 
 function render(t) {
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(paper, 0, 0);
-  // çok hafif kamera nefesi
+  // very light camera breathing
   const sc = 1 + 0.025 * eio(seg(t, 0, 10));
   ctx.setTransform(sc, 0, 0, sc, 960 - 960 * sc, 540 - 540 * sc);
   let pts, i0 = 0, i1 = N, head = null, tail = null;
@@ -109,14 +109,14 @@ function render(t) {
   if (i1 - i0 > 1) strokePts(pts, i0, i1);
   if (head) dot(head[0], head[1], 7.5);
   if (tail && i0 > 1) dot(tail[0], tail[1], 7.5);
-  // alt yazı (çok küçük, zarif)
+  // subtitle (very small, subtle)
   const ca = seg(t, 7.0, 7.5) * (1 - seg(t, 8.3, 8.8));
   if (ca > 0) { ctx.save(); ctx.globalAlpha = ca; ctx.fillStyle = INK; ctx.font = "italic 500 40px 'Cormorant Garamond'"; ctx.textAlign = 'center'; ctx.letterSpacing = '2px';
     ctx.fillText('one line, one word.', 960, 880 + 10 * (1 - eout(seg(t, 7.0, 7.6)))); ctx.restore(); }
-  // son: kâğıda yumuşak çıkış
+  // end: soft exit to paper
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   const fo = seg(t, 9.6, 10); if (fo > 0) { ctx.globalAlpha = fo * 0.35; ctx.drawImage(paper, 0, 0); ctx.globalAlpha = 1; }
 }
-window.ready = loadFont('Cormorant Garamond', 'CormorantGaramond-500', 500, 'italic').then(() => document.fonts.load("italic 500 40px 'Cormorant Garamond'", 'çöğ'));
+window.ready = loadFont('Cormorant Garamond', 'CormorantGaramond-500', 500, 'italic').then(() => document.fonts.load("italic 500 40px 'Cormorant Garamond'", 'hello'));
 window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
 </script></body></html>
