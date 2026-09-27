@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── neo-brutalism · UI-born neubrutalist launch spot for a fictional tool, "Stackly" ─────────────
+// Cream grid → logo tile + headline pop in with hard overshoot, "NEW!" starburst → quick slide to the board:
+// task cards drop and stack, one lifts and shuffles to the top, checks tick off, progress counts up → a cursor
+// presses the chunky "Ship it" button into its shadow → geometric confetti → a thick-outlined color-block wipe
+// → end card with the wordmark, CTA press and crossing marquee bands → marquee brakes, gentle fade.
+// Everything: 5 px black outlines, flat saturated fills, solid 10 px offset shadows (screen-aligned, no blur).
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eOut5 = u => 1 - Math.pow(1 - u, 5);
+const eIn = u => u * u * u;
+const eInOut = u => u < .5 ? 16 * u ** 5 : 1 - Math.pow(-2 * u + 2, 5) / 2;
+const backOut = (u, s = 2.4) => { const v = u - 1; return 1 + (s + 1) * v * v * v + s * v * v; };
+// damped spring 0→1 (strong overshoot), u = seconds since start
+const spring = (sec, f = 3.2, z = 5.5) => sec <= 0 ? 0 : 1 - Math.exp(-z * sec) * Math.cos(TAU * f * sec);
+const deg = d => d * Math.PI / 180;
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+const HF = '"Archivo Black"', GF = '"Space Grotesk"';
+const INK = '#111111', BG = '#FFF6E5', WHITE = '#FFFFFF';
+const LIME = '#B8FF5C', PINK = '#FF6BCB', BLUE = '#4D6BFF', SKY = '#8FB0FF', YEL = '#FFD23F', ORNG = '#FF8A4C';
+const LW = 5, SH = 10, GRID = 60;
+
+// ── timeline ─────────────────────────────────────────────────────────────────────────────────────
+const T = {
+  logo: .2, w1: .5, w2: .68, hl: 1.0, sticker: 1.35, cap: 1.65, spark: 1.9,
+  slide: 2.3, slideEnd: 2.72,
+  drops: [2.85, 3.1, 3.35, 3.6], shuffle: 3.95, shuffleEnd: 4.4, checks: [4.5, 4.65, 4.8, 4.95],
+  cur: 4.95, curArr: 5.33, press: 5.5, release: 5.64,
+  wipeIn: 6.25, wipeOut: 6.62,
+  end: 6.7, endTile: 6.8, endWord: 6.98, tag: 7.45, cta: 7.7, badge: 8.0, cur2: 8.3, press2: 8.75, release2: 8.87,
+  brake: 9.15, fade: 9.55
+};
+
+// ── drawing primitives ───────────────────────────────────────────────────────────────────────────
+function rr(x, y, w, h, r) { r = Math.min(r, w / 2, h / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+// shadow offset that stays screen-aligned (+sh,+sh) under the current local rotation/scale
+function shv(sh, ang = 0, sc = 1) { const c = Math.cos(-ang), s = Math.sin(-ang); return [(sh * c - sh * s) / sc, (sh * s + sh * c) / sc]; }
+// a neo-brutalist box: solid offset shadow, flat fill, thick black outline
+function box(x, y, w, h, r, fill, sh = SH, ang = 0, sc = 1, lw = LW) {
+  if (sh > 0.01) { const [dx, dy] = shv(sh, ang, sc); ctx.fillStyle = INK; rr(x + dx, y + dy, w, h, r); ctx.fill(); }
+  ctx.fillStyle = fill; rr(x, y, w, h, r); ctx.fill(); ctx.lineWidth = lw / sc; ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.stroke();
+}
+function poly(pts) { ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); }
+function starPts(n, R, r, rot = 0) { const p = []; for (let i = 0; i < n * 2; i++) { const a = rot + i * Math.PI / n - Math.PI / 2, rad = i % 2 ? r : R; p.push([Math.cos(a) * rad, Math.sin(a) * rad]); } return p; }
+function shape(pts, fill, sh = SH, ang = 0, sc = 1, lw = LW) {
+  if (sh > 0.01) { const [dx, dy] = shv(sh, ang, sc); ctx.save(); ctx.translate(dx, dy); poly(pts); ctx.fillStyle = INK; ctx.fill(); ctx.restore(); }
+  poly(pts); ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = lw / sc; ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.stroke();
+}
+function txt(s, x, y, font, color = INK, align = 'left', base = 'alphabetic') { ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base; ctx.fillText(s, x, y); }
+function withT(x, y, ang, sc, fn) { ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(sc, sc); fn(); ctx.restore(); }
+// stack icon: three offset outlined cards
+function stackIcon(s, cols = [PINK, YEL, WHITE]) {
+  const w = s * .62, h = s * .2, r = s * .05;
+  for (let i = 0; i < 3; i++) { const oy = (i - 1) * s * .19, ox = (1 - i) * s * .05; ctx.fillStyle = cols[i]; rr(-w / 2 + ox, -h / 2 + oy, w, h, r); ctx.fill(); ctx.lineWidth = s * .035; ctx.strokeStyle = INK; ctx.stroke(); }
+}
+function logoTile(s, ang, sc, sh = SH) { box(-s / 2, -s / 2, s, s, s * .16, LIME, sh, ang, sc); stackIcon(s); }
+function arrowGlyph(x, y, s, lw = 9) { // a chunky right arrow (→)
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + s, y); ctx.moveTo(x + s * .55, y - s * .42); ctx.lineTo(x + s, y); ctx.lineTo(x + s * .55, y + s * .42);
+  ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = INK; ctx.stroke();
+}
+function checkGlyph(cx, cy, s, u, color, lw) { // drawn check, progress u
+  const a = [cx - s * .42, cy + s * .02], b = [cx - s * .12, cy + s * .32], c = [cx + s * .46, cy - s * .34];
+  const l1 = Math.hypot(b[0] - a[0], b[1] - a[1]), l2 = Math.hypot(c[0] - b[0], c[1] - b[1]), d = u * (l1 + l2);
+  ctx.beginPath(); ctx.moveTo(...a);
+  if (d <= l1) ctx.lineTo(lerp(a[0], b[0], d / l1), lerp(a[1], b[1], d / l1));
+  else { ctx.lineTo(...b); const v = (d - l1) / l2; ctx.lineTo(lerp(b[0], c[0], v), lerp(b[1], c[1], v)); }
+  ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = color; ctx.stroke();
+}
+function cursor(x, y, sc = 1) { // thick-outline arrow pointer, tip at (x,y)
+  const P = [[0, 0], [0, 64], [16, 50], [28, 76], [40, 70], [28, 45], [48, 44]];
+  withT(x, y, deg(-8), sc * 1.25, () => shape(P, WHITE, 6, deg(-8), sc * 1.25, 5));
+}
+function sparkle(x, y, s, fill, ang = 0) { withT(x, y, ang, 1, () => shape(starPts(4, s, s * .32), fill, 6, ang)); }
+
+// ── precomputed layers ───────────────────────────────────────────────────────────────────────────
+let GRIDC, CONF;
+function buildGrid() { // cream paper with a raw visible grid (wider than the frame so it can scroll)
+  const c = mk(W + GRID * 2, H), g = c.getContext('2d');
+  g.fillStyle = BG; g.fillRect(0, 0, c.width, H);
+  g.strokeStyle = 'rgba(17,17,17,0.10)'; g.lineWidth = 2;
+  for (let x = 0; x <= c.width; x += GRID) { g.beginPath(); g.moveTo(x + .5, 0); g.lineTo(x + .5, H); g.stroke(); }
+  for (let y = 30; y <= H; y += GRID) { g.beginPath(); g.moveTo(0, y + .5); g.lineTo(c.width, y + .5); g.stroke(); }
+  g.fillStyle = 'rgba(17,17,17,0.22)';
+  for (let x = 0; x <= c.width; x += GRID * 4) for (let y = 30; y <= H; y += GRID * 4) { g.fillRect(x - 4, y - 4, 9, 9); }
+  return c;
+}
+function bg(cam = 0) { const o = ((cam % GRID) + GRID) % GRID; ctx.drawImage(GRIDC, -GRID - o + GRID, 0); ctx.drawImage(GRIDC, -o, 0); }
+function buildConfetti() {
+  const r = rng(77), cols = [LIME, PINK, BLUE, YEL, ORNG, SKY, WHITE], P = [];
+  for (let i = 0; i < 46; i++) {
+    const a = deg(-90 + (r() * 2 - 1) * 82), sp = 1100 + r() * 1300;
+    P.push({ k: Math.floor(r() * 5), c: cols[Math.floor(r() * cols.length)], s: 18 + r() * 22, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, rot: r() * TAU, vr: (r() * 2 - 1) * 9, d: r() * .05 });
+  }
+  return P;
+}
+function confettiPiece(p) {
+  const s = p.s;
+  if (p.k === 0) box(-s / 2, -s / 2, s, s, 3, p.c, 5, p.rot, 1, 4);
+  else if (p.k === 1) { const [dx, dy] = shv(5, p.rot); ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(dx, dy, s / 2, 0, TAU); ctx.fill(); ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(0, 0, s / 2, 0, TAU); ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke(); }
+  else if (p.k === 2) shape([[0, -s * .6], [s * .55, s * .4], [-s * .55, s * .4]], p.c, 5, p.rot, 1, 4);
+  else if (p.k === 3) { const a = s * .2, b = s * .6; shape([[-a, -b], [a, -b], [a, -a], [b, -a], [b, a], [a, a], [a, b], [-a, b], [-a, a], [-b, a], [-b, -a], [-a, -a]], p.c, 5, p.rot, 1, 4); }
+  else box(-s * .8, -s * .22, s * 1.6, s * .44, s * .22, p.c, 5, p.rot, 1, 4);
+}
+function confetti(t, t0, ox, oy) {
+  for (const p of CONF) {
+    const s = t - t0 - p.d; if (s <= 0) continue;
+    const drag = 1.9, e = (1 - Math.exp(-drag * s)) / drag; // velocity decays, gravity pulls
+    const x = ox + p.vx * e, y = oy + p.vy * e + 0.5 * 2400 * s * s * .55;
+    if (y > H + 80) continue;
+    const pop = Math.min(1, backOut(seg(s, 0, .12), 3));
+    ctx.save(); ctx.translate(x, y); ctx.rotate(p.rot + p.vr * s); ctx.scale(pop, pop); confettiPiece(p); ctx.restore();
+  }
+}
+
+// ── scene 1: title ───────────────────────────────────────────────────────────────────────────────
+const S1 = { x: 560, l1: 460, cardY: 535, cardH: 190 };
+function popScale(t, t0, f = 3.0, z = 6) { return Math.max(0, spring(t - t0, f, z)); }
+function scene1(t) {
+  // logo tile slams in with rotation and overshoot
+  const ls = popScale(t, T.logo), la = deg(lerp(-28, -6, clamp(spring(t - T.logo, 2.2, 5))));
+  if (ls > 0) withT(340, 520, la, ls, () => logoTile(250, la, ls));
+  // line 1: two words drop in, staggered
+  ctx.font = `150px ${HF}`;
+  const wY = ctx.measureText('Your ').width;
+  [['Your', S1.x, T.w1], ['tasks.', S1.x + wY, T.w2]].forEach(([w, x, t0]) => {
+    const s = t - t0; if (s <= 0) return;
+    const dy = (1 - spring(s, 2.6, 6.5)) * -140, sc = lerp(1.25, 1, clamp(spring(s, 2.6, 6.5)));
+    ctx.save(); ctx.translate(x, S1.l1 + dy); ctx.scale(1, sc);
+    txt(w, 0, 0, `150px ${HF}`, INK); ctx.restore();
+  });
+  // line 2: pink highlight card grows from the left, text rides with it
+  const w2 = (ctx.font = `150px ${HF}`, ctx.measureText('Zero chaos.').width), cw = w2 + 70;
+  const g = clamp(backOut(seg(t, T.hl, T.hl + .42), 1.6), 0, 1.06);
+  if (g > 0) {
+    const ang = deg(-2.5);
+    withT(S1.x - 20, S1.cardY, ang, 1, () => {
+      box(0, 0, cw * g, S1.cardH, 22, PINK, SH, ang);
+      ctx.save(); rr(0, 0, cw * g, S1.cardH, 22); ctx.clip();
+      const ts = seg(t, T.hl + .1, T.hl + .45);
+      txt('Zero chaos.', 35 + (1 - eOut5(ts)) * -120, 148, `150px ${HF}`, INK); ctx.restore();
+      ctx.lineWidth = LW; ctx.strokeStyle = INK; rr(0, 0, cw * g, S1.cardH, 22); ctx.stroke();
+    });
+  }
+  // caption chip
+  const cs = popScale(t, T.cap, 3.2, 7);
+  if (cs > 0) withT(S1.x + 10, 835, 0, 1, () => {
+    ctx.save(); ctx.translate(0, 45); ctx.scale(cs, cs); ctx.translate(0, -45);
+    ctx.font = `700 40px ${GF}`; const w = ctx.measureText('The task board for teams that ship.').width + 150;
+    box(0, 0, w, 90, 45, WHITE, 8, 0, cs);
+    ctx.fillStyle = LIME; ctx.beginPath(); ctx.arc(48, 45, 18, 0, TAU); ctx.fill(); ctx.lineWidth = 4; ctx.stroke();
+    txt('The task board for teams that ship.', 88, 59, `700 40px ${GF}`); ctx.restore();
+  });
+  // NEW! starburst sticker
+  const ss = popScale(t, T.sticker, 2.6, 5.5);
+  if (ss > 0) { const a = deg(14) + (t - T.sticker) * .5 + (1 - clamp(ss)) * -1.2;
+    withT(1640, 250, a, ss, () => { shape(starPts(14, 140, 108), YEL, SH, a, ss); ctx.rotate(-a + deg(12)); txt('NEW!', 0, 22, `64px ${HF}`, INK, 'center'); }); }
+  // accent sparkles
+  const k = popScale(t, T.spark, 3, 6); if (k > 0) { sparkle(1560, 780, 44 * k, LIME, (t - T.spark) * 1.2); sparkle(1760, 640, 28 * k, SKY, -(t - T.spark)); sparkle(210, 250, 34 * k, PINK, (t - T.spark) * .9); }
+}
+
+// ── scene 2: the board ───────────────────────────────────────────────────────────────────────────
+const WIN = { x: 130, y: 120, w: 960, h: 840 };
+const CARD = { x: 180, w: 860, h: 124, slots: [258, 403, 548, 693] };
+const TASKS = [
+  { label: 'Write launch post', tag: 'COPY', fill: YEL, slot0: 3, slot1: 3, rot: 5 },
+  { label: 'Fix login bug', tag: 'BUG', fill: PINK, slot0: 2, slot1: 0, rot: -6 },
+  { label: 'Design end card', tag: 'DESIGN', fill: SKY, slot0: 1, slot1: 2, rot: 4 },
+  { label: 'Ping the team', tag: 'TEAM', fill: ORNG, slot0: 0, slot1: 1, rot: -5 },
+];
+const checkAt = i => T.checks[TASKS[i].slot1]; // tick off top → bottom after the shuffle
+function taskCard(tk, i, t, x, y, ang, sc, sh) {
+  withT(x + CARD.w / 2, y + CARD.h / 2, ang, sc, () => {
+    const L = -CARD.w / 2, Tp = -CARD.h / 2;
+    box(L, Tp, CARD.w, CARD.h, 20, tk.fill, sh, ang, sc);
+    // checkbox
+    const ct = t - checkAt(i), done = ct > 0;
+    const bx = L + 34, by = -30;
+    ctx.save(); if (done) { const k = 1 + .25 * Math.exp(-9 * ct) * Math.sin(ct * 40); ctx.translate(bx + 30, by + 30); ctx.scale(k, k); ctx.translate(-bx - 30, -by - 30); }
+    box(bx, by, 60, 60, 12, done ? INK : WHITE, 0, 0, sc, 5);
+    if (done) checkGlyph(bx + 30, by + 31, 40, eOut(seg(ct, 0, .16)), LIME, 9);
+    ctx.restore();
+    txt(tk.label, L + 124, 16, `700 48px ${GF}`);
+    if (done) { ctx.font = `700 48px ${GF}`; const lw = ctx.measureText(tk.label).width * eOut(seg(ct, .04, .2)); ctx.fillStyle = INK; ctx.fillRect(L + 120, -2, lw + 8, 8); }
+    ctx.font = `700 30px ${GF}`; const tw = ctx.measureText(tk.tag).width + 44;
+    box(-L - 34 - tw, -26, tw, 52, 26, WHITE, 0, 0, sc, 4); txt(tk.tag, -L - 34 - tw / 2, 11, `700 30px ${GF}`, INK, 'center');
+  });
+}
+function cardState(i, t) {
+  const tk = TASKS[i], td = T.drops[i];
+  const s = t - td; if (s < -0.3) return null;
+  const y0 = CARD.slots[tk.slot0];
+  // fall with gravity (0.28 s) then land with a squash-and-settle spring
+  const fall = .26; let y, ang, sc = 1, sy = 1, sh = SH;
+  if (s < 0) return null;
+  if (s < fall) { const u = s / fall; y = lerp(-220, y0, u * u); ang = deg(tk.rot * (1 - u * .3)); sh = SH + 8; }
+  else { const ls = s - fall; y = y0 + Math.exp(-10 * ls) * Math.sin(ls * 38) * -14; ang = deg(tk.rot * .7) * Math.exp(-7 * ls) * Math.cos(ls * 24); sy = 1 - .12 * Math.exp(-14 * ls) * Math.cos(ls * 30); }
+  let x = CARD.x, lift = 0;
+  // shuffle: the bug card lifts, arcs out and slides to the top; the others step down
+  if (t > T.shuffle && tk.slot0 !== tk.slot1) {
+    const u = seg(t, T.shuffle, T.shuffleEnd), e = eInOut(u), y1 = CARD.slots[tk.slot1];
+    if (i === 1) { lift = Math.sin(Math.PI * clamp(u * 1.1)) ; y = lerp(y0, y1, e); x = CARD.x + 70 * lift; ang = deg(3) * lift; sc = 1 + .05 * lift; sh = SH + 14 * lift;
+      if (u >= 1) { const ls = t - T.shuffleEnd; sc = 1 - .04 * Math.exp(-10 * ls) * Math.sin(ls * 36); } }
+    else { const u2 = seg(t, T.shuffle + .1, T.shuffleEnd + .02); y = lerp(y0, y1, backOut(u2, 1.8)); }
+  }
+  return { x, y, ang, sc, sy, sh, top: i === 1 && t > T.shuffle && t < T.shuffleEnd + .1 };
+}
+function progressCard(t, n) {
+  const x = 1190, y = 160, w = 600, h = 320;
+  box(x, y, w, h, 24, WHITE);
+  txt('PROGRESS', x + 40, y + 70, `700 34px ${GF}`);
+  box(x + w - 170, y + 30, 130, 54, 27, LIME, 0, 0, 1, 4); txt('LIVE', x + w - 105, y + 68, `700 28px ${GF}`, INK, 'center');
+  // counter punches on every tick
+  let k = 1; for (const c of T.checks) { const d = t - c - .05; if (d > 0 && d < .4) k = 1 + .18 * Math.exp(-10 * d) * Math.cos(d * 30); }
+  withT(x + 40, y + 200, 0, k, () => txt(`${n}/4`, 0, 0, `140px ${HF}`));
+  txt('tasks done', x + 330, y + 196, `700 34px ${GF}`);
+  const bx = x + 40, by = y + 238, bw = w - 80, bh = 46;
+  box(bx, by, bw, bh, 12, BG, 0);
+  let f = 0; T.checks.forEach(c => f += eOut(seg(t, c + .02, c + .22)) / 4);
+  if (f > 0) { ctx.save(); rr(bx, by, bw, bh, 12); ctx.clip(); ctx.fillStyle = LIME; ctx.fillRect(bx, by, bw * f, bh);
+    ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.beginPath(); ctx.moveTo(bx + bw * f, by); ctx.lineTo(bx + bw * f, by + bh); ctx.stroke();
+    for (let q = 1; q < 4; q++) { ctx.beginPath(); ctx.moveTo(bx + bw * q / 4, by + bh - 12); ctx.lineTo(bx + bw * q / 4, by + bh); ctx.stroke(); } ctx.restore(); }
+  ctx.lineWidth = LW; ctx.strokeStyle = INK; rr(bx, by, bw, bh, 12); ctx.stroke();
+}
+const BTN = { x: 1190, y: 620, w: 600, h: 190 };
+function pressState(t, tp, tr, tHover) { // → {off (0 = resting on shadow top-left), sh}
+  let lift = tHover != null ? eOut(seg(t, tHover, tHover + .15)) * 3 : 0;
+  if (t < tp) return { d: -lift, sh: SH + lift };
+  if (t < tr) { const u = eOut(seg(t, tp, tp + .06)); return { d: lerp(-lift, SH, u), sh: lerp(SH + lift, 0, u) }; }
+  const s = t - tr, v = 1 - spring(s, 2.8, 6); // spring back up past rest
+  return { d: SH * v, sh: SH - SH * v };
+}
+function shipButton(t) {
+  const p = pressState(t, T.press, T.release, T.curArr - .08);
+  const x = BTN.x + p.d, y = BTN.y + p.d, shipped = t > T.release + .02;
+  if (p.sh > 0) { ctx.fillStyle = INK; rr(BTN.x + SH, BTN.y + SH, BTN.w, BTN.h, 28); ctx.fill(); }
+  ctx.fillStyle = shipped ? LIME : YEL; rr(x, y, BTN.w, BTN.h, 28); ctx.fill(); ctx.lineWidth = LW + 1; ctx.strokeStyle = INK; ctx.stroke();
+  if (!shipped) { txt('Ship it', x + 90, y + 122, `84px ${HF}`); arrowGlyph(x + 430, y + 94, 84, 14); }
+  else { const k = clamp(backOut(seg(t, T.release, T.release + .3), 3), 0, 1.2); withT(x + BTN.w / 2, y + BTN.h / 2, 0, k, () => { ctx.font = `76px ${HF}`; const tw = ctx.measureText('Shipped!').width, gw = 70 + 26 + tw, x0 = -gw / 2; checkGlyph(x0 + 35, -4, 64, eOut(seg(t, T.release, T.release + .2)), INK, 14); txt('Shipped!', x0 + 96, 27, `76px ${HF}`); }); }
+}
+function scene2(t, ox) {
+  ctx.save(); ctx.translate(ox, 0);
+  // window
+  box(WIN.x, WIN.y, WIN.w, WIN.h, 28, WHITE, 14);
+  ctx.save(); rr(WIN.x, WIN.y, WIN.w, WIN.h, 28); ctx.clip(); ctx.fillStyle = BLUE; ctx.fillRect(WIN.x, WIN.y, WIN.w, 100); ctx.restore();
+  ctx.lineWidth = LW; ctx.strokeStyle = INK; ctx.beginPath(); ctx.moveTo(WIN.x, WIN.y + 100); ctx.lineTo(WIN.x + WIN.w, WIN.y + 100); ctx.stroke();
+  [PINK, YEL, LIME].forEach((c, i) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(WIN.x + 50 + i * 44, WIN.y + 50, 14, 0, TAU); ctx.fill(); ctx.lineWidth = 4; ctx.stroke(); });
+  txt('Today', WIN.x + 200, WIN.y + 68, `50px ${HF}`, WHITE);
+  box(WIN.x + WIN.w - 260, WIN.y + 24, 220, 54, 27, WHITE, 0, 0, 1, 4); txt('Launch week', WIN.x + WIN.w - 150, WIN.y + 61, `700 28px ${GF}`, INK, 'center');
+  // "+ New task" ghost row (dashed)
+  ctx.setLineDash([18, 14]); ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(17,17,17,.45)'; rr(CARD.x, 850, CARD.w, 76, 18); ctx.stroke(); ctx.setLineDash([]);
+  txt('+  New task', CARD.x + 36, 900, `700 34px ${GF}`, 'rgba(17,17,17,.5)');
+  // cards (lifted card drawn on top)
+  const st = TASKS.map((_, i) => cardState(i, t));
+  const order = [0, 1, 2, 3].filter(i => st[i]).sort((a, b) => (st[a].top - st[b].top));
+  for (const i of order) { const s = st[i]; ctx.save(); ctx.translate(0, s.y + CARD.h); ctx.scale(1, s.sy); ctx.translate(0, -s.y - CARD.h); taskCard(TASKS[i], i, t, s.x, s.y, s.ang, s.sc, s.sh); ctx.restore(); }
+  // right column
+  let n = 0; T.checks.forEach(c => { if (t > c + .05) n++; });
+  progressCard(t, n);
+  shipButton(t);
+  ctx.restore();
+}
+function cursorPath(t) {
+  if (t < T.cur) return null;
+  const u = eOut(seg(t, T.cur, T.curArr)), p0 = [2000, 1120], p1 = [1720, 900], p2 = [1560, 735];
+  const x = (1 - u) ** 2 * p0[0] + 2 * (1 - u) * u * p1[0] + u * u * p2[0], y = (1 - u) ** 2 * p0[1] + 2 * (1 - u) * u * p1[1] + u * u * p2[1];
+  const pr = pressState(t, T.press, T.release, T.curArr - .08);
+  const sq = t > T.press && t < T.release + .15 ? .9 + .1 * eOut(seg(t, T.release, T.release + .15)) : 1;
+  const out = eIn(seg(t, 5.95, 6.3));
+  return [x + pr.d + out * 300, y + pr.d + out * 380, sq];
+}
+
+// ── wipe: two thick-outlined color blocks sweep across ─────────────────────────────────────────
+function wipeBlock(Lx, Rx, fill, label) {
+  if (Rx <= Lx) return;
+  const top = -40, bot = H + 40;
+  // hard offset shadow along both edges
+  ctx.fillStyle = INK; ctx.fillRect(Lx + 16, top, Rx - Lx, bot - top);
+  ctx.fillStyle = fill; ctx.fillRect(Lx, top, Rx - Lx, bot - top);
+  ctx.lineWidth = 8; ctx.strokeStyle = INK; ctx.strokeRect(Lx, top, Rx - Lx, bot - top);
+  if (label) { ctx.save(); ctx.beginPath(); ctx.rect(Lx, top, Rx - Lx, bot - top); ctx.clip();
+    const cx = (Lx + Rx) / 2; ctx.translate(cx, H / 2); ctx.rotate(deg(-6));
+    ctx.font = `330px ${HF}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = INK; ctx.fillText(label, 16, 16);
+    ctx.fillStyle = WHITE; ctx.fillText(label, 0, 0); ctx.lineWidth = 8; ctx.strokeStyle = INK; ctx.strokeText(label, 0, 0); ctx.restore(); }
+}
+function wipe(t) {
+  const X = (u) => lerp(W + 60, -80, u);
+  const inY = eIn(seg(t, T.wipeIn, T.wipeIn + .3)) , inB = eOut(seg(t, T.wipeIn + .06, T.wipeIn + .34));
+  const outB = eInOut(seg(t, T.wipeOut, T.wipeOut + .34)), outY = eInOut(seg(t, T.wipeOut + .07, T.wipeOut + .41));
+  if (t > T.wipeIn && outY < 1) wipeBlock(X(Math.max(inY, 0)), X(outY) + (outY > 0 ? 0 : 400), YEL);
+  if (t > T.wipeIn + .06 && outB < 1) wipeBlock(X(inB), X(outB) + (outB > 0 ? 0 : 400), BLUE, 'GO!');
+}
+
+// ── scene 3: end card ────────────────────────────────────────────────────────────────────────────
+function mqPos(t, t0, v) { // marquee offset with a smooth brake to a stop
+  const tb = T.brake, D = .75;
+  if (t < tb) return v * (t - t0);
+  const u = clamp((t - tb) / D); return v * (tb - t0) + v * D * (u - u * u / 2);
+}
+function marquee(t, cy, ang, h, fill, color, font, words, v, sepFill, enterFrom, t0) {
+  const e = eOut5(seg(t, t0, t0 + .45));
+  withT(W / 2 + enterFrom * (1 - e) * 2400, cy, ang, 1, () => {
+    const Wd = 2600;
+    ctx.fillStyle = INK; ctx.fillRect(-Wd / 2, -h / 2 + 12, Wd, h);
+    ctx.fillStyle = fill; ctx.fillRect(-Wd / 2, -h / 2, Wd, h);
+    ctx.lineWidth = 6; ctx.strokeStyle = INK; ctx.beginPath(); ctx.moveTo(-Wd / 2, -h / 2); ctx.lineTo(Wd / 2, -h / 2); ctx.moveTo(-Wd / 2, h / 2); ctx.lineTo(Wd / 2, h / 2); ctx.stroke();
+    ctx.font = font; const tw = ctx.measureText(words).width, gap = h * .9, unit = tw + gap;
+    const off = ((mqPos(t, t0, v) % unit) + unit) % unit;
+    ctx.save(); ctx.beginPath(); ctx.rect(-Wd / 2, -h / 2 + 3, Wd, h - 6); ctx.clip();
+    for (let x = -Wd / 2 - unit + off; x < Wd / 2 + unit; x += unit) {
+      txt(words, x, 0, font, color, 'left', 'middle');
+      const sx = x + tw + gap / 2; withT(sx, 0, deg(15) + t * .8 * Math.sign(v), 1, () => shape(starPts(8, h * .26, h * .13), sepFill, 0, 0, 1, 4));
+    }
+    ctx.restore();
+  });
+}
+function scene3(t) {
+  bg(0);
+  marquee(t, 118, deg(-2.2), 88, INK, BG, `700 44px ${GF}`, 'YOUR TASKS. ZERO CHAOS.', -170, PINK, -1, T.end + .1);
+  // center group
+  const word = 'Stackly', F = `200px ${HF}`; ctx.font = F; const tw = ctx.measureText(word).width;
+  const tile = 210, gap = 56, total = tile + gap + tw, gx = W / 2 - total / 2, cy = 430;
+  const ls = popScale(t, T.endTile, 2.6, 5.5), la = deg(lerp(40, -5, clamp(spring(t - T.endTile, 2, 5))));
+  if (ls > 0) withT(gx + tile / 2, cy, la, ls, () => logoTile(tile, la, ls));
+  let x = gx + tile + gap;
+  for (let i = 0; i < word.length; i++) {
+    const ch = word[i], s = t - (T.endWord + i * .045), cw = ctx.measureText(word.slice(0, i + 1)).width - ctx.measureText(word.slice(0, i)).width;
+    if (s > 0) { const k = spring(s, 2.8, 6), dy = (1 - k) * 90;
+      ctx.save(); ctx.translate(x + cw / 2, cy + 72 + dy); const kk = .35 + .65 * clamp(k, 0, 1.3); ctx.scale(kk, kk); ctx.font = F; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = INK; ctx.fillText(ch, 12, 12); ctx.fillStyle = WHITE; ctx.fillText(ch, 0, 0); ctx.lineWidth = 7; ctx.lineJoin = 'round'; ctx.strokeStyle = INK; ctx.strokeText(ch, 0, 0); ctx.restore(); }
+    ctx.font = F; x += cw;
+  }
+  // badge sticker on the wordmark corner
+  const bs = popScale(t, T.badge, 2.6, 5.5);
+  if (bs > 0) { const a = deg(-12) + (t - T.badge) * .35; withT(gx + total - 20, cy - 150, a, bs, () => { shape(starPts(12, 92, 74), PINK, 8, a, bs); ctx.rotate(-a + deg(-10)); txt('v1.0', 0, -6, `44px ${HF}`, INK, 'center'); txt('OUT NOW', 0, 30, `700 24px ${GF}`, INK, 'center'); }); }
+  // tagline
+  const tg = seg(t, T.tag, T.tag + .35); if (tg > 0) { ctx.save(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.rect(0, 540, W, 110); ctx.clip();
+    txt('Your tasks. Zero chaos.', W / 2, 620 + (1 - eOut5(tg)) * 90, `700 62px ${GF}`, INK, 'center'); ctx.restore(); }
+  // CTA button, pressed by a cursor later
+  const cs = popScale(t, T.cta, 3, 6);
+  if (cs > 0) { const bw = 520, bh = 118, bx = W / 2 - bw / 2, by = 690;
+    const p = pressState(t, T.press2, T.release2, T.press2 - .2);
+    ctx.save(); ctx.translate(W / 2, by + bh / 2); ctx.scale(cs, cs); ctx.translate(-W / 2, -by - bh / 2);
+    ctx.fillStyle = INK; rr(bx + SH, by + SH, bw, bh, 59); ctx.fill();
+    ctx.fillStyle = PINK; rr(bx + p.d, by + p.d, bw, bh, 59); ctx.fill(); ctx.lineWidth = LW + 1; ctx.strokeStyle = INK; ctx.stroke();
+    txt('Try it free', bx + p.d + 70, by + p.d + 80, `54px ${HF}`); arrowGlyph(bx + p.d + 400, by + p.d + 60, 58, 11); ctx.restore(); }
+  marquee(t, 952, deg(2.4), 136, LIME, INK, `78px ${HF}`, 'SHIP FASTER', 260, YEL, 1, T.end + .2);
+  // accent sparkles
+  const k = popScale(t, T.tag + .1, 3, 6); if (k > 0) { sparkle(300, 640, 46 * k, YEL, (t - T.tag) * 1.1); sparkle(1640, 700, 36 * k, SKY, -(t - T.tag)); sparkle(1770, 470, 28 * k, LIME, t - T.tag); }
+  // second cursor: clicks the CTA, then leaves
+  if (t > T.cur2 && t < 9.6) {
+    const u = eOut(seg(t, T.cur2, T.press2 - .12)), out = eIn(seg(t, 9.05, 9.5));
+    const p = pressState(t, T.press2, T.release2, T.press2 - .2), sq = t > T.press2 && t < T.release2 + .15 ? .9 : 1;
+    cursor(lerp(1500, W / 2 + 150, u) + p.d + out * 420, lerp(1180, 770, u) + p.d + out * 300, sq);
+  }
+}
+
+// ── master ───────────────────────────────────────────────────────────────────────────────────────
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  if (t < T.wipeOut + .1) {
+    // quick slide from title to board (grid scrolls with the camera)
+    const u = seg(t, T.slide, T.slideEnd), e = eInOut(u), cam = e * W;
+    const ant = Math.sin(Math.PI * seg(t, T.slide - .14, T.slide)) * 26; // anticipation: tiny drift right before the shove
+    bg(cam - ant);
+    if (e < 1) { ctx.save(); ctx.translate(-cam + ant, 0); scene1(t); ctx.restore(); }
+    if (e > 0) { const settle = t > T.slideEnd ? Math.exp(-9 * (t - T.slideEnd)) * Math.sin((t - T.slideEnd) * 30) * -18 : 0; scene2(t, W - cam + settle); }
+    if (t > T.press) confetti(t, T.press + .02, BTN.x + BTN.w / 2, BTN.y + 20);
+    const c = cursorPath(t); if (c) cursor(c[0], c[1], c[2]);
+  }
+  if (t >= T.wipeOut) { // end card, revealed as the blocks leave
+    const Rb = lerp(W + 60, -80, eInOut(seg(t, T.wipeOut + .07, T.wipeOut + .41)));
+    ctx.save(); if (Rb > 0) { ctx.beginPath(); ctx.rect(Rb, 0, W, H); ctx.clip(); } scene3(t); ctx.restore();
+  }
+  wipe(t);
+  // graceful ending: settle, then fade to the cream paper
+  const f = seg(t, T.fade, DUR - .06); if (f > 0) { ctx.globalAlpha = eOut(f) * eOut(f); ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+}
+
+window.ready = (async () => {
+  await Promise.all([`400 150px ${HF}`, `700 40px ${GF}`, `500 40px ${GF}`].map(f => document.fonts.load(f, 'Stackly Your tasks. Zero chaos. SHIP FASTER GO! NEW! v1.0 +')));
+  await document.fonts.ready;
+  GRIDC = buildGrid(); CONF = buildConfetti();
+  render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [
+    { t: T.logo, k: 'pop', v: 1, f: 1 }, { t: T.w1, k: 'pop', v: .8, f: 1.25 }, { t: T.w2, k: 'pop', v: .8, f: 1.5 },
+    { t: T.hl, k: 'swipe', d: .35 }, { t: T.hl + .2, k: 'pop', v: .7, f: 1.9 }, { t: T.sticker, k: 'boing' }, { t: T.cap, k: 'pop', v: .6, f: 2.2 },
+    { t: T.slide - .02, k: 'whoosh', d: .5 },
+    { t: T.shuffle, k: 'swipe', d: .4 }, { t: T.shuffleEnd, k: 'thud', v: .6 },
+    { t: T.curArr - .08, k: 'tick', v: .5 }, { t: T.press, k: 'press' }, { t: T.release, k: 'release' }, { t: T.press + .03, k: 'confetti' }, { t: T.release + .02, k: 'chime' },
+    { t: T.wipeIn - .02, k: 'whoosh', d: .45 }, { t: T.wipeOut, k: 'whoosh', d: .5 },
+    { t: T.endTile, k: 'thud', v: 1 }, { t: T.endTile, k: 'chord' }, { t: T.badge, k: 'boing' }, { t: T.tag, k: 'swipe', d: .3 }, { t: T.cta, k: 'pop', v: .8, f: 1.6 },
+    { t: T.press2, k: 'press', v: .6 }, { t: T.release2, k: 'release', v: .6 }, { t: T.brake, k: 'brake' }, { t: 9.35, k: 'outro' }
+  ];
+  T.drops.forEach((d, i) => ev.push({ t: d + .26, k: 'thud', v: .9 - i * .05 }));
+  T.checks.forEach((c, i) => ev.push({ t: c, k: 'check', f: i }));
+  for (let i = 0; i < 7; i++) ev.push({ t: T.endWord + i * .045, k: 'pop', v: .45, f: 1.4 + i * .12 });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
