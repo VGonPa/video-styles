@@ -4,9 +4,9 @@ Visual family · Recreations of older media and eras.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (8) · [Social & Short-Form](../../categories/use-cases/social.md) (10) · [Storytelling & Brand](../../categories/use-cases/story.md) (11) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (7)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (8) · [Social & Short-Form](../../categories/use-cases/social.md) (10) · [Storytelling & Brand](../../categories/use-cases/story.md) (12) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (7)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (6) · [Nostalgia](../../categories/families/nostalgia.md) (5) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (1)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (6) · [Nostalgia](../../categories/families/nostalgia.md) (6) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (1)
 
 <table>
 <tr>
@@ -17,6 +17,7 @@ Visual family · Recreations of older media and eras.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/newspaper/newspaper.mp4"><img src="../../styles/newspaper/preview.gif" alt="Newspaper Headline" width="100%"></a><br><b>27 · Newspaper Headline</b><br><a href="../../styles/newspaper/newspaper.mp4">video</a> · <a href="../../styles/newspaper">source</a></td>
+<td width="25%" align="center"><a href="../../styles/lofi-anime/lofi-anime.mp4"><img src="../../styles/lofi-anime/preview.gif" alt="Lo-Fi Anime" width="100%"></a><br><b>30 · Lo-Fi Anime</b><br><a href="../../styles/lofi-anime/lofi-anime.mp4">video</a> · <a href="../../styles/lofi-anime">source</a></td>
 </tr>
 </table>
 
@@ -27,3 +28,4 @@ Visual family · Recreations of older media and eras.
 | 15 | [16 mm Documentary](../../styles/documentary-16mm/) | Vintage black-and-white film | History and origin stories | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md) |
 | 16 | [Comic Book](../../styles/comic-book/) | Newspaper comic panels | Dialogue, humor, and tension | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md) |
 | 27 | [Newspaper Headline](../../styles/newspaper/) | Broadsheet front page, ink and halftone | Breaking facts, surprising findings, and documentary hooks | [Nostalgia](../../categories/families/nostalgia.md) | [News & Current Affairs](../../categories/use-cases/news.md), [Social & Short-Form](../../categories/use-cases/social.md) |
+| 30 | [Lo-Fi Anime](../../styles/lofi-anime/) | Rainy cozy 90s anime dusk | Calm moods, quiet stories, and study-night atmosphere | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md) |
