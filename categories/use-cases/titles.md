@@ -4,9 +4,9 @@ Use case · Openers, outros, series titles, and scene breaks.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (9) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (2) · [Product & Launches](../../categories/use-cases/product.md) (5) · [Social & Short-Form](../../categories/use-cases/social.md) (7) · [Storytelling & Brand](../../categories/use-cases/story.md) (11) · [Data & Results](../../categories/use-cases/data.md) (3) · [News & Current Affairs](../../categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (5)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (9) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (2) · [Product & Launches](../../categories/use-cases/product.md) (6) · [Social & Short-Form](../../categories/use-cases/social.md) (7) · [Storytelling & Brand](../../categories/use-cases/story.md) (11) · [Data & Results](../../categories/use-cases/data.md) (3) · [News & Current Affairs](../../categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (6)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (5) · [Nostalgia](../../categories/families/nostalgia.md) (4) · [Technical](../../categories/families/technical.md) (3) · [Experimental](../../categories/families/experimental.md) (1)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (5) · [Nostalgia](../../categories/families/nostalgia.md) (4) · [Technical](../../categories/families/technical.md) (3) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (1)
 
 <table>
 <tr>
@@ -17,6 +17,7 @@ Use case · Openers, outros, series titles, and scene breaks.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/kinetic-typography/kinetic-typography.mp4"><img src="../../styles/kinetic-typography/preview.gif" alt="Kinetic Typography" width="100%"></a><br><b>20 · Kinetic Typography</b><br><a href="../../styles/kinetic-typography/kinetic-typography.mp4">video</a> · <a href="../../styles/kinetic-typography">source</a></td>
+<td width="25%" align="center"><a href="../../styles/liquid-glass/liquid-glass.mp4"><img src="../../styles/liquid-glass/preview.gif" alt="Liquid Glass" width="100%"></a><br><b>22 · Liquid Glass</b><br><a href="../../styles/liquid-glass/liquid-glass.mp4">video</a> · <a href="../../styles/liquid-glass">source</a></td>
 </tr>
 </table>
 
@@ -27,3 +28,4 @@ Use case · Openers, outros, series titles, and scene breaks.
 | 09 | [Paper Cutout](../../styles/paper-cutout/) | Layered cardboard diorama | Storytelling and emotional openings | [Texture & Craft](../../categories/families/texture-craft.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
 | 13 | [1970s Retro](../../styles/retro-1970s/) | Vintage television titles | Nostalgic openings and series titles | [Nostalgia](../../categories/families/nostalgia.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
 | 20 | [Kinetic Typography](../../styles/kinetic-typography/) | Words in rhythm | Quotes and strong opening lines | [Experimental](../../categories/families/experimental.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Social & Short-Form](../../categories/use-cases/social.md) |
+| 22 | [Liquid Glass](../../styles/liquid-glass/) | Refractive glass morphing over a glowing aurora | Premium product reveals, feature launches, and polished title cards | [Polished & Premium](../../categories/families/polished.md) | [Product & Launches](../../categories/use-cases/product.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
