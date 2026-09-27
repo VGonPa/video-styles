@@ -1,10 +1,15 @@
 # Animation Style Catalog
 
-Twenty short HTML canvas films demonstrate different animation styles. Each example is a self-contained clip of roughly 9–10 seconds. Choose a style before commissioning a new animation: “Explain this topic in the `blueprint` style.”
+Short HTML canvas films demonstrate different animation styles. Each example is a self-contained clip of roughly 9–10 seconds. Choose a style before commissioning a new animation: “Explain this topic in the `blueprint` style.”
 
-Watch the [complete English catalog](catalog/catalog.mp4), or open a style below to see its translated video, animated preview, and HTML source.
+Watch the [complete English catalog](catalog/catalog.mp4), or browse by use case or visual family, or open a style below to see its translated video, animated preview, and HTML source.
 
 This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The examples retain references to irticalen where they are part of the original scene. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
+
+<!-- styles:start -->
+**By use case:** [Explainers](categories/use-cases/explainer.md) (8) · [Tutorials & Training](categories/use-cases/tutorial.md) (2) · [Product & Launches](categories/use-cases/product.md) (5) · [Social & Short-Form](categories/use-cases/social.md) (7) · [Storytelling & Brand](categories/use-cases/story.md) (10) · [Data & Results](categories/use-cases/data.md) (3) · [News & Current Affairs](categories/use-cases/news.md) (1) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (5)
+
+**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (4) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (4) · [Nostalgia](categories/families/nostalgia.md) (4) · [Technical](categories/families/technical.md) (3) · [Experimental](categories/families/experimental.md) (1)
 
 <table>
 <tr>
@@ -39,28 +44,29 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 </tr>
 </table>
 
-| # | Style | Feel | Best for |
-|---|---|---|---|
-| 01 | [Kurzgesagt](styles/kurzgesagt/) | Bright, layered science documentary | Explaining a scientific idea with a sense of wonder |
-| 02 | [Isometric](styles/isometric/) | Miniature model world | Showing the parts of a system or process |
-| 03 | [Bauhaus](styles/bauhaus/) | Poster grid and basic shapes | Steps, principles, and bold messages |
-| 04 | [Memphis](styles/memphis/) | Playful, bouncing 1980s design | Fun announcements and short videos |
-| 05 | [Whiteboard](styles/whiteboard/) | A lesson drawn as it unfolds | Step-by-step explanations |
-| 06 | [Chalkboard](styles/chalkboard/) | Chalk-drawn classroom lesson | Teaching a rule or memorable point |
-| 07 | [Blueprint](styles/blueprint/) | Engineering drawing | Measurements, technical details, and inner workings |
-| 08 | [Single Line](styles/single-line/) | One continuous, minimal line | Elegant intros, outros, and transitions |
-| 09 | [Paper Cutout](styles/paper-cutout/) | Layered cardboard diorama | Storytelling and emotional openings |
-| 10 | [Pencil Sketch](styles/pencil-sketch/) | Graphite sketchbook | Showing how an idea develops |
-| 11 | [Linocut](styles/linocut/) | Carved print in black and red | A strong single message or manifesto |
-| 12 | [Clay](styles/clay/) | Warm stop motion | Friendly, playful storytelling |
-| 13 | [1970s Retro](styles/retro-1970s/) | Vintage television titles | Nostalgic openings and series titles |
-| 14 | [Pixel Art](styles/pixel-art/) | 16-bit platform game | Progress, milestones, and game-like scenes |
-| 15 | [16 mm Documentary](styles/documentary-16mm/) | Vintage black-and-white film | History and origin stories |
-| 16 | [Comic Book](styles/comic-book/) | Newspaper comic panels | Dialogue, humor, and tension |
-| 17 | [Terminal](styles/terminal/) | Green phosphor command line | Technical processes and what happens behind the scenes |
-| 18 | [Sci-Fi Interface](styles/sci-fi-interface/) | Cool HUD, radar, and analysis | Measurement, scoring, and diagnostics |
-| 19 | [Data Visualization](styles/data-visualization/) | Editorial charts | Evidence in numbers and before/after comparisons |
-| 20 | [Kinetic Typography](styles/kinetic-typography/) | Words in rhythm | Quotes and strong opening lines |
+| # | Style | Feel | Best for | Family | Use cases |
+|---|---|---|---|---|---|
+| 01 | [Kurzgesagt](styles/kurzgesagt/) | Bright, layered science documentary | Explaining a scientific idea with a sense of wonder | [Flat Graphics](categories/families/flat-graphics.md) | [Explainers](categories/use-cases/explainer.md), [Storytelling & Brand](categories/use-cases/story.md) |
+| 02 | [Isometric](styles/isometric/) | Miniature model world | Showing the parts of a system or process | [Flat Graphics](categories/families/flat-graphics.md) | [Explainers](categories/use-cases/explainer.md), [Product & Launches](categories/use-cases/product.md) |
+| 03 | [Bauhaus](styles/bauhaus/) | Poster grid and basic shapes | Steps, principles, and bold messages | [Flat Graphics](categories/families/flat-graphics.md) | [Social & Short-Form](categories/use-cases/social.md), [Intros, Titles & Transitions](categories/use-cases/titles.md), [Explainers](categories/use-cases/explainer.md) |
+| 04 | [Memphis](styles/memphis/) | Playful, bouncing 1980s design | Fun announcements and short videos | [Flat Graphics](categories/families/flat-graphics.md) | [Social & Short-Form](categories/use-cases/social.md), [Product & Launches](categories/use-cases/product.md) |
+| 05 | [Whiteboard](styles/whiteboard/) | A lesson drawn as it unfolds | Step-by-step explanations | [Hand Drawn](categories/families/hand-drawn.md) | [Explainers](categories/use-cases/explainer.md), [Tutorials & Training](categories/use-cases/tutorial.md) |
+| 06 | [Chalkboard](styles/chalkboard/) | Chalk-drawn classroom lesson | Teaching a rule or memorable point | [Hand Drawn](categories/families/hand-drawn.md) | [Tutorials & Training](categories/use-cases/tutorial.md), [Explainers](categories/use-cases/explainer.md) |
+| 07 | [Blueprint](styles/blueprint/) | Engineering drawing | Measurements, technical details, and inner workings | [Hand Drawn](categories/families/hand-drawn.md) | [Explainers](categories/use-cases/explainer.md), [Product & Launches](categories/use-cases/product.md) |
+| 08 | [Single Line](styles/single-line/) | One continuous, minimal line | Elegant intros, outros, and transitions | [Hand Drawn](categories/families/hand-drawn.md) | [Intros, Titles & Transitions](categories/use-cases/titles.md), [Storytelling & Brand](categories/use-cases/story.md) |
+| 09 | [Paper Cutout](styles/paper-cutout/) | Layered cardboard diorama | Storytelling and emotional openings | [Texture & Craft](categories/families/texture-craft.md) | [Storytelling & Brand](categories/use-cases/story.md), [Intros, Titles & Transitions](categories/use-cases/titles.md) |
+| 10 | [Pencil Sketch](styles/pencil-sketch/) | Graphite sketchbook | Showing how an idea develops | [Texture & Craft](categories/families/texture-craft.md) | [Storytelling & Brand](categories/use-cases/story.md), [Explainers](categories/use-cases/explainer.md) |
+| 11 | [Linocut](styles/linocut/) | Carved print in black and red | A strong single message or manifesto | [Texture & Craft](categories/families/texture-craft.md) | [Storytelling & Brand](categories/use-cases/story.md), [Social & Short-Form](categories/use-cases/social.md) |
+| 12 | [Clay](styles/clay/) | Warm stop motion | Friendly, playful storytelling | [Texture & Craft](categories/families/texture-craft.md) | [Storytelling & Brand](categories/use-cases/story.md), [Social & Short-Form](categories/use-cases/social.md) |
+| 13 | [1970s Retro](styles/retro-1970s/) | Vintage television titles | Nostalgic openings and series titles | [Nostalgia](categories/families/nostalgia.md) | [Intros, Titles & Transitions](categories/use-cases/titles.md), [Storytelling & Brand](categories/use-cases/story.md) |
+| 14 | [Pixel Art](styles/pixel-art/) | 16-bit platform game | Progress, milestones, and game-like scenes | [Nostalgia](categories/families/nostalgia.md) | [Social & Short-Form](categories/use-cases/social.md), [Storytelling & Brand](categories/use-cases/story.md), [Data & Results](categories/use-cases/data.md) |
+| 15 | [16 mm Documentary](styles/documentary-16mm/) | Vintage black-and-white film | History and origin stories | [Nostalgia](categories/families/nostalgia.md) | [Storytelling & Brand](categories/use-cases/story.md) |
+| 16 | [Comic Book](styles/comic-book/) | Newspaper comic panels | Dialogue, humor, and tension | [Nostalgia](categories/families/nostalgia.md) | [Storytelling & Brand](categories/use-cases/story.md), [Social & Short-Form](categories/use-cases/social.md) |
+| 17 | [Terminal](styles/terminal/) | Green phosphor command line | Technical processes and what happens behind the scenes | [Technical](categories/families/technical.md) | [Explainers](categories/use-cases/explainer.md), [Product & Launches](categories/use-cases/product.md) |
+| 18 | [Sci-Fi Interface](styles/sci-fi-interface/) | Cool HUD, radar, and analysis | Measurement, scoring, and diagnostics | [Technical](categories/families/technical.md) | [Data & Results](categories/use-cases/data.md), [Product & Launches](categories/use-cases/product.md) |
+| 19 | [Data Visualization](styles/data-visualization/) | Editorial charts | Evidence in numbers and before/after comparisons | [Technical](categories/families/technical.md) | [Data & Results](categories/use-cases/data.md), [News & Current Affairs](categories/use-cases/news.md) |
+| 20 | [Kinetic Typography](styles/kinetic-typography/) | Words in rhythm | Quotes and strong opening lines | [Experimental](categories/families/experimental.md) | [Intros, Titles & Transitions](categories/use-cases/titles.md), [Social & Short-Form](categories/use-cases/social.md) |
+<!-- styles:end -->
 
 Each linked directory contains an `anim.html` source file, an English MP4, and an English preview GIF.
 
@@ -72,6 +78,7 @@ The [original brief](BRIEF.md) gave Claude Code (Opus 5.5) a goal, style, and te
 - Playwright renders frames in headless Chromium. ffmpeg turns them into H.264 video; optional sounds are synthesized with ffmpeg or Python.
 - To reproduce a clip, install Node.js, `@playwright/test`, Chromium headless shell, and ffmpeg, then run that style’s `build.sh` when present, or its `render.mjs` directly.
 - To regenerate the previews, run `python3 make_previews.py`. To assemble the catalog, install Pillow and run `python3 combine.py`. Both commands require ffmpeg on your path.
+- Style metadata (use cases and visual family) lives in `styles.json`. After editing it, run `python3 build_index.py` to regenerate this gallery and the pages under `categories/`.
 - Fonts are stored under each style’s `fonts/` directory. The original README identifies them as Google Fonts under the SIL Open Font License.
 
 The source repository does not include a general software license. This adaptation does not claim a new license for the original code or media.
