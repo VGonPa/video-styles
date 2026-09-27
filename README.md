@@ -7,9 +7,9 @@ Watch the [complete English catalog](catalog/catalog.mp4), or browse by use case
 This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The examples retain references to irticalen where they are part of the original scene. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
 
 <!-- styles:start -->
-**By use case:** [Explainers](categories/use-cases/explainer.md) (11) · [Tutorials & Training](categories/use-cases/tutorial.md) (4) · [Product & Launches](categories/use-cases/product.md) (8) · [Social & Short-Form](categories/use-cases/social.md) (10) · [Storytelling & Brand](categories/use-cases/story.md) (11) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (7)
+**By use case:** [Explainers](categories/use-cases/explainer.md) (11) · [Tutorials & Training](categories/use-cases/tutorial.md) (4) · [Product & Launches](categories/use-cases/product.md) (8) · [Social & Short-Form](categories/use-cases/social.md) (10) · [Storytelling & Brand](categories/use-cases/story.md) (12) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (7)
 
-**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (6) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (6) · [Nostalgia](categories/families/nostalgia.md) (5) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (1) · [Polished & Premium](categories/families/polished.md) (1)
+**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (6) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (6) · [Nostalgia](categories/families/nostalgia.md) (6) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (1) · [Polished & Premium](categories/families/polished.md) (1)
 
 <table>
 <tr>
@@ -54,6 +54,9 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 <td width="25%" align="center"><a href="styles/neo-brutalism/neo-brutalism.mp4"><img src="styles/neo-brutalism/preview.gif" alt="Neo-Brutalism" width="100%"></a><br><b>28 · Neo-Brutalism</b><br><a href="styles/neo-brutalism/neo-brutalism.mp4">video</a> · <a href="styles/neo-brutalism">source</a></td>
 <td width="25%" align="center"><a href="styles/infographic/infographic.mp4"><img src="styles/infographic/preview.gif" alt="Infographic Explainer" width="100%"></a><br><b>29 · Infographic Explainer</b><br><a href="styles/infographic/infographic.mp4">video</a> · <a href="styles/infographic">source</a></td>
 </tr>
+<tr>
+<td width="25%" align="center"><a href="styles/lofi-anime/lofi-anime.mp4"><img src="styles/lofi-anime/preview.gif" alt="Lo-Fi Anime" width="100%"></a><br><b>30 · Lo-Fi Anime</b><br><a href="styles/lofi-anime/lofi-anime.mp4">video</a> · <a href="styles/lofi-anime">source</a></td>
+</tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
@@ -86,6 +89,7 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 | 27 | [Newspaper Headline](styles/newspaper/) | Broadsheet front page, ink and halftone | Breaking facts, surprising findings, and documentary hooks | [Nostalgia](categories/families/nostalgia.md) | [News & Current Affairs](categories/use-cases/news.md), [Social & Short-Form](categories/use-cases/social.md) |
 | 28 | [Neo-Brutalism](styles/neo-brutalism/) | Chunky UI cards, hard shadows | App launches, product promos, and punchy social clips | [Flat Graphics](categories/families/flat-graphics.md) | [Social & Short-Form](categories/use-cases/social.md), [Product & Launches](categories/use-cases/product.md) |
 | 29 | [Infographic Explainer](styles/infographic/) | Flat icons, counters and simple characters | Fast explainers with stats, steps, and everyday examples | [Flat Graphics](categories/families/flat-graphics.md) | [Explainers](categories/use-cases/explainer.md) |
+| 30 | [Lo-Fi Anime](styles/lofi-anime/) | Rainy cozy 90s anime dusk | Calm moods, quiet stories, and study-night atmosphere | [Nostalgia](categories/families/nostalgia.md) | [Storytelling & Brand](categories/use-cases/story.md) |
 <!-- styles:end -->
 
 Each linked directory contains an `anim.html` source file, an English MP4, and an English preview GIF.
