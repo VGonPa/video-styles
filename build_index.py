@@ -48,7 +48,8 @@ def nav(prefix):
         for key in MANIFEST[kind]:
             count = sum(key in (s["use_cases"] if kind == "use_cases" else [s["family"]])
                         for s in MANIFEST["styles"])
-            items.append(f"{link(kind, key, prefix)} ({count})")
+            if count:
+                items.append(f"{link(kind, key, prefix)} ({count})")
         return " · ".join(items)
     return f"**By use case:** {row('use_cases')}\n\n**By visual family:** {row('families')}"
 
@@ -80,7 +81,8 @@ def main():
     styles = MANIFEST["styles"]
     for kind in ("use_cases", "families"):
         for key in MANIFEST[kind]:
-            write_page(kind, key)
+            if any(key in (s["use_cases"] if kind == "use_cases" else [s["family"]]) for s in styles):
+                write_page(kind, key)
 
     readme = ROOT / "README.md"
     text = readme.read_text()

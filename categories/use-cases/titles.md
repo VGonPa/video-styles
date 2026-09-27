@@ -6,7 +6,7 @@ Use case · Openers, outros, series titles, and scene breaks.
 
 **By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (9) · [Social & Short-Form](../../categories/use-cases/social.md) (11) · [Storytelling & Brand](../../categories/use-cases/story.md) (13) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (8)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (6) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (2) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (6) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2)
 
 <table>
 <tr>
@@ -25,7 +25,7 @@ Use case · Openers, outros, series titles, and scene breaks.
 
 | # | Style | Feel | Best for | Family | Use cases |
 |---|---|---|---|---|---|
-| 03 | [Bauhaus](../../styles/bauhaus/) | Poster grid and basic shapes | Steps, principles, and bold messages | [Flat Graphics](../../categories/families/flat-graphics.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Explainers](../../categories/use-cases/explainer.md) |
+| 03 | [Bauhaus](../../styles/bauhaus/) | Poster grid and basic shapes | Steps, principles, and bold messages | [Art Movements](../../categories/families/art-movements.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Explainers](../../categories/use-cases/explainer.md) |
 | 08 | [Single Line](../../styles/single-line/) | One continuous, minimal line | Elegant intros, outros, and transitions | [Hand Drawn](../../categories/families/hand-drawn.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
 | 09 | [Paper Cutout](../../styles/paper-cutout/) | Layered cardboard diorama | Storytelling and emotional openings | [Texture & Craft](../../categories/families/texture-craft.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
 | 13 | [1970s Retro](../../styles/retro-1970s/) | Vintage television titles | Nostalgic openings and series titles | [Nostalgia](../../categories/families/nostalgia.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
