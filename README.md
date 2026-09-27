@@ -7,9 +7,9 @@ Watch the [complete English catalog](catalog/catalog.mp4), or browse by use case
 This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The examples retain references to irticalen where they are part of the original scene. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
 
 <!-- styles:start -->
-**By use case:** [Explainers](categories/use-cases/explainer.md) (9) · [Tutorials & Training](categories/use-cases/tutorial.md) (2) · [Product & Launches](categories/use-cases/product.md) (5) · [Social & Short-Form](categories/use-cases/social.md) (7) · [Storytelling & Brand](categories/use-cases/story.md) (11) · [Data & Results](categories/use-cases/data.md) (3) · [News & Current Affairs](categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (5)
+**By use case:** [Explainers](categories/use-cases/explainer.md) (9) · [Tutorials & Training](categories/use-cases/tutorial.md) (2) · [Product & Launches](categories/use-cases/product.md) (6) · [Social & Short-Form](categories/use-cases/social.md) (7) · [Storytelling & Brand](categories/use-cases/story.md) (11) · [Data & Results](categories/use-cases/data.md) (3) · [News & Current Affairs](categories/use-cases/news.md) (2) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (6)
 
-**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (4) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (5) · [Nostalgia](categories/families/nostalgia.md) (4) · [Technical](categories/families/technical.md) (3) · [Experimental](categories/families/experimental.md) (1)
+**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (4) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (5) · [Nostalgia](categories/families/nostalgia.md) (4) · [Technical](categories/families/technical.md) (3) · [Experimental](categories/families/experimental.md) (1) · [Polished & Premium](categories/families/polished.md) (1)
 
 <table>
 <tr>
@@ -44,6 +44,7 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 </tr>
 <tr>
 <td width="25%" align="center"><a href="styles/map-documentary/map-documentary.mp4"><img src="styles/map-documentary/preview.gif" alt="Map Documentary" width="100%"></a><br><b>21 · Map Documentary</b><br><a href="styles/map-documentary/map-documentary.mp4">video</a> · <a href="styles/map-documentary">source</a></td>
+<td width="25%" align="center"><a href="styles/liquid-glass/liquid-glass.mp4"><img src="styles/liquid-glass/preview.gif" alt="Liquid Glass" width="100%"></a><br><b>22 · Liquid Glass</b><br><a href="styles/liquid-glass/liquid-glass.mp4">video</a> · <a href="styles/liquid-glass">source</a></td>
 </tr>
 </table>
 
@@ -70,6 +71,7 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 | 19 | [Data Visualization](styles/data-visualization/) | Editorial charts | Evidence in numbers and before/after comparisons | [Technical](categories/families/technical.md) | [Data & Results](categories/use-cases/data.md), [News & Current Affairs](categories/use-cases/news.md) |
 | 20 | [Kinetic Typography](styles/kinetic-typography/) | Words in rhythm | Quotes and strong opening lines | [Experimental](categories/families/experimental.md) | [Intros, Titles & Transitions](categories/use-cases/titles.md), [Social & Short-Form](categories/use-cases/social.md) |
 | 21 | [Map Documentary](styles/map-documentary/) | Pinned paper map with red string | Journeys, how things spread, and well-researched stories | [Texture & Craft](categories/families/texture-craft.md) | [Explainers](categories/use-cases/explainer.md), [News & Current Affairs](categories/use-cases/news.md), [Storytelling & Brand](categories/use-cases/story.md) |
+| 22 | [Liquid Glass](styles/liquid-glass/) | Refractive glass morphing over a glowing aurora | Premium product reveals, feature launches, and polished title cards | [Polished & Premium](categories/families/polished.md) | [Product & Launches](categories/use-cases/product.md), [Intros, Titles & Transitions](categories/use-cases/titles.md) |
 <!-- styles:end -->
 
 Each linked directory contains an `anim.html` source file, an English MP4, and an English preview GIF.

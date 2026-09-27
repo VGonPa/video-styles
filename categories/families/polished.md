@@ -1,6 +1,6 @@
-# Experimental
+# Polished & Premium
 
-Visual family · Type- and rhythm-driven pieces.
+Visual family · Glossy materials, glass, and light.
 
 [← All styles](../../README.md)
 
@@ -10,10 +10,10 @@ Visual family · Type- and rhythm-driven pieces.
 
 <table>
 <tr>
-<td width="25%" align="center"><a href="../../styles/kinetic-typography/kinetic-typography.mp4"><img src="../../styles/kinetic-typography/preview.gif" alt="Kinetic Typography" width="100%"></a><br><b>20 · Kinetic Typography</b><br><a href="../../styles/kinetic-typography/kinetic-typography.mp4">video</a> · <a href="../../styles/kinetic-typography">source</a></td>
+<td width="25%" align="center"><a href="../../styles/liquid-glass/liquid-glass.mp4"><img src="../../styles/liquid-glass/preview.gif" alt="Liquid Glass" width="100%"></a><br><b>22 · Liquid Glass</b><br><a href="../../styles/liquid-glass/liquid-glass.mp4">video</a> · <a href="../../styles/liquid-glass">source</a></td>
 </tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
 |---|---|---|---|---|---|
-| 20 | [Kinetic Typography](../../styles/kinetic-typography/) | Words in rhythm | Quotes and strong opening lines | [Experimental](../../categories/families/experimental.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Social & Short-Form](../../categories/use-cases/social.md) |
+| 22 | [Liquid Glass](../../styles/liquid-glass/) | Refractive glass morphing over a glowing aurora | Premium product reveals, feature launches, and polished title cards | [Polished & Premium](../../categories/families/polished.md) | [Product & Launches](../../categories/use-cases/product.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
