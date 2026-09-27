@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#17120f}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── constructivism · "SPEAK UP!" — an agitprop manifesto poster for the fictional Orator Club ───────────────
+// Scene 1 (cream): a red sun slams in, a halftone megaphone slides up the -27° diagonal and SHOUTS two words
+//   out of its bell ("SPEAK" in a black block, "UP!" huge over the sun), rays fan out, bars and an arrow lock in.
+// Transition: a red wedge drives in from the left and splits the poster along a counter-diagonal; the halves
+//   are pushed apart and fly off, leaving the red field of scene 2.
+// Scene 2 (red): the manifesto — a halftone gear rolls in, a lattice radio tower rises and broadcasts arcs,
+//   three numbered text blocks rotate into place with stagger (STAND UP. / SPEAK OUT. / BE HEARD.).
+// Transition: one broadcast ring swells into a cream circle that swallows the frame.
+// Scene 3 (cream): the call to action — JOIN / THE ORATOR CLUB, a red seal with rotating rays, the meeting
+//   bar and a three-beat tagline; slow push-in, then the poster fades to black.
+// Palette: red, black, cream only. Print texture: paper grain (multiply) + ink drop-out specks, all precomputed.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2, DEG = Math.PI / 180;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eBack = (u, s = 1.7) => u <= 0 ? 0 : u >= 1 ? 1 : 1 + (s + 1) * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+const PAPER = '#ebdfc4', RED = '#cc2a1e', DRED = '#9a1b14', BLACK = '#18120e';
+const ANTON = 'Anton', OSW = 'Oswald';
+
+// ── timeline ─────────────────────────────────────────────────────────────────────────────────
+const T = {
+  sun: 0.10, strip: 0.22, half: 0.34, mega: 0.50, shout1: 1.12, shout2: 1.66, bar: 2.02, small: 2.22, arrow: 2.42,
+  split0: 3.22, split1: 3.56, split2: 3.92,
+  gear: 3.80, tower: 3.92, title2: 3.98, row: [4.12, 4.50, 4.88], arrow2: 5.35,
+  wipe0: 6.62, wipe1: 7.22,
+  tri: 7.02, join: 7.22, club: 7.44, seal: 7.66, sealTxt: 7.84, info: 8.08, rays: 8.20, band: 8.30, tag: [8.44, 8.70, 8.96],
+  fade0: 9.38, fade1: 10.0
+};
+// main diagonal of scene 1
+const AX = -27 * DEG, DX = Math.cos(AX), DY = Math.sin(AX), NX = -DY, NY = DX;   // n = perpendicular, pointing down-right
+const REAR = { x: 250, y: 1010 };
+const MOUTH0 = { x: REAR.x + 520 * DX, y: REAR.y + 520 * DY };
+const along = (d, p = 0) => ({ x: MOUTH0.x + d * DX + p * NX, y: MOUTH0.y + d * DY + p * NY });
+const SUN = { x: 1560, y: 350, r: 320 };
+
+// impacts: camera kick + slam sound (a = strength 0..1)
+const IMP = [
+  { t: T.sun + 0.2, a: 0.7 }, { t: T.mega + 0.3, a: 0.6 }, { t: T.shout1 + 0.3, a: 0.8 }, { t: T.shout2 + 0.3, a: 1.0 },
+  { t: T.bar + 0.13, a: 0.35 }, { t: T.arrow + 0.16, a: 0.3 },
+  { t: T.gear + 0.3, a: 0.6 }, { t: T.tower + 0.3, a: 0.5 },
+  ...T.row.map(r => ({ t: r + 0.26, a: 0.7 })),
+  { t: T.tri + 0.18, a: 0.5 }, { t: T.join + 0.26, a: 0.7 }, { t: T.club + 0.22, a: 0.5 }, { t: T.seal + 0.25, a: 1.0 },
+  { t: T.info + 0.2, a: 0.35 }, { t: T.band + 0.2, a: 0.3 }, ...T.tag.map(x => ({ t: x + 0.08, a: 0.22 }))
+];
+function shake(t) {
+  let x = 0, y = 0;
+  for (const im of IMP) { const d = t - im.t; if (d < 0 || d > 0.4) continue;
+    const e = Math.exp(-d / 0.06) * im.a * 11; x += e * Math.sin(d * 95 + im.t * 13); y += e * Math.cos(d * 81 + im.t * 7); }
+  return { x, y };
+}
+
+// ── textures ─────────────────────────────────────────────────────────────────────────────────
+let GRAIN, SPECK, HALF1, HALF2, MEGA, GEAR, TOWER, CREAMBG;
+function buildGrain() {
+  const c = mk(W, H), g = c.getContext('2d'), R = rng(39);
+  const id = g.createImageData(W, H), d = id.data;
+  for (let i = 0; i < W * H; i++) { const r = R(); const v = 255 - r * r * r * 34 - R() * 7;
+    d[i * 4] = v; d[i * 4 + 1] = v - 2; d[i * 4 + 2] = v - 6; d[i * 4 + 3] = 255; }
+  g.putImageData(id, 0, 0);
+  // low-frequency mottling (paper that has lived on a wall)
+  const s = mk(64, 36), sg = s.getContext('2d'); const sd = sg.createImageData(64, 36);
+  for (let i = 0; i < 64 * 36; i++) { const v = 200 + R() * 55; sd.data[i * 4] = v; sd.data[i * 4 + 1] = v - 6; sd.data[i * 4 + 2] = v - 18; sd.data[i * 4 + 3] = 255; }
+  sg.putImageData(sd, 0, 0);
+  g.globalCompositeOperation = 'multiply'; g.globalAlpha = 0.25; g.imageSmoothingEnabled = true; g.drawImage(s, 0, 0, W, H);
+  g.globalAlpha = 1;
+  // fibres
+  g.lineCap = 'round';
+  for (let i = 0; i < 1400; i++) { const x = R() * W, y = R() * H, a = R() * TAU, l = 6 + R() * 26;
+    g.strokeStyle = `rgba(110,85,55,${0.05 + R() * 0.08})`; g.lineWidth = 0.6 + R() * 0.8;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a + 0.6) * l * 0.5, y + Math.sin(a + 0.6) * l * 0.5, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+  // fold creases (a poster folded in four) + vignette
+  g.globalCompositeOperation = 'multiply';
+  for (const [x0, y0, x1, y1] of [[W / 2 + 6, 0, W / 2 - 4, H], [0, H / 2 + 3, W, H / 2 - 5]]) {
+    const gr = g.createLinearGradient(x0 - (y1 - y0 ? 14 : 0), y0 - (x1 - x0 ? 14 : 0), x0 + (y1 - y0 ? 14 : 0), y0 + (x1 - x0 ? 14 : 0));
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(205,195,180,1)'); gr.addColorStop(1, 'rgba(255,255,255,1)');
+    g.strokeStyle = gr; g.lineWidth = 26; g.globalAlpha = 0.35; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
+  g.globalAlpha = 1;
+  const vg = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.05);
+  vg.addColorStop(0, 'rgba(255,255,255,1)'); vg.addColorStop(1, 'rgba(190,170,145,1)');
+  g.fillStyle = vg; g.fillRect(0, 0, W, H);
+  GRAIN = c;
+}
+function buildSpeck() {
+  const c = mk(W, H), g = c.getContext('2d'), R = rng(1927);
+  g.fillStyle = PAPER;
+  for (let i = 0; i < 9000; i++) { const x = R() * W, y = R() * H, r = 0.5 + Math.pow(R(), 3) * 2.6;
+    g.globalAlpha = 0.25 + R() * 0.55; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+  // worn roller streaks
+  for (let i = 0; i < 70; i++) { const x = R() * W, y = R() * H, l = 40 + R() * 220;
+    g.globalAlpha = 0.08 + R() * 0.12; g.fillRect(x, y, l, 0.8 + R() * 1.5); }
+  g.globalAlpha = 1; SPECK = c;
+}
+// rotated-grid halftone dots; fn(x,y) → radius
+function halftone(w, h, sp, ang, fn, col) {
+  const c = mk(w, h), g = c.getContext('2d'); g.fillStyle = col;
+  const ca = Math.cos(ang), sa = Math.sin(ang), R = Math.hypot(w, h);
+  for (let i = -R / sp; i < R / sp; i++) for (let j = -R / sp; j < R / sp; j++) {
+    const x = w / 2 + (i * ca - j * sa) * sp, y = h / 2 + (i * sa + j * ca) * sp;
+    if (x < -sp || y < -sp || x > w + sp || y > h + sp) continue;
+    const r = fn(x, y); if (r < 0.35) continue; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+  return c;
+}
+function buildCream() { const c = mk(W, H), g = c.getContext('2d'); g.fillStyle = PAPER; g.fillRect(0, 0, W, H); CREAMBG = c; }
+
+// megaphone sprite, pointing +x; local origin = rear centre; sprite offset (30, 250)
+const MO = { x: 30, y: 250 };
+function coneHH(x) { return 48 + (x - 95) / 425 * 162; }
+function buildMega() {
+  const c = mk(620, 520), g = c.getContext('2d'); g.translate(MO.x, MO.y);
+  // handle + trigger (behind cone)
+  g.fillStyle = BLACK;
+  g.beginPath(); g.moveTo(168, 40); g.lineTo(236, 40); g.lineTo(262, 196); g.lineTo(206, 204); g.closePath(); g.fill();
+  g.fillStyle = RED; g.fillRect(214, 70, 16, 44);
+  // mouthpiece + neck ring
+  g.fillStyle = BLACK; g.beginPath(); g.roundRect(-6, -34, 86, 68, 10); g.fill();
+  g.fillStyle = RED; g.fillRect(70, -52, 26, 104);
+  // cone
+  const cone = new Path2D(); cone.moveTo(95, -48); cone.lineTo(520, -210); cone.lineTo(520, 210); cone.lineTo(95, 48); cone.closePath();
+  g.fillStyle = BLACK; g.fill(cone);
+  // halftone highlight inside cone (the "photo" feel)
+  g.save(); g.clip(cone);
+  const ht = halftone(620, 520, 11, 45 * DEG, (x, y) => { const lx = x - MO.x, ly = y - MO.y; if (lx < 95 || lx > 520) return 0;
+    const v = ly / coneHH(lx); return 5.4 * Math.exp(-Math.pow((v + 0.42) / 0.3, 2)) * (0.55 + 0.45 * (lx - 95) / 425) + 2.2 * Math.exp(-Math.pow((v - 0.62) / 0.16, 2)); }, PAPER);
+  g.drawImage(ht, -MO.x, -MO.y);
+  // red band near the bell
+  g.fillStyle = RED; g.beginPath(); g.moveTo(430, -coneHH(430) - 2); g.lineTo(462, -coneHH(462) - 2); g.lineTo(462, coneHH(462) + 2); g.lineTo(430, coneHH(430) + 2); g.closePath(); g.fill();
+  g.restore();
+  // bell rim: black ellipse with red inside
+  g.fillStyle = BLACK; g.beginPath(); g.ellipse(522, 0, 40, 212, 0, 0, TAU); g.fill();
+  g.fillStyle = RED; g.beginPath(); g.ellipse(526, 0, 26, 190, 0, 0, TAU); g.fill();
+  g.fillStyle = DRED; g.beginPath(); g.ellipse(530, 0, 12, 120, 0, 0, TAU); g.fill();
+  MEGA = c;
+}
+// gear sprite, centre (360,360)
+function buildGear() {
+  const c = mk(720, 720), g = c.getContext('2d'); g.translate(360, 360);
+  const N = 16, rR = 282, rT = 338;
+  g.fillStyle = BLACK; g.beginPath();
+  for (let i = 0; i < N; i++) { const a0 = i / N * TAU, w = TAU / N;
+    const pts = [[a0, rR], [a0 + w * 0.12, rT], [a0 + w * 0.46, rT], [a0 + w * 0.58, rR]];
+    for (const [a, r] of pts) g.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  g.closePath(); g.fill();
+  // halftone light from upper-left
+  g.save(); g.clip();
+  g.drawImage(halftone(720, 720, 12, 15 * DEG, (x, y) => { const dx = x - 360, dy = y - 360, rr = Math.hypot(dx, dy);
+    const l = Math.max(0, (-dx - dy) / (rr + 1e-6)); return rr > 120 ? 4.6 * l * l * clamp((rr - 120) / 60) : 0; }, PAPER), -360, -360);
+  g.restore();
+  // windows + hub (cut out)
+  g.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; g.beginPath(); g.arc(Math.cos(a) * 180, Math.sin(a) * 180, 58, 0, TAU); g.fill(); }
+  g.beginPath(); g.arc(0, 0, 52, 0, TAU); g.fill();
+  g.globalCompositeOperation = 'source-over';
+  g.strokeStyle = BLACK; g.lineWidth = 16; g.beginPath(); g.arc(0, 0, 70, 0, TAU); g.stroke();
+  GEAR = c;
+}
+// lattice radio tower; origin = base centre at (230, 960) in sprite; top at local y = -880
+function buildTower() {
+  const c = mk(460, 1000), g = c.getContext('2d'); g.translate(230, 960);
+  const Ht = 780, B = 175, Tp = 20, lv = 9;
+  const hw = y => lerp(B, Tp, Math.pow(y / Ht, 0.8));
+  g.strokeStyle = BLACK; g.lineCap = 'square'; g.lineJoin = 'miter';
+  g.lineWidth = 16; g.beginPath(); for (let s of [-1, 1]) { g.moveTo(s * B, 0); for (let k = 1; k <= 30; k++) { const y = Ht * k / 30; g.lineTo(s * hw(y), -y); } } g.stroke();
+  g.lineWidth = 8; g.beginPath();
+  for (let i = 0; i < lv; i++) { const y0 = Ht * i / lv, y1 = Ht * (i + 1) / lv;
+    g.moveTo(-hw(y0), -y0); g.lineTo(hw(y1), -y1); g.moveTo(hw(y0), -y0); g.lineTo(-hw(y1), -y1);
+    g.moveTo(-hw(y1), -y1); g.lineTo(hw(y1), -y1); }
+  g.stroke();
+  // platform + mast
+  g.fillStyle = BLACK; g.fillRect(-60, -Ht - 14, 120, 14); g.fillRect(-7, -Ht - 100, 14, 100);
+  g.beginPath(); g.arc(0, -Ht - 108, 16, 0, TAU); g.fill();
+  g.fillStyle = RED; g.beginPath(); g.arc(0, -Ht - 108, 7, 0, TAU); g.fill();
+  TOWER = c;
+}
+const TOWER_TOP = { x: 1640, y: 1110 - 888 };
+
+// ── drawing helpers ──────────────────────────────────────────────────────────────────────────
+function setFont(g, fam, w, px, ls = 0) { g.font = `${w} ${px}px ${fam}`; g.letterSpacing = ls + 'px'; }
+// text block centred (align 'c') or left-anchored ('l') at the current origin
+function block(g, txt, { fam = ANTON, w = 400, px, ls = 0, fg, bg = null, padX = 0, padY = 0, align = 'c', shadow = null, sh = 0, knock = null }) {
+  setFont(g, fam, w, px, ls);
+  const m = g.measureText(txt), tw = m.width - ls, cap = m.actualBoundingBoxAscent;
+  const x0 = align === 'c' ? -tw / 2 : 0;
+  if (bg) { g.fillStyle = bg; g.fillRect(x0 - padX, -cap / 2 - padY, tw + padX * 2, cap + padY * 2); }
+  if (knock) { g.strokeStyle = knock; g.lineWidth = 14; g.lineJoin = 'round'; g.strokeText(txt, x0, cap / 2); }
+  if (shadow) { g.fillStyle = shadow; g.fillText(txt, x0 + sh * 0.5, cap / 2 + sh); }
+  g.fillStyle = fg; g.fillText(txt, x0, cap / 2);
+  return { tw, cap };
+}
+function poly(g, pts, col) { g.fillStyle = col; g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.fill(); }
+function arrow(g, x0, y0, x1, y1, w, col) {
+  const a = Math.atan2(y1 - y0, x1 - x0), l = Math.hypot(x1 - x0, y1 - y0);
+  g.save(); g.translate(x0, y0); g.rotate(a);
+  poly(g, [[0, -w / 2], [l - w * 2.2, -w / 2], [l - w * 2.2, -w * 1.6], [l, 0], [l - w * 2.2, w * 1.6], [l - w * 2.2, w / 2], [0, w / 2]], col);
+  g.restore();
+}
+function wedgeRay(g, cx, cy, a, spread, r0, r1, col) {
+  g.fillStyle = col; g.beginPath();
+  g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+  g.lineTo(cx + Math.cos(a - spread) * r1, cy + Math.sin(a - spread) * r1);
+  g.lineTo(cx + Math.cos(a + spread) * r1, cy + Math.sin(a + spread) * r1); g.closePath(); g.fill();
+}
+
+// ── scene 1 — the shout ──────────────────────────────────────────────────────────────────────
+const SHOUTS = [T.shout1, T.shout2];
+function megaKick(t) {  // offset along the axis: wind-up before each shout, recoil after
+  let k = 0;
+  for (const s of SHOUTS) { k -= 20 * eInOut(seg(t, s - 0.16, s)) * (t < s ? 1 : 0);
+    if (t >= s) { const d = t - s; k += -34 * Math.exp(-d / 0.09) * Math.cos(d * 38) + 0; } }
+  return k;
+}
+function s1(g, t) {
+  g.drawImage(CREAMBG, 0, 0);
+  const sh = shake(t); g.save(); g.translate(sh.x, sh.y);
+  // halftone field, lower right — circular reveal from the corner
+  { const u = eOut(seg(t, T.half, T.half + 0.45)); if (u > 0) { g.save(); g.beginPath(); g.arc(W + 40, H + 40, u * 1500, 0, TAU); g.clip(); g.drawImage(HALF1, 0, 0); g.restore(); } }
+  // rays from the bell (behind the sun)
+  const mk0 = megaKick(t), mIn = eBack(seg(t, T.mega, T.mega + 0.42), 1.5);
+  const slide = (1 - mIn) * -1000 + mk0;
+  const mouth = { x: MOUTH0.x + slide * DX, y: MOUTH0.y + slide * DY };
+  for (let si = 0; si < 2; si++) {
+    const u = seg(t, SHOUTS[si], SHOUTS[si] + 0.3); if (u <= 0) continue;
+    const L = 2300 * eOut(u), pulse = 1 + 0.12 * Math.exp(-(t - SHOUTS[si]) / 0.15);
+    const angs = si === 0 ? [-3, -1, 1, 3] : [-4, -2, 0, 2, 4];
+    angs.forEach((k, i) => wedgeRay(g, mouth.x, mouth.y, AX + k * 6.5 * DEG, (si ? 0.9 : 1.3) * DEG * pulse, 60, L * (0.8 + 0.2 * ((i + si) % 2)), (i + si) % 2 ? RED : BLACK));
+  }
+  // red sun
+  { const u = seg(t, T.sun, T.sun + 0.36); if (u > 0) { const s = eBack(u, 2.4);
+    g.fillStyle = RED; g.beginPath(); g.arc(SUN.x, SUN.y, SUN.r * s, 0, TAU); g.fill(); } }
+  // vertical red strip with rotated text (left edge)
+  { const u = eOut(seg(t, T.strip, T.strip + 0.4)); if (u > 0) {
+    const top = lerp(H + 20, 70, u);
+    g.fillStyle = RED; g.fillRect(52, top, 104, H + 40 - top);
+    g.save(); g.beginPath(); g.rect(52, top, 104, H); g.clip();
+    g.translate(104, lerp(1400, 560, eOut(seg(t, T.strip + 0.1, T.strip + 0.55)))); g.rotate(-90 * DEG);
+    block(g, 'MANIFESTO No. 1', { fam: OSW, w: 700, px: 64, ls: 10, fg: PAPER });
+    g.restore();
+    g.fillStyle = BLACK; g.fillRect(52, top - 22, 104, 12);
+  } }
+  // bars under the words
+  { const u = eOut(seg(t, T.bar, T.bar + 0.2)), u2 = eOut(seg(t, T.bar + 0.08, T.bar + 0.3));
+    const a = along(250, 205), b = along(250, 250);
+    g.save(); g.translate(a.x, a.y); g.rotate(AX); g.fillStyle = BLACK; g.fillRect(0, -17, 2000 * u, 34); g.restore();
+    g.save(); g.translate(b.x, b.y); g.rotate(AX); g.fillStyle = RED; g.fillRect(40, -6, 1800 * u2, 12); g.restore(); }
+  // megaphone
+  if (mIn > 0 || t > T.mega) {
+    const vib = (t > T.shout1 && t < T.shout2 + 0.5) ? Math.sin(t * 190) * 2.2 * Math.exp(-((t - (t < T.shout2 ? T.shout1 : T.shout2))) / 0.2) : 0;
+    const pul = 1 + SHOUTS.reduce((s, x) => s + (t >= x ? 0.05 * Math.exp(-(t - x) / 0.1) : 0), 0);
+    g.save(); g.translate(REAR.x + slide * DX + vib * NX, REAR.y + slide * DY + vib * NY); g.rotate(AX); g.scale(pul, pul);
+    g.drawImage(MEGA, -MO.x, -MO.y); g.restore();
+  }
+  // shouted words fly out of the bell
+  const words = [
+    { ts: T.shout1, d: 450, p: -6, draw: gg => block(gg, 'SPEAK', { px: 205, fg: PAPER, bg: BLACK, padX: 30, padY: 26, ls: 4 }) },
+    { ts: T.shout2, d: 935, p: -10, draw: gg => block(gg, 'UP!', { px: 330, fg: PAPER, shadow: BLACK, sh: 14, ls: 6 }) },
+  ];
+  for (const w of [words[1], words[0]]) {   // UP! passes behind the SPEAK block
+    const u = seg(t, w.ts, w.ts + 0.4); if (u <= 0) continue;
+    const e = eOut(u), tgt = along(w.d, w.p), st = { x: mouth.x + 40 * DX, y: mouth.y + 40 * DY };
+    const s = lerp(0.1, 1, eBack(u, 1.8));
+    g.save(); g.translate(lerp(st.x, tgt.x, e), lerp(st.y, tgt.y, e)); g.rotate(AX - (1 - e) * 0.55); g.scale(s, s); w.draw(g); g.restore();
+  }
+  // small line of type along the axis
+  { const u = eOut(seg(t, T.small, T.small + 0.35)); if (u > 0) {
+    const a = along(215, 300);
+    g.save(); g.translate(a.x, a.y); g.rotate(AX); g.beginPath(); g.rect(0, -40, 1300 * u, 80); g.clip();
+    g.translate(-240 * (1 - u), 0); block(g, 'A MANIFESTO FOR THE FEARLESS VOICE', { fam: OSW, w: 600, px: 40, ls: 7, fg: BLACK, align: 'l' }); g.restore(); } }
+  // arrow
+  { const u = eBack(seg(t, T.arrow, T.arrow + 0.3), 1.6); if (u > 0) {
+    const off = (1 - u) * -400; const x0 = 1330 + off * DX, y0 = 1010 + off * DY;
+    arrow(g, x0, y0, x0 + 430 * DX, y0 + 430 * DY, 30, RED); } }
+  g.restore();
+}
+
+// ── scene 2 — the manifesto ──────────────────────────────────────────────────────────────────
+const RA = -8 * DEG;
+const ROWS = [
+  { n: '1', txt: 'STAND UP.', x: 440, y: 400, bg: BLACK, fg: PAPER, cbg: PAPER, cfg: BLACK, from: 1 },
+  { n: '2', txt: 'SPEAK OUT.', x: 540, y: 600, bg: PAPER, fg: BLACK, cbg: BLACK, cfg: PAPER, from: -1 },
+  { n: '3', txt: 'BE HEARD.', x: 640, y: 800, bg: BLACK, fg: PAPER, cbg: PAPER, cfg: BLACK, from: 1 },
+];
+const ARC_T = [4.30, 4.72, 5.14, 5.56, 5.98, 6.40];
+function s2(g, t) {
+  g.fillStyle = RED; g.fillRect(0, 0, W, H);
+  const sh = shake(t); g.save(); g.translate(sh.x, sh.y);
+  // radial halftone behind the tower
+  { const u = eOut(seg(t, T.tower + 0.15, T.tower + 0.55)); if (u > 0) { g.save(); g.beginPath(); g.arc(TOWER_TOP.x, TOWER_TOP.y, u * 1100, 0, TAU); g.clip(); g.drawImage(HALF2, 0, 0); g.restore(); } }
+  // broadcast arcs
+  for (const b of ARC_T) { const d = t - b; if (d < 0 || d > 1.5) continue;
+    const r = 70 + d * 430, a = 1 - d / 1.5;
+    g.strokeStyle = PAPER; g.lineWidth = 16 * (0.4 + 0.6 * a); g.lineCap = 'butt';
+    for (const c of [0, Math.PI]) { g.beginPath(); g.arc(TOWER_TOP.x, TOWER_TOP.y - 108, r, c - 0.42, c + 0.42); g.stroke(); } }
+  // tower
+  { const u = eBack(seg(t, T.tower, T.tower + 0.42), 1.4); if (u > 0 || t > T.tower) {
+    g.drawImage(TOWER, TOWER_TOP.x - 230, 1110 - 960 + (1 - u) * 1000); } }
+  // gear rolls in from lower-left
+  { const u = seg(t, T.gear, T.gear + 0.42); if (u > 0) { const e = eBack(u, 1.3);
+    const cx = lerp(-420, 210, e), cy = lerp(1380, 930, e), rot = t * 0.9 - (1 - e) * 3.2;
+    g.save(); g.translate(cx, cy); g.rotate(rot); g.drawImage(GEAR, -360, -360); g.restore(); } }
+  // title
+  { const u = eOut(seg(t, T.title2, T.title2 + 0.4)); if (u > 0) {
+    g.save(); g.translate(110, 170); g.rotate(RA); g.beginPath(); g.rect(-10, -60, 1100 * u, 120); g.clip();
+    const r = block(g, "THE ORATOR'S MANIFESTO", { fam: OSW, w: 700, px: 50, ls: 12, fg: PAPER, align: 'l' });
+    g.fillStyle = BLACK; g.fillRect(0, r.cap / 2 + 18, r.tw * u, 12);
+    g.restore(); } }
+  // rows
+  ROWS.forEach((row, i) => {
+    const t0 = T.row[i], u = seg(t, t0, t0 + 0.34); if (u <= 0) return;
+    const e = eBack(u, 1.9), eo = eOut(u);
+    const ang = RA + (1 - e) * 0.62 * row.from, s = lerp(1.5, 1, eo);
+    const ox = (1 - eo) * 520 * row.from, oy = (1 - eo) * -140;
+    g.save(); g.translate(row.x + ox, row.y + oy); g.rotate(ang); g.scale(s, s);
+    // offset shadow slab
+    g.save(); g.translate(22, 20); setFont(g, ANTON, 400, 150, 4);
+    const tw = g.measureText(row.txt).width - 4, cap = g.measureText(row.txt).actualBoundingBoxAscent;
+    g.fillStyle = row.bg === BLACK ? DRED : BLACK; g.fillRect(47, -cap / 2 - 26, tw + 150, cap + 52); g.restore();
+    g.translate(122, 0); block(g, row.txt, { px: 150, ls: 4, fg: row.fg, bg: row.bg, padX: 75, padY: 26, align: 'l' });
+    g.restore();
+    // number disc pops after the block lands
+    const u2 = seg(t, t0 + 0.2, t0 + 0.44); if (u2 > 0) { const e2 = eBack(u2, 2.6);
+      g.save(); g.translate(row.x + ox, row.y + oy); g.rotate(RA); g.scale(e2, e2);
+      g.fillStyle = row.cbg; g.beginPath(); g.arc(0, 0, 92, 0, TAU); g.fill();
+      g.strokeStyle = row.cfg; g.lineWidth = 7; g.beginPath(); g.arc(0, 0, 76, 0, TAU); g.stroke();
+      block(g, row.n, { px: 110, fg: row.cfg }); g.restore(); }
+  });
+  // cream arrow toward the tower
+  { const u = eBack(seg(t, T.arrow2, T.arrow2 + 0.3), 1.5); if (u > 0) {
+    const a = -38 * DEG, off = (1 - u) * -300, x0 = 1290 + off * Math.cos(a), y0 = 960 + off * Math.sin(a);
+    arrow(g, x0, y0, x0 + 330 * Math.cos(a), y0 + 330 * Math.sin(a), 26, PAPER); } }
+  g.restore();
+}
+
+// ── scene 3 — the call to action ─────────────────────────────────────────────────────────────
+const CA = -10 * DEG, SEAL = { x: 1575, y: 390, r: 235 };
+function s3(g, t) {
+  g.drawImage(CREAMBG, 0, 0);
+  const sh = shake(t), push = 1 + 0.03 * eInOut(seg(t, 7.2, 10));
+  g.save(); g.translate(W / 2 + sh.x, H / 2 + sh.y); g.scale(push, push); g.translate(-W / 2, -H / 2);
+  // rays behind the seal
+  { const u = eOut(seg(t, T.rays, T.rays + 0.45)); if (u > 0) { const rot = (t - T.rays) * 0.1;
+    for (let i = 0; i < 18; i++) { const a = rot + i / 18 * TAU; wedgeRay(g, SEAL.x, SEAL.y, a, 2.6 * DEG, 0, (i % 2 ? 360 : 470) * u, BLACK); } } }
+  // black corner triangle
+  { const u = eBack(seg(t, T.tri, T.tri + 0.3), 1.4); if (u > 0) { const o = (1 - u) * -700;
+    poly(g, [[o - 20, H + 20 - o * 0.3], [o - 20, 820 - o * 0.3], [o + 640, H + 20 - o * 0.3]], BLACK); } }
+  // bottom-right band: black slab with a cream line of type, red rule under it
+  { const u = eBack(seg(t, T.band, T.band + 0.32), 1.3), u2 = eOut(seg(t, T.band + 0.1, T.band + 0.4));
+    if (u > 0) { g.save(); g.translate(1060 + (1 - u) * 1100 * Math.cos(CA), 985 + (1 - u) * 1100 * Math.sin(CA)); g.rotate(CA);
+      g.fillStyle = BLACK; g.fillRect(0, -48, 1100, 96);
+      g.translate(44, 0); block(g, 'FIRST MEETING FREE', { fam: OSW, w: 600, px: 40, ls: 7, fg: PAPER, align: 'l' }); g.restore(); }
+    if (u2 > 0) { g.save(); g.translate(W + 20, 1066); g.rotate(CA); g.fillStyle = RED; g.fillRect(-1000 * u2, -12, 1000 * u2, 24); g.restore(); } }
+  // JOIN
+  { const u = seg(t, T.join, T.join + 0.36); if (u > 0) { const e = eBack(u, 1.8), eo = eOut(u);
+    g.save(); g.translate(150, 400 + (1 - eo) * -60); g.rotate(CA - (1 - e) * 0.7); g.scale(lerp(1.6, 1, eo), lerp(1.6, 1, eo));
+    block(g, 'JOIN', { px: 330, ls: 6, fg: RED, align: 'l', shadow: BLACK, sh: 14 }); g.restore(); } }
+  // THE ORATOR CLUB
+  { const u = eOut(seg(t, T.club, T.club + 0.3)); if (u > 0) {
+    g.save(); g.translate(160, 615); g.rotate(CA); g.beginPath(); g.rect(-20, -90, 1300, 180); g.clip();
+    g.translate((1 - u) * -900, 0); block(g, 'THE ORATOR CLUB', { px: 140, ls: 5, fg: BLACK, align: 'l', knock: PAPER }); g.restore(); } }
+  // meeting bar
+  { const u = eBack(seg(t, T.info, T.info + 0.3), 1.3); if (u > 0) {
+    g.save(); g.translate(160 + (1 - u) * -1200 * Math.cos(CA), 770 + (1 - u) * -1200 * Math.sin(CA)); g.rotate(CA);
+    block(g, 'THURSDAYS · 7 PM · HALL 4', { fam: OSW, w: 600, px: 50, ls: 8, fg: PAPER, bg: BLACK, padX: 30, padY: 22, align: 'l' }); g.restore(); } }
+  // tagline, word group by word group
+  { const parts = ['NO NOTES.', 'NO FEAR.', 'JUST YOUR VOICE.']; let x = 0;
+    g.save(); g.translate(190, 880); g.rotate(CA); setFont(g, OSW, 700, 40, 6);
+    parts.forEach((p, i) => { const u = seg(t, T.tag[i], T.tag[i] + 0.16), w = g.measureText(p).width;
+      if (u > 0) { const s = lerp(1.4, 1, eOut(u)); g.save(); g.translate(x + w / 2, 0); g.scale(s, s);
+        block(g, p, { fam: OSW, w: 700, px: 40, ls: 6, fg: i === 2 ? RED : BLACK }); g.restore(); }
+      x += w + 34; });
+    g.restore(); }
+  // seal
+  { const u = seg(t, T.seal, T.seal + 0.36); if (u > 0) { const s = eBack(u, 2.2);
+    g.save(); g.translate(SEAL.x, SEAL.y); g.scale(s, s);
+    g.fillStyle = RED; g.beginPath(); g.arc(0, 0, SEAL.r, 0, TAU); g.fill();
+    g.strokeStyle = PAPER; g.lineWidth = 7; g.beginPath(); g.arc(0, 0, SEAL.r - 26, 0, TAU); g.stroke();
+    g.restore();
+    const u2 = seg(t, T.sealTxt, T.sealTxt + 0.3); if (u2 > 0) { const e2 = eBack(u2, 2.0);
+      g.save(); g.translate(SEAL.x, SEAL.y); g.rotate(CA - (1 - e2) * 0.8); g.scale(e2, e2);
+      g.save(); g.translate(0, -62); block(g, 'SPEAK', { px: 120, ls: 4, fg: PAPER }); g.restore();
+      g.save(); g.translate(0, 62); block(g, 'UP!', { px: 150, ls: 4, fg: BLACK }); g.restore();
+      g.restore(); } } }
+  g.restore();
+}
+
+// ── transitions ──────────────────────────────────────────────────────────────────────────────
+let SNAP, SCTX;
+const LP = { x: 0, y: 330 }, LA = 13 * DEG;
+function split(g, t) {
+  // phase 1: the wedge's apex drives in along L; phase 2: the halves are thrown apart
+  const p1 = eIn(seg(t, T.split0, T.split1)) * 0.7 + 0.3 * seg(t, T.split0, T.split1);
+  const a = lerp(-120, 2300, p1);
+  const p2 = eIn(seg(t, T.split1, T.split2));
+  const k = lerp(0.2, 0.5, p2), E = p2 * 900;
+  s1(SCTX, t);
+  g.save(); g.translate(LP.x, LP.y); g.rotate(LA);
+  // wedge: two-tone gap
+  const off = s => Math.max(0, a - s) * k / 2 + E;
+  poly(g, [[a, -E], [-3000, -off(-3000)], [-3000, off(-3000)], [a, E]], RED);
+  poly(g, [[a - 60, 0], [-3000, -off(-3000) * 0.42], [-3000, off(-3000) * 0.42]], DRED);
+  for (const sg of [-1, 1]) {
+    // left of the apex: sheared away from the line; right of it: untouched
+    g.save(); g.transform(1, -sg * k / 2, 0, 1, 0, sg * (a * k / 2 + E));
+    g.beginPath(); g.rect(-3000, sg < 0 ? -3000 : 0, a + 3000, 3000); g.clip();
+    g.rotate(-LA); g.translate(-LP.x, -LP.y); g.drawImage(SNAP, 0, 0); g.restore();
+    g.save(); g.transform(1, -sg * k / 2, 0, 1, 0, sg * (a * k / 2 + E)); g.strokeStyle = BLACK; g.lineWidth = 12;
+    g.beginPath(); g.moveTo(-3000, sg * 6); g.lineTo(a, sg * 6); g.stroke(); g.restore();
+    if (E < 1) { g.save(); g.beginPath(); g.rect(a, sg < 0 ? -3000 : 0, 6000, 3000); g.clip();
+      g.rotate(-LA); g.translate(-LP.x, -LP.y); g.drawImage(SNAP, 0, 0); g.restore(); }
+  }
+  g.restore();
+}
+function wipe(g, t) {
+  const u = eInOut(seg(t, T.wipe0, T.wipe1)), R = 40 + u * 2350;
+  const c = { x: TOWER_TOP.x, y: TOWER_TOP.y - 108 };
+  g.save(); g.beginPath(); g.arc(c.x, c.y, R, 0, TAU); g.clip(); s3(g, t); g.restore();
+  g.strokeStyle = BLACK; g.lineWidth = 30 + 30 * u; g.beginPath(); g.arc(c.x, c.y, R + (15 + 15 * u), 0, TAU); g.stroke();
+  g.strokeStyle = PAPER; g.lineWidth = 12; g.beginPath(); g.arc(c.x, c.y, R + 80 + 70 * u, 0, TAU); g.stroke();
+}
+
+// ── frame ────────────────────────────────────────────────────────────────────────────────────
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  if (t < T.split0) s1(ctx, t);
+  else if (t < T.split2) { s2(ctx, t); split(ctx, t); }
+  else if (t < T.wipe0) s2(ctx, t);
+  else if (t < T.wipe1) { s2(ctx, t); wipe(ctx, t); }
+  else s3(ctx, t);
+  // print: ink drop-outs, then paper grain multiplied over everything
+  ctx.globalAlpha = 0.6; ctx.drawImage(SPECK, 0, 0); ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(GRAIN, 0, 0); ctx.globalCompositeOperation = 'source-over';
+  const f = eInOut(seg(t, T.fade0, T.fade1 - 0.04)) + (1 - eOut(seg(t, 0, 0.12)));
+  if (f > 0) { ctx.fillStyle = `rgba(16,11,8,${clamp(f)})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await Promise.all([`400 100px ${ANTON}`, `700 60px ${OSW}`, `600 60px ${OSW}`].map(f => document.fonts.load(f, "SPEAK UP! MANIFESTO No. 1 THE ORATOR'S 123 · .")));
+  await document.fonts.ready;
+  buildGrain(); buildSpeck(); buildCream(); buildMega(); buildGear(); buildTower();
+  HALF1 = halftone(W, H, 18, 45 * DEG, (x, y) => { const d = Math.hypot(W - x, H - y); return 8.6 * clamp(1 - d / 950) ** 1.2; }, BLACK);
+  HALF2 = halftone(W, H, 20, 30 * DEG, (x, y) => { const d = Math.hypot(TOWER_TOP.x - x, TOWER_TOP.y - 108 - y); return 8.5 * clamp(1 - d / 900) ** 1.4; }, BLACK);
+  SNAP = mk(W, H); SCTX = SNAP.getContext('2d');
+  render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [];
+  for (const im of IMP) ev.push({ t: im.t, k: 'slam', v: im.a });
+  for (const s of SHOUTS) ev.push({ t: s, k: 'shout', v: s === T.shout2 ? 1 : 0 });
+  ev.push({ t: T.mega, k: 'whoosh', v: 0.6 }, { t: T.strip, k: 'whoosh', v: 0.4 }, { t: T.split0, k: 'rip', d: T.split2 - T.split0 },
+    { t: T.gear, k: 'gear' }, { t: T.tower, k: 'whoosh', v: 0.5 }, { t: T.wipe0, k: 'swell', d: T.wipe1 - T.wipe0 },
+    { t: T.seal + 0.25, k: 'boom' }, { t: T.club, k: 'whoosh', v: 0.5 }, { t: T.info, k: 'whoosh', v: 0.4 }, { t: T.band, k: 'whoosh', v: 0.4 });
+  for (const r of T.row) ev.push({ t: r, k: 'whoosh', v: 0.5 });
+  for (const b of ARC_T) ev.push({ t: b, k: 'beep' });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
