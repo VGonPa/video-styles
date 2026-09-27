@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#efe4cc}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── art-nouveau · "Lys d'Or — Eau de Parfum, Maison Aubelle, Paris 1900" ─────────────────────────────
+// Close on the halo: a mosaic halo lays itself tile by tile, the arched frame draws symmetrically, whiplash
+// vines grow and curl, a lily stem rises and the lily blooms (petals open with overshoot, stamens pop).
+// The camera pulls back: the lily lifts and shrinks into the glass stopper of a perfume bottle that is
+// revealed beneath it, side panels and borders assemble, lily stalks grow and bloom, peacock feathers fan
+// out behind the arch, the ring of lettering appears along the arch, the title flows in letter by letter.
+// A gleam passes over the gold, petals drift, and the poster fades to cream paper.
+// Every frame depends only on t (seeded RNG); textures are precomputed once.
+const W = 1920, H = 1080, TAU = Math.PI * 2, PI = Math.PI;
+const out = document.getElementById('c'), g = out.getContext('2d');
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eSine = u => 0.5 - 0.5 * Math.cos(PI * u);
+const back = (u, s = 1.7) => { if (u <= 0) return 0; if (u >= 1) return 1; const c3 = s + 1; return 1 + c3 * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2); };
+const spring = (u, f = 1.6, z = 0.45) => { if (u <= 0) return 0; const w = TAU * f, wd = w * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * w * u) * (Math.cos(wd * u) + (z * w / wd) * Math.sin(wd * u)); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const FT = '"Cinzel Decorative"', FI = 'Italiana', FF = 'Federo';
+
+// palette: cream paper, sage, dusty rose, gold, sepia line
+const PAPER = '#efe4cc', CREAM = '#f7eedb', SEPIA = '#4a3a2a', SEPIA2 = '#6b5440';
+const SAGE = '#9fae8f', SAGE_D = '#6f8466', SAGE_L = '#c3ccb0', ROSE = '#d9aba0', ROSE_D = '#b8847a', ROSE_L = '#ecd0c6';
+const GOLD_C = '#c9a45c', GOLD_D = '#9a7838', TEAL = '#5f8583', TEAL_D = '#3f5c60';
+
+// ── timeline (s) ──
+const T = {
+  fadeIn: [0, .55], disc: [.1, .9], tiles: [.3, 1.9], arch: [.3, 2.2], dots: [1.3, 2.3],
+  stem: [.55, 1.5], bloom: [1.45, 2.9], stamen: [2.25, 3.0], vinesA: [.7, 3.2],
+  pull: [3.25, 5.0], stemFade: [3.4, 4.2], morph: [3.5, 4.8], bottle: [3.9, 5.0], liquid: [4.5, 5.6],
+  sideBorder: [3.7, 5.0], outer: [4.0, 5.3], stalks: [4.2, 5.5], stalkBloom: [5.1, 6.4], feathers: [4.8, 6.3],
+  arcText: [5.3, 6.3], plaque: [5.5, 6.1], title: [5.8, 6.9], sub: [6.6, 7.3],
+  gleam: [7.7, 8.7], fade: [9.2, 10.0],
+};
+
+// ── layout (poster space) ──
+const CX = 960, HALO_Y = 440, R_ARCH = 380, AX0 = 580, AX1 = 1340, BOT = 1010;
+const SP = [{ x0: 70, x1: 545 }, { x0: 1375, x1: 1850 }], SP_Y0 = 70, SP_Y1 = 1010;
+
+let GOLDPAT, GRAIN, VIG, TILES = [], VINES = [], FEATH = [], PETALS = [], ARC = [], TITLE_LAY = [], SUB_W = 0;
+
+// ── textures ──
+function goldTex() {
+  const c = mk(512, 512), x = c.getContext('2d'), r = rng(11);
+  // seamless (periodic) sheen so the pattern tiles without seams
+  const id = x.createImageData(512, 512), d = id.data, lo = [141, 106, 46], hi = [240, 218, 160];
+  for (let y = 0; y < 512; y++) for (let xx = 0; xx < 512; xx++) { const v = .5 + .5 * Math.sin(TAU * (xx + y) / 512 * 2) * Math.cos(TAU * (xx - y) / 512), k = Math.pow(v, 1.4), o = (y * 512 + xx) * 4;
+    for (let c = 0; c < 3; c++) d[o + c] = lo[c] + (hi[c] - lo[c]) * k; d[o + 3] = 255; }
+  x.putImageData(id, 0, 0);
+  for (let i = 0; i < 900; i++) { x.fillStyle = r() < .5 ? `rgba(255,240,200,${.05 + r() * .07})` : `rgba(80,55,20,${.04 + r() * .06})`; x.fillRect(r() * 512, r() * 512, 1 + r() * 2, 1 + r() * 2); }
+  return g.createPattern(c, 'repeat');
+}
+function grainTex() {
+  const c = mk(W, H), x = c.getContext('2d'), r = rng(5);
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  // lithograph mottling: soft blotches
+  for (let i = 0; i < 260; i++) {
+    const px = r() * W, py = r() * H, rad = 40 + r() * 180, a = .025 + r() * .04;
+    const rg = x.createRadialGradient(px, py, 0, px, py, rad);
+    rg.addColorStop(0, `rgba(150,120,85,${a})`); rg.addColorStop(1, 'rgba(150,120,85,0)');
+    x.fillStyle = rg; x.fillRect(px - rad, py - rad, rad * 2, rad * 2);
+  }
+  const id = x.getImageData(0, 0, W, H), d = id.data;
+  for (let i = 0; i < d.length; i += 4) { const n = (r() - .5) * 26 + (r() < .004 ? -60 : 0); d[i] += n; d[i + 1] += n; d[i + 2] += n * .9; }
+  x.putImageData(id, 0, 0);
+  // fibres
+  for (let i = 0; i < 1400; i++) { x.strokeStyle = `rgba(120,95,60,${.04 + r() * .05})`; x.lineWidth = .7; const px = r() * W, py = r() * H, a = r() * TAU, l = 6 + r() * 18;
+    x.beginPath(); x.moveTo(px, py); x.quadraticCurveTo(px + Math.cos(a) * l * .5 + r() * 4, py + Math.sin(a) * l * .5 + r() * 4, px + Math.cos(a) * l, py + Math.sin(a) * l); x.stroke(); }
+  return c;
+}
+function vigTex() {
+  const c = mk(W, H), x = c.getContext('2d');
+  const rg = x.createRadialGradient(W / 2, H / 2, 380, W / 2, H / 2, 1150);
+  rg.addColorStop(0, 'rgba(70,45,25,0)'); rg.addColorStop(1, 'rgba(70,45,25,.30)');
+  x.fillStyle = rg; x.fillRect(0, 0, W, H); return c;
+}
+
+// ── polyline helpers ──
+function bez(p0, p1, p2, p3, n, arr) { for (let i = arr.length ? 1 : 0; i <= n; i++) { const u = i / n, v = 1 - u;
+  arr.push([v * v * v * p0[0] + 3 * v * v * u * p1[0] + 3 * v * u * u * p2[0] + u * u * u * p3[0], v * v * v * p0[1] + 3 * v * v * u * p1[1] + 3 * v * u * u * p2[1] + u * u * u * p3[1]]); } return arr; }
+function withLen(pts) { const L = [0]; for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); return { pts, L, len: L[L.length - 1] }; }
+function curl(pts, dir, r0, turns) { // append a tightening spiral from the end tangent
+  const n = pts.length, a = pts[n - 2], b = pts[n - 1]; let h = Math.atan2(b[1] - a[1], b[0] - a[0]), x = b[0], y = b[1];
+  const steps = Math.round(turns * 64); for (let i = 1; i <= steps; i++) { const u = i / steps, r = r0 * (1 - .78 * u), dt = TAU * turns / steps; h += dir * dt; x += Math.cos(h) * r * dt; y += Math.sin(h) * r * dt; pts.push([x, y]); }
+  return pts;
+}
+function partial(P, f) { // points up to fraction f of length
+  const target = P.len * f, res = []; for (let i = 0; i < P.pts.length; i++) { if (P.L[i] <= target) res.push(P.pts[i]); else { const a = P.pts[i - 1], b = P.pts[i], u = (target - P.L[i - 1]) / (P.L[i] - P.L[i - 1] || 1); res.push([lerp(a[0], b[0], u), lerp(a[1], b[1], u)]); break; } }
+  return res;
+}
+function strokePart(P, f, w, col, outline) {
+  if (f <= 0) return; const pts = partial(P, f); if (pts.length < 2) return;
+  const run = () => { g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); };
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  if (outline) { run(); g.strokeStyle = SEPIA; g.lineWidth = w + outline; g.stroke(); }
+  run(); g.strokeStyle = col; g.lineWidth = w; g.stroke();
+}
+function pointAt(P, f) { const pts = partial(P, clamp(f, .0005, 1)); const b = pts[pts.length - 1], a = pts[Math.max(0, pts.length - 2)]; return { x: b[0], y: b[1], a: Math.atan2(b[1] - a[1], b[0] - a[0]) }; }
+// tapered ribbon with a pointed growing tip
+function ribbon(P, f, w0, w1, fill) {
+  if (f <= 0) return; const pts = partial(P, f), n = pts.length; if (n < 2) return;
+  const Ls = [0]; for (let i = 1; i < n; i++) Ls.push(Ls[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const tot = Ls[n - 1], Lf = [], Rt = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)], ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const u = Ls[i] / P.len, tip = clamp((tot - Ls[i]) / 40), w = lerp(w0, w1, u) * (.25 + .75 * tip) * .5;
+    Lf.push([pts[i][0] - Math.sin(ang) * w, pts[i][1] + Math.cos(ang) * w]); Rt.push([pts[i][0] + Math.sin(ang) * w, pts[i][1] - Math.cos(ang) * w]);
+  }
+  const path = () => { g.beginPath(); g.moveTo(Lf[0][0], Lf[0][1]); for (const p of Lf) g.lineTo(p[0], p[1]); for (let i = n - 1; i >= 0; i--) g.lineTo(Rt[i][0], Rt[i][1]); g.closePath(); };
+  path(); g.lineJoin = 'round'; g.strokeStyle = SEPIA; g.lineWidth = 3; g.stroke(); g.fillStyle = fill; g.fill();
+}
+function leaf(x, y, a, len, s, col) {
+  if (s <= 0) return; g.save(); g.translate(x, y); g.rotate(a); g.scale(s, s);
+  g.beginPath(); g.moveTo(0, 0); g.bezierCurveTo(len * .3, -len * .32, len * .75, -len * .22, len, 0); g.bezierCurveTo(len * .7, len * .2, len * .3, len * .26, 0, 0);
+  const lg = g.createLinearGradient(0, 0, len, 0); lg.addColorStop(0, SAGE_D); lg.addColorStop(1, col);
+  g.fillStyle = lg; g.fill(); g.strokeStyle = SEPIA; g.lineWidth = 2.4 / s; g.stroke();
+  g.beginPath(); g.moveTo(len * .08, 0); g.quadraticCurveTo(len * .5, -len * .05, len * .9, 0); g.strokeStyle = 'rgba(74,58,42,.55)'; g.lineWidth = 1.3 / s; g.stroke();
+  g.restore();
+}
+
+// ── lily (front view, 6 tepals) ── open: 0 = closed bud, 1 = open
+const LILY_OPEN = [-60, -120, 0, 180, 60, 120].map(d => d * PI / 180);
+const SPOTS = (() => { const r = rng(21), a = []; for (let i = 0; i < 6; i++) { const s = []; for (let k = 0; k < 9; k++) s.push([.14 + r() * .3, (r() - .5) * .5, 1.2 + r() * 2]); a.push(s); } return a; })();
+function petal(len, wid, k, alpha) {
+  g.beginPath(); g.moveTo(0, 0);
+  g.bezierCurveTo(len * .22, -wid, len * .68, -wid * .95, len, wid * .08);
+  g.bezierCurveTo(len * .72, wid * .55, len * .28, wid * .95, 0, 0);
+  const lg = g.createLinearGradient(0, 0, len, 0); lg.addColorStop(0, ROSE_D); lg.addColorStop(.32, ROSE_L); lg.addColorStop(.7, CREAM); lg.addColorStop(1, '#fbf5e8');
+  g.fillStyle = lg; g.fill(); g.strokeStyle = SEPIA; g.lineWidth = 2.6; g.stroke();
+  g.beginPath(); g.moveTo(len * .05, 0); g.quadraticCurveTo(len * .55, -wid * .08, len * .93, wid * .06); g.strokeStyle = 'rgba(184,132,122,.8)'; g.lineWidth = 1.6; g.stroke();
+  for (const [u, v, r] of SPOTS[k]) { g.beginPath(); g.arc(len * u, wid * v, r, 0, TAU); g.fillStyle = 'rgba(150,80,75,.6)'; g.fill(); }
+}
+function lily(x, y, s, open, stam, rot = 0) {
+  g.save(); g.translate(x, y); g.rotate(rot); g.scale(s, s);
+  const o = open, L = 150 * (.72 + .28 * clamp(o)), Wd = 44 * (.42 + .58 * clamp(o));
+  const order = [1, 0, 3, 2, 5, 4]; // back tepals first (upper pair behind)
+  const drawSet = idx => { for (const i of idx) { const bud = -PI / 2 + (i % 2 ? -1 : 1) * (.05 + .03 * (i >> 1)); const a = lerp(bud, LILY_OPEN[i] + (i === 3 ? 0 : 0), o);
+    g.save(); g.rotate(a); petal(L * (i >= 4 ? .95 : 1), Wd, i); g.restore(); } };
+  // inner layer (upper and lower) then outer side tepals on top
+  drawSet([3, 0, 1]); drawSet([2, 4, 5]);
+  // stamens
+  if (stam > 0) for (let i = 0; i < 6; i++) {
+    const a = -PI / 2 + (i - 2.5) * .42, l = 95 * back(seg(stam, i * .06, .6 + i * .06), 2.2);
+    if (l <= 0) continue; const ex = Math.cos(a) * l, ey = Math.sin(a) * l * .9 - l * .12;
+    g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(ex * .4, ey * .6 - 10, ex, ey); g.strokeStyle = '#8c9a6c'; g.lineWidth = 2.6; g.stroke();
+    g.save(); g.translate(ex, ey); g.rotate(a + PI / 2); g.beginPath(); g.ellipse(0, 0, 4.2, 10, 0, 0, TAU); g.fillStyle = '#a0522d'; g.fill(); g.strokeStyle = SEPIA; g.lineWidth = 1.5; g.stroke(); g.restore();
+  }
+  // throat
+  const rg = g.createRadialGradient(0, 0, 0, 0, 0, 26); rg.addColorStop(0, 'rgba(160,170,100,.9)'); rg.addColorStop(1, 'rgba(160,170,100,0)');
+  g.fillStyle = rg; g.globalAlpha = clamp(o * 1.5); g.beginPath(); g.arc(0, 0, 26, 0, TAU); g.fill(); g.globalAlpha = 1;
+  g.restore();
+}
+
+// ── peacock feather ──
+function feather(px, py, ang, len, s) {
+  if (s <= 0) return; g.save(); g.translate(px, py); g.rotate(ang); g.scale(s, s);
+  const bend = 18;
+  // barbs
+  for (let i = 0; i < 44; i++) { const u = .12 + i / 44 * .74, x = u * len, y = Math.sin(u * PI) * bend, bl = 16 + 30 * Math.sin(u * PI * .95);
+    for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + bl * .5, y + sd * bl * .6, x + bl * .95, y + sd * bl * .85); g.strokeStyle = i % 3 ? 'rgba(111,132,102,.75)' : 'rgba(95,133,131,.8)'; g.lineWidth = 1.6; g.stroke(); } }
+  // shaft
+  g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(len * .5, bend * 2, len * .94, 0); g.strokeStyle = SEPIA2; g.lineWidth = 3; g.stroke();
+  // eye
+  const ex = len * .92, ey = 0;
+  const ring = (rx, ry, col) => { g.beginPath(); g.ellipse(ex, ey, rx, ry, 0, 0, TAU); g.fillStyle = col; g.fill(); g.strokeStyle = SEPIA; g.lineWidth = 2; g.stroke(); };
+  ring(44, 31, SAGE_L); ring(35, 24, GOLD_C); ring(25, 18, TEAL); ring(15, 11, '#c79a55'); ring(8, 6.5, TEAL_D);
+  g.restore();
+}
+
+// ── mosaic halo ──
+function buildTiles() {
+  const r = rng(77), rings = [[230, 252, 44], [255, 276, 52], [279, 300, 60]];
+  const pal = [[GOLD_C, ROSE, CREAM, SAGE], [SAGE, GOLD_C, SAGE_L, TEAL], [ROSE, GOLD_C, ROSE_L, CREAM]];
+  rings.forEach(([r0, r1, n], ri) => { for (let i = 0; i < n; i++) {
+    const a0 = i / n * TAU, a1 = (i + 1) / n * TAU, am = (a0 + a1) / 2;
+    const fromBottom = Math.abs(((am - PI / 2 + PI) % TAU + TAU) % TAU - PI) / PI; // 0 at bottom, 1 at top
+    const col = ri === 0 ? (i % 4 === 0 ? ROSE : GOLD_C) : ri === 1 ? (i % 2 ? SAGE : TEAL) : (i % 5 === 0 ? GOLD_C : i % 2 ? ROSE : CREAM);
+    TILES.push({ ri, r0, r1, a0: a0 + .012, a1: a1 - .012, am, col, j: (r() - .5) * .16, d: fromBottom * .75 + ri * .1 + r() * .06 });
+  } });
+}
+function drawHalo(t) {
+  const disc = eOut(seg(t, ...T.disc));
+  if (disc > 0) {
+    g.save(); g.globalAlpha = disc;
+    const rg = g.createRadialGradient(CX, HALO_Y, 10, CX, HALO_Y, 228); rg.addColorStop(0, '#fbf4e2'); rg.addColorStop(.7, '#f1e2bd'); rg.addColorStop(1, '#e2c98e');
+    g.beginPath(); g.arc(CX, HALO_Y, 228 * lerp(.6, 1, disc), 0, TAU); g.fillStyle = rg; g.fill();
+    // fine concentric rings and rays
+    g.strokeStyle = 'rgba(154,120,56,.35)'; g.lineWidth = 1.2;
+    for (const rr of [90, 200]) { g.beginPath(); g.arc(CX, HALO_Y, rr * disc, 0, TAU); g.stroke(); }
+    for (let i = 0; i < 36; i++) { const a = i / 36 * TAU; g.beginPath(); g.moveTo(CX + Math.cos(a) * 60, HALO_Y + Math.sin(a) * 60); g.lineTo(CX + Math.cos(a) * 224 * disc, HALO_Y + Math.sin(a) * 224 * disc); g.stroke(); }
+    g.restore();
+  }
+  const tp = seg(t, ...T.tiles);
+  const drift = Math.pow(seg(t, 1.9, 10), 1.3) * .16;
+  for (const q of TILES) { const k = back(seg(tp, q.d, q.d + .22), 2.0); if (k <= 0) continue;
+    const rm = (q.r0 + q.r1) / 2, hw = (q.r1 - q.r0) / 2 * k, ha = (q.a1 - q.a0) / 2 * k, am = q.am + (q.ri === 1 ? -drift : drift);
+    g.beginPath(); g.arc(CX, HALO_Y, rm + hw, am - ha, am + ha); g.arc(CX, HALO_Y, rm - hw, am + ha, am - ha, true); g.closePath();
+    g.fillStyle = q.col === GOLD_C ? GOLDPAT : q.col; g.fill(); g.fillStyle = q.j > 0 ? `rgba(255,250,235,${q.j})` : `rgba(60,40,20,${-q.j})`; g.fill(); g.strokeStyle = 'rgba(74,58,42,.7)'; g.lineWidth = 1.3; g.stroke(); }
+  // outline rings
+  const ol = eOut(seg(t, .5, 1.6));
+  if (ol > 0) { g.lineWidth = 3.5; g.strokeStyle = SEPIA;
+    for (const rr of [228, 302]) { g.beginPath(); g.arc(CX, HALO_Y, rr, PI / 2 - PI * ol, PI / 2 + PI * ol); g.stroke(); } }
+  // dot ring
+  const dp = seg(t, ...T.dots);
+  for (let i = 0; i < 48; i++) { const a = PI / 2 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) / 48 * TAU; const k = back(seg(dp, i / 48 * .7, i / 48 * .7 + .3));
+    if (k <= 0) continue; g.beginPath(); g.arc(CX + Math.cos(a) * 318, HALO_Y + Math.sin(a) * 318, 5.5 * k, 0, TAU); g.fillStyle = GOLDPAT; g.fill(); g.strokeStyle = SEPIA; g.lineWidth = 1.5; g.stroke(); }
+}
+
+// ── frames ──
+function archHalf(sd, inset) { // bottom centre → side → arc to apex
+  const x = CX + sd * (R_ARCH - inset), pts = [[CX, BOT - inset], [x, BOT - inset], [x, HALO_Y]];
+  for (let i = 1; i <= 60; i++) { const a = sd > 0 ? -i / 60 * PI / 2 : PI + i / 60 * PI / 2; pts.push([CX + Math.cos(a) * (R_ARCH - inset), HALO_Y + Math.sin(a) * (R_ARCH - inset)]); }
+  return withLen(pts);
+}
+let ARCH = [];
+function archPath(inset) { g.beginPath(); const r = R_ARCH - inset; g.moveTo(CX - r, BOT - inset); g.lineTo(CX - r, HALO_Y); g.arc(CX, HALO_Y, r, PI, 0); g.lineTo(CX + r, BOT - inset); g.closePath(); }
+function rrect(x0, y0, x1, y1, r) { g.beginPath(); g.moveTo(x0 + r, y0); g.arcTo(x1, y0, x1, y1, r); g.arcTo(x1, y1, x0, y1, r); g.arcTo(x0, y1, x0, y0, r); g.arcTo(x0, y0, x1, y0, r); g.closePath(); }
+function rrectHalves(x0, y0, x1, y1, r) { // two halves from bottom centre up to top centre
+  const cx = (x0 + x1) / 2, mk2 = sd => { const xs = sd > 0 ? x1 : x0, pts = [[cx, y1], [xs - sd * r, y1]];
+    for (let i = 1; i <= 12; i++) { const a = sd > 0 ? PI / 2 - i / 12 * PI / 2 : PI / 2 + i / 12 * PI / 2; pts.push([xs - sd * r + Math.cos(a) * r, y1 - r + Math.sin(a) * r]); }
+    pts.push([xs, y0 + r]); for (let i = 1; i <= 12; i++) { const a = sd > 0 ? -i / 12 * PI / 2 : PI + i / 12 * PI / 2; pts.push([xs - sd * r + Math.cos(a) * r, y0 + r + Math.sin(a) * r]); }
+    pts.push([cx, y0]); return withLen(pts); };
+  return [mk2(-1), mk2(1)];
+}
+let SIDEB = [], OUTERB = [];
+
+// ── vines (whiplash, with curl terminals) ──
+function buildVines() {
+  const defs = [ // left side panel, mirrored for right; [p0,c1,c2,p1,c3,c4,p2], curl dir, r0, turns
+    { p: [[112, 1000], [120, 860], [470, 860], [440, 700], [410, 540], [120, 560], [150, 400], [175, 260], [400, 300], [420, 200]], dir: -1, r0: 42, turns: 1.3, w: [15, 5], leaves: [.2, .36, .52, .66], t: [4.0, 5.8] },
+    { p: [[503, 1000], [495, 860], [145, 860], [175, 700], [205, 540], [495, 560], [465, 400], [440, 260], [215, 300], [195, 200]], dir: 1, r0: 42, turns: 1.3, w: [15, 5], leaves: [.24, .4, .56, .7], t: T.vinesA },
+  ];
+  for (const sd of [-1, 1]) for (const d of defs) {
+    const P = d.p.map(([x, y]) => sd < 0 ? [x, y] : [W - x, y]);
+    const pts = []; for (let k = 0; k + 3 < P.length; k += 3) bez(P[k], P[k + 1], P[k + 2], P[k + 3], 40, pts); curl(pts, sd < 0 ? d.dir : -d.dir, d.r0, d.turns);
+    VINES.push({ P: withLen(pts), w: d.w, leaves: d.leaves, t: d.t, sd });
+  }
+}
+function drawVines(t) {
+  for (const v of VINES) { const f = eInOut(seg(t, ...v.t)); if (f <= 0) continue;
+    ribbon(v.P, f, v.w[0], v.w[1], SAGE);
+    v.leaves.forEach((u, i) => { const k = back(seg(f, u + .02, u + .16), 2); if (k <= 0) return; const p = pointAt(v.P, u); const side = (i % 2 ? 1 : -1);
+      leaf(p.x, p.y, p.a + side * 1.0, 62 - i * 5, k, SAGE_L); });
+  }
+}
+
+// ── lily stalks in side panels ──
+let STALKS = [];
+function buildStalks() {
+  for (const sd of [-1, 1]) { const x = sd < 0 ? 310 : W - 310, pts = []; bez([x, 1000], [x - sd * 10, 800], [x + sd * 30, 500], [x + sd * 8, 250], 60, pts); STALKS.push({ P: withLen(pts), sd }); }
+}
+function drawStalks(t) {
+  const f = eInOut(seg(t, ...T.stalks)); if (f <= 0) return;
+  const bl = seg(t, ...T.stalkBloom);
+  for (const s of STALKS) {
+    strokePart(s.P, f, 7, SAGE_D, 3);
+    const leaves = [[.3, -1, 92], [.4, 1, 84], [.5, -1, 72]];
+    leaves.forEach(([u, sdd, l]) => { const k = back(seg(f, u + .05, u + .25)); if (k <= 0) return; const p = pointAt(s.P, u); leaf(p.x, p.y, p.a + sdd * .38, l, k, SAGE); });
+    // buds on short pedicels
+    [[.62, 1, .0], [.74, -1, .25]].forEach(([u, sdd, o], i) => { const k = back(seg(f, u, u + .2)); if (k <= 0) return; const p = pointAt(s.P, u);
+      const bx = p.x + sdd * 46 * k, by = p.y - 30 * k; g.beginPath(); g.moveTo(p.x, p.y); g.quadraticCurveTo(p.x + sdd * 30, p.y, bx, by); g.strokeStyle = SEPIA; g.lineWidth = 6; g.stroke(); g.strokeStyle = SAGE_D; g.lineWidth = 3.5; g.stroke();
+      lily(bx, by, .36 * k, lerp(o, o + .45, eOut(seg(bl, .3 + i * .15, 1))), 0, sdd * .5); });
+    if (f > .96) { const p = pointAt(s.P, 1); const o = spring(seg(bl, 0, .8), 1.3, .5); lily(p.x, p.y - 6, .62, o, seg(bl, .5, 1), s.sd * .12 + .045 * Math.sin(t * 1.3 + s.sd)); }
+  }
+}
+
+// ── bottle ──
+function bottlePath() {
+  g.beginPath(); g.moveTo(CX - 26, 368); g.lineTo(CX - 26, 402);
+  g.bezierCurveTo(CX - 60, 412, CX - 108, 430, CX - 110, 488);
+  g.bezierCurveTo(CX - 112, 560, CX - 104, 616, CX - 86, 640);
+  g.quadraticCurveTo(CX - 76, 654, CX - 50, 654); g.lineTo(CX + 50, 654); g.quadraticCurveTo(CX + 76, 654, CX + 86, 640);
+  g.bezierCurveTo(CX + 104, 616, CX + 112, 560, CX + 110, 488);
+  g.bezierCurveTo(CX + 108, 430, CX + 60, 412, CX + 26, 402); g.lineTo(CX + 26, 368); g.closePath();
+}
+function drawBottle(t) {
+  const rev = eInOut(seg(t, ...T.bottle)); if (rev <= 0) return;
+  const top = lerp(662, 356, rev), liq = eOut(seg(t, ...T.liquid));
+  g.save(); g.beginPath(); g.rect(CX - 140, top, 280, 700); g.clip();
+  // shadow
+  g.beginPath(); g.ellipse(CX, 656, 120, 12, 0, 0, TAU); g.fillStyle = 'rgba(74,58,42,.22)'; g.fill();
+  bottlePath(); const gl = g.createLinearGradient(CX - 110, 0, CX + 110, 0); gl.addColorStop(0, 'rgba(236,208,198,.9)'); gl.addColorStop(.5, 'rgba(250,244,232,.75)'); gl.addColorStop(1, 'rgba(210,190,170,.9)');
+  g.fillStyle = gl; g.fill();
+  // liquid
+  if (liq > 0) { g.save(); bottlePath(); g.clip(); const ly = lerp(654, 470, liq) + Math.sin(t * 3.1) * 2.5 * liq;
+    const lg = g.createLinearGradient(0, ly, 0, 654); lg.addColorStop(0, '#e6b77c'); lg.addColorStop(1, '#c47f63');
+    g.beginPath(); g.moveTo(CX - 130, ly); for (let x = -130; x <= 130; x += 10) g.lineTo(CX + x, ly + Math.sin(x * .04 + t * 2.4) * 2.2); g.lineTo(CX + 130, 700); g.lineTo(CX - 130, 700); g.closePath(); g.fillStyle = lg; g.globalAlpha = .88; g.fill(); g.restore(); }
+  // facets + highlights
+  g.save(); bottlePath(); g.clip();
+  g.strokeStyle = 'rgba(74,58,42,.28)'; g.lineWidth = 1.6; for (const dx of [-56, 56]) { g.beginPath(); g.moveTo(CX + dx * .7, 430); g.quadraticCurveTo(CX + dx * 1.02, 540, CX + dx * .84, 648); g.stroke(); }
+  g.fillStyle = 'rgba(255,255,255,.55)'; g.beginPath(); g.ellipse(CX - 72, 520, 9, 70, -.05, 0, TAU); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.3)'; g.beginPath(); g.ellipse(CX + 78, 540, 5, 50, .05, 0, TAU); g.fill();
+  g.restore();
+  bottlePath(); g.strokeStyle = SEPIA; g.lineWidth = 3.6; g.stroke();
+  // collar
+  g.beginPath(); g.moveTo(CX - 36, 396); g.lineTo(CX + 36, 396); g.lineTo(CX + 32, 414); g.lineTo(CX - 32, 414); g.closePath(); g.fillStyle = GOLDPAT; g.fill(); g.strokeStyle = SEPIA; g.lineWidth = 2.5; g.stroke();
+  // label medallion
+  g.beginPath(); g.ellipse(CX, 548, 46, 56, 0, 0, TAU); g.fillStyle = CREAM; g.fill(); g.lineWidth = 5; g.strokeStyle = GOLDPAT; g.stroke(); g.lineWidth = 2; g.strokeStyle = SEPIA; g.stroke();
+  g.beginPath(); g.ellipse(CX, 548, 38, 48, 0, 0, TAU); g.strokeStyle = 'rgba(154,120,56,.8)'; g.lineWidth = 1.2; g.stroke();
+  lily(CX, 552, .2, .85, 0);
+  // reveal edge glow
+  if (rev < 1) { const lg = g.createLinearGradient(0, top - 10, 0, top + 14); lg.addColorStop(0, 'rgba(255,248,225,0)'); lg.addColorStop(.5, 'rgba(255,248,225,.95)'); lg.addColorStop(1, 'rgba(255,248,225,0)'); bottlePath(); g.clip(); g.fillStyle = lg; g.fillRect(CX - 130, top - 10, 260, 24); }
+  g.restore();
+}
+
+// ── scene-A stem ──
+let STEM;
+function drawStem(t) {
+  const f = eOut(seg(t, ...T.stem)), a = 1 - seg(t, ...T.stemFade); if (f <= 0 || a <= 0) return;
+  g.save(); g.globalAlpha = a; strokePart(STEM, f, 9, SAGE_D, 3.5);
+  [[.3, -1], [.5, 1]].forEach(([u, sd]) => { const k = back(seg(t, 1.0 + u, 1.45 + u)); if (k <= 0) return; const p = pointAt(STEM, u); leaf(p.x, p.y, p.a + sd * .8, 120, k, SAGE); });
+  g.restore();
+}
+
+// ── lettering ──
+const TITLE = "Lys d'Or", SUB = 'EAU DE PARFUM', ARC_TXT = 'MAISON AUBELLE · PARIS · 1900';
+function drawArcText(t) {
+  const p = seg(t, ...T.arcText); if (p <= 0) return;
+  g.save(); g.font = `30px ${FF}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = SEPIA;
+  for (const c of ARC) { const k = eOut(seg(p, c.d, c.d + .35)); if (k <= 0) continue;
+    g.save(); g.globalAlpha = k; g.translate(CX + Math.cos(c.a) * 342, HALO_Y + Math.sin(c.a) * 342); g.rotate(c.a + PI / 2); g.translate(0, (1 - k) * 12); g.fillText(c.ch, 0, 0); g.restore(); }
+  g.restore();
+}
+function drawPlaque(t) {
+  const k = eOut(seg(t, ...T.plaque)); if (k <= 0) return;
+  const hw = 330 * k, y0 = 790, y1 = 978;
+  g.save(); g.beginPath(); g.moveTo(CX - hw, y0 + 20); g.quadraticCurveTo(CX - hw, y0, CX - hw + 20, y0); g.bezierCurveTo(CX - hw * .4, y0 - 4, CX - 60, y0 - 26, CX, y0 - 30);
+  g.bezierCurveTo(CX + 60, y0 - 26, CX + hw * .4, y0 - 4, CX + hw - 20, y0); g.quadraticCurveTo(CX + hw, y0, CX + hw, y0 + 20);
+  g.lineTo(CX + hw, y1 - 20); g.quadraticCurveTo(CX + hw, y1, CX + hw - 20, y1); g.lineTo(CX - hw + 20, y1); g.quadraticCurveTo(CX - hw, y1, CX - hw, y1 - 20); g.closePath();
+  g.fillStyle = CREAM; g.fill(); g.lineWidth = 7; g.strokeStyle = SEPIA; g.stroke(); g.lineWidth = 4; g.strokeStyle = GOLDPAT; g.stroke();
+  g.restore();
+}
+function drawTitle(t) {
+  const p = seg(t, ...T.title);
+  if (p > 0) { g.save(); g.font = `700 112px ${FT}`; g.textBaseline = 'alphabetic'; g.textAlign = 'left';
+    for (const c of TITLE_LAY) { const k = seg(p, c.d, c.d + .45); if (k <= 0) continue; const y = 912 + (1 - eOut(k)) * 26, s = lerp(.7, 1, back(k, 2.2));
+      g.save(); g.globalAlpha = clamp(k * 2); g.translate(c.x + c.w / 2, y); g.scale(s, s); g.fillStyle = SEPIA; g.fillText(c.ch, -c.w / 2 + 2.5, 2.5); g.fillStyle = GOLDPAT; g.fillText(c.ch, -c.w / 2, 0);
+      g.lineWidth = 1.6; g.strokeStyle = SEPIA; g.strokeText(c.ch, -c.w / 2, 0); g.restore(); }
+    g.restore(); }
+  const q = eOut(seg(t, ...T.sub));
+  if (q > 0) { g.save(); g.globalAlpha = q; g.font = `30px ${FI}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = SEPIA2;
+    g.letterSpacing = `${lerp(2, 12, q)}px`; g.fillText(SUB, CX + lerp(1, 6, q), 952); g.letterSpacing = '0px';
+    const lw = 110 * q; g.strokeStyle = GOLD_D; g.lineWidth = 2; for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(CX + sd * 238, 952); g.lineTo(CX + sd * (238 + lw * .6), 952); g.stroke();
+      g.beginPath(); g.arc(CX + sd * (244 + lw * .6), 952, 4 * q, 0, TAU); g.fillStyle = GOLD_D; g.fill(); }
+    g.restore(); }
+}
+
+// ── drifting petals (screen space) ──
+function buildPetals() { const r = rng(1900); for (let i = 0; i < 34; i++) PETALS.push({ t0: 2.4 + r() * 6.4, x: r() * W * 1.1 - 100, y: -60 - r() * 200, vx: 50 + r() * 60, vy: 70 + r() * 50, sw: 30 + r() * 40, f: .6 + r() * .8, ph: r() * TAU, s: .9 + r() * .7, rose: r() < .75 }); }
+function drawPetals(t) {
+  for (const p of PETALS) { const dt = t - p.t0; if (dt <= 0) continue; const x = p.x + p.vx * dt + Math.sin(dt * p.f * 2 + p.ph) * p.sw, y = p.y + p.vy * dt + dt * dt * 4;
+    if (y > H + 60) continue; g.save(); g.translate(x, y); g.rotate(p.ph + dt * .9 + Math.sin(dt * p.f * 2) * .6); g.scale(p.s, p.s * (.55 + .45 * Math.abs(Math.cos(dt * p.f * 1.7 + p.ph))));
+    g.beginPath(); g.moveTo(-18, 0); g.bezierCurveTo(-10, -12, 10, -12, 18, 0); g.bezierCurveTo(10, 10, -10, 10, -18, 0); g.fillStyle = p.rose ? ROSE_L : CREAM; g.fill(); g.strokeStyle = 'rgba(74,58,42,.7)'; g.lineWidth = 1.6; g.stroke(); g.restore(); }
+}
+
+// ── camera ──
+function camera(t) {
+  const u = eInOut(seg(t, ...T.pull)), push = eSine(seg(t, T.pull[1], 10));
+  const z = lerp(1.45, 1.0, u) * (1 + .03 * push) * (1 + .035 * eSine(seg(t, 0, T.pull[0] + .4)) * (1 - u)), cy = lerp(452, 540, u) - 6 * push;
+  return { z, cx: CX, cy };
+}
+
+function render(t) {
+  const cam = camera(t);
+  g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
+  g.setTransform(cam.z, 0, 0, cam.z, W / 2 - cam.cx * cam.z, H / 2 - cam.cy * cam.z);
+  // side panel fields
+  for (const s of SP) { rrect(s.x0, SP_Y0, s.x1, SP_Y1, 28); const lg = g.createLinearGradient(0, SP_Y0, 0, SP_Y1); lg.addColorStop(0, '#ecd3c8'); lg.addColorStop(1, '#dcb1a5'); g.fillStyle = lg; g.fill(); }
+  // side panel stripes (litho)
+  g.save(); for (const s of SP) { rrect(s.x0, SP_Y0, s.x1, SP_Y1, 28); g.save(); g.clip(); g.strokeStyle = 'rgba(184,132,122,.18)'; g.lineWidth = 2; for (let x = s.x0 + 12; x < s.x1; x += 22) { g.beginPath(); g.moveTo(x, SP_Y0); g.lineTo(x, SP_Y1); g.stroke(); } g.restore(); } g.restore();
+  // peacock-tail fans at the foot of the side panels (outer feathers first)
+  const fp = seg(t, ...T.feathers);
+  for (const s of SP) { g.save(); rrect(s.x0, SP_Y0, s.x1, SP_Y1, 28); g.clip();
+    for (const f of FEATH.filter(f => f.sp === s).sort((a, b) => Math.abs(b.o) - Math.abs(a.o))) { const k = back(seg(fp, f.d, f.d + .5), 1.4); if (k <= 0) continue; feather(f.x, f.y, lerp(-PI / 2, f.a, k), f.len * lerp(.6, 1, clamp(k)), clamp(k * 1.4)); }
+    g.restore(); }
+  drawVines(t); drawStalks(t);
+  // arch panel
+  archPath(0); const ag = g.createLinearGradient(0, 60, 0, BOT); ag.addColorStop(0, '#b7c2a2'); ag.addColorStop(1, '#93a384'); g.fillStyle = ag; g.fill();
+  g.save(); archPath(0); g.clip(); g.strokeStyle = 'rgba(111,132,102,.22)'; g.lineWidth = 2; for (let x = AX0 + 10; x < AX1; x += 20) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, BOT); g.stroke(); } g.restore();
+  drawHalo(t); drawArcText(t);
+  drawStem(t); drawBottle(t);
+  // lily: scene-A centre → stopper
+  const m = eInOut(seg(t, ...T.morph)), bo = spring(seg(t, ...T.bloom), 1.1, .42);
+  const lx = CX, ly = lerp(452, 330, m), ls = lerp(1.0, .4, m);
+  if (t > T.stem[0] + .5) { const grow = eOut(seg(t, T.stem[0] + .5, T.bloom[0] + .1)); lily(lx, ly, ls * lerp(.35, 1, grow), lerp(bo, .82, m), seg(t, ...T.stamen) * (1 - m * .3), .05 * Math.sin(t * 1.7) * (1 - m) * seg(t, 1.4, 2.2)); }
+  drawPlaque(t); drawTitle(t);
+  // frames: arch (double gold line), side panels, outer border
+  const ap = eInOut(seg(t, ...T.arch));
+  for (const P of ARCH) { strokePart(P, ap, 6, GOLDPAT, 4); }
+  const sb = eInOut(seg(t, ...T.sideBorder)); for (const P of SIDEB) strokePart(P, sb, 5, GOLDPAT, 4);
+  const ob = eInOut(seg(t, ...T.outer)); for (const P of OUTERB) strokePart(P, ob, 3, GOLD_D, 0);
+  for (const [sx, sy, t0] of [[CX + 74, 470, 8.05], [CX - 190, 850, 8.35], [CX + 330, 410, 8.6]]) { const k = seg(t, t0, t0 + .55); if (k <= 0 || k >= 1) continue;
+    const a = Math.sin(PI * k), r = 34 * a; g.save(); g.translate(sx, sy); g.rotate(k * .8); g.fillStyle = `rgba(255,250,230,${.95 * a})`;
+    g.beginPath(); for (let i = 0; i < 8; i++) { const rr = i % 2 ? r * .16 : r, an = i / 8 * TAU; g.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); } g.closePath(); g.fill(); g.restore(); }
+  // paper grain in world space
+  g.globalCompositeOperation = 'multiply'; g.globalAlpha = .85; g.drawImage(GRAIN, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  // gleam over the gold
+  const gp = seg(t, ...T.gleam);
+  if (gp > 0 && gp < 1) { const x = lerp(-400, W + 400, eInOut(gp)); const lg = g.createLinearGradient(x - 220, 0, x + 220, 0);
+    lg.addColorStop(0, 'rgba(255,245,215,0)'); lg.addColorStop(.5, 'rgba(255,245,215,.34)'); lg.addColorStop(1, 'rgba(255,245,215,0)');
+    g.globalCompositeOperation = 'screen'; g.fillStyle = lg; g.fillRect(0, 0, W, H); g.globalCompositeOperation = 'source-over'; }
+  drawPetals(t);
+  g.drawImage(VIG, 0, 0);
+  const fin = 1 - eOut(seg(t, ...T.fadeIn)), fo = eInOut(seg(t, ...T.fade)), f = Math.max(fin, fo);
+  if (f > 0) { g.fillStyle = `rgba(239,228,204,${f})`; g.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await Promise.all([document.fonts.load(`700 112px ${FT}`, "Lys d'Or L"), document.fonts.load(`30px ${FI}`, SUB), document.fonts.load(`30px ${FF}`, ARC_TXT)]);
+  await document.fonts.ready;
+  GOLDPAT = goldTex(); GRAIN = grainTex(); VIG = vigTex();
+  buildTiles(); buildVines(); buildStalks(); buildPetals();
+  ARCH = [archHalf(-1, 0), archHalf(1, 0), archHalf(-1, 16), archHalf(1, 16)];
+  SIDEB = SP.flatMap(s => rrectHalves(s.x0 + 14, SP_Y0 + 14, s.x1 - 14, SP_Y1 - 14, 20).concat(rrectHalves(s.x0, SP_Y0, s.x1, SP_Y1, 28)));
+  OUTERB = rrectHalves(34, 34, W - 34, H - 34, 14);
+  const sp = []; bez([CX, 790], [CX + 6, 690], [CX - 10, 560], [CX, 452], 50, sp); STEM = withLen(sp);
+  for (const s of SP) for (let i = 0; i < 7; i++) { const o = i - 3; FEATH.push({ x: (s.x0 + s.x1) / 2, y: SP_Y1 + 20, a: -PI / 2 + o * .29, len: 340 - Math.abs(o) * 20, d: Math.abs(o) * .14, o, sp: s }); }
+  // title layout (centred, proportional)
+  g.font = `700 112px ${FT}`; const ws = [...TITLE].map(ch => g.measureText(ch).width), tot = ws.reduce((a, b) => a + b, 0); let x = CX - tot / 2;
+  const n = TITLE.length; TITLE_LAY = [...TITLE].map((ch, i) => { const o = { ch, x, w: ws[i], d: Math.abs(i - (n - 1) / 2) / ((n - 1) / 2) * .5 }; x += ws[i]; return o; }).filter(c => c.ch !== ' ');
+  g.font = `30px ${FF}`; const R = 342, cw = [...ARC_TXT].map(ch => g.measureText(ch).width + 5), ct = cw.reduce((a, b) => a + b, 0); let acc = 0;
+  ARC = [...ARC_TXT].map((ch, i) => { const off = (acc + cw[i] / 2 - ct / 2) / R; acc += cw[i]; return { ch, a: -PI / 2 + off, d: Math.abs(off) / (ct / 2 / R) * .6 }; }).filter(c => c.ch !== ' ');
+})();
+window.draw = ({ t }) => { render(t); return out.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => {
+  const ev = [];
+  // tiles: glassy ticks sweeping up both sides
+  for (let i = 0; i < 14; i++) ev.push({ t: T.tiles[0] + (T.tiles[1] - T.tiles[0]) * i / 14 * .9, k: 'tick', v: .5 + .5 * (i / 14) });
+  ev.push({ t: .15, k: 'swell', d: 1.2 }, { t: T.arch[0], k: 'harp', n: 8, d: 1.4 }, { t: T.stem[0], k: 'grow', d: 1.0 },
+    { t: T.bloom[0], k: 'bloom' }, { t: T.stamen[0], k: 'pluck', f: 0 }, { t: T.stamen[0] + .15, k: 'pluck', f: 1 },
+    { t: T.pull[0], k: 'whoosh', d: 1.7 }, { t: T.bottle[0] + .2, k: 'glass' }, { t: T.liquid[0], k: 'pour', d: 1.1 },
+    { t: T.stalkBloom[0], k: 'bloom2' }, { t: T.arcText[0], k: 'harp', n: 10, d: .9 }, { t: T.title[0], k: 'reveal' }, { t: T.sub[0], k: 'chime' },
+    { t: T.gleam[0] + .3, k: 'gleam' }, { t: T.fade[0] - .1, k: 'final' });
+  for (let i = 0; i < 5; i++) ev.push({ t: T.feathers[0] + i * .1 * (T.feathers[1] - T.feathers[0]) + .1, k: 'fwip' });
+  return ev.sort((a, b) => a.t - b.t);
+};
+window.T = T;
+</script>
+</body></html>
