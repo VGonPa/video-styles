@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── split-flap · mechanical Solari departures board ────────────────────────────────────────
+// Power-up on a blank board → the departures list clatters in left to right (every character runs through its
+// drum until it lands; the top half falls over the bottom half with perspective and shading), status flaps cycle
+// their colours, the header clock ticks to 09:00 → push-in on "09:00 FOCUS", track along the row, FOCUS flips to
+// BOARDING → pull back, the whole board clears → it cascades into the headline "NOW BOARDING: YOUR NEXT BIG IDEA"
+// → hold and dim out. The board is drawn flat into a layer and composited with a fake rotateY perspective.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const deg = d => d * Math.PI / 180;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+const COND = '"Barlow Condensed"', SANS = '"Barlow"';
+const CREAM = '#f1e7c8', YELLOW = '#f6c945', FLAP_T = ['#2e2f33', '#232427'], FLAP_B = ['#1f2023', '#17181a'];
+const S = 2.4;                                         // atlas supersampling (camera zooms to ~1.9x)
+
+// ── board geometry (board-space px) ──
+const PAD = 44, CW = 50, CH = 80, GX = 6, RG = 14, NC = 24, NR = 6;
+const GRID_Y = 164, GRID_X = PAD, GRID_R = GRID_X + NC * (CW + GX) - GX;
+const SX = GRID_R + 30, SW = 280;
+const BW = SX + SW + PAD, BH = GRID_Y + NR * (CH + RG) - RG + 40;
+const rowY = r => GRID_Y + r * (CH + RG), colX = c => GRID_X + c * (CW + GX);
+const CLK_W = 38, CLK_H = 60, CLK_X = BW - PAD - (4 * (CLK_W + 5) + 14) + 5, CLK_Y = 26;
+
+// ── drums ──
+const MAIN = ' 0123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ-.';
+const DIG = '0123456789';
+const STAT = [
+  { txt: '', bg: null, fg: CREAM },
+  { txt: 'ON TIME', bg: '#2f9a58', fg: '#f4f1e6' },
+  { txt: 'BOARDING', bg: '#e9a82c', fg: '#1c1406' },
+  { txt: 'DELAYED', bg: '#cf3a2b', fg: '#fbeee6' },
+  { txt: 'LAST CALL', bg: '#e9e1c6', fg: '#1d1b16' },
+];
+
+// ── atlases: one cell image per drum symbol, drawn at S× ──
+function flapFace(g, w, h, bg) {
+  const r = 4 * S;
+  g.save(); g.beginPath(); g.roundRect(0, 0, w, h, r); g.clip();
+  let gr = g.createLinearGradient(0, 0, 0, h / 2);
+  gr.addColorStop(0, bg ? shade(bg, 1.08) : FLAP_T[0]); gr.addColorStop(1, bg ? shade(bg, 0.96) : FLAP_T[1]);
+  g.fillStyle = gr; g.fillRect(0, 0, w, h / 2);
+  gr = g.createLinearGradient(0, h / 2, 0, h);
+  gr.addColorStop(0, bg ? shade(bg, 0.86) : FLAP_B[0]); gr.addColorStop(1, bg ? shade(bg, 0.74) : FLAP_B[1]);
+  g.fillStyle = gr; g.fillRect(0, h / 2, w, h / 2);
+  // gloss on the upper flap
+  gr = g.createLinearGradient(0, 0, 0, h * 0.3); gr.addColorStop(0, 'rgba(255,255,255,0.07)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, w, h * 0.3);
+  g.restore();
+}
+function flapSplit(g, w, h) {
+  g.fillStyle = 'rgba(0,0,0,0.95)'; g.fillRect(0, h / 2 - 1.0 * S, w, 2.0 * S);
+  g.fillStyle = 'rgba(255,255,255,0.07)'; g.fillRect(0, h / 2 + 1.0 * S, w, 0.8 * S);
+  // hinge pins
+  g.fillStyle = '#0a0a0b'; g.fillRect(0, h / 2 - 5 * S, 2.2 * S, 10 * S); g.fillRect(w - 2.2 * S, h / 2 - 5 * S, 2.2 * S, 10 * S);
+  g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(0.4 * S, h / 2 - 4 * S, 0.8 * S, 8 * S); g.fillRect(w - 1.6 * S, h / 2 - 4 * S, 0.8 * S, 8 * S);
+}
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16), r = n >> 16, gg = n >> 8 & 255, b = n & 255;
+  const f = v => Math.round(clamp(v * k, 0, 255)).toString(16).padStart(2, '0');
+  return '#' + f(r) + f(gg) + f(b);
+}
+function charAtlas(drum, color, w, h, fontPx) {
+  const aw = Math.round(w * S), ah = Math.round(h * S);
+  const c = mk(aw * drum.length, ah), g = c.getContext('2d');
+  g.font = `700 ${fontPx * S}px ${COND}`; g.textAlign = 'center';
+  const m = g.measureText('H'), capH = m.actualBoundingBoxAscent;
+  for (let i = 0; i < drum.length; i++) {
+    g.save(); g.translate(i * aw, 0);
+    flapFace(g, aw, ah, null);
+    const ch = drum[i];
+    if (ch !== ' ') {
+      const gr = g.createLinearGradient(0, 0, 0, ah);
+      gr.addColorStop(0, color); gr.addColorStop(0.5, color); gr.addColorStop(0.51, shade(color, 0.86)); gr.addColorStop(1, shade(color, 0.8));
+      g.fillStyle = gr; g.fillText(ch, aw / 2, ah / 2 + capH / 2);
+    }
+    flapSplit(g, aw, ah);
+    g.restore();
+  }
+  return { img: c, aw, ah };
+}
+function statAtlas(w, h) {
+  const aw = Math.round(w * S), ah = Math.round(h * S);
+  const c = mk(aw * STAT.length, ah), g = c.getContext('2d');
+  g.textAlign = 'center';
+  for (let i = 0; i < STAT.length; i++) {
+    const s = STAT[i];
+    g.save(); g.translate(i * aw, 0);
+    flapFace(g, aw, ah, s.bg);
+    if (s.txt) {
+      g.font = `700 ${48 * S}px ${COND}`; g.letterSpacing = `${3 * S}px`;
+      const capH = g.measureText('H').actualBoundingBoxAscent;
+      const gr = g.createLinearGradient(0, 0, 0, ah);
+      gr.addColorStop(0, s.fg); gr.addColorStop(0.5, s.fg); gr.addColorStop(0.51, shade(s.fg, 0.86)); gr.addColorStop(1, shade(s.fg, 0.8));
+      g.fillStyle = gr; g.fillText(s.txt, aw / 2 + 1.5 * S, ah / 2 + capH / 2);
+    }
+    flapSplit(g, aw, ah);
+    g.restore();
+  }
+  return { img: c, aw, ah };
+}
+
+// ── cells + schedule ──
+const cells = [];
+const R0 = rng(4242);
+function addCell(o) { o.segs = []; o.dx = (R0() - .5) * 0.8; o.dy = (R0() - .5) * 0.8; o.lum = 1 + (R0() - .5) * 0.06; o.jit = R0(); cells.push(o); return o; }
+const grid = [];
+for (let r = 0; r < NR; r++) { grid.push([]); for (let c = 0; c < NC; c++) grid[r].push(addCell({ kind: 'main', r, c, x: colX(c), y: rowY(r), w: CW, h: CH, drum: MAIN, init: 0 })); }
+const stat = []; for (let r = 0; r < NR; r++) stat.push(addCell({ kind: 'stat', r, x: SX, y: rowY(r), w: SW, h: CH, drum: STAT, init: 0 }));
+const clk = []; const CLK_INIT = [0, 8, 5, 8];
+for (let i = 0; i < 4; i++) clk.push(addCell({ kind: 'clock', x: CLK_X + i * (CLK_W + 5) + (i >= 2 ? 14 : 0), y: CLK_Y, w: CLK_W, h: CLK_H, drum: DIG, init: CLK_INIT[i] }));
+
+const L_OF = c => c.drum.length;
+function lastTo(c) { return c.segs.length ? c.segs[c.segs.length - 1].to : c.init; }
+function lastEnd(c) { if (!c.segs.length) return -1; const s = c.segs[c.segs.length - 1]; return s.t0 + s.n * s.p; }
+function push(c, t0, to, p, col, extra = 0) {
+  const from = lastTo(c), L = L_OF(c);
+  const n = ((to - from) % L + L) % L + extra * L;
+  if (n === 0) return;
+  t0 = Math.max(t0, lastEnd(c));
+  c.segs.push({ t0, from, to, n, p: p * (1 + (c.jit - .5) * 0.12), col });
+}
+const COLS = { cream: CREAM, yellow: YELLOW };
+function setRow(r, str, t0, colDel, p, colFn, jitter = 0.02) {
+  for (let c = 0; c < NC; c++) {
+    const ch = str[c] || ' ', cell = grid[r][c];
+    push(cell, t0 + c * colDel + (cell.jit - .5) * jitter, MAIN.indexOf(ch), p, colFn(c));
+  }
+}
+const pad = (s, n) => s.padEnd(n).slice(0, n);
+const DEPS = [
+  ['07:30', 'MORNING PAGES', 'A01', 1],
+  ['08:15', 'DEEP WORK', 'A04', 1],
+  ['09:00', 'FOCUS', 'B12', 1],
+  ['10:45', 'COFFEE CHAT', 'C03', 3],
+  ['12:30', 'LONG WALK', 'C09', 1],
+  ['14:00', 'BRAINSTORM', 'D02', 1],
+];
+const T_IN = 0.55, T_CLEAR = 5.55, T_HEAD = 6.85;
+DEPS.forEach(([tm, dest, gate, st], r) => {
+  const line = pad(tm, 5) + ' ' + pad(dest, 14) + ' ' + pad(gate, 3);
+  const t0 = T_IN + r * 0.1;
+  setRow(r, line, t0, 0.026, 0.036, c => c < 5 ? 'yellow' : 'cream');
+  push(stat[r], t0 + 0.75, st, 0.075, null, 1);
+});
+// header clock 08:58 → 08:59 → 09:00
+push(clk[3], 1.25, 9, 0.06, null);
+push(clk[1], 3.0, 9, 0.06, null); push(clk[2], 3.0, 0, 0.06, null); push(clk[3], 3.0, 0, 0.06, null);
+// the FOCUS flight starts boarding while the camera is on it
+push(stat[2], 4.7, 2, 0.08, null);
+// clear
+for (let r = 0; r < NR; r++) { setRow(r, '', T_CLEAR + r * 0.06, 0.016, 0.022, () => 'cream', 0.01); push(stat[r], T_CLEAR + r * 0.06 + 0.35, 0, 0.06, null); }
+// headline
+const HEAD = [['', ''], ['NOW BOARDING:', 'cream'], ['YOUR NEXT', 'cream'], ['BIG IDEA', 'yellow'], ['GATE 01 - ALL ABOARD', 'cream'], ['', '']];
+const center = s => ' '.repeat(Math.floor((NC - s.length) / 2)) + s;
+HEAD.forEach(([s, col], r) => { if (s) setRow(r, center(s), T_HEAD + (r - 1) * 0.16, 0.03, 0.03, () => col); });
+push(stat[1], T_HEAD + 0.9, 2, 0.08, null, 1);
+push(stat[3], T_HEAD + 1.3, 1, 0.08, null, 1);
+
+function stateAt(c, t) {
+  let s = null;
+  for (const q of c.segs) { if (q.t0 <= t) s = q; else break; }
+  if (!s) return { a: c.init, col: null };
+  const el = t - s.t0;
+  if (el >= s.n * s.p) return { a: s.to, col: s.col };
+  const k = Math.floor(el / s.p), ph = el / s.p - k, L = L_OF(c);
+  const a = (s.from + k) % L; return { a, b: (a + 1) % L, ph, col: s.col };
+}
+
+// ── drawing a cell (flat, board space) ──
+function drawHalf(g, A, i, top, x, y, w, h) {
+  g.drawImage(A.img, i * A.aw, top ? 0 : A.ah / 2, A.aw, A.ah / 2, x, top ? y : y + h / 2, w, h / 2);
+}
+// a falling half: top=true → top half of symbol i rotating toward the viewer about the hinge (θ 0→90°),
+// top=false → back side (bottom half of next symbol) coming down (θ 90°→0). Free edge widens with perspective.
+function drawFlap(g, A, i, top, x, y, w, h, th, dark) {
+  const hy = y + h / 2, hh = h / 2 * Math.cos(th), N = 5, k = 0.09 * Math.sin(th);
+  if (hh < 0.3) return;
+  for (let j = 0; j < N; j++) {
+    const u0 = j / N, u1 = (j + 1) / N, f = 1 + k * (j + .5) / N, ww = w * f, xx = x + (w - ww) / 2;
+    const srcH = A.ah / 2 / N;
+    if (top) {
+      const sy = A.ah / 2 - (j + 1) * srcH;
+      g.drawImage(A.img, i * A.aw, sy, A.aw, srcH, xx, hy - hh * u1, ww, hh * (u1 - u0) + 0.4);
+      g.fillStyle = `rgba(0,0,0,${dark})`; g.fillRect(xx, hy - hh * u1, ww, hh * (u1 - u0) + 0.4);
+    } else {
+      const sy = A.ah / 2 + j * srcH;
+      g.drawImage(A.img, i * A.aw, sy, A.aw, srcH, xx, hy + hh * u0, ww, hh * (u1 - u0) + 0.4);
+      g.fillStyle = `rgba(0,0,0,${dark})`; g.fillRect(xx, hy + hh * u0, ww, hh * (u1 - u0) + 0.4);
+    }
+  }
+}
+let AT = {};
+function atlasFor(c, col) {
+  if (c.kind === 'stat') return AT.stat;
+  if (c.kind === 'clock') return AT.clock;
+  return col === 'yellow' ? AT.yellow : AT.cream;
+}
+function drawCell(g, c, t) {
+  const st = stateAt(c, t), A = atlasFor(c, st.col), x = c.x + c.dx, y = c.y + c.dy, w = c.w, h = c.h;
+  if (st.ph === undefined) { drawHalf(g, A, st.a, true, x, y, w, h); drawHalf(g, A, st.a, false, x, y, w, h); }
+  else {
+    const ph = st.ph;
+    drawHalf(g, A, st.b, true, x, y, w, h);          // revealed upper (next symbol)
+    drawHalf(g, A, st.a, false, x, y, w, h);         // lower still shows the old symbol
+    if (ph < 0.5) {
+      const u = Math.pow(ph / 0.5, 1.35), th = u * Math.PI / 2;
+      g.fillStyle = `rgba(0,0,0,${0.35 * (1 - u)})`; g.fillRect(x, y + h / 2 - h * 0.18 * (1 - u), w, h * 0.18 * (1 - u)); // flap shadow under hinge
+      drawFlap(g, A, st.a, true, x, y, w, h, th, 0.62 * Math.sin(th));
+    } else {
+      const u = eOut((ph - 0.5) / 0.5), th = (1 - u) * Math.PI / 2;
+      g.fillStyle = `rgba(0,0,0,${0.45 * (1 - u)})`; g.fillRect(x, y + h / 2, w, h / 2);                        // shadow on the lower half
+      drawFlap(g, A, st.b, false, x, y, w, h, th, 0.55 * Math.sin(th) + 0.08 * (1 - u));
+    }
+  }
+  if (c.lum < 1) { g.fillStyle = `rgba(0,0,0,${(1 - c.lum) * 2})`; g.fillRect(x, y, w, h); }
+}
+
+// ── static layers ──
+let BG, HOUSING, GRAIN, VIG, LAYER, LG;
+const HM = 90;                                         // housing image margin (drop shadow)
+function buildBG() {
+  const c = mk(W, H), g = c.getContext('2d');
+  let gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#16181c'); gr.addColorStop(0.6, '#0d0e11'); gr.addColorStop(1, '#08090b');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  // wall panels
+  for (let x = -40; x < W; x += 240) { g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(x, 0, 3, H); g.fillStyle = 'rgba(255,255,255,0.025)'; g.fillRect(x + 3, 0, 1, H); }
+  // warm overhead light pools
+  for (const [x, y, r, a] of [[520, -60, 700, 0.16], [1400, -80, 760, 0.14], [960, -200, 1100, 0.08]]) {
+    gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(255,214,150,${a})`); gr.addColorStop(1, 'rgba(255,214,150,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  }
+  // cool bounce from the floor
+  gr = g.createLinearGradient(0, H * 0.75, 0, H); gr.addColorStop(0, 'rgba(90,120,160,0)'); gr.addColorStop(1, 'rgba(90,120,160,0.06)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  return c;
+}
+function planeIcon(g, x, y, s) {
+  g.save(); g.translate(x, y); g.rotate(deg(-32)); g.scale(s, s);
+  g.beginPath();
+  g.moveTo(-26, -2.6); g.lineTo(18, -2.6); g.quadraticCurveTo(27, -2.6, 28, 0); g.quadraticCurveTo(27, 2.6, 18, 2.6); g.lineTo(-26, 2.6); g.closePath();
+  g.moveTo(4, -2); g.lineTo(-8, -22); g.lineTo(-2, -22); g.lineTo(14, -2); g.closePath();
+  g.moveTo(4, 2); g.lineTo(-8, 22); g.lineTo(-2, 22); g.lineTo(14, 2); g.closePath();
+  g.moveTo(-18, -2); g.lineTo(-26, -11); g.lineTo(-22, -11); g.lineTo(-12, -2); g.closePath();
+  g.moveTo(-18, 2); g.lineTo(-26, 11); g.lineTo(-22, 11); g.lineTo(-12, 2); g.closePath();
+  g.fill(); g.restore();
+}
+function buildHousing() {
+  const sc = 2;
+  const c = mk((BW + 2 * HM) * sc, (BH + 2 * HM) * sc), g = c.getContext('2d');
+  g.scale(sc, sc); g.translate(HM, HM);
+  // drop shadow
+  g.save(); g.shadowColor = 'rgba(0,0,0,0.75)'; g.shadowBlur = 60; g.shadowOffsetY = 26;
+  g.fillStyle = '#000'; g.beginPath(); g.roundRect(-16, -16, BW + 32, BH + 32, 14); g.fill(); g.restore();
+  // outer metal frame
+  let gr = g.createLinearGradient(0, -16, 0, BH + 16);
+  gr.addColorStop(0, '#3b3d42'); gr.addColorStop(0.08, '#26282c'); gr.addColorStop(0.9, '#1b1c1f'); gr.addColorStop(1, '#101113');
+  g.fillStyle = gr; g.beginPath(); g.roundRect(-16, -16, BW + 32, BH + 32, 14); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,0.14)'; g.lineWidth = 1.5; g.beginPath(); g.roundRect(-15, -15, BW + 30, BH + 30, 13); g.stroke();
+  // inner recess
+  g.fillStyle = '#0a0b0c'; g.beginPath(); g.roundRect(0, 0, BW, BH, 6); g.fill();
+  gr = g.createLinearGradient(0, 0, 0, 30); gr.addColorStop(0, 'rgba(0,0,0,0.8)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, BW, 30);
+  // header
+  g.fillStyle = '#111214'; g.fillRect(8, 8, BW - 16, 104);
+  g.fillStyle = 'rgba(255,255,255,0.06)'; g.fillRect(8, 112, BW - 16, 1.5);
+  g.fillStyle = 'rgba(0,0,0,0.8)'; g.fillRect(8, 113.5, BW - 16, 2);
+  g.fillStyle = CREAM; planeIcon(g, PAD + 30, 62, 1.25);
+  g.font = `600 58px ${SANS}`; g.letterSpacing = '9px'; g.textBaseline = 'alphabetic';
+  g.fillText('DEPARTURES', PAD + 80, 82);
+  g.font = `600 17px ${SANS}`; g.letterSpacing = '3px'; g.fillStyle = 'rgba(241,231,200,0.55)';
+  g.textAlign = 'right'; g.fillText('LOCAL TIME', CLK_X - 22, 64); g.textAlign = 'left';
+  // clock colon
+  g.fillStyle = YELLOW; const cx = CLK_X + 2 * (CLK_W + 5) + 2;
+  g.beginPath(); g.arc(cx + 4.5, CLK_Y + 21, 3.4, 0, TAU); g.arc(cx + 4.5, CLK_Y + 40, 3.4, 0, TAU); g.fill();
+  // column labels
+  g.font = `600 19px ${SANS}`; g.letterSpacing = '4px'; g.fillStyle = 'rgba(241,231,200,0.62)';
+  const ly = 146;
+  g.fillText('TIME', colX(0) + 2, ly); g.fillText('DESTINATION', colX(6) + 2, ly); g.fillText('GATE', colX(21) + 2, ly); g.fillText('STATUS', SX + 2, ly);
+  // row rails
+  for (let r = 0; r < NR; r++) {
+    const y = rowY(r) + CH + 5;
+    g.fillStyle = 'rgba(255,255,255,0.03)'; g.fillRect(PAD - 10, y, BW - 2 * PAD + 20, 1);
+    // lamp housings
+    g.fillStyle = '#050505'; g.beginPath(); g.arc(GRID_R + 15, rowY(r) + CH / 2, 6.5, 0, TAU); g.fill();
+    g.fillStyle = '#2a2016'; g.beginPath(); g.arc(GRID_R + 15, rowY(r) + CH / 2, 4.6, 0, TAU); g.fill();
+  }
+  // screws
+  for (const [x, y] of [[-4, -4], [BW + 4, -4], [-4, BH + 4], [BW + 4, BH + 4], [BW / 2, -8], [BW / 2, BH + 8]]) {
+    gr = g.createRadialGradient(x - 1.5, y - 1.5, 0, x, y, 6); gr.addColorStop(0, '#6a6c70'); gr.addColorStop(1, '#1a1b1d');
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, 5, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(x - 3, y + 1); g.lineTo(x + 3, y - 1); g.stroke();
+  }
+  return c;
+}
+function buildGrain() {
+  const n = 512, c = mk(n, n), g = c.getContext('2d'), im = g.createImageData(n, n), r = rng(9);
+  for (let i = 0; i < n * n; i++) { const v = 128 + (r() + r() + r() - 1.5) * 120; im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = v; im.data[i * 4 + 3] = 255; }
+  g.putImageData(im, 0, 0); return c;
+}
+function buildVig() {
+  const c = mk(W, H), g = c.getContext('2d');
+  const gr = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.05);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.72)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H); return c;
+}
+
+// ── camera ──
+const FOCUS_L = { x: colX(0) + 470, y: rowY(2) + CH / 2 }, FOCUS_R = { x: SX + SW - 470, y: rowY(2) + CH / 2 };
+const WIDE = { x: BW / 2, y: BH / 2 - 6 };
+function camera(t) {
+  let x = WIDE.x, y = WIDE.y, z = lerp(0.95, 0.98, eInOut(seg(t, 0, 3.2))), a = lerp(deg(9), deg(5), eInOut(seg(t, 0, 3.2)));
+  const zin = eInOut(seg(t, 3.15, 3.95)), pan = eInOut(seg(t, 3.95, 4.85)), zout = eInOut(seg(t, 4.95, 5.7));
+  const Z = 1.9;
+  if (t >= 3.15 && t < 4.95) {
+    const fx = lerp(FOCUS_L.x, FOCUS_R.x, pan), fy = FOCUS_L.y;
+    x = lerp(WIDE.x, fx, zin); y = lerp(WIDE.y, fy, zin); z = lerp(0.98, Z, zin); a = lerp(deg(5), deg(-1.5) + deg(3) * pan, zin);
+  } else if (t >= 4.95) {
+    x = lerp(FOCUS_R.x, WIDE.x, zout); y = lerp(FOCUS_R.y, WIDE.y, zout); z = lerp(Z, 0.96, zout); a = lerp(deg(1.5), deg(-6), zout);
+    const hd = eInOut(seg(t, 6.6, 9.6));
+    z += 0.05 * hd; a = lerp(a, deg(-3.5), hd);
+  }
+  // tiny handheld-free mechanical drift
+  x += Math.sin(t * 0.7) * 3; y += Math.sin(t * 0.9 + 1) * 2;
+  return { x, y, z, a };
+}
+
+// ── compose ──
+function render(t) {
+  const cam = camera(t);
+  // wall with mild parallax
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const bz = 1 + (cam.z - 0.95) * 0.12;
+  ctx.drawImage(BG, W / 2 - W * bz / 2 - (cam.x - WIDE.x) * 0.06, H / 2 - H * bz / 2 - (cam.y - WIDE.y) * 0.06, W * bz, H * bz);
+
+  // board layer (flat)
+  const g = LG; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
+  g.setTransform(cam.z, 0, 0, cam.z, W / 2 - cam.x * cam.z, H / 2 - cam.y * cam.z);
+  g.drawImage(HOUSING, -HM, -HM, BW + 2 * HM, BH + 2 * HM);
+  const vx0 = cam.x - W / 2 / cam.z - 60, vx1 = cam.x + W / 2 / cam.z + 60, vy0 = cam.y - H / 2 / cam.z - 100, vy1 = cam.y + H / 2 / cam.z + 100;
+  for (const c of cells) { if (c.x + c.w < vx0 || c.x > vx1 || c.y + c.h < vy0 || c.y > vy1) continue; drawCell(g, c, t); }
+  // status lamps: amber blink while boarding
+  for (let r = 0; r < NR; r++) {
+    const s = stateAt(stat[r], t);
+    if (s.ph === undefined && s.a === 2 && Math.floor(t * 2.6) % 2 === 0) {
+      const lx = GRID_R + 15, ly = rowY(r) + CH / 2;
+      let gr = g.createRadialGradient(lx, ly, 0, lx, ly, 26); gr.addColorStop(0, 'rgba(255,190,70,0.55)'); gr.addColorStop(1, 'rgba(255,190,70,0)');
+      g.fillStyle = gr; g.fillRect(lx - 26, ly - 26, 52, 52);
+      g.fillStyle = '#ffd27a'; g.beginPath(); g.arc(lx, ly, 4.6, 0, TAU); g.fill();
+    }
+  }
+  // spotlight the focus row during the push-in
+  const dim = eInOut(seg(t, 3.2, 3.8)) * (1 - eInOut(seg(t, 4.95, 5.5)));
+  if (dim > 0) {
+    g.fillStyle = `rgba(0,0,0,${0.5 * dim})`;
+    g.fillRect(0, 0, BW, rowY(2) - 6); g.fillRect(0, rowY(2) + CH + 6, BW, BH - rowY(2) - CH - 6);
+  }
+  // overhead light falloff + a slow glass sheen sweeping across
+  g.save(); g.beginPath(); g.rect(-16, -16, BW + 32, BH + 32); g.clip();
+  let gr = g.createLinearGradient(0, 0, 0, BH); gr.addColorStop(0, 'rgba(255,230,190,0.05)'); gr.addColorStop(0.5, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.22)');
+  g.fillStyle = gr; g.fillRect(-16, -16, BW + 32, BH + 32);
+  const sx = -700 + t * 320;
+  g.globalCompositeOperation = 'lighter';
+  gr = g.createLinearGradient(sx, 0, sx + 700, BH * 0.5);
+  gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.45, 'rgba(200,215,235,0.035)'); gr.addColorStop(0.5, 'rgba(220,230,245,0.075)'); gr.addColorStop(0.55, 'rgba(200,215,235,0.035)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(-16, -16, BW + 32, BH + 32);
+  // reflection of a ceiling light strip on the glass
+  gr = g.createLinearGradient(0, GRID_Y - 30, 0, GRID_Y + 70);
+  gr.addColorStop(0, 'rgba(255,240,215,0)'); gr.addColorStop(0.5, 'rgba(255,240,215,0.025)'); gr.addColorStop(1, 'rgba(255,240,215,0)');
+  g.fillStyle = gr; g.fillRect(-16, GRID_Y - 30, BW + 32, 100);
+  g.restore();
+
+  // composite layer with a fake rotateY perspective (vertical strips)
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const F = 2500, SWP = 16, sa = Math.sin(cam.a), ca = Math.cos(cam.a);
+  const map = x => { const X = x - W / 2, Z = F + X * sa; return [W / 2 + F * X * ca / Z, F / Z]; };
+  // re-centre the board horizontally (the near side grows), faded out as the camera pushes in
+  const xl = W / 2 + (-16 - cam.x) * cam.z, xr = W / 2 + (BW + 16 - cam.x) * cam.z;
+  const off = (W / 2 - (map(xl)[0] + map(xr)[0]) / 2) * clamp((1.3 - cam.z) / 0.3);
+  let [px, ps] = map(0); px += off;
+  for (let x = 0; x < W; x += SWP) {
+    let [nx, ns] = map(x + SWP); nx += off; const s = (ps + ns) / 2;
+    ctx.drawImage(LAYER, x, 0, SWP, H, px, H / 2 - H / 2 * s, nx - px + 0.6, H * s);
+    px = nx; ps = ns;
+  }
+  // grain + vignette
+  ctx.globalAlpha = 0.05; ctx.globalCompositeOperation = 'overlay';
+  const fr = Math.round(t * 30), rr = rng(fr + 1);
+  const ox = Math.floor(rr() * 512), oy = Math.floor(rr() * 512);
+  ctx.save(); ctx.translate(-ox, -oy); ctx.fillStyle = ctx.createPattern(GRAIN, 'repeat'); ctx.fillRect(ox, oy, W, H); ctx.restore();
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(VIG, 0, 0);
+  // fade in (power-up) / dim out
+  const fade = Math.max(1 - eOut(seg(t, 0, 0.6)), eInOut(seg(t, 9.35, 10.0)));
+  if (fade > 0) { ctx.fillStyle = `rgba(0,0,0,${fade})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await document.fonts.load(`700 80px ${COND}`); await document.fonts.load(`600 40px ${SANS}`); await document.fonts.ready;
+  AT.cream = charAtlas(MAIN, CREAM, CW, CH, 72); AT.yellow = charAtlas(MAIN, YELLOW, CW, CH, 72);
+  AT.clock = charAtlas(DIG, YELLOW, CLK_W, CLK_H, 54); AT.stat = statAtlas(SW, CH);
+  BG = buildBG(); HOUSING = buildHousing(); GRAIN = buildGrain(); VIG = buildVig();
+  LAYER = mk(W, H); LG = LAYER.getContext('2d');
+  return true;
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cues: one event per flap landing (+ camera moves, chime, closing tone)
+window.events = () => {
+  const ev = [];
+  for (const c of cells) for (const s of c.segs) for (let k = 0; k < s.n; k++) {
+    const te = s.t0 + (k + 0.62) * s.p; if (te > DUR) continue;
+    const pan = clamp((c.x + c.w / 2) / BW * 2 - 1, -1, 1) * 0.7;
+    ev.push({ k: c.kind === 'stat' ? 'sflap' : c.kind === 'clock' ? 'cflap' : 'flap', t: +te.toFixed(4), pan: +pan.toFixed(2) });
+  }
+  ev.push({ k: 'whoosh', t: 3.1, d: 0.95 }, { k: 'whoosh', t: 4.9, d: 0.9 }, { k: 'chime', t: T_HEAD - 0.15 }, { k: 'tone', t: 8.45 }, { k: 'power', t: 0.05 });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
