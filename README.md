@@ -7,9 +7,9 @@ Watch the [complete English catalog](catalog/catalog.mp4), or browse by use case
 This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The examples retain references to irticalen where they are part of the original scene. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
 
 <!-- styles:start -->
-**By use case:** [Explainers](categories/use-cases/explainer.md) (11) · [Tutorials & Training](categories/use-cases/tutorial.md) (5) · [Product & Launches](categories/use-cases/product.md) (10) · [Social & Short-Form](categories/use-cases/social.md) (15) · [Storytelling & Brand](categories/use-cases/story.md) (15) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (10)
+**By use case:** [Explainers](categories/use-cases/explainer.md) (11) · [Tutorials & Training](categories/use-cases/tutorial.md) (5) · [Product & Launches](categories/use-cases/product.md) (10) · [Social & Short-Form](categories/use-cases/social.md) (15) · [Storytelling & Brand](categories/use-cases/story.md) (16) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (11)
 
-**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (4) · [Art Movements](categories/families/art-movements.md) (2) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (7) · [Nostalgia](categories/families/nostalgia.md) (8) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (1) · [Polished & Premium](categories/families/polished.md) (2) · [Comics & Cartoons](categories/families/comics.md) (1) · [Games](categories/families/games.md) (2)
+**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (4) · [Art Movements](categories/families/art-movements.md) (3) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (7) · [Nostalgia](categories/families/nostalgia.md) (8) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (1) · [Polished & Premium](categories/families/polished.md) (2) · [Comics & Cartoons](categories/families/comics.md) (1) · [Games](categories/families/games.md) (2)
 
 <table>
 <tr>
@@ -66,6 +66,9 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 <td width="25%" align="center"><a href="styles/retro-desktop/retro-desktop.mp4"><img src="styles/retro-desktop/preview.gif" alt="Retro Desktop" width="100%"></a><br><b>35 · Retro Desktop</b><br><a href="styles/retro-desktop/retro-desktop.mp4">video</a> · <a href="styles/retro-desktop">source</a></td>
 <td width="25%" align="center"><a href="styles/vector-arcade/vector-arcade.mp4"><img src="styles/vector-arcade/preview.gif" alt="Vector Arcade" width="100%"></a><br><b>36 · Vector Arcade</b><br><a href="styles/vector-arcade/vector-arcade.mp4">video</a> · <a href="styles/vector-arcade">source</a></td>
 </tr>
+<tr>
+<td width="25%" align="center"><a href="styles/art-deco/art-deco.mp4"><img src="styles/art-deco/preview.gif" alt="Art Deco" width="100%"></a><br><b>37 · Art Deco</b><br><a href="styles/art-deco/art-deco.mp4">video</a> · <a href="styles/art-deco">source</a></td>
+</tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
@@ -106,6 +109,7 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 | 34 | [VHS Camcorder](styles/vhs-camcorder/) | 90s home video on a VCR | Nostalgic memories, throwbacks, and found-footage hooks | [Nostalgia](categories/families/nostalgia.md) | [Storytelling & Brand](categories/use-cases/story.md), [Social & Short-Form](categories/use-cases/social.md) |
 | 35 | [Retro Desktop](styles/retro-desktop/) | Mid-90s desktop on a CRT | Nostalgic stories, tech humor, and step-by-step computer tutorials | [Nostalgia](categories/families/nostalgia.md) | [Storytelling & Brand](categories/use-cases/story.md), [Tutorials & Training](categories/use-cases/tutorial.md) |
 | 36 | [Vector Arcade](styles/vector-arcade/) | Glowing phosphor lines on black | Game-style openers, retro title cards, and punchy social clips | [Games](categories/families/games.md) | [Intros, Titles & Transitions](categories/use-cases/titles.md), [Social & Short-Form](categories/use-cases/social.md) |
+| 37 | [Art Deco](styles/art-deco/) | Gold sunbursts, stepped frames, symmetry | Gala invitations, elegant openers, and period brand stories | [Art Movements](categories/families/art-movements.md) | [Intros, Titles & Transitions](categories/use-cases/titles.md), [Storytelling & Brand](categories/use-cases/story.md) |
 <!-- styles:end -->
 
 Each linked directory contains an `anim.html` source file, an English MP4, and an English preview GIF.
