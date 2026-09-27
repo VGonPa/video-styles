@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Build the English catalog video from the style clips listed in styles.json."""
+"""Build the English catalog video from the style clips listed in the style manifest."""
 
 from pathlib import Path
-import json
 import subprocess
 import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
+import manifest
+
 
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "_catalog_build"
 OUTPUT = ROOT / "catalog" / "catalog.mp4"
-MANIFEST = json.loads((ROOT / "styles.json").read_text())
+MANIFEST = manifest.load()
 STYLES = [(s["slug"], s["name"], MANIFEST["families"][s["family"]]["title"].upper())
           for s in MANIFEST["styles"]]
 
