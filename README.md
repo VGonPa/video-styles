@@ -7,9 +7,9 @@ Watch the [complete English catalog](catalog/catalog.mp4), or browse by use case
 This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The examples retain references to irticalen where they are part of the original scene. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
 
 <!-- styles:start -->
-**By use case:** [Explainers](categories/use-cases/explainer.md) (11) · [Tutorials & Training](categories/use-cases/tutorial.md) (4) · [Product & Launches](categories/use-cases/product.md) (10) · [Social & Short-Form](categories/use-cases/social.md) (12) · [Storytelling & Brand](categories/use-cases/story.md) (13) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (8)
+**By use case:** [Explainers](categories/use-cases/explainer.md) (11) · [Tutorials & Training](categories/use-cases/tutorial.md) (5) · [Product & Launches](categories/use-cases/product.md) (10) · [Social & Short-Form](categories/use-cases/social.md) (12) · [Storytelling & Brand](categories/use-cases/story.md) (14) · [Data & Results](categories/use-cases/data.md) (4) · [News & Current Affairs](categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (8)
 
-**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (4) · [Art Movements](categories/families/art-movements.md) (2) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (7) · [Nostalgia](categories/families/nostalgia.md) (5) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (1) · [Polished & Premium](categories/families/polished.md) (2) · [Comics & Cartoons](categories/families/comics.md) (1) · [Games](categories/families/games.md) (1)
+**By visual family:** [Flat Graphics](categories/families/flat-graphics.md) (4) · [Art Movements](categories/families/art-movements.md) (2) · [Hand Drawn](categories/families/hand-drawn.md) (4) · [Texture & Craft](categories/families/texture-craft.md) (7) · [Nostalgia](categories/families/nostalgia.md) (6) · [Technical](categories/families/technical.md) (5) · [Experimental](categories/families/experimental.md) (1) · [Polished & Premium](categories/families/polished.md) (2) · [Comics & Cartoons](categories/families/comics.md) (1) · [Games](categories/families/games.md) (1)
 
 <table>
 <tr>
@@ -60,6 +60,9 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 <td width="25%" align="center"><a href="styles/liquid-motion/liquid-motion.mp4"><img src="styles/liquid-motion/preview.gif" alt="Liquid Motion" width="100%"></a><br><b>31 · Liquid Motion</b><br><a href="styles/liquid-motion/liquid-motion.mp4">video</a> · <a href="styles/liquid-motion">source</a></td>
 <td width="25%" align="center"><a href="styles/frutiger-aero/frutiger-aero.mp4"><img src="styles/frutiger-aero/preview.gif" alt="Frutiger Aero" width="100%"></a><br><b>33 · Frutiger Aero</b><br><a href="styles/frutiger-aero/frutiger-aero.mp4">video</a> · <a href="styles/frutiger-aero">source</a></td>
 </tr>
+<tr>
+<td width="25%" align="center"><a href="styles/retro-desktop/retro-desktop.mp4"><img src="styles/retro-desktop/preview.gif" alt="Retro Desktop" width="100%"></a><br><b>35 · Retro Desktop</b><br><a href="styles/retro-desktop/retro-desktop.mp4">video</a> · <a href="styles/retro-desktop">source</a></td>
+</tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
@@ -96,6 +99,7 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 | 30 | [Lo-Fi Anime](styles/lofi-anime/) | Rainy cozy 90s anime dusk | Calm moods, quiet stories, and study-night atmosphere | [Nostalgia](categories/families/nostalgia.md) | [Storytelling & Brand](categories/use-cases/story.md) |
 | 31 | [Liquid Motion](styles/liquid-motion/) | Gooey blobs in warm flowing gradients | Wellness brands, calm title cards, and soft product intros | [Polished & Premium](categories/families/polished.md) | [Intros, Titles & Transitions](categories/use-cases/titles.md), [Product & Launches](categories/use-cases/product.md) |
 | 33 | [Frutiger Aero](styles/frutiger-aero/) | Glossy bubbles, blue skies, green grass | Cheerful app launches, playful promos, and nostalgic social posts | [Nostalgia](categories/families/nostalgia.md) | [Social & Short-Form](categories/use-cases/social.md), [Product & Launches](categories/use-cases/product.md) |
+| 35 | [Retro Desktop](styles/retro-desktop/) | Mid-90s desktop on a CRT | Nostalgic stories, tech humor, and step-by-step computer tutorials | [Nostalgia](categories/families/nostalgia.md) | [Storytelling & Brand](categories/use-cases/story.md), [Tutorials & Training](categories/use-cases/tutorial.md) |
 <!-- styles:end -->
 
 Each linked directory contains an `anim.html` source file, an English MP4, and an English preview GIF.
