@@ -4,9 +4,9 @@ Use case · Origin stories, manifestos, and brand films.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (8) · [Social & Short-Form](../../categories/use-cases/social.md) (11) · [Storytelling & Brand](../../categories/use-cases/story.md) (13) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (7)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (9) · [Social & Short-Form](../../categories/use-cases/social.md) (11) · [Storytelling & Brand](../../categories/use-cases/story.md) (13) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (8)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (6) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (1)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (6) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2)
 
 <table>
 <tr>
