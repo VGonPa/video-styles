@@ -4,9 +4,9 @@ Visual family · Recreations of older media and eras.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (4) · [Product & Launches](../../categories/use-cases/product.md) (10) · [Social & Short-Form](../../categories/use-cases/social.md) (12) · [Storytelling & Brand](../../categories/use-cases/story.md) (13) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (8)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (11) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (5) · [Product & Launches](../../categories/use-cases/product.md) (10) · [Social & Short-Form](../../categories/use-cases/social.md) (12) · [Storytelling & Brand](../../categories/use-cases/story.md) (14) · [Data & Results](../../categories/use-cases/data.md) (4) · [News & Current Affairs](../../categories/use-cases/news.md) (3) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (8)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (2) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (5) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (1) · [Games](../../categories/families/games.md) (1)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (2) · [Hand Drawn](../../categories/families/hand-drawn.md) (4) · [Texture & Craft](../../categories/families/texture-craft.md) (7) · [Nostalgia](../../categories/families/nostalgia.md) (6) · [Technical](../../categories/families/technical.md) (5) · [Experimental](../../categories/families/experimental.md) (1) · [Polished & Premium](../../categories/families/polished.md) (2) · [Comics & Cartoons](../../categories/families/comics.md) (1) · [Games](../../categories/families/games.md) (1)
 
 <table>
 <tr>
@@ -17,6 +17,7 @@ Visual family · Recreations of older media and eras.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/frutiger-aero/frutiger-aero.mp4"><img src="../../styles/frutiger-aero/preview.gif" alt="Frutiger Aero" width="100%"></a><br><b>33 · Frutiger Aero</b><br><a href="../../styles/frutiger-aero/frutiger-aero.mp4">video</a> · <a href="../../styles/frutiger-aero">source</a></td>
+<td width="25%" align="center"><a href="../../styles/retro-desktop/retro-desktop.mp4"><img src="../../styles/retro-desktop/preview.gif" alt="Retro Desktop" width="100%"></a><br><b>35 · Retro Desktop</b><br><a href="../../styles/retro-desktop/retro-desktop.mp4">video</a> · <a href="../../styles/retro-desktop">source</a></td>
 </tr>
 </table>
 
@@ -27,3 +28,4 @@ Visual family · Recreations of older media and eras.
 | 27 | [Newspaper Headline](../../styles/newspaper/) | Broadsheet front page, ink and halftone | Breaking facts, surprising findings, and documentary hooks | [Nostalgia](../../categories/families/nostalgia.md) | [News & Current Affairs](../../categories/use-cases/news.md), [Social & Short-Form](../../categories/use-cases/social.md) |
 | 30 | [Lo-Fi Anime](../../styles/lofi-anime/) | Rainy cozy 90s anime dusk | Calm moods, quiet stories, and study-night atmosphere | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md) |
 | 33 | [Frutiger Aero](../../styles/frutiger-aero/) | Glossy bubbles, blue skies, green grass | Cheerful app launches, playful promos, and nostalgic social posts | [Nostalgia](../../categories/families/nostalgia.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Product & Launches](../../categories/use-cases/product.md) |
+| 35 | [Retro Desktop](../../styles/retro-desktop/) | Mid-90s desktop on a CRT | Nostalgic stories, tech humor, and step-by-step computer tutorials | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Tutorials & Training](../../categories/use-cases/tutorial.md) |
