@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── silhouette · "The Traveler and the Lantern" — a shadow-puppet fable in the Lotte Reiniger manner ─────────
+// Iris opens on a lace-framed title card (backlit amber→rose paper), a tiny lantern swings on its pin.
+// A wipe of foliage sweeps into a teal→gold dusk forest: filigree trees, a far castle on thinner paper layers,
+// the moon rising behind it, birds in V formation, and the traveler walking — a jointed puppet animated on twos.
+// The page turns (its back shows the old scene through the paper) onto an amber→rose hill with an iron lantern;
+// the traveler reaches up, the lantern flares, the world dims around its light, the light fades and the iris closes.
+const W = 1920, H = 1080, TAU = Math.PI * 2, PI = Math.PI;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eOut2 = u => 1 - (1 - u) * (1 - u);
+const eIn = u => u * u;
+const eBack = u => { const c1 = 1.8, c3 = c1 + 1; return 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const INK = '#0a0706';
+const SC = '"IM Fell English SC"', IT = '"IM Fell English"';
+const STEP = 12;                              // puppets animate "on twos" at 12 drawings per second
+const q = t => Math.floor(t * STEP + 1e-6) / STEP;
+
+// ── timeline ─────────────────────────────────────────────────────────────────────────────────────────────
+const T = {
+  iris0: 0, iris1: .8, let0: .55, let1: 1.3, sub: 1.25, div0: 1.4, div1: 1.95,
+  wipe0: 2.1, wipe1: 3.0,
+  walkB: 2.75, moon0: 2.7, moon1: 6.4, bird0: 3.3, bird1: 6.6,
+  turn0: 6.25, turn1: 7.15,
+  walkC0: 6.55, walkC1: 8.0, reach0: 7.95, reach1: 8.4, lit: 8.38,
+  dim0: 8.7, dim1: 9.3, glow0: 9.15, glow1: 9.88, irisC0: 9.3, irisC1: 9.95
+};
+
+// ── drawing primitives: tapered strokes stamped from circles, curls, leaves ───────────────────────────────
+function bez(p0, p1, p2, p3, u) {
+  const v = 1 - u;
+  return [v * v * v * p0[0] + 3 * v * v * u * p1[0] + 3 * v * u * u * p2[0] + u * u * u * p3[0],
+          v * v * v * p0[1] + 3 * v * v * u * p1[1] + 3 * v * u * u * p2[1] + u * u * u * p3[1]];
+}
+function taperPts(x, pts, w0, w1) {          // pts along a path; radius from w0 → w1
+  let L = 0; const d = [0];
+  for (let i = 1; i < pts.length; i++) { L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); d.push(L); }
+  x.beginPath();
+  let j = 0;
+  for (let s = 0; s <= L + .01;) {
+    while (j < pts.length - 2 && d[j + 1] < s) j++;
+    const k = d[j + 1] - d[j] || 1, u = clamp((s - d[j]) / k);
+    const px = lerp(pts[j][0], pts[j + 1][0], u), py = lerp(pts[j][1], pts[j + 1][1], u);
+    const r = Math.max(.35, lerp(w0, w1, L ? s / L : 0));
+    x.moveTo(px + r, py); x.arc(px, py, r, 0, TAU);
+    s += Math.max(.5, r * .35);
+  }
+  x.fill();
+}
+function taperBez(x, p0, p1, p2, p3, w0, w1) {
+  const n = 24, pts = [];
+  for (let i = 0; i <= n; i++) pts.push(bez(p0, p1, p2, p3, i / n));
+  taperPts(x, pts, w0, w1);
+}
+// spiral tendril: heading a (0 = up), turning sign sg; ends in a small ball like a cut-paper curl
+function curl(x, px, py, a, len, w, sg, turns = 1.6) {
+  const pts = [[px, py]]; let h = a; const n = 60;
+  for (let i = 1; i <= n; i++) {
+    const s = i / n, st = len / n * (1.25 - s * .8);
+    h += sg * (turns * TAU / n) * (0.35 + s * 1.5);
+    px += Math.sin(h) * st; py -= Math.cos(h) * st; pts.push([px, py]);
+  }
+  taperPts(x, pts, w, w * .28);
+  x.beginPath(); x.arc(px, py, Math.max(1.2, w * .55), 0, TAU); x.fill();
+}
+// leaf: base at (px,py), pointing along a (0 = up)
+function leaf(x, px, py, a, L, wd, holes) {
+  x.save(); x.translate(px, py); x.rotate(a);
+  x.beginPath(); x.moveTo(0, 0);
+  x.bezierCurveTo(wd, -L * .25, wd * .8, -L * .75, 0, -L);
+  x.bezierCurveTo(-wd * .8, -L * .75, -wd, -L * .25, 0, 0); x.fill();
+  x.restore();
+  if (holes && L > 26) holes.push({ k: 'vein', x: px, y: py, a, L, wd });
+}
+function cutHoles(x, holes) {
+  x.save(); x.globalCompositeOperation = 'destination-out';
+  for (const h of holes) {
+    x.save(); x.translate(h.x, h.y); x.rotate(h.a); x.beginPath();
+    if (h.k === 'vein') {             // a thin cut vein with two side slits
+      x.moveTo(0, -h.L * .18); x.quadraticCurveTo(h.wd * .12, -h.L * .5, 0, -h.L * .8);
+      x.lineWidth = Math.max(1.1, h.wd * .12); x.strokeStyle = '#000'; x.stroke();
+    } else if (h.k === 'almond') {
+      x.moveTo(0, -h.s); x.quadraticCurveTo(h.s * .45, 0, 0, h.s); x.quadraticCurveTo(-h.s * .45, 0, 0, -h.s); x.fill();
+    } else if (h.k === 'dot') { x.arc(0, 0, h.s, 0, TAU); x.fill(); }
+    else if (h.k === 'diamond') { x.moveTo(0, -h.s); x.lineTo(h.s * .6, 0); x.lineTo(0, h.s); x.lineTo(-h.s * .6, 0); x.closePath(); x.fill(); }
+    x.restore();
+  }
+  x.restore();
+}
+// filigree tree: recursive curved branches with curls, leaves and cut-lace trunks
+function tree(x, rnd, bx, by, o) {
+  const holes = [];
+  const dir = a => [Math.sin(a), -Math.cos(a)];
+  function br(px, py, a, len, w, depth) {
+    const bend = (rnd() - .5) * (o.bend || .7);
+    const d0 = dir(a), d1 = dir(a + bend);
+    const ex = px + d1[0] * len, ey = py + d1[1] * len;
+    const p1 = [px + d0[0] * len * .4, py + d0[1] * len * .4], p2 = [ex - dir(a + bend * 1.6)[0] * len * .35, ey - dir(a + bend * 1.6)[1] * len * .35];
+    taperBez(x, [px, py], p1, p2, [ex, ey], w, w * .66);
+    if (w > 11 && o.lace !== false) {
+      for (let u = .22; u < .8; u += 30 / len) {
+        const p = bez([px, py], p1, p2, [ex, ey], u), p3 = bez([px, py], p1, p2, [ex, ey], u + .02);
+        holes.push({ k: (Math.floor(u * 40) % 3 === 0) ? 'dot' : 'almond', x: p[0], y: p[1], a: Math.atan2(p3[0] - p[0], -(p3[1] - p[1])), s: w * lerp(1, .66, u) * (Math.floor(u * 40) % 3 === 0 ? .22 : .42) });
+      }
+    }
+    // side tendrils
+    if (depth < o.depth && rnd() < (o.tendril ?? .55)) {
+      const u = .35 + rnd() * .4, p = bez([px, py], p1, p2, [ex, ey], u), sg = rnd() < .5 ? -1 : 1;
+      curl(x, p[0], p[1], a + bend * u + sg * (.9 + rnd() * .5), len * (.35 + rnd() * .3), Math.max(1.4, w * .3), sg, 1.4 + rnd() * .6);
+    }
+    if (depth <= 1 || w < 5) {
+      const nl = o.leaves ?? 5;
+      for (let i = 0; i < nl; i++) {
+        const u = .3 + rnd() * .7, p = bez([px, py], p1, p2, [ex, ey], u), sg = rnd() < .5 ? -1 : 1;
+        leaf(x, p[0], p[1], a + bend * u + sg * (.6 + rnd() * .7), (o.leafL || 22) * (.7 + rnd() * .6), (o.leafL || 22) * .32);
+      }
+    }
+    if (depth === 0) {
+      const sg = rnd() < .5 ? -1 : 1;
+      curl(x, ex, ey, a + bend, len * (.5 + rnd() * .3), Math.max(1.3, w * .6), sg, 1.3 + rnd() * .7);
+      return;
+    }
+    const n = rnd() < (o.three ?? .3) ? 3 : 2, spread = (o.spread || .55) * (.8 + rnd() * .5);
+    for (let i = 0; i < n; i++) {
+      const f = n === 2 ? (i ? 1 : -1) : i - 1;
+      br(ex, ey, a + bend + f * spread + (rnd() - .5) * .25 + (o.lean || 0) * .3, len * (o.shrink || .74) * (.85 + rnd() * .3), w * .64, depth - 1);
+    }
+  }
+  br(bx, by, o.a || 0, o.len, o.w, o.depth);
+  // root flare
+  x.beginPath(); x.moveTo(bx - o.w * 2.4, by + 2); x.quadraticCurveTo(bx - o.w * .8, by - o.w * .3, bx - o.w * .9, by - o.w * 2.2);
+  x.lineTo(bx + o.w * .9, by - o.w * 2.2); x.quadraticCurveTo(bx + o.w * .8, by - o.w * .3, bx + o.w * 2.4, by + 2); x.fill();
+  cutHoles(x, holes);
+}
+// ground strip with lace grass, fern fronds and little flowers
+function ground(x, rnd, x0, x1, gy, o = {}) {
+  x.beginPath(); x.moveTo(x0, H + 10);
+  for (let px = x0; px <= x1; px += 8) x.lineTo(px, gy(px));
+  x.lineTo(x1, H + 10); x.closePath(); x.fill();
+  const holes = [];
+  for (let px = x0; px < x1; px += 5 + rnd() * 9) {
+    const y = gy(px) + 3, h = (o.grass || 26) * (.35 + rnd() * rnd() * 1.5), lean = (rnd() - .5) * .9;
+    const tip = [px + Math.sin(lean) * h, y - Math.cos(lean) * h];
+    taperBez(x, [px, y], [px, y - h * .5], [tip[0] - Math.sin(lean) * h * .3, tip[1] + h * .2], tip, 2.4, .5);
+    if (rnd() < .035) {                // fern frond
+      const sg = rnd() < .5 ? -1 : 1, fl = 70 + rnd() * 60, pts = []; let h2 = sg * (.15 + rnd() * .3), cx = px, cy = y;
+      for (let i = 0; i <= 30; i++) { pts.push([cx, cy]); h2 += sg * .045 * (1 + i / 30 * 1.5); cx += Math.sin(h2) * fl / 30; cy -= Math.cos(h2) * fl / 30; }
+      taperPts(x, pts, 3, .8);
+      for (let i = 3; i < 28; i += 2) { const p = pts[i], ll = 18 * (1 - i / 34); leaf(x, p[0], p[1], h2 * i / 30 - 1.2, ll, ll * .35); leaf(x, p[0], p[1], h2 * i / 30 + 1.2, ll, ll * .35); }
+    } else if (rnd() < .03) {         // flower on a thin stem
+      const fh = 40 + rnd() * 50, fx = px + (rnd() - .5) * 20, fy = y - fh;
+      taperBez(x, [px, y], [px, y - fh * .5], [fx, fy + fh * .3], [fx, fy], 2, 1.2);
+      const pr = 7 + rnd() * 5;
+      for (let k = 0; k < 7; k++) { const a = k / 7 * TAU; leaf(x, fx, fy, a, pr * 1.6, pr * .55); }
+      holes.push({ k: 'dot', x: fx, y: fy, a: 0, s: pr * .35 });
+      leaf(x, px + 2, y - fh * .3, .8, 16, 6); leaf(x, px - 2, y - fh * .45, -.8, 14, 5);
+    } else if (rnd() < .025) {        // curled weed
+      curl(x, px, y, (rnd() - .5) * .6, 34 + rnd() * 30, 2.2, rnd() < .5 ? -1 : 1, 1.4);
+    }
+  }
+  cutHoles(x, holes);
+}
+function hills(x, x0, x1, yb, fn) { x.beginPath(); x.moveTo(x0, H + 10); for (let px = x0; px <= x1; px += 6) x.lineTo(px, yb + fn(px)); x.lineTo(x1, H + 10); x.closePath(); x.fill(); }
+// fairy-tale castle: towers, cones, pennants, crenellations; arched windows are cut out
+function castle(x, cx, by, s, rnd) {
+  const holes = [];
+  const tower = (tx, w, h, roof, flag) => {
+    x.fillRect(tx - w / 2, by - h, w, h);
+    for (let k = 0; k < 4; k++) x.fillRect(tx - w / 2 - 3 * s + k * (w + 6 * s) / 3.5, by - h - 10 * s, (w + 6 * s) / 7, 10 * s);
+    x.fillRect(tx - w / 2 - 4 * s, by - h - 2 * s, w + 8 * s, 5 * s);
+    if (roof) {
+      x.beginPath(); x.moveTo(tx - w / 2 - 6 * s, by - h - 4 * s); x.quadraticCurveTo(tx - w * .15, by - h - roof * .5, tx, by - h - roof);
+      x.quadraticCurveTo(tx + w * .15, by - h - roof * .5, tx + w / 2 + 6 * s, by - h - 4 * s); x.fill();
+      if (flag) { x.fillRect(tx - 1.2 * s, by - h - roof - 26 * s, 2.4 * s, 26 * s);
+        x.beginPath(); x.moveTo(tx + s, by - h - roof - 25 * s); x.quadraticCurveTo(tx + 16 * s, by - h - roof - 26 * s, tx + 30 * s, by - h - roof - 17 * s); x.quadraticCurveTo(tx + 14 * s, by - h - roof - 16 * s, tx + s, by - h - roof - 13 * s); x.fill(); }
+    }
+    for (let yy = by - h + 22 * s; yy < by - 30 * s; yy += 38 * s) holes.push({ k: 'win', x: tx, y: yy, w: Math.max(3, w * .16), h: 13 * s });
+  };
+  tower(cx, 90 * s, 150 * s, 0);                                     // keep
+  x.fillRect(cx - 150 * s, by - 80 * s, 300 * s, 80 * s);            // curtain wall
+  for (let k = 0; k < 14; k++) x.fillRect(cx - 150 * s + k * 22 * s, by - 90 * s, 12 * s, 12 * s);
+  tower(cx - 150 * s, 40 * s, 130 * s, 90 * s, true);
+  tower(cx + 150 * s, 44 * s, 118 * s, 80 * s, true);
+  tower(cx - 38 * s, 30 * s, 215 * s, 110 * s, true);
+  tower(cx + 44 * s, 26 * s, 190 * s, 95 * s, false);
+  x.save(); x.globalCompositeOperation = 'destination-out';
+  for (const h of holes) { x.beginPath(); x.moveTo(h.x - h.w / 2, h.y + h.h); x.lineTo(h.x - h.w / 2, h.y); x.arc(h.x, h.y, h.w / 2, PI, 0); x.lineTo(h.x + h.w / 2, h.y + h.h); x.fill(); }
+  x.beginPath(); x.moveTo(cx - 22 * s, by); x.lineTo(cx - 22 * s, by - 40 * s); x.arc(cx, by - 40 * s, 22 * s, PI, 0); x.lineTo(cx + 22 * s, by); x.fill();   // gate
+  x.restore();
+}
+// onion-domed spire town for the far layer of the lantern hill
+function spires(x, cx, by, s) {
+  const dome = (tx, w, h, dh) => {
+    x.fillRect(tx - w / 2, by - h, w, h);
+    x.beginPath(); x.moveTo(tx - w / 2, by - h); x.bezierCurveTo(tx - w * 1.1, by - h - dh * .45, tx - w * .1, by - h - dh * .7, tx, by - h - dh);
+    x.bezierCurveTo(tx + w * .1, by - h - dh * .7, tx + w * 1.1, by - h - dh * .45, tx + w / 2, by - h); x.fill();
+    x.fillRect(tx - 1.5 * s, by - h - dh - 22 * s, 3 * s, 24 * s); x.beginPath(); x.arc(tx, by - h - dh - 24 * s, 4 * s, 0, TAU); x.fill();
+  };
+  dome(cx, 120 * s, 90 * s, 120 * s); dome(cx - 150 * s, 18 * s, 260 * s, 40 * s); dome(cx + 150 * s, 18 * s, 240 * s, 40 * s);
+  dome(cx - 250 * s, 60 * s, 60 * s, 70 * s); dome(cx + 260 * s, 70 * s, 50 * s, 80 * s); dome(cx + 380 * s, 14 * s, 170 * s, 30 * s);
+  x.fillRect(cx - 320 * s, by - 40 * s, 760 * s, 40 * s);
+}
+
+// ── offscreen layers (built once) ────────────────────────────────────────────────────────────────────────
+let L = {};
+function inked(w, h, fn) { const c = mk(w, h), x = c.getContext('2d'); x.fillStyle = INK; x.strokeStyle = INK; fn(x); return c; }
+const GYB = px => 905 + 10 * Math.sin(px * .004 + 1) + 6 * Math.sin(px * .011) + (px < 260 ? (260 - px) * .25 : 0) + (px > 1700 ? -(px - 1700) * .12 : 0);
+const GYC = px => 905 + 7 * Math.sin(px * .005 + 2) + 4 * Math.sin(px * .013) + (px > 1360 ? -(px - 1360) * .28 : 0) + (px < 300 ? -(300 - px) * .15 : 0);
+function buildLayers() {
+  const PADX = 160;                            // layers are wider than the frame for the slow pan
+  // ---- scene B: dusk forest (teal → gold)
+  L.farB = inked(W + PADX, H, x => {
+    const r = rng(11);
+    hills(x, 0, W + PADX, 745, px => -38 * Math.sin(px * .0026 + .6) - 22 * Math.sin(px * .007) - 70 * Math.exp(-Math.pow((px - 1390) / 260, 2)));
+    castle(x, 1390, 692, 1.05, r);
+    for (const cx of [260, 420, 560, 900, 1010, 1760, 1880]) { const hh = 60 + r() * 70; x.beginPath(); x.moveTo(cx, 760 - hh); x.quadraticCurveTo(cx + 16, 760 - hh * .4, cx + 10, 770); x.lineTo(cx - 10, 770); x.quadraticCurveTo(cx - 16, 760 - hh * .4, cx, 760 - hh); x.fill(); }
+  });
+  L.midB = inked(W + PADX, H, x => {
+    const r = rng(23);
+    hills(x, 0, W + PADX, 858, px => -20 * Math.sin(px * .0032 + 2) - 10 * Math.sin(px * .009 + 1));
+    for (const [cx, hh] of [[640, 170], [1080, 210], [1640, 190], [1900, 150]]) tree(x, r, cx, 850, { len: hh * .42, w: 9, depth: 4, spread: .5, leafL: 14, leaves: 5, lace: false, tendril: .4 });
+  });
+  L.nearB = inked(W + PADX, H, x => {
+    const r = rng(37);
+    ground(x, r, 0, W + PADX, GYB, { grass: 30 });
+    tree(x, r, 20, 950, { len: 330, w: 34, depth: 5, spread: .62, a: .12, lean: .5, bend: .45, leafL: 22, leaves: 2, shrink: .76, three: .3, tendril: .8 });
+    tree(x, r, 1930, 900, { len: 165, w: 24, depth: 5, spread: .5, a: -.22, lean: -.5, leafL: 20, leaves: 2, shrink: .74, tendril: .8 });
+  });
+  // ---- scene C: lantern hill (amber → rose)
+  L.farC = inked(W + PADX, H, x => {
+    hills(x, 0, W + PADX, 770, px => -30 * Math.sin(px * .003 + 2.2) - 16 * Math.sin(px * .008));
+    spires(x, 560, 760, 1.0);
+  });
+  L.midC = inked(W + PADX, H, x => {
+    const r = rng(51);
+    hills(x, 0, W + PADX, 835, px => -20 * Math.sin(px * .0036 + .4) - 60 * Math.exp(-Math.pow((px - 1500) / 300, 2)));
+    for (const [cx, hh] of [[240, 180], [980, 150], [1560, 230], [1760, 170]]) tree(x, r, cx, 830, { len: hh * .42, w: 9, depth: 4, spread: .55, leafL: 14, leaves: 5, lace: false, tendril: .4 });
+  });
+  L.nearC = inked(W + PADX, H, x => {
+    const r = rng(67);
+    ground(x, r, 0, W + PADX, GYC, { grass: 30 });
+    tree(x, r, 1850, 870, { len: 195, w: 30, depth: 6, spread: .5, a: -.35, lean: -.9, leafL: 21, leaves: 2, shrink: .75, tendril: .8 });
+    tree(x, r, 40, 880, { len: 150, w: 22, depth: 5, spread: .55, a: .45, lean: .9, leafL: 20, leaves: 2, shrink: .74, tendril: .8 });
+    // wrought-iron lantern post with a shepherd's-hook scroll
+    const px = LAN.post;
+    x.fillRect(px - 7, 470, 14, GYC(px) - 470 + 20);
+    x.beginPath(); x.moveTo(px - 26, GYC(px) + 6); x.quadraticCurveTo(px - 8, GYC(px) - 16, px - 8, GYC(px) - 60); x.lineTo(px + 8, GYC(px) - 60); x.quadraticCurveTo(px + 8, GYC(px) - 16, px + 26, GYC(px) + 6); x.fill();
+    for (const yy of [560, 700, 820]) { x.fillRect(px - 12, yy, 24, 7); }
+    curl(x, px + 4, 610, .5, 70, 3.2, -1, 1.3); curl(x, px - 4, 650, -.5, 60, 3, 1, 1.3);
+    taperBez(x, [px, 478], [px, 430], [LAN.hx + 40, 418], [LAN.hx, 445], 7, 5);
+    curl(x, LAN.hx, 445, PI * 1.1, 40, 4.5, -1, 1.1);
+    curl(x, px + 2, 470, .2, 45, 3, 1, 1.4);
+    x.beginPath(); x.arc(px, 468, 9, 0, TAU); x.fill();
+  });
+  // ---- foliage wipe band
+  L.band = inked(1600, H, x => {
+    const r = rng(83), c0 = 660, c1 = 940;
+    x.fillRect(c0, 0, c1 - c0, H);
+    // a ragged edge of overlapping leaves hides the straight core edges
+    for (let i = 0; i < 160; i++) { const side = i % 2 ? 1 : -1, y = r() * (H + 60) - 30, d = r() * 70, sz = 40 + r() * 40;
+      leaf(x, side > 0 ? c1 - 10 : c0 + 10, y, side * (PI / 2) + (r() - .5) * 1.6, sz + d, (sz + d) * .4); }
+    // fronds and leafy sprays reaching out of both edges of a solid core
+    for (let i = 0; i < 150; i++) {
+      const side = i % 2 ? 1 : -1, y0 = (i >> 1) / 75 * (H + 80) - 40 + (r() - .5) * 20;
+      const len = 90 + Math.pow(r(), 1.3) * 300, sg = r() < .5 ? -1 : 1, pts = [];
+      let h = side * (PI / 2) + sg * (r() * .5), px = side > 0 ? c1 - 8 : c0 + 8, py = y0;
+      for (let k = 0; k <= 26; k++) { pts.push([px, py]); h += sg * side * .028 * (1 + k / 12); px += Math.sin(h) * len / 26; py -= Math.cos(h) * len / 26; }
+      taperPts(x, pts, 4.2, 1);
+      if (r() < .3) { curl(x, px, py, h, 40 + r() * 30, 2.2, sg * side, 1.4); continue; }
+      for (let k = 2; k < 26; k += 2) { const p = pts[k], ll = lerp(40, 12, k / 26) * (.8 + r() * .4);
+        leaf(x, p[0], p[1], h - 1.0 * side * 0 + (-1.05), ll, ll * .36); leaf(x, p[0], p[1], h + 1.05, ll, ll * .36); }
+      leaf(x, px, py, h, 26, 9);
+    }
+  });
+  // ---- title card: oval window in a lace frame, scalloped edge, corner vines
+  L.frame = inked(W, H, x => {
+    const r = rng(97), cx = W / 2, cy = H / 2, rx = 780, ry = 430;
+    x.fillRect(0, 0, W, H);
+    x.save(); x.globalCompositeOperation = 'destination-out'; x.beginPath(); x.ellipse(cx, cy, rx, ry, 0, 0, TAU); x.fill(); x.restore();
+    const holes = [];
+    const n = 86;
+    for (let i = 0; i < n; i++) {
+      const a = i / n * TAU, px = cx + Math.cos(a) * rx, py = cy + Math.sin(a) * ry;
+      x.beginPath(); x.arc(px, py, 22, 0, TAU); x.fill();
+      holes.push({ k: 'dot', x: cx + Math.cos(a) * (rx - 8), y: cy + Math.sin(a) * (ry - 8), a: 0, s: 5 });
+      const ao = (i + .5) / n * TAU;
+      holes.push({ k: 'diamond', x: cx + Math.cos(ao) * (rx + 46), y: cy + Math.sin(ao) * (ry + 44), a: ao + PI / 2, s: 13 });
+      holes.push({ k: 'dot', x: cx + Math.cos(a) * (rx + 46), y: cy + Math.sin(a) * (ry + 44), a: 0, s: 4.5 });
+      holes.push({ k: 'almond', x: cx + Math.cos(ao) * (rx + 88), y: cy + Math.sin(ao) * (ry + 80), a: ao + PI / 2, s: 9 });
+    }
+    cutHoles(x, holes);
+    // vines creeping in from the four corners
+    for (const [vx, vy, a, sg] of [[250, 1000, .75, 1], [1670, 1000, -.75, -1], [260, 80, 2.35, -1], [1660, 80, -2.35, 1]]) {
+      const rr = rng(Math.round(vx + vy));
+      tree(x, rr, vx, vy, { len: 120, w: 13, depth: 4, a, spread: .6, leafL: 20, leaves: 4, lace: false, tendril: .7, lean: sg * .2 });
+    }
+  });
+  // divider ornament under the title (drawn black; revealed from the centre outward)
+  L.div = inked(900, 120, x => {
+    const cx = 450, cy = 60;
+    x.beginPath(); x.moveTo(cx, cy - 16); x.lineTo(cx + 11, cy); x.lineTo(cx, cy + 16); x.lineTo(cx - 11, cy); x.closePath(); x.fill();
+    for (const sg of [-1, 1]) {
+      taperBez(x, [cx + sg * 16, cy], [cx + sg * 120, cy - 18], [cx + sg * 240, cy + 18], [cx + sg * 380, cy], 3.2, 1.2);
+      curl(x, cx + sg * 120, cy - 12, sg * .9, 60, 2.4, -sg, 1.4); curl(x, cx + sg * 250, cy + 12, sg * 2.3, 50, 2.2, sg, 1.4);
+      leaf(x, cx + sg * 60, cy - 5, sg * 1.1, 20, 7); leaf(x, cx + sg * 180, cy + 3, sg * 1.9, 18, 6); leaf(x, cx + sg * 320, cy + 2, sg * 1.2, 16, 6);
+      x.beginPath(); x.arc(cx + sg * 386, cy, 5, 0, TAU); x.fill();
+    }
+  });
+  // backlit paper: fibres, cloud-like thickness and a warm vignette
+  L.fiber = mk(W, H); {
+    const x = L.fiber.getContext('2d'), r = rng(5);
+    x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+    for (let i = 0; i < 260; i++) { const g = x.createRadialGradient(0, 0, 0, 0, 0, 1); const px = r() * W, py = r() * H, rr = 60 + r() * 220;
+      x.save(); x.translate(px, py); x.scale(rr, rr * (.5 + r())); g.addColorStop(0, `rgba(120,90,60,${.05 + r() * .06})`); g.addColorStop(1, 'rgba(120,90,60,0)'); x.fillStyle = g; x.beginPath(); x.arc(0, 0, 1, 0, TAU); x.fill(); x.restore(); }
+    x.lineCap = 'round';
+    for (let i = 0; i < 1600; i++) { const px = r() * W, py = r() * H, a = r() * TAU, l = 10 + r() * 36; x.strokeStyle = `rgba(110,70,40,${.025 + r() * .05})`; x.lineWidth = .5 + r() * .9;
+      x.beginPath(); x.moveTo(px, py); x.quadraticCurveTo(px + Math.cos(a + .5) * l * .5, py + Math.sin(a + .5) * l * .5, px + Math.cos(a) * l, py + Math.sin(a) * l); x.stroke(); }
+  }
+  L.vig = mk(W, H); {
+    const x = L.vig.getContext('2d'), g = x.createRadialGradient(W / 2, H / 2, 300, W / 2, H / 2, 1150);
+    g.addColorStop(0, 'rgba(20,6,4,0)'); g.addColorStop(.7, 'rgba(20,6,4,.18)'); g.addColorStop(1, 'rgba(10,3,2,.62)'); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  }
+  L.grain = [0, 1, 2].map(k => { const c = mk(W / 2, H / 2), x = c.getContext('2d'), im = x.createImageData(W / 2, H / 2), r = rng(300 + k);
+    for (let i = 0; i < im.data.length; i += 4) { const v = 128 + (r() - .5) * 70; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; }
+    x.putImageData(im, 0, 0); return c; });
+  L.bufA = mk(W, H); L.bufB = mk(W, H); L.pup = mk(640, 640);
+}
+
+// ── backgrounds: luminous gradients behind the paper ─────────────────────────────────────────────────────
+function vg(x, stops) { const g = x.createLinearGradient(0, 0, 0, H); for (const [o, c] of stops) g.addColorStop(o, c); x.fillStyle = g; x.fillRect(0, 0, W, H); }
+function glow(x, gx, gy, r, stops, a = 1) {
+  x.save(); x.globalCompositeOperation = 'lighter'; x.globalAlpha = a;
+  const g = x.createRadialGradient(gx, gy, 0, gx, gy, r); for (const [o, c] of stops) g.addColorStop(o, c);
+  x.fillStyle = g; x.fillRect(gx - r, gy - r, 2 * r, 2 * r); x.restore();
+}
+const layer = (x, c, dx, a) => { x.globalAlpha = a; x.drawImage(c, dx, 0); x.globalAlpha = 1; };
+
+// ── the traveler: a jointed puppet (pins at hip, knees, shoulders, elbows, neck) ──────────────────────────
+// angles: 0 = limb hanging straight down, positive = swung forward (towards +x, the way he faces)
+const dv = a => [Math.sin(a), Math.cos(a)];
+function limb(x, a, b, r0, r1) { taperPts(x, [a, b], r0, r1); }
+function puppet(t, pose) {
+  const c = L.pup, x = c.getContext('2d'), ox = 300, oy = 600;
+  x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height); x.translate(ox, oy);
+  x.fillStyle = INK; x.strokeStyle = INK;
+  const ph = pose.ph, amp = pose.amp;
+  const bob = -Math.abs(Math.cos(ph)) * 5 * amp;
+  const hip = [0, -150 + bob + 4 * amp];
+  const lean = .05 + .03 * amp - pose.reach * .06;
+  const neck = [hip[0] + Math.sin(lean) * 92, hip[1] - Math.cos(lean) * 92];
+  const sh = [hip[0] + Math.sin(lean) * 82 - 2, hip[1] - Math.cos(lean) * 82];
+  // legs
+  const leg = s => {
+    const p = ph + (s ? PI : 0);
+    const th = Math.sin(p) * .42 * amp, kn = Math.max(0, Math.sin(p + 1.1)) * .75 * amp + .06;
+    const knee = [hip[0] + dv(th)[0] * 72, hip[1] + dv(th)[1] * 72];
+    const sa = th - kn, ank = [knee[0] + dv(sa)[0] * 70, knee[1] + dv(sa)[1] * 70];
+    return { knee, ank, sa };
+  };
+  const drawLeg = g => {
+    limb(x, hip, g.knee, 11, 8); limb(x, g.knee, g.ank, 7.8, 4.6);
+    x.save(); x.translate(g.ank[0], g.ank[1]); x.rotate(-g.sa * .35);
+    x.beginPath(); x.moveTo(-7, -6); x.quadraticCurveTo(10, -9, 22, -1); x.quadraticCurveTo(30, 1, 27, -7); x.quadraticCurveTo(33, 4, 18, 5); x.lineTo(-7, 5); x.closePath(); x.fill();   // curled-toe shoe
+    x.restore();
+  };
+  // arms (absolute angles). walk swing, or IK towards the lantern
+  const arm = (s) => {
+    const p = ph + (s ? 0 : PI);
+    let aU = Math.sin(p) * .38 * amp + .06, aF = aU + .25 + Math.max(0, Math.sin(p)) * .35 * amp;
+    if (!s && pose.reach > 0) {                  // near arm → 2-bone IK to the target
+      const tx = pose.tx - sh[0], ty = pose.ty - sh[1], d = Math.min(Math.hypot(tx, ty), 116), a = Math.atan2(tx, ty);
+      const al = Math.acos(clamp((58 * 58 + d * d - 58 * 58) / (2 * 58 * d), -1, 1));
+      const u = a + al, el = [sh[0] + dv(u)[0] * 58, sh[1] + dv(u)[1] * 58];
+      const f = Math.atan2(sh[0] + dv(a)[0] * d - el[0], sh[1] + dv(a)[1] * d - el[1]);
+      aU = lerp(aU, u, pose.reach); aF = lerp(aF, f, pose.reach);
+    }
+    const el = [sh[0] + dv(aU)[0] * 58, sh[1] + dv(aU)[1] * 58], hd = [el[0] + dv(aF)[0] * 54, el[1] + dv(aF)[1] * 54];
+    return { el, hd, aF };
+  };
+  const drawArm = g => { limb(x, sh, g.el, 7.2, 5.4); limb(x, g.el, g.hd, 5.2, 3.6);
+    x.save(); x.translate(g.hd[0], g.hd[1]); x.rotate(-g.aF); x.beginPath(); x.ellipse(1, 6, 4.6, 8, 0, 0, TAU); x.fill(); x.beginPath(); x.ellipse(4, 3, 2, 6, -.5, 0, TAU); x.fill(); x.restore(); };
+  const lF = leg(1), lN = leg(0), aFar = arm(1), aNear = arm(0);
+  // cloak (behind), lace-cut along its hem
+  const sway = Math.sin(ph * 2 + .6) * 6 * amp + amp * 10;
+  x.beginPath(); x.moveTo(sh[0] + 4, sh[1] - 6);
+  x.bezierCurveTo(sh[0] - 30, sh[1] + 10, sh[0] - 44 - sway, sh[1] + 90, sh[0] - 62 - sway * 1.6, sh[1] + 152);
+  const hx0 = sh[0] - 62 - sway * 1.6, hy0 = sh[1] + 152, hx1 = sh[0] - 4, hy1 = sh[1] + 128;
+  for (let k = 1; k <= 5; k++) { const u = k / 5, px = lerp(hx0, hx1, u), py = lerp(hy0, hy1, u); x.quadraticCurveTo(lerp(hx0, hx1, u - .1), lerp(hy0, hy1, u - .1) + 12, px, py); }
+  x.lineTo(sh[0] + 6, sh[1] + 10); x.closePath(); x.fill();
+  cutHoles(x, [0, 1, 2, 3].map(k => ({ k: 'dot', x: lerp(hx0, hx1, .12 + k * .16) + 4, y: lerp(hy0, hy1, .12 + k * .16) - 14, a: 0, s: 3.2 }))
+    .concat([0, 1, 2].map(k => ({ k: 'diamond', x: lerp(hx0, hx1, .2 + k * .16) + 4 - sway * .15, y: lerp(hy0, hy1, .2 + k * .16) - 40, a: .3, s: 6 }))));
+  x.fillStyle = INK;
+  // far arm with the staff, far leg
+  drawArm(aFar);
+  { const hd = aFar.hd, b = aFar.aF * .25 - .12 + pose.reach * .1; x.save(); x.translate(hd[0], hd[1] + 4); x.rotate(-b);
+    x.fillRect(-2.4, -150, 4.8, 290); x.restore();
+    const top = [hd[0] + Math.sin(b) * 150, hd[1] + 4 - Math.cos(b) * 150]; curl(x, top[0], top[1], b - .2, 46, 3.4, 1, 1.25); }
+  drawLeg(lF);
+  // torso and tunic
+  taperPts(x, [[hip[0], hip[1] + 8], [lerp(hip[0], sh[0], .5) + 2, lerp(hip[1], sh[1], .5)], [sh[0] + 2, sh[1] + 6]], 15, 19);
+  const hs = Math.sin(ph * 2) * 3 * amp;
+  x.beginPath(); x.moveTo(hip[0] - 15, hip[1] - 18); x.lineTo(hip[0] + 16, hip[1] - 18);
+  x.quadraticCurveTo(hip[0] + 24, hip[1] + 20, hip[0] + 30 + hs, hip[1] + 46);
+  for (let k = 1; k <= 4; k++) { const px = lerp(hip[0] + 30 + hs, hip[0] - 28 + hs, k / 4); x.quadraticCurveTo(px + 7.5, hip[1] + 58, px, hip[1] + 46); }
+  x.quadraticCurveTo(hip[0] - 22, hip[1] + 18, hip[0] - 15, hip[1] - 18); x.fill();
+  x.fillRect(hip[0] - 17, hip[1] - 20, 35, 7);                 // belt
+  cutHoles(x, [{ k: 'diamond', x: hip[0] + 1, y: hip[1] - 16.5, a: PI / 2, s: 3 }]);
+  x.fillStyle = INK;
+  drawLeg(lN);
+  // head: neck, profile with nose and chin, pointed hat with a curled feather
+  const ht = -pose.reach * .38 + .04 * amp;
+  x.save(); x.translate(neck[0], neck[1]); x.rotate(ht);
+  x.fillRect(-4.5, -14, 9, 18);
+  x.beginPath(); x.moveTo(-15, -28);
+  x.bezierCurveTo(-18, -48, 4, -56, 13, -44);       // crown to brow
+  x.quadraticCurveTo(14, -38, 17, -35); x.lineTo(21, -28); x.lineTo(15, -27);   // nose
+  x.quadraticCurveTo(15, -22, 12, -20); x.quadraticCurveTo(14, -15, 9, -12);    // lips, chin
+  x.quadraticCurveTo(0, -8, -6, -12); x.quadraticCurveTo(-16, -16, -15, -28); x.fill();
+  x.beginPath(); x.ellipse(-2, -47, 32, 5.5, -.08, 0, TAU); x.fill();          // brim
+  x.beginPath(); x.moveTo(-16, -48); x.quadraticCurveTo(-12, -76, -30, -94); x.quadraticCurveTo(-4, -78, 12, -49); x.closePath(); x.fill();  // cone
+  curl(x, -30, -94, -2.2, 26, 2.2, -1, 1.2);
+  taperBez(x, [-8, -60], [-26, -70], [-44, -64], [-52, -50], 2.6, .6);            // feather
+  for (let k = 0; k < 5; k++) leaf(x, lerp(-14, -48, k / 5), lerp(-63, -54, k / 5) - k * 1.5, -1.9 - k * .12, 11 - k, 3.4);
+  cutHoles(x, [{ k: 'dot', x: 4, y: -38, a: 0, s: 2.1 }]);     // eye, cut through
+  x.restore(); x.fillStyle = INK;
+  drawArm(aNear);
+  x.setTransform(1, 0, 0, 1, 0, 0);
+  return c;
+}
+function drawPuppet(x, t, px, py, pose, s = 1) { const c = puppet(t, pose); x.drawImage(c, px - 300 * s, py - 600 * s, 640 * s, 640 * s); }
+
+// ── birds: body + two wings pinned at the shoulder, flying left ───────────────────────────────────────────
+function bird(x, bx, by, s, ph) {
+  x.save(); x.translate(bx, by); x.scale(-s, s);            // drawn facing +x, mirrored to fly left
+  const wa = Math.sin(ph) * .95;
+  x.beginPath(); x.moveTo(-34, 2); x.lineTo(-50, -6); x.lineTo(-44, 3); x.lineTo(-52, 10); x.quadraticCurveTo(-20, 10, 0, 6);
+  x.quadraticCurveTo(18, 6, 26, -1); x.lineTo(36, 0); x.lineTo(26, -5); x.quadraticCurveTo(18, -9, 6, -5); x.quadraticCurveTo(-18, -4, -34, 2); x.fill();
+  for (const [off, k] of [[-6, .8], [0, 1]]) {
+    x.save(); x.translate(off, -3); x.rotate(-wa * k - .1);
+    x.beginPath(); x.moveTo(-10, 0); x.quadraticCurveTo(-18, -26, -42, -52); x.quadraticCurveTo(-24, -40, -8, -34); x.quadraticCurveTo(4, -22, 10, 0); x.closePath(); x.fill();
+    x.restore();
+  }
+  x.restore();
+}
+
+// ── lantern (swings on its hook) ────────────────────────────────────────────────────────────────────────
+const LAN = { post: 1300, hx: 1232, hy: 445 };
+const lanternPos = a => [LAN.hx + Math.sin(a) * 90, LAN.hy + 30 + Math.cos(a) * 90];
+function lantern(x, a) {
+  x.save(); x.translate(LAN.hx, LAN.hy + 2); x.rotate(-a); x.fillStyle = INK;
+  for (let k = 0; k < 5; k++) { x.beginPath(); x.ellipse(0, 6 + k * 9, 2.6, 5, 0, 0, TAU); x.fill(); }
+  x.translate(0, 50);
+  x.beginPath(); x.arc(0, -4, 6, 0, TAU); x.fill();
+  x.beginPath(); x.moveTo(-26, 16); x.quadraticCurveTo(-24, 2, 0, -2); x.quadraticCurveTo(24, 2, 26, 16); x.closePath(); x.fill();  // dome cap
+  x.fillRect(-28, 14, 56, 6);
+  x.beginPath(); x.moveTo(-24, 20); x.lineTo(-20, 78); x.lineTo(20, 78); x.lineTo(24, 20); x.lineTo(19, 20); x.lineTo(15.5, 73); x.lineTo(-15.5, 73); x.lineTo(-19, 20); x.closePath(); x.fill();  // frame
+  x.fillRect(-2, 20, 4, 55); x.fillRect(-22, 44, 44, 3);
+  x.beginPath(); x.moveTo(-24, 78); x.lineTo(24, 78); x.lineTo(15, 90); x.lineTo(-15, 90); x.closePath(); x.fill();
+  curl(x, -24, 18, -2.2, 26, 2.4, -1, 1.2); curl(x, 24, 18, 2.2, 26, 2.4, 1, 1.2);
+  x.beginPath(); x.arc(0, 95, 5, 0, TAU); x.fill();
+  x.restore();
+}
+
+// ── scenes ───────────────────────────────────────────────────────────────────────────────────────────────
+function sceneA(x, t) {
+  const gx = W / 2, gy = H / 2;
+  const g = x.createRadialGradient(gx, gy - 40, 40, gx, gy, 900);
+  g.addColorStop(0, '#fff1c8'); g.addColorStop(.28, '#fbd08a'); g.addColorStop(.6, '#ef9a55'); g.addColorStop(1, '#b8475e');
+  x.fillStyle = g; x.fillRect(0, 0, W, H);
+  x.drawImage(L.frame, 0, 0);
+  x.fillStyle = INK;
+  // little lantern hanging from the top of the oval, swinging on its pin (damped)
+  const tq = q(t), sw = .32 * Math.exp(-tq * .9) * Math.cos(tq * 3.4) + .03 * Math.sin(tq * 2.1);
+  x.save(); x.translate(W / 2, 108); x.rotate(-sw);
+  taperPts(x, [[0, 0], [0, 110]], 2.4, 2); x.translate(-LAN.hx, -LAN.hy - 110 + 2 - 48); x.restore();
+  x.save(); x.translate(W / 2, 108); x.rotate(-sw); x.scale(.72, .72);
+  x.translate(0, 140); x.beginPath(); x.arc(0, -4, 6, 0, TAU); x.fill();
+  x.beginPath(); x.moveTo(-26, 16); x.quadraticCurveTo(-24, 2, 0, -2); x.quadraticCurveTo(24, 2, 26, 16); x.closePath(); x.fill(); x.fillRect(-28, 14, 56, 6);
+  x.beginPath(); x.moveTo(-24, 20); x.lineTo(-20, 78); x.lineTo(20, 78); x.lineTo(24, 20); x.lineTo(19, 20); x.lineTo(15.5, 73); x.lineTo(-15.5, 73); x.lineTo(-19, 20); x.closePath(); x.fill();
+  x.fillRect(-2, 20, 4, 55); x.beginPath(); x.moveTo(-24, 78); x.lineTo(24, 78); x.lineTo(15, 90); x.lineTo(-15, 90); x.closePath(); x.fill();
+  curl(x, -24, 18, -2.2, 26, 2.4, -1, 1.2); curl(x, 24, 18, 2.2, 26, 2.4, 1, 1.2);
+  x.restore();
+  // title letters: each a cut-paper piece that drops onto its pin with a little overshoot (stepped)
+  const s1 = 'The Traveler';
+  x.font = `164px ${SC}`; x.textBaseline = 'alphabetic';
+  const ws = [...s1].map(ch => x.measureText(ch).width), tw = ws.reduce((a, b) => a + b, 0);
+  let px = W / 2 - tw / 2;
+  [...s1].forEach((ch, i) => {
+    const u = seg(tq, T.let0 + i * .055, T.let0 + i * .055 + .3);
+    if (u > 0) { const k = eBack(u), dy = (1 - k) * -46, rot = (1 - k) * (i % 2 ? .25 : -.25);
+      x.save(); x.translate(px + ws[i] / 2, 540 + dy); x.rotate(rot); x.fillText(ch, -ws[i] / 2, 0); x.restore(); }
+    px += ws[i];
+  });
+  const us = seg(tq, T.sub, T.sub + .35);
+  if (us > 0) { x.font = `italic 90px ${IT}`; const k = eBack(us); x.save(); x.translate(W / 2, 656 + (1 - k) * 30); x.textAlign = 'center'; x.globalAlpha = clamp(us * 3); x.fillText('and the Lantern', 0, 0); x.restore(); x.globalAlpha = 1; }
+  const ud = eOut(seg(tq, T.div0, T.div1));
+  if (ud > 0) { const w = 900 * ud; x.drawImage(L.div, 450 - w / 2, 0, w, 120, W / 2 - w / 2, 692, w, 120); }
+}
+function travelerB(t) { const tq = q(t); return -150 + 262 * (tq - T.walkB); }
+function sceneB(x, t) {
+  const cam = 110 * eInOut(seg(t, T.wipe0, T.turn1)), tq = q(t);
+  vg(x, [[0, '#0b2f3a'], [.3, '#17565f'], [.5, '#3f8a86'], [.64, '#b3b877'], [.74, '#f1c66a'], [.9, '#f8d88c'], [1, '#e9b870']]);
+  glow(x, 900, 800, 1000, [[0, 'rgba(255,214,130,.6)'], [.5, 'rgba(255,190,110,.18)'], [1, 'rgba(0,0,0,0)']]);
+  // moon rising behind the castle
+  const mu = eInOut(seg(t, T.moon0, T.moon1)), mx = 1500 - cam * .1, my = lerp(740, 255, mu);
+  const ma = clamp((720 - my) / 110);            // rises out of the haze behind the far hills
+  glow(x, mx, my, 420, [[0, 'rgba(255,248,220,.75)'], [.2, 'rgba(255,240,200,.35)'], [.55, 'rgba(200,230,210,.1)'], [1, 'rgba(0,0,0,0)']], ma);
+  x.globalAlpha = ma; x.fillStyle = '#fff8e6'; x.beginPath(); x.arc(mx, my, 74, 0, TAU); x.fill(); x.globalAlpha = 1;
+  layer(x, L.farB, -cam * .2, .27);
+  // birds in V formation, wings pinned at the shoulder
+  x.fillStyle = INK;
+  const bu = seg(tq, T.bird0, T.bird1);
+  if (bu > 0 && bu < 1) {
+    const lx = lerp(2150, -500, bu), ly = 300 - 60 * Math.sin(bu * PI);
+    const F = [[0, 0], [1, -1], [1, 1], [2, -2], [2, 2], [3, -3], [3, 3]];
+    F.forEach(([k, sd], i) => bird(x, lx + k * 78 + (sd > 0 ? 8 : 0), ly + sd * 34 + Math.sin(tq * 3 + i) * 4, .62 - k * .02, tq * 11 + i * 1.3));
+  }
+  layer(x, L.midB, -cam * .5, .42);
+  x.drawImage(L.nearB, -cam, 0);
+  // traveler
+  const tx = travelerB(t);
+  if (tx > -260) drawPuppet(x, t, tx - cam, GYB(tx) + 2, { ph: tx / 225 * TAU, amp: 1, reach: 0 });
+}
+function travelerC(t) { const tq = q(t); return lerp(760, 1122, eOut2(seg(tq, T.walkC0, T.walkC1))); }
+function sceneC(x, t) {
+  const tq = q(t);
+  vg(x, [[0, '#2f1330'], [.3, '#6d2748'], [.52, '#b24f64'], [.72, '#ec9559'], [.86, '#f7bf72'], [1, '#fad38e']]);
+  glow(x, 800, 830, 900, [[0, 'rgba(255,210,140,.45)'], [1, 'rgba(0,0,0,0)']]);
+  // the world dims around the lantern's light
+  const dim = eInOut(seg(t, T.dim0, T.dim1));
+  if (dim > 0) { x.fillStyle = `rgba(14,4,10,${dim * .9})`; x.fillRect(0, 0, W, H); }
+  // lantern light: spark flicker (anticipation), bloom, then fade
+  const lu = seg(t, T.lit, T.lit + .45);
+  let gl = 0;
+  if (t > T.lit) { gl = eOut(lu) * (1 - eInOut(seg(t, T.glow0, T.glow1)));
+    if (t < T.lit + .2) gl *= [.35, .1, .6, .25, .9, .7][Math.floor((t - T.lit) * 30) % 6]; gl *= 1 + .05 * Math.sin(q(t) * 40); }
+  const swing = t > T.lit - .05 ? .1 * Math.exp(-(tq - T.lit) * 1.6) * Math.sin((tq - T.lit) * 5.5) : .018 * Math.sin(tq * 1.7);
+  const lp = lanternPos(swing);
+  if (gl > 0) {
+    glow(x, lp[0], lp[1] - 10, 820, [[0, 'rgba(255,238,190,.9)'], [.12, 'rgba(255,196,110,.55)'], [.4, 'rgba(240,130,60,.2)'], [1, 'rgba(0,0,0,0)']], gl);
+    glow(x, lp[0], lp[1] - 12, 70, [[0, 'rgba(255,255,240,1)'], [.6, 'rgba(255,230,160,.7)'], [1, 'rgba(0,0,0,0)']], gl);
+  }
+  layer(x, L.farC, 0, .26);
+  layer(x, L.midC, 0, .45);
+  x.drawImage(L.nearC, 0, 0);
+  lantern(x, swing);
+  const tx = travelerC(t);
+  const tx1 = travelerC(t + 1 / STEP), spd = (tx1 - tx) * STEP;
+  const ru = seg(tq, T.reach0, T.reach1), rk = ru > 0 ? eBack(ru) : 0;
+  drawPuppet(x, t, tx, GYC(tx) + 2, { ph: tx / 225 * TAU, amp: clamp(spd / 170), reach: clamp(rk, 0, 1.08), tx: lp[0] - tx - 6, ty: lp[1] + 38 - GYC(tx) - 2 });
+}
+
+// ── compositor: iris in → card → foliage wipe → forest → page turn → lantern hill → dim → iris out ─────────
+function iris(x, cx, cy, r) {
+  x.save(); x.fillStyle = '#000'; x.beginPath(); x.rect(0, 0, W, H); x.arc(cx, cy, Math.max(0, r), 0, TAU, true); x.fill('evenodd'); x.restore();
+  if (r > 0) { x.save(); x.strokeStyle = 'rgba(0,0,0,.35)'; x.lineWidth = 24; x.beginPath(); x.arc(cx, cy, r + 6, 0, TAU); x.stroke(); x.restore(); }
+}
+function render(t) {
+  const x = ctx; x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over';
+  if (t < T.wipe0) sceneA(x, t);
+  else if (t < T.wipe1) {
+    const c = lerp(W + 820, -820, eInOut(seg(t, T.wipe0, T.wipe1)));
+    const a = L.bufA.getContext('2d'), b = L.bufB.getContext('2d');
+    sceneA(a, t); sceneB(b, t);
+    x.drawImage(L.bufA, 0, 0);
+    const cc = clamp(c, 0, W); if (cc < W) x.drawImage(L.bufB, cc, 0, W - cc, H, cc, 0, W - cc, H);
+    x.drawImage(L.band, c - 800, 0);
+  } else if (t < T.turn0) sceneB(x, t);
+  else if (t < T.turn1) {
+    const f = lerp(W, -60, eInOut(seg(t, T.turn0, T.turn1))), w = W - f;
+    const a = L.bufA.getContext('2d'); sceneB(a, t); sceneC(x, t);
+    // old page left of the flap
+    const ol = Math.max(0, f - w);
+    if (ol > 0) { x.drawImage(L.bufA, 0, 0, ol, H, 0, 0, ol, H);
+      const sg = x.createLinearGradient(ol, 0, ol - 70, 0); sg.addColorStop(0, 'rgba(0,0,0,.4)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = sg; x.fillRect(ol - 70, 0, 70, H); }
+    // shadow cast by the lifted page on the new one
+    const cs = x.createLinearGradient(f, 0, f + 120, 0); cs.addColorStop(0, 'rgba(0,0,0,.5)'); cs.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = cs; x.fillRect(f, 0, 120, H);
+    // the flap: back of the backlit paper, the old scene seen through it (mirrored)
+    x.save(); x.beginPath(); x.rect(ol, 0, f - ol, H); x.clip();
+    x.fillStyle = '#e2b986'; x.fillRect(ol, 0, f - ol, H);
+    x.globalAlpha = .3; x.save(); x.translate(2 * f, 0); x.scale(-1, 1); x.drawImage(L.bufA, 0, 0); x.restore(); x.globalAlpha = 1;
+    const fg = x.createLinearGradient(ol, 0, f, 0); fg.addColorStop(0, 'rgba(90,40,20,.35)'); fg.addColorStop(.7, 'rgba(255,240,210,.0)'); fg.addColorStop(.93, 'rgba(255,250,235,.35)'); fg.addColorStop(1, 'rgba(60,20,10,.4)');
+    x.fillStyle = fg; x.fillRect(ol, 0, f - ol, H); x.restore();
+  } else sceneC(x, t);
+  // backlit paper texture, vignette, projector flicker and grain
+  x.globalCompositeOperation = 'multiply'; x.drawImage(L.fiber, 0, 0);
+  x.globalCompositeOperation = 'source-over'; x.drawImage(L.vig, 0, 0);
+  const fk = Math.floor(t * 24);
+  x.fillStyle = `rgba(0,0,0,${.035 * hash(fk)})`; x.fillRect(0, 0, W, H);
+  x.globalCompositeOperation = 'overlay'; x.globalAlpha = .1; x.drawImage(L.grain[fk % 3], 0, 0, W, H); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over';
+  // iris in at the start, iris out on the dying lantern at the end
+  if (t < T.iris1) iris(x, W / 2, H / 2, 1150 * eOut(seg(t, T.iris0, T.iris1)));
+  if (t > T.irisC0) { const lp = lanternPos(0); iris(x, lerp(lp[0], lp[0], 0), lp[1] - 20, lerp(1400, 0, eInOut(seg(t, T.irisC0, T.irisC1)))); }
+}
+
+window.ready = (async () => {
+  await Promise.all([`164px ${SC}`, `italic 90px ${IT}`].map(f => document.fonts.load(f, 'The Traveler and the Lantern')));
+  await document.fonts.ready;
+  buildLayers(); render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [{ t: .05, k: 'iris' }];
+  for (let i = 0; i < 12; i++) ev.push({ t: T.let0 + i * .055 + .2, k: 'snip', v: i === 3 || i === 4 ? .3 : 1 });
+  ev.push({ t: T.sub + .15, k: 'snip', v: .8 }, { t: T.div0, k: 'shimmer' });
+  ev.push({ t: T.wipe0, k: 'rustle', d: T.wipe1 - T.wipe0 + .2 });
+  ev.push({ t: T.moon0 + .8, k: 'moon' }, { t: T.bird0 + .9, k: 'wings', d: 2.2 });
+  ev.push({ t: T.turn0, k: 'page', d: T.turn1 - T.turn0 });
+  // footsteps: where the stepping phase crosses a half-cycle
+  let prev = null;
+  for (let n = 0; n < 300; n++) {
+    const t = n / 30; let ph = null;
+    if (t >= T.walkB + .05 && t < T.turn0 + .3) ph = travelerB(t) / 225 * TAU; else if (t >= T.turn1 - .1 && t < T.walkC1) ph = travelerC(t) / 225 * TAU;
+    if (ph !== null && prev !== null && Math.floor(ph / PI) !== Math.floor(prev / PI) && (t < T.turn0 || t > T.turn1 - .1)) {
+      const xx = t < T.turn1 ? travelerB(t) : travelerC(t); if (xx > -60) ev.push({ t, k: 'step', v: t > T.turn1 ? .8 : 1 });
+    }
+    prev = ph;
+  }
+  // harp melody (MIDI notes, D major)
+  for (const [t, n] of [[.6, 62], [.85, 69], [1.1, 66], [1.35, 74], [1.6, 73], [1.95, 69], [3.1, 62], [3.1, 50], [3.5, 66], [3.9, 69], [4.5, 71], [4.5, 47], [4.9, 69], [5.3, 66], [5.8, 64], [5.8, 45], [6.1, 62],
+    [7.2, 64], [7.2, 52], [7.6, 66], [8.0, 69], [8.95, 74], [9.2, 73], [9.45, 69], [9.45, 50], [9.7, 66]]) ev.push({ t, k: 'harp', n });
+  ev.push({ t: T.reach1 - .1, k: 'tink' }, { t: T.lit, k: 'flare' }, { t: T.lit + .05, k: 'chord' }, { t: T.dim0 + .2, k: 'fall' });
+  return ev;
+};
+</script>
+</body></html>
