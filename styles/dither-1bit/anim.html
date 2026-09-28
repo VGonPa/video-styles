@@ -1,0 +1,342 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="cv" width="1920" height="1080"></canvas>
+<script>
+// 1-Bit Dither: the scene is rendered in grayscale at 640x360, then ordered-dithered (Bayer 8x8)
+// to two inks and scaled 3x with nearest neighbour (1 dither pixel = 3x3 screen pixels).
+// Everything is a function of t (seeded hash noise only).
+const W = 640, H = 360, S = 3, HY = 222;           // low-res grid, horizon row
+const INK = [13, 15, 18], PAPER = [240, 230, 200];  // the two (and only two) colours
+const cv = document.getElementById('cv'), out = cv.getContext('2d');
+const lo = document.createElement('canvas'); lo.width = W; lo.height = H;
+const g = lo.getContext('2d', { willReadFrequently: true });
+const bits = document.createElement('canvas'); bits.width = W; bits.height = H;
+const bctx = bits.getContext('2d');
+const bitImg = bctx.createImageData(W, H);
+const ttl = document.createElement('canvas'); ttl.width = W; ttl.height = H;
+const tctx = ttl.getContext('2d', { willReadFrequently: true });
+let titleFill, titleEdge, capFill, capEdge;   // 1-bit masks (Uint8Array W*H)
+
+// ---------- helpers ----------
+const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const sm = (a, b, x) => { const u = clamp((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+const lerp = (a, b, u) => a + (b - a) * u;
+const easeOut = u => 1 - Math.pow(1 - clamp(u), 3);
+const easeIO = u => { u = clamp(u); return u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; };
+function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function hash(x, y, s) { let h = (x * 374761393 + y * 668265263 + s * 982451653) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function vnoise(x, y, s) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi, s), b = hash(xi + 1, yi, s), c = hash(xi, yi + 1, s), d = hash(xi + 1, yi + 1, s);
+  return lerp(lerp(a, b, u), lerp(c, d, u), v);
+}
+function fbm(x, y, s, oct = 5) { let a = 0, amp = .5, f = 1, n = 0; for (let i = 0; i < oct; i++) { a += amp * vnoise(x * f, y * f, s + i * 17); n += amp; amp *= .5; f *= 2.03; } return a / n; }
+const BAYER = (() => { // 8x8 Bayer threshold matrix, normalised to (0,1)
+  const m = [[0]]; let M = m;
+  for (let n = 1; n < 8; n *= 2) { const N = []; for (let y = 0; y < 2 * n; y++) { N.push([]); for (let x = 0; x < 2 * n; x++) { const b = M[y % n][x % n] * 4; N[y].push(b + [0, 2, 3, 1][(y >= n) * 2 + (x >= n)]); } } M = N; }
+  const f = new Float32Array(64); for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) f[y * 8 + x] = (M[y][x] + .5) / 64; return f;
+})();
+
+// ---------- precomputed fields ----------
+const CW = 820;                         // tile width (scroll budget is < 180 px)
+const cloudT = new Float32Array(CW * HY), fogT = new Float32Array(CW * H);
+const stars = [];
+let bolt = [];
+function precompute() {
+  for (let y = 0; y < HY; y++) for (let x = 0; x < CW; x++) {
+    const n = fbm(x / 150, y / 46, 3); const band = sm(10, 60, y);
+    cloudT[y * CW + x] = n * (.72 + .4 * band) * (1 - .45 * sm(120, 215, y));
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < CW; x++) fogT[y * CW + x] = fbm(x / 90, y / 26, 41, 4);
+  const r = rng(7);
+  for (let i = 0; i < 90; i++) stars.push({ x: r() * W, y: r() * 150, b: .55 + .45 * r(), p: r() * 6.28 });
+  // lightning bolt: main jagged channel + two branches (seeded)
+  const r2 = rng(19); const main = [[268, -4]]; let x = 268, y = -4;
+  while (y < 176) { y += 7 + r2() * 11; x += (r2() - .45) * 22; main.push([x, y]); }
+  bolt.push({ pts: main, w: 2 });
+  for (const k of [3, 7]) { let [bx, by] = main[k]; const br = [[bx, by]]; for (let j = 0; j < 5; j++) { by += 6 + r2() * 8; bx += (k === 3 ? -1 : 1) * (6 + r2() * 10); br.push([bx, by]); } bolt.push({ pts: br, w: 1 }); }
+}
+function sampleT(T, tw, x, y) { // bilinear along x only (y is integer)
+  const xi = Math.floor(x), f = x - xi; const i = y * tw + xi; return T[i] * (1 - f) + T[i + 1] * f;
+}
+function renderMask(font, text, x, y, align, spacing, edgeW) {
+  tctx.clearRect(0, 0, W, H); tctx.font = font; tctx.textAlign = align; tctx.textBaseline = 'alphabetic';
+  if ('letterSpacing' in tctx) tctx.letterSpacing = spacing + 'px';
+  tctx.fillStyle = '#fff'; tctx.fillText(text, x, y);
+  const d = tctx.getImageData(0, 0, W, H).data; const fill = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) fill[i] = d[i * 4 + 3] > 110 ? 1 : 0;
+  const edge = new Uint8Array(W * H); // dilated outline so the letters read over any tone
+  for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++) {
+    if (fill[yy * W + xx]) continue; let hit = 0;
+    for (let dy = -edgeW; dy <= edgeW && !hit; dy++) for (let dx = -edgeW; dx <= edgeW; dx++) {
+      const X = xx + dx, Y = yy + dy; if (X >= 0 && Y >= 0 && X < W && Y < H && fill[Y * W + X]) { hit = 1; break; } }
+    edge[yy * W + xx] = hit;
+  }
+  return [fill, edge];
+}
+
+// ---------- timeline ----------
+const LX = 560, LY = 55;                       // lamp
+const TL = 5.1;                                 // lightning strike
+const lampOn = t => { // ignition flicker, steady, then the final fade
+  if (t < .9) return 0;
+  const ign = t < 1.35 ? ([1, 0, 1, 1, 0, 1][Math.floor((t - .9) / .075)] ?? 1) * sm(.9, 1.35, t) : 1;
+  const fade = 1 - sm(8.35, 9.35, t);
+  const stutter = (t > 8.55 && t < 8.62) || (t > 8.8 && t < 8.85) ? .35 : 1;
+  return ign * fade * stutter;
+};
+const phi = t => 1.5 * Math.PI + 2 * Math.PI * (t - 2.3) / 4.1 + (t > 8.35 ? -0.6 * sm(8.35, 9.6, t) * (t - 8.35) : 0);
+function ship(t) {
+  const e = easeIO(t / 10) * .75 + (t / 10) * .25;
+  return { x: 60 + 200 * e, y: HY + 6 + 30 * e + Math.sin(t * 2.2) * .8, s: .5 + .5 * e, rot: .045 * Math.sin(t * 1.8 + .6) };
+}
+const flash = t => { // lightning: bright sky frames used for the palette inversion
+  const d = t - TL; if (d < 0 || d > 1) return 0;
+  if (d < .07) return 1; if (d < .13) return .55; if (d < .2) return 1;
+  return .5 * Math.exp(-(d - .2) * 5);
+};
+const inverted = t => { const d = t - TL; return (d >= 0 && d < .07) || (d >= .13 && d < .2); };
+const exposure = t => easeOut(t / 1.3) * (1 - sm(9.25, 9.95, t));
+
+// beam intensity at a low-res pixel (volumetric cone projected to 2D)
+function beamParams(t, off = 0, gain = 1) {
+  const p = phi(t) + off, sx = Math.sin(p), c = Math.cos(p);
+  let ax = sx, ay = .045 + .03 * (1 - Math.abs(sx)); const n = Math.hypot(ax, ay); ax /= n; ay /= n;
+  const fs = .14 + .86 * Math.abs(sx);
+  return { sx, c, ax, ay, fs, str: lampOn(t) * gain };
+}
+function beamAt(B, x, y, fog) {
+  if (B.str <= 0) return 0;
+  const dx = x - LX, dy = y - LY; const along = dx * B.ax + dy * B.ay; if (along < 2) return 0;
+  const perp = Math.abs(dx * B.ay - dy * B.ax);
+  const w = (3 + along * .13) * (1 + 1.3 * (1 - B.fs));
+  const al = along / B.fs;
+  let v = Math.exp(-(perp * perp) / (w * w) * 1.6) * Math.exp(-al / 700) * sm(2, 14, along);
+  v *= (1.25 + 1.3 * fog) * (B.c > 0 ? 1 : .75);
+  return v * B.str;
+}
+const beamsAt = (BS, x, y, fog) => beamAt(BS[0], x, y, fog) + beamAt(BS[1], x, y, fog);
+// slow camera push-in (the dither grid stays fixed to the screen, so the pattern never crawls)
+const CX = 420, CY = 190;
+const zoom = t => 1 + .075 * easeIO(t / 9.6);
+
+// ---------- drawing ----------
+function drawShip(t, B) {
+  const sh = ship(t);
+  const lit = beamsAt(B, sh.x, sh.y - 40 * sh.s, .5);
+  g.save(); g.translate(sh.x, sh.y); g.rotate(sh.rot); g.scale(sh.s, sh.s);
+  g.beginPath(); g.rect(-120, -140, 240, 140); g.clip(); // hull cut at the waterline
+  const gray = v => { const k = Math.round(clamp(v) * 255); return `rgb(${k},${k},${k})`; };
+  // sails (two-masted schooner, bow to the right)
+  const sail = clamp(.16 + .8 * lit) * (1 - flash(t));
+  const sg = g.createLinearGradient(-40, 0, 45, 0); sg.addColorStop(0, gray(clamp(sail + .5))); sg.addColorStop(1, gray(clamp(sail + .12))); g.fillStyle = sg;
+  g.beginPath(); g.moveTo(-34, -12); g.lineTo(-30, -92); g.lineTo(-4, -16); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(6, -12); g.lineTo(10, -104); g.lineTo(40, -16); g.closePath(); g.fill();
+  g.fillStyle = gray(sail * .75);
+  g.beginPath(); g.moveTo(14, -100); g.lineTo(72, -14); g.lineTo(46, -14); g.closePath(); g.fill();
+  g.strokeStyle = gray(.03); g.lineWidth = 3;
+  g.beginPath(); g.moveTo(-32, -4); g.lineTo(-30, -100); g.moveTo(8, -4); g.lineTo(10, -112); g.moveTo(40, -8); g.lineTo(92, -18); g.stroke();
+  g.lineWidth = 1.5; g.beginPath(); g.moveTo(10, -112); g.lineTo(92, -18); g.moveTo(-30, -100); g.lineTo(10, -112); g.stroke();
+  // hull
+  g.fillStyle = gray(.03);
+  g.beginPath(); g.moveTo(-70, -18); g.lineTo(84, -20); g.lineTo(62, 2); g.lineTo(-58, 2); g.closePath(); g.fill();
+  g.fillStyle = gray(.5 + .5 * lit); g.fillRect(-68, -20, 152, 2.5);
+  g.fillStyle = gray(.75); g.fillRect(-60, -2.5, 124, 2.5); // foam at the waterline
+  g.restore();
+  // stern lantern (steady, then answers the light with three blinks)
+  const bl = t > 7.7 && t < 9.3 ? (Math.floor((t - 7.7) / .27) % 2 === 0 ? 1 : .15) : 1;
+  const lx = sh.x - 62 * sh.s * Math.cos(sh.rot) + 20 * sh.s * Math.sin(sh.rot), ly = sh.y - 24 * sh.s - 62 * sh.s * Math.sin(sh.rot);
+  return { lx, ly, on: bl * (t > .4 ? 1 : 0), sh };
+}
+function drawCliff(t, B) {
+  const fl = flash(t);
+  g.fillStyle = 'rgb(8,8,8)';
+  g.beginPath(); g.moveTo(418, 360); g.lineTo(428, 300); g.lineTo(446, 262); g.lineTo(452, 236); g.lineTo(474, 212);
+  g.lineTo(496, 196); g.lineTo(528, 184); g.lineTo(640, 176); g.lineTo(640, 360); g.closePath(); g.fill();
+  // moonlit left facets
+  const r = rng(3); g.fillStyle = 'rgb(46,46,46)';
+  const facets = [[428, 300, 446, 262, 454, 290], [446, 262, 452, 236, 462, 258], [452, 236, 474, 212, 470, 240], [474, 212, 496, 196, 488, 222], [496, 196, 528, 184, 510, 204], [424, 330, 428, 300, 440, 320]];
+  for (const f of facets) { g.beginPath(); g.moveTo(f[0], f[1]); g.lineTo(f[2], f[3]); g.lineTo(f[4], f[5]); g.closePath(); g.fill(); }
+  g.strokeStyle = 'rgb(70,70,70)'; g.lineWidth = 1;
+  for (let i = 0; i < 9; i++) { const y = 200 + i * 17 + r() * 6, x = 470 + r() * 40 + (360 - y) * -.25; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 20 + r() * 40, y + 3 - r() * 6); g.stroke(); }
+  // keeper's cottage
+  g.fillStyle = 'rgb(30,30,30)'; g.fillRect(514, 166, 30, 16); g.beginPath(); g.moveTo(510, 167); g.lineTo(529, 155); g.lineTo(548, 167); g.fill();
+  g.fillStyle = 'rgb(140,140,140)'; g.fillRect(514, 166, 5, 16);
+  const win = t < 8.9 ? .95 : lerp(.95, .15, sm(8.9, 9.3, t));
+  g.fillStyle = `rgb(${win * 255},${win * 255},${win * 255})`; g.fillRect(523, 170, 5, 5); g.fillRect(533, 170, 5, 5);
+  // lighthouse tower: tapered, moonlit from the left, two dark bands
+  const x0 = LX, yb = 182, yt = 68;
+  const grad = g.createLinearGradient(x0 - 18, 0, x0 + 18, 0);
+  grad.addColorStop(0, 'rgb(250,250,250)'); grad.addColorStop(.35, 'rgb(200,200,200)'); grad.addColorStop(.7, 'rgb(95,95,95)'); grad.addColorStop(1, 'rgb(30,30,30)');
+  g.fillStyle = grad; g.beginPath(); g.moveTo(x0 - 18, yb); g.lineTo(x0 - 11, yt); g.lineTo(x0 + 11, yt); g.lineTo(x0 + 18, yb); g.closePath(); g.fill();
+  const bg = g.createLinearGradient(x0 - 18, 0, x0 + 18, 0);
+  bg.addColorStop(0, 'rgb(70,70,70)'); bg.addColorStop(.4, 'rgb(28,28,28)'); bg.addColorStop(1, 'rgb(6,6,6)'); g.fillStyle = bg;
+  const hw = y => 11 + (y - yt) / (yb - yt) * 7;
+  for (const [a, b] of [[92, 110], [132, 150]]) { g.beginPath(); g.moveTo(x0 - hw(a), a); g.lineTo(x0 + hw(a), a); g.lineTo(x0 + hw(b), b); g.lineTo(x0 - hw(b), b); g.closePath(); g.fill(); }
+  g.fillStyle = 'rgb(12,12,12)'; g.fillRect(x0 - 4, 168, 8, 14); g.fillRect(x0 - 5, 120, 3, 5); // door, window
+  // gallery + lantern room + cap
+  g.fillStyle = 'rgb(14,14,14)'; g.fillRect(x0 - 17, 64, 34, 5);
+  g.strokeStyle = 'rgb(14,14,14)'; g.lineWidth = 1; g.beginPath(); g.moveTo(x0 - 17, 57.5); g.lineTo(x0 + 17, 57.5);
+  for (let i = -17; i <= 17; i += 5) { g.moveTo(x0 + i + .5, 57); g.lineTo(x0 + i + .5, 64); } g.stroke();
+  const L = lampOn(t); const glass = clamp(.16 + .84 * L);
+  g.fillStyle = `rgb(${glass * 255},${glass * 255},${glass * 255})`; g.fillRect(x0 - 9, 44, 18, 20);
+  g.fillStyle = 'rgb(14,14,14)'; g.fillRect(x0 - 1, 44, 2, 20); g.fillRect(x0 - 10, 43, 20, 2);
+  g.beginPath(); g.moveTo(x0 - 11, 44); g.quadraticCurveTo(x0, 28, x0 + 11, 44); g.fill(); g.fillRect(x0 - .5, 24, 1.5, 8);
+  // moonlit rims so the cap and gallery read against the night sky
+  g.strokeStyle = 'rgb(170,170,170)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(x0 - 11, 43.5); g.quadraticCurveTo(x0 - 7, 35, x0, 35.5); g.stroke();
+  g.fillStyle = 'rgb(150,150,150)'; g.fillRect(x0 - 17, 64, 12, 1.2); g.fillRect(x0 - 1, 24, 1, 8);
+  // surf at the cliff foot
+  g.fillStyle = 'rgb(200,200,200)';
+  for (let i = 0; i < 14; i++) { const ph = t * 1.3 + i * .7, a = (Math.sin(ph) * .5 + .5); const yy = 300 + i * 4.5, xx = 426 - (yy - 300) * .12 - a * 10 - i % 3 * 3; if (a > .35) g.fillRect(xx, yy, 6 + a * 12, 1.5); }
+}
+
+function render(t) {
+  const B = [beamParams(t), beamParams(t, Math.PI, .8)], fl = flash(t), ex = exposure(t);
+  const Z = zoom(t), iZ = 1 / Z;
+  const sh = ship(t);
+  const img = g.createImageData(W, H), d = img.data;
+  const cOff = 20 + t * 7, fOff = 10 + t * 14;
+  const MX = 96, MY = 44;                        // moon
+  const seaX = B.map(b => LX + b.sx * 470);        // where each beam grazes the far water
+  for (let Y = 0; Y < H; Y++) {
+    const y = CY + (Y - CY) * iZ, yi = Math.min(H - 1, Math.max(0, y | 0));
+    for (let X = 0; X < W; X++) {
+      const x = CX + (X - CX) * iZ;
+      let v;
+      const fogN = sampleT(fogT, CW, x + fOff, yi);
+      const fogD = clamp((fogN - .38) * 2.2) * (.35 + .9 * Math.exp(-Math.abs(y - HY + 10) / 50));
+      if (y < HY) {
+        // night sky: gradient + moon + cloud deck with silver edges
+        v = .02 + .3 * Math.pow(y / HY, 3.2);
+        const cn = sampleT(cloudT, CW, x + cOff, Math.min(HY - 1, yi)); const dens = sm(.44, .66, cn);
+        const md = Math.hypot(x - MX, (y - MY) * 1.05);
+        const moonLight = Math.exp(-md / 95);
+        let sky = v + .38 * Math.exp(-md / 34) + .16 * moonLight;
+        if (md < 15) sky = md < 13.5 ? (Math.hypot(x - MX - 5, y - MY + 3) < 11 ? .78 : .97) : .6; // moon disc with a crater tone
+        const edge = dens * (1 - dens) * 4;
+        const cloud = .02 + (.75 * moonLight + .07) * Math.pow(edge, 1.6) + .06 * moonLight * dens + .2 * Math.pow(y / HY, 3) * (1 - dens);
+        v = lerp(sky, cloud, dens);
+        v = lerp(v, .97, fl * (1 - .35 * dens));
+      } else {
+        // sea: perspective sine swell, crest glints, moon + beam reflection columns
+        const dz = y - HY + .6, z = 70 / dz;
+        const u = (x - 320) / dz * 2.2;
+        const h = Math.sin(z * 15 + u * .35 - t * 1.7) * .5 + Math.sin(z * 23 - u * .55 + t * 1.2) * .3 + (vnoise(u * .7 + t * .3, z * 9 - t * 1.1, 5) - .5) * 1.1;
+        const crest = sm(.45, 1.0, h);
+        const haze = Math.exp(-dz / 18);
+        const trough = sm(-.2, -.9, h);
+        v = .07 + .42 * Math.pow(crest, 1.4) * (.55 + .45 * Math.exp(-dz / 80)) + .34 * haze - .06 * trough;
+        const moonCol = Math.exp(-Math.pow((x - MX) / (6 + dz * .55), 2)) * Math.exp(-dz / 150);
+        v += moonCol * (crest * .9 + .12);
+        const bw = 28 + dz * 2.2;
+        let beamCol = 0;
+        for (let k = 0; k < 2; k++) beamCol += Math.exp(-Math.pow((x - seaX[k]) / bw, 2)) * Math.exp(-dz / 90) * B[k].str * (B[k].c > -.3 ? 1 : .4);
+        v += beamCol * (.25 * crest + .12);
+        v = lerp(v, .6 + .4 * crest, fl * .85);
+      }
+      v += fogD * .05;
+      const k = Math.round(clamp(v) * 255), i = (Y * W + X) * 4;
+      d[i] = d[i + 1] = d[i + 2] = k; d[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  g.setTransform(Z, 0, 0, Z, CX - CX * Z, CY - CY * Z);
+  // stars in clear gaps (1 px, twinkle)
+  for (const s of stars) {
+    const cn = sampleT(cloudT, CW, s.x + cOff, Math.floor(s.y)); if (cn > .42) continue;
+    const b = s.b * (.7 + .3 * Math.sin(t * 3 + s.p)); const k = Math.round(b * 255);
+    g.fillStyle = `rgb(${k},${k},${k})`; g.fillRect(Math.floor(s.x), Math.floor(s.y), 1, 1);
+  }
+  // lightning channel
+  const dT = t - TL;
+  if (dT >= 0 && dT < .32) {
+    g.strokeStyle = '#fff'; g.lineJoin = 'miter';
+    for (const b of bolt) { g.lineWidth = b.w; g.beginPath(); b.pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke(); }
+  }
+  // ship + its lantern reflection
+  const shp = drawShip(t, B);
+  if (shp.on > 0) {
+    const k = Math.round(shp.on * 255); g.fillStyle = `rgb(${k},${k},${k})`;
+    g.fillRect(shp.lx - 1.5, shp.ly - 1.5, 3, 3);
+    for (let j = 0; j < 7; j++) if ((j + Math.floor(t * 8)) % 3) g.fillRect(Math.round(shp.lx - 1 + Math.sin(j * 2 + t * 5)), Math.round(sh.y + 3 + j * 2.2), 2, 1);
+    // bow wash
+    g.fillStyle = 'rgb(190,190,190)';
+    for (let j = 0; j < 5; j++) { const a = Math.sin(t * 3 + j * 1.3) * .5 + .5; g.fillRect(sh.x + (48 + j * 9) * sh.s, sh.y - .5 + j * .8, (8 + a * 10) * sh.s, 1); }
+  }
+  drawCliff(t, B);
+  // rain after the strike
+  const rainA = sm(TL - .1, TL + .4, t) * (1 - sm(8.8, 9.8, t));
+  if (rainA > 0) {
+    g.strokeStyle = `rgba(150,150,150,${.55 * rainA})`; g.lineWidth = 1; g.beginPath();
+    const r = rng(77);
+    for (let i = 0; i < 150; i++) { const x0 = r() * 760, y0 = r() * 400, sp = 380 + r() * 160; const yy = (y0 + t * sp) % 400 - 20, xx = (x0 - t * sp * .32) % 760; const X = xx < 0 ? xx + 760 : xx; g.moveTo(X, yy); g.lineTo(X - 3.2, yy + 10); }
+    g.stroke();
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  // volumetric beam + lamp glare on top of everything
+  const px = g.getImageData(0, 0, W, H), p = px.data;
+  const glare = Math.max(B[0].str * Math.pow(Math.max(0, B[0].c), 7), B[1].str * Math.pow(Math.max(0, B[1].c), 7));
+  const lampS = lampOn(t);
+  for (let Y = 0; Y < H; Y++) for (let X = 0; X < W; X++) {
+    const x = CX + (X - CX) * iZ, y = CY + (Y - CY) * iZ;
+    const i = (Y * W + X) * 4; let v = p[i] / 255;
+    const fogN = sampleT(fogT, CW, x + fOff, Math.min(H - 1, Math.max(0, y | 0)));
+    const fog = clamp((fogN - .3) * 1.8);
+    let bm = beamsAt(B, x, y, fog);
+    const r = Math.hypot(x - LX, (y - LY) * 1.1);
+    const rs = Math.hypot(x - shp.lx, y - shp.ly);
+    bm += shp.on * .45 * Math.exp(-rs / 3.5);
+    bm += lampS * .9 * Math.exp(-r / 5) + glare * (1.3 * Math.exp(-r / (16 + 50 * glare)) + .7 * Math.exp(-Math.abs(y - LY) / 1.8) * Math.exp(-Math.abs(x - LX) / 240));
+    v = 1 - (1 - v) * (1 - clamp(bm));             // screen blend
+    v = Math.pow(clamp(v * ex), 1.2);
+    p[i] = Math.round(v * 255);
+  }
+  // 1-bit ordered dither
+  const inv = inverted(t);
+  const tp = titleA(t), cp = capA(t);
+  const wipe = (a, x, x0, x1) => clamp(a * 1.6 - (x - x0) / (x1 - x0) * .6);
+  const bd = bitImg.data;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const j = y * W + x, i = j * 4, th = BAYER[(y & 7) * 8 + (x & 7)];
+    let on = p[i] / 255 > th ? 1 : 0;
+    if (tp > 0 && wipe(tp, x, 20, 500) > th) { if (titleFill[j]) on = 1; else if (titleEdge[j]) on = 0; }
+    if (cp > 0 && wipe(cp, x, 20, 250) > th) { if (capFill[j]) on = 1; else if (capEdge[j]) on = 0; }
+    if (inv) on = 1 - on;
+    const c = on ? PAPER : INK; bd[i] = c[0]; bd[i + 1] = c[1]; bd[i + 2] = c[2]; bd[i + 3] = 255;
+  }
+  bctx.putImageData(bitImg, 0, 0);
+  out.imageSmoothingEnabled = false; out.drawImage(bits, 0, 0, W * S, H * S);
+}
+// title + caption reveal/hide through the Bayer thresholds (a dithered wipe, left to right)
+const titleA = t => sm(6.0, 6.9, t) * (1 - sm(9.35, 9.9, t));
+const capA = t => sm(.9, 1.5, t) * (1 - sm(3.6, 4.1, t));
+
+window.ready = (async () => {
+  await document.fonts.load('46px "IM Fell English SC"'); await document.fonts.load('8px "Silkscreen"'); await document.fonts.ready;
+  precompute();
+  const tf = renderMask('46px "IM Fell English SC"', 'THE LAST SIGNAL', 262, 112, 'center', 3, 2); titleFill = tf[0]; titleEdge = tf[1];
+  const cf = renderMask('8px "Silkscreen"', 'NORTH REEF LIGHT  ·  NOVEMBER 1899', 24, 336, 'left', 1, 1); capFill = cf[0]; capEdge = cf[1];
+  // the subtitle under the title rides on the title mask
+  const sf = renderMask('8px "Silkscreen"', "THE KEEPER'S FINAL WATCH", 262, 136, 'center', 2, 1);
+  for (let i = 0; i < W * H; i++) { titleFill[i] |= sf[0][i]; titleEdge[i] = (titleEdge[i] | sf[1][i]) & (1 - titleFill[i]); }
+  // dotted rule between them
+  for (let x = 180; x <= 344; x += 2) { titleFill[122 * W + x] = 1; for (const dy of [-1, 1]) titleEdge[(122 + dy) * W + x] = 1; titleEdge[122 * W + x + 1] = 1; }
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+
+// audio cue list (read by events.mjs -> events.json -> audio.py)
+window.events = () => {
+  const ev = [{ t: 0, k: 'bed' }, { t: .9, k: 'ignite' }];
+  // beam passes toward the camera: a low swell each revolution
+  for (let t = 1.2; t < 9.4; t += 1 / 30) for (const o of [0, Math.PI]) { const a = Math.cos(phi(t) + o), b = Math.cos(phi(t + 1 / 30) + o); if (a < .97 && b >= .97 && lampOn(t) > .3) ev.push({ t, k: 'sweep', v: lampOn(t) * (o ? .8 : 1) }); }
+  ev.push({ t: 3.4, k: 'horn', v: .7 }); ev.push({ t: TL, k: 'strike' }); ev.push({ t: TL + .55, k: 'thunder' });
+  ev.push({ t: TL, k: 'rain' }); ev.push({ t: 6.0, k: 'title' });
+  for (let i = 0; i < 3; i++) ev.push({ t: 7.7 + i * .54, k: 'blink' });
+  ev.push({ t: 8.35, k: 'fade' }); ev.push({ t: 8.9, k: 'horn', v: .5 });
+  return ev;
+};
+</script></body></html>
