@@ -1,0 +1,43 @@
+// node render.mjs <outDir> [fps=30] [t0=0] [t1=10] [workers=2] [times=comma list]
+// Every frame is a pure function of t; each worker still takes a contiguous block of frames.
+// WebGL runs on the Mac GPU (Metal via ANGLE) when available, else SwiftShader (same image, slower).
+import { createRequire } from 'module';
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+const require = createRequire(import.meta.url);
+// Playwright: global @playwright/test (as in the other styles), else $PLAYWRIGHT_DIR (a playwright or playwright-core package dir)
+const loadPW = () => { const cands = [process.env.PLAYWRIGHT_DIR, path.join(execSync('npm root -g').toString().trim(), '@playwright/test'), 'playwright', 'playwright-core'].filter(Boolean);
+  for (const c of cands) { try { return require(c); } catch {} } throw new Error('Playwright not found: npm i -g @playwright/test or set PLAYWRIGHT_DIR'); };
+const { chromium } = loadPW();
+const dir = path.dirname(new URL(import.meta.url).pathname);
+const [outDir, fpsA = '30', t0A = '0', t1A = '10', wA = '2', timesA] = process.argv.slice(2);
+const fps = +fpsA, t0 = +t0A, t1 = +t1A, workers = +wA;
+fs.mkdirSync(outDir, { recursive: true });
+let jobs;
+if (timesA) jobs = timesA.split(',').map(s => ({ t: +s, file: path.join(outDir, `t_${(+s).toFixed(2)}.jpg`) })).sort((a, b) => a.t - b.t);
+else { jobs = []; const n0 = Math.round(t0 * 30), n1 = Math.round(t1 * 30), stp = Math.round(30 / fps);
+  for (let n = n0; n < n1; n += stp) jobs.push({ t: n / 30, file: path.join(outDir, `${String(n).padStart(5, '0')}.jpg`) }); }
+const exe = (() => {
+  const base = path.join(process.env.HOME, 'Library/Caches/ms-playwright');
+  const dirs = fs.readdirSync(base).filter(d => d.startsWith('chromium_headless_shell-')).sort().reverse();
+  for (const d of dirs) { const p = path.join(base, d, 'chrome-headless-shell-mac-arm64/chrome-headless-shell'); if (fs.existsSync(p)) return p; }
+})();
+// GPU (Metal via ANGLE) when available; falls back to SwiftShader (same result, slower)
+const browser = await chromium.launch({ executablePath: exe, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const t = Date.now();
+const N = jobs.length, W = Math.min(workers, N);
+await Promise.all(Array.from({ length: W }, async (_, w) => {
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  page.on('pageerror', e => console.log('[err]', e.message));
+  page.on('console', m => { if (m.type() === 'error') console.log('[console]', m.text()); });
+  await page.goto('file://' + path.join(dir, 'anim.html'));
+  await page.evaluate(() => window.ready);
+  const a = Math.floor(w * N / W), b = Math.floor((w + 1) * N / W);
+  for (let i = a; i < b; i++) {
+    const b64 = await page.evaluate(j => window.draw(j), jobs[i]);
+    fs.writeFileSync(jobs[i].file, Buffer.from(b64, 'base64'));
+  }
+}));
+await browser.close();
+console.log('drew', jobs.length, 'in', ((Date.now() - t) / 1000).toFixed(1), 's');

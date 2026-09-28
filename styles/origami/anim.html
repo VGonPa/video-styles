@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Origami</title>
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#e7e1d5;overflow:hidden}canvas{display:block}</style>
+<!-- three.js r159 (MIT), vendored: no CDN at render time -->
+<script src="vendor/three.min.js"></script>
+</head>
+<body>
+<canvas id="out" width="1920" height="1080"></canvas>
+<script>
+/* ======================================================================
+ * Origami: a square sheet folds step by step into a crane, the crane
+ * flaps and flies off, a second sheet folds into a sailboat that floats
+ * on pleated paper water, then the boat unfolds flat into the title.
+ *
+ * Folding engine: every sheet is a set of convex paper facets (polygons
+ * in paper coordinates). A fold is a hinge line in the plane of the flat
+ * model; facets it crosses are split, facets on the moving side get the
+ * fold appended to their chain of rigid hinge rotations. Flat (180°)
+ * folds are exact, layer order comes from lifting the hinge just above
+ * the layers the flap lands on. A frame is then a pure function of t:
+ * each facet = product of its hinge rotations at their angles(t).
+ * Shading: flat facets (MeshStandard + flat normals), soft shadow maps,
+ * two-sided paper colours, procedural fibre texture and crease lines
+ * that appear once a fold has been made and stay when it is unfolded.
+ * Deterministic: seeded RNG only.
+ * ====================================================================== */
+const W = 1920, H = 1080, DUR = 10, PI = Math.PI, TAU = 2 * PI;
+const clamp01 = x => Math.min(1, Math.max(0, x)), lerp = (a, b, u) => a + (b - a) * u;
+const sstep = (a, b, x) => { const u = clamp01((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+const easeInOut = x => { x = clamp01(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const easeOut = x => 1 - Math.pow(1 - clamp01(x), 3);
+const easeIn = x => Math.pow(clamp01(x), 2.2);
+const backOut = (x, s = 1.7) => { x = clamp01(x) - 1; return 1 + (s + 1) * x * x * x + s * x * x; };
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+const DEG = PI / 180;
+
+/* ------------------------------------------------ paper stiffness curves */
+// fold: eases over, lands at u=.7, springs back a touch and is pressed flat
+const foldCurve = u => u <= 0 ? 0 : u >= 1 ? 1 : u < 0.7 ? easeInOut(u / 0.7) : 1 - 0.06 * Math.sin(PI * (u - 0.7) / 0.3);
+const FOLD_LAND = 0.7;
+
+/* ------------------------------------------------ 2D polygon helpers */
+const cross2 = (a, b, p) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+function clean(poly) {
+  const out = [];
+  for (const p of poly) { const q = out[out.length - 1]; if (!q || Math.hypot(p[0] - q[0], p[1] - q[1]) > 1e-7) out.push(p); }
+  if (out.length > 1) { const a = out[0], b = out[out.length - 1]; if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-7) out.pop(); }
+  return out.length >= 3 && Math.abs(area(out)) > 1e-6 ? out : null;
+}
+function area(p) { let s = 0; for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; }
+function centroid(p) { let x = 0, y = 0; for (const q of p) { x += q[0]; y += q[1]; } return [x / p.length, y / p.length]; }
+// split a convex polygon by line a-b -> [left(+), right(-), cut segment]
+function split(poly, a, b) {
+  const L = [], R = [], cut = [];
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length], sp = cross2(a, b, p), sq = cross2(a, b, q);
+    if (sp >= -1e-9) L.push(p); if (sp <= 1e-9) R.push(p);
+    if (Math.abs(sp) <= 1e-9) cut.push(p);
+    if ((sp > 1e-9 && sq < -1e-9) || (sp < -1e-9 && sq > 1e-9)) {
+      const u = sp / (sp - sq), x = [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u]; L.push(x); R.push(x); cut.push(x);
+    }
+  }
+  return [clean(L), clean(R), cut.length >= 2 ? [cut[0], cut[cut.length - 1]] : null];
+}
+function overlap(P, Q, tol = 2e-3) {
+  for (const poly of [P, Q]) for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length], n = [-(b[1] - a[1]), b[0] - a[0]], l = Math.hypot(n[0], n[1]);
+    if (l < 1e-9) continue; n[0] /= l; n[1] /= l;
+    let p0 = 1e9, p1 = -1e9, q0 = 1e9, q1 = -1e9;
+    for (const p of P) { const d = p[0] * n[0] + p[1] * n[1]; p0 = Math.min(p0, d); p1 = Math.max(p1, d); }
+    for (const q of Q) { const d = q[0] * n[0] + q[1] * n[1]; q0 = Math.min(q0, d); q1 = Math.max(q1, d); }
+    if (p1 < q0 + tol || q1 < p0 + tol) return false;
+  }
+  return true;
+}
+function reflect(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, u = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2;
+  const fx = a[0] + dx * u, fy = a[1] + dy * u; return [2 * fx - p[0], 2 * fy - p[1]];
+}
+
+/* ------------------------------------------------ folding engine
+ * plane coords (x, y) of the flat model <-> model space (x, height, -y) */
+const EPS = 0.0035;
+class Sheet {
+  constructor(poly, half) { this.pieces = [{ p: poly, M: new THREE.Matrix4(), ops: [], tag: 0 }]; this.ops = []; this.creases = []; this.half = half; }
+  w(pc, pt) { return V3(pt[0], 0, -pt[1]).applyMatrix4(pc.M); }                 // paper -> model
+  plane(pc) { return pc.p.map(q => { const v = this.w(pc, q); return [v.x, -v.z]; }); }
+  toPaper(pc, pt) { const inv = pc.M.clone().invert(), v = V3(pt[0], pc.M.elements[13], -pt[1]).applyMatrix4(inv); return [v.x, -v.z]; }
+  // o: {a, b, side, extra:[{a,b,side}], filter(pc), amt(t) -> 0..1, full: true (180° flat fold) | angle (free), dir: +1/-1}
+  fold(o) {
+    const id = this.ops.length + 1, lines = [{ a: o.a, b: o.b, side: o.side }, ...(o.extra || [])];
+    const next = [], moving = [];
+    for (const pc of this.pieces) {
+      let cur = pc.p, inside = true, segs = [];
+      const outs = [];
+      for (let li = 0; li < lines.length && cur; li++) {
+        const L = lines[li], pa = this.toPaper(pc, L.a), pb = this.toPaper(pc, L.b);
+        const [l, r, cut] = split(cur, pa, pb);
+        const sgn = cross2(L.a, L.b, L.side);
+        // classify halves in plane coordinates (paper may be mirrored)
+        let keep = null, drop = null;
+        for (const part of [l, r]) { if (!part) continue; const c = this.w(pc, centroid(part));
+          if (Math.sign(cross2(L.a, L.b, [c.x, -c.z])) === Math.sign(sgn)) keep = part; else drop = part; }
+        if (drop) outs.push(drop);
+        if (li === 0 && keep && drop && cut) segs.push(cut);
+        cur = keep; if (!cur) inside = false;
+      }
+      for (const d of outs) next.push({ ...pc, p: d, ops: [...pc.ops] });
+      if (cur) {
+        const np = { ...pc, p: cur, ops: [...pc.ops] }; next.push(np);
+        if (!o.filter || o.filter(np)) { moving.push(np); for (const s of segs) this.creases.push({ id, s }); }
+      }
+    }
+    this.pieces = next;
+    const movSet = new Set(moving), stat = next.filter(p => !movSet.has(p));
+    const hgt = pc => pc.M.elements[13];
+    let lo = 1e9, hi = -1e9; for (const m of moving) { lo = Math.min(lo, hgt(m)); hi = Math.max(hi, hgt(m)); }
+    let h;
+    if (o.full === true) {
+      let yov = -1e9;
+      const land = moving.map(m => this.plane(m).map(q => reflect(q, o.a, o.b)));
+      for (const s of stat) { const sp = this.plane(s); if (land.some(L => overlap(L, sp))) yov = Math.max(yov, hgt(s)); }
+      h = yov > -1e8 ? (yov + hi + EPS) / 2 : (lo + hi) / 2;
+    } else h = (lo + hi) / 2;
+    const A = V3(o.a[0], h, -o.a[1]), D = V3(o.b[0] - o.a[0], 0, -(o.b[1] - o.a[1])).normalize();
+    // rotation sense: the moving side lifts up (+height) first
+    const c0 = this.w(moving[0], centroid(moving[0].p)), vel = D.clone().cross(c0.clone().sub(A));
+    const sense = (vel.y >= 0 ? 1 : -1) * (o.dir || 1);
+    const op = { id, A, D, sense, full: o.full === true ? PI : o.full, amt: o.amt, t0: o.t0, t1: o.t1 };
+    this.ops.push(op);
+    const R = rotAbout(A, D, op.sense * op.full);
+    for (const m of moving) { m.ops.push(op); if (o.full === true) m.M = R.clone().multiply(m.M); }
+    return op;
+  }
+}
+const _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4();
+function rotAbout(A, D, ang, out = new THREE.Matrix4()) {
+  _m1.makeTranslation(A.x, A.y, A.z); _m2.makeRotationAxis(D, ang); _m3.makeTranslation(-A.x, -A.y, -A.z);
+  return out.copy(_m1).multiply(_m2).multiply(_m3);
+}
+
+/* ------------------------------------------------ textures */
+function fiberCanvas(seed, n = 1024) {
+  const c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d'), rnd = mulberry32(seed);
+  const img = g.createImageData(n, n), d = img.data;
+  // tileable value noise, 3 octaves (soft mottling of the pulp)
+  const oct = [[8, 0.5], [24, 0.3], [96, 0.2]].map(([f, a]) => { const gr = []; for (let i = 0; i < f * f; i++) gr.push(rnd()); return { f, a, gr }; });
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    let v = 0;
+    for (const o of oct) { const fx = x / n * o.f, fy = y / n * o.f, ix = Math.floor(fx), iy = Math.floor(fy), ux = fx - ix, uy = fy - iy;
+      const g0 = (i, j) => o.gr[((j % o.f + o.f) % o.f) * o.f + ((i % o.f + o.f) % o.f)];
+      const sx = ux * ux * (3 - 2 * ux), sy = uy * uy * (3 - 2 * uy);
+      v += o.a * lerp(lerp(g0(ix, iy), g0(ix + 1, iy), sx), lerp(g0(ix, iy + 1), g0(ix + 1, iy + 1), sx), sy); }
+    const k = (y * n + x) * 4, val = 118 + (v - 0.5) * 34 + (rnd() - 0.5) * 10; d[k] = d[k + 1] = d[k + 2] = val; d[k + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  // fibres: short curved strands, wrapped for tiling
+  g.lineCap = 'round';
+  for (let i = 0; i < 3200; i++) {
+    const x = rnd() * n, y = rnd() * n, a = rnd() * TAU, len = 6 + rnd() * rnd() * 46, bend = (rnd() - 0.5) * 0.9;
+    const light = rnd() < 0.6; g.strokeStyle = light ? `rgba(255,255,255,${0.10 + rnd() * 0.16})` : `rgba(40,30,20,${0.05 + rnd() * 0.08})`;
+    g.lineWidth = 0.5 + rnd() * 1.1;
+    for (const ox of [-n, 0, n]) for (const oy of [-n, 0, n]) {
+      if (x + ox < -60 || x + ox > n + 60 || y + oy < -60 || y + oy > n + 60) continue;
+      g.beginPath(); g.moveTo(x + ox, y + oy);
+      g.quadraticCurveTo(x + ox + Math.cos(a + bend) * len * 0.5, y + oy + Math.sin(a + bend) * len * 0.5, x + ox + Math.cos(a) * len, y + oy + Math.sin(a) * len); g.stroke();
+    }
+  }
+  return c;
+}
+const fiberTex = new THREE.CanvasTexture(fiberCanvas(56));
+fiberTex.wrapS = fiberTex.wrapT = THREE.RepeatWrapping; fiberTex.colorSpace = THREE.NoColorSpace; fiberTex.anisotropy = 8;
+
+// crease map: R = fold id (drawn wide), G = crease line intensity (antialiased, thin)
+function creaseTexture(sheet, n = 2048) {
+  const [hx, hy] = sheet.half, map = q => [(q[0] / hx * 0.5 + 0.5) * n, (0.5 - q[1] / hy * 0.5) * n];
+  const ca = document.createElement('canvas'), cb = document.createElement('canvas'); ca.width = ca.height = cb.width = cb.height = n;
+  const ga = ca.getContext('2d'), gb = cb.getContext('2d'); ga.fillStyle = '#000'; ga.fillRect(0, 0, n, n); gb.fillStyle = '#000'; gb.fillRect(0, 0, n, n);
+  ga.lineCap = gb.lineCap = 'butt';
+  for (const { id, s } of sheet.creases) {
+    const [a, b] = s.map(map);
+    ga.strokeStyle = `rgb(${id},0,0)`; ga.lineWidth = 9; ga.beginPath(); ga.moveTo(...a); ga.lineTo(...b); ga.stroke();
+  }
+  gb.strokeStyle = '#fff'; gb.lineWidth = 3.2;
+  for (const { s } of sheet.creases) { const [a, b] = s.map(map); gb.beginPath(); gb.moveTo(...a); gb.lineTo(...b); gb.stroke(); }
+  const A = ga.getImageData(0, 0, n, n), B = gb.getImageData(0, 0, n, n);
+  for (let i = 0; i < A.data.length; i += 4) { A.data[i + 1] = B.data[i]; A.data[i + 3] = 255; }
+  ga.putImageData(A, 0, 0);
+  const tx = new THREE.CanvasTexture(ca); tx.colorSpace = THREE.NoColorSpace; tx.generateMipmaps = false; tx.minFilter = THREE.LinearFilter; tx.flipY = true;
+  return tx;
+}
+
+/* ------------------------------------------------ paper material */
+function paperMaterial(o) {
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.93, metalness: 0, flatShading: true, side: THREE.DoubleSide });
+  const U = m.userData.U = {
+    uFront: { value: new THREE.Color(o.front) }, uBack: { value: new THREE.Color(o.back) }, uFiber: { value: fiberTex },
+    uFibScale: { value: o.fibScale || 0.32 }, uCrease: { value: o.crease || null }, uHasCrease: { value: o.crease ? 1 : 0 },
+    uStr: { value: new Array(24).fill(0) }, uHalf: { value: new THREE.Vector2(...(o.half || [1, 1])) }, uShape: { value: o.shape || 0 },
+    uText: { value: o.text || null }, uHasText: { value: o.text ? 1 : 0 }, uInk: { value: new THREE.Color(o.ink || '#20233a') },
+  };
+  m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aPaper; varying vec2 vPaper;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPaper = aPaper;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+      varying vec2 vPaper; uniform vec3 uFront, uBack, uInk; uniform sampler2D uFiber, uCrease, uText; uniform float uFibScale, uHasCrease, uHasText, uShape;
+      uniform float uStr[24]; uniform vec2 uHalf;`)
+      .replace('#include <map_fragment>', `
+      bool fr = gl_FrontFacing;
+      vec3 pc = fr ? uFront : uBack;
+      float fib = texture2D(uFiber, vPaper * uFibScale + (fr ? vec2(0.0) : vec2(0.37, 0.61))).r;
+      pc *= 0.80 + 0.42 * fib;
+      if (uHasCrease > 0.5) {
+        vec2 cuv = vPaper / uHalf * 0.5 + 0.5;
+        vec4 cr = texture2D(uCrease, cuv);
+        int id = int(cr.r * 255.0 + 0.5);
+        float s = id > 0 && id < 24 ? uStr[id] : 0.0;
+        pc *= 1.0 - 0.42 * cr.g * s;
+      }
+      // cut edge of the sheet: a hairline of shade so stacked layers read
+      float de = uShape < 0.5 ? (uHalf.x - abs(vPaper.x) - abs(vPaper.y)) * 0.7071 : min(uHalf.x - abs(vPaper.x), uHalf.y - abs(vPaper.y));
+      pc *= 0.84 + 0.16 * smoothstep(0.0, 0.016, de);
+      if (uHasText > 0.5 && fr) {
+        vec2 tuv = vec2(vPaper.y / uHalf.y * 0.5 + 0.5, vPaper.x / uHalf.x * 0.5 + 0.5);
+        float ta = texture2D(uText, tuv).a;
+        pc = mix(pc, uInk * (0.85 + 0.25 * fib), ta * 0.94);
+      }
+      diffuseColor.rgb *= pc;`);
+  };
+  return m;
+}
+
+/* ------------------------------------------------ renderer + scene */
+THREE.ColorManagement.enabled = true;
+const glc = document.createElement('canvas'); glc.width = W; glc.height = H;
+const renderer = new THREE.WebGLRenderer({ canvas: glc, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(W, H, false);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#e7e1d5');
+const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
+const hemi = new THREE.HemisphereLight('#fff6ea', '#b9b0a2', 1.25); scene.add(hemi);
+const sun = new THREE.DirectionalLight('#fff1dc', 2.6); sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096); sun.shadow.radius = 5; sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.012;
+Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 0.5, far: 40 });
+scene.add(sun); scene.add(sun.target);
+const SUN_DIR = V3(-0.42, 1, 0.5).normalize();
+
+// table: warm washi board
+const tableMat = paperMaterial({ front: '#b59c7e', back: '#b59c7e', fibScale: 0.12, half: [999, 999], shape: 1 });
+const table = new THREE.Mesh(new THREE.PlaneGeometry(80, 60).rotateX(-PI / 2), tableMat);
+{ const g = table.geometry, p = g.attributes.position, a = new Float32Array(p.count * 2); for (let i = 0; i < p.count; i++) { a[2 * i] = p.getX(i); a[2 * i + 1] = p.getZ(i); } g.setAttribute('aPaper', new THREE.BufferAttribute(a, 2)); }
+table.position.y = -0.006; table.receiveShadow = true; scene.add(table);
+
+// mesh for a folded sheet: non-indexed triangle fans, positions rewritten every frame
+function sheetMesh(sheet, mat) {
+  let nv = 0; for (const pc of sheet.pieces) nv += (pc.p.length - 2) * 3;
+  const g = new THREE.BufferGeometry(), pos = new Float32Array(nv * 3), pap = new Float32Array(nv * 2);
+  let k = 0; for (const pc of sheet.pieces) for (let i = 1; i < pc.p.length - 1; i++) for (const q of [pc.p[0], pc.p[i], pc.p[i + 1]]) { pap[2 * k] = q[0]; pap[2 * k + 1] = q[1]; k++; }
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPaper', new THREE.BufferAttribute(pap, 2));
+  const mesh = new THREE.Mesh(g, mat); mesh.castShadow = mesh.receiveShadow = true; mesh.matrixAutoUpdate = false; mesh.frustumCulled = false;
+  mesh.userData.sheet = sheet; scene.add(mesh); return mesh;
+}
+const _pm = new THREE.Matrix4(), _rm = new THREE.Matrix4(), _v = new THREE.Vector3();
+function poseSheet(mesh, t, angleOf) {
+  const sheet = mesh.userData.sheet, pos = mesh.geometry.attributes.position.array; let k = 0;
+  const angs = new Map(sheet.ops.map(op => [op, angleOf(op, t)]));
+  for (const pc of sheet.pieces) {
+    _pm.identity();
+    for (const op of pc.ops) { const a = angs.get(op); if (Math.abs(a) > 1e-6) _pm.premultiply(rotAbout(op.A, op.D, op.sense * a, _rm)); }
+    for (let i = 1; i < pc.p.length - 1; i++) for (const q of [pc.p[0], pc.p[i], pc.p[i + 1]]) {
+      _v.set(q[0], 0, -q[1]).applyMatrix4(_pm); pos[k++] = _v.x; pos[k++] = _v.y; pos[k++] = _v.z; }
+  }
+  mesh.geometry.attributes.position.needsUpdate = true;
+  mesh.geometry.computeBoundingSphere();
+  const U = mesh.material.userData.U;
+  for (const op of sheet.ops) U.uStr.value[op.id] = op.crease ? op.crease(t) : sstep(op.t0, op.t0 + (op.t1 - op.t0) * 0.7, t);
+}
+
+/* ================================================= sheet 1: the crane
+ * Square in diamond orientation, long axis L-R. Kite folds at both ends
+ * narrow it to a slim diamond, it is folded in half along the axis, neck
+ * and tail are folded up, the head folded forward; the two stacks above
+ * the wing hinge then open out as wings. */
+const S = 1.55, t225 = Math.tan(22.5 * DEG);
+const crane = new Sheet([[-S, 0], [0, -S], [S, 0], [0, S]], [S, S]);
+crane.pieces[0].tag = 0;
+const fl = (t0, t1) => ({ t0, t1, amt: t => foldCurve((t - t0) / (t1 - t0)) });
+const dirPt = (p, ang, l = 1) => [p[0] + Math.cos(ang * DEG) * l, p[1] + Math.sin(ang * DEG) * l];
+const tk = Math.tan(30 * DEG), xk = S * (1 - tk) / (1 + tk), yk = S - xk;
+const CF = {};  // crane folds
+CF.k1 = crane.fold({ a: [-S, 0], b: [xk, yk], side: [0, 3 * S], full: true, ...fl(0.55, 1.02) });
+CF.k2 = crane.fold({ a: [-S, 0], b: [xk, -yk], side: [0, -3 * S], full: true, ...fl(0.86, 1.30) });
+CF.k3 = crane.fold({ a: [S, 0], b: [-xk, yk], side: [0, 3 * S], full: true, ...fl(1.22, 1.66) });
+CF.k4 = crane.fold({ a: [S, 0], b: [-xk, -yk], side: [0, -3 * S], full: true, ...fl(1.52, 1.96) });
+CF.k5 = crane.fold({ a: [-S, 0], b: [S, 0], side: [0, -3 * S], full: true, ...fl(1.94, 2.44) });
+const NP = [0.36 * S, 0], TP = [-0.40 * S, 0];
+CF.neck = crane.fold({ a: NP, b: dirPt(NP, 35), side: [S, 0], full: true, ...fl(2.44, 2.84) });
+CF.tail = crane.fold({ a: TP, b: dirPt(TP, 152.5), side: [-S, 0], full: true, ...fl(2.56, 2.96) });
+const HC = dirPt(NP, 70, 0.5 * S);
+CF.head = crane.fold({ a: HC, b: dirPt(HC, 25), side: dirPt(NP, 70, 0.7 * S), full: true, filter: pc => pc.ops.includes(CF.neck), ...fl(2.94, 3.22) });
+const YH = 0.05 * S, inWing = pc => !pc.ops.includes(CF.neck) && !pc.ops.includes(CF.tail);
+const wingLines = { a: [-3 * S, YH], b: [3 * S, YH], side: [0, 3 * S],
+  extra: [{ a: NP, b: dirPt(NP, 35), side: [0, 0.25 * S] }, { a: TP, b: dirPt(TP, 152.5), side: [0, 0.25 * S] }] };
+const paperSide = pc => centroid(pc.p)[1] > 0 ? 1 : -1;
+// stack order after k5: paper v<0 lies on top (it was folded over)
+CF.wingTop = crane.fold({ ...wingLines, filter: pc => inWing(pc) && paperSide(pc) < 0, full: 0, dir: 1 });
+CF.wingBot = crane.fold({ ...wingLines, filter: pc => inWing(pc) && paperSide(pc) > 0, full: 0, dir: -1 });
+const T_OPEN = 3.36, T_FLY = 3.86;
+function wingAngle(t) {
+  if (t < T_OPEN) return 0;
+  const open = 72 * backOut((t - T_OPEN) / 0.5, 1.4);
+  if (t < T_FLY) return open * DEG;
+  const w = TAU * 2.7, ph = -1.628, u = t - T_FLY;
+  return (70 - 36 * Math.cos(w * u + ph)) * DEG;
+}
+CF.wingTop.t0 = CF.wingBot.t0 = T_OPEN; CF.wingTop.t1 = CF.wingBot.t1 = T_OPEN + 0.5;
+CF.wingTop.crease = CF.wingBot.crease = t => sstep(T_OPEN, T_OPEN + 0.3, t);
+for (const op of crane.ops) op.angle = op.full === PI ? t => PI * op.amt(t) : wingAngle;
+const craneMat = paperMaterial({ front: '#f4ecdc', back: '#d9432b', crease: creaseTexture(crane), half: [S, S], shape: 0 });
+const craneMesh = sheetMesh(crane, craneMat);
+
+/* ================================================= sheet 2: the sailboat
+ * Portrait sheet: folded in half, top corners folded down to the centre
+ * line (the sail), the band folded up (the hull), hull corners folded in. */
+const BA = 1.15, BH = 1.633;   // half width, half height (BH - BA = band height)
+const boat = new Sheet([[-BA, -BH], [BA, -BH], [BA, BH], [-BA, BH]], [BA, BH]);
+const BF = {};
+BF.b1 = boat.fold({ a: [-3, 0], b: [3, 0], side: [0, 3], full: true, ...fl(5.02, 5.46) });
+BF.b2 = boat.fold({ a: [0, 0], b: [-BA, -BA], side: [-2 * BA, 0], full: true, ...fl(5.40, 5.80) });
+BF.b3 = boat.fold({ a: [0, 0], b: [BA, -BA], side: [2 * BA, 0], full: true, ...fl(5.62, 6.02) });
+BF.b4 = boat.fold({ a: [-3, -BA], b: [3, -BA], side: [0, -3], full: true, ...fl(5.98, 6.38) });
+const HK = 0.62 * BA;
+BF.b5 = boat.fold({ a: [-HK, -BA], b: [-BA, -HK], side: [-2 * BA, -2 * BA], full: true, ...fl(6.30, 6.62) });
+BF.b6 = boat.fold({ a: [HK, -BA], b: [BA, -HK], side: [2 * BA, -2 * BA], full: true, ...fl(6.42, 6.74) });
+const T_UNF = 7.8;
+const UNF = { b6: [T_UNF, 0.34], b5: [T_UNF + 0.04, 0.34], b4: [T_UNF + 0.20, 0.36], b3: [T_UNF + 0.36, 0.36], b2: [T_UNF + 0.40, 0.36], b1: [T_UNF + 0.56, 0.40] };
+for (const [k, op] of Object.entries(BF)) {
+  const [u0, ud] = UNF[k], f = op.amt; op.u0 = u0; op.u1 = u0 + ud;
+  op.angle = t => PI * (f(t) - easeInOut((t - u0) / ud));
+}
+const T_TITLE = T_UNF + 0.9;
+const textCanvas = document.createElement('canvas'); textCanvas.width = 2048; textCanvas.height = Math.round(2048 * BA / BH);
+const textTex = new THREE.CanvasTexture(textCanvas); textTex.flipY = false; textTex.colorSpace = THREE.NoColorSpace;
+const boatMat = paperMaterial({ front: '#faf5ea', back: '#e8a92e', crease: creaseTexture(boat), half: [BA, BH], shape: 1, text: textTex, ink: '#232845' });
+const boatMesh = sheetMesh(boat, boatMat);
+
+/* ================================================= pleated paper water */
+const X2 = 20, WX0 = X2 - 9.5, WX1 = X2 + 9.5, WZ0 = -17, WZ1 = 4.6, PLEAT = 0.34, NXW = 150;
+const NZW = Math.round((WZ1 - WZ0) / PLEAT);
+const waterGeo = new THREE.BufferGeometry();
+{
+  const idx = [], pos = new Float32Array((NXW + 1) * (NZW + 1) * 3), pap = new Float32Array((NXW + 1) * (NZW + 1) * 2);
+  for (let j = 0; j <= NZW; j++) for (let i = 0; i <= NXW; i++) { const k = j * (NXW + 1) + i, x = lerp(WX0, WX1, i / NXW), z = WZ0 + j * PLEAT;
+    pos[3 * k] = x; pos[3 * k + 2] = z; pap[2 * k] = x; pap[2 * k + 1] = z; }
+  for (let j = 0; j < NZW; j++) for (let i = 0; i < NXW; i++) { const a = j * (NXW + 1) + i, b = a + 1, c = a + NXW + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
+  waterGeo.setIndex(idx); waterGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); waterGeo.setAttribute('aPaper', new THREE.BufferAttribute(pap, 2));
+}
+const waterMat = paperMaterial({ front: '#3f6fa8', back: '#2c4f80', fibScale: 0.22, half: [99, 99], shape: 1 });
+const water = new THREE.Mesh(waterGeo, waterMat); water.receiveShadow = true; water.castShadow = false; water.frustumCulled = false; scene.add(water);
+const T_WATER = 6.35, T_FLAT = 8.2;
+function pleatAmp(x, t) { return 0.13 * sstep(0, 1, (t - T_WATER - (x - WX0) * 0.035) / 0.55) * (1 - sstep(T_FLAT, T_FLAT + 0.75, t)); }
+function waterH(x, j, t) {
+  const A = pleatAmp(x, t) * (0.72 + 0.28 * Math.sin(1.25 * x - 2.6 * t + 0.85 * j)), s = j % 2 ? 1 : -1;
+  return A * (1 + s) + 0.002;
+}
+function poseWater(t) {
+  const p = waterGeo.attributes.position.array;
+  for (let j = 0; j <= NZW; j++) for (let i = 0; i <= NXW; i++) { const k = j * (NXW + 1) + i; p[3 * k + 1] = waterH(p[3 * k], j, t); }
+  waterGeo.attributes.position.needsUpdate = true;
+}
+
+/* ================================================= poses */
+const BZ = 0.9;   // boat sheet lies a little in front of the water centre
+const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _e = new THREE.Euler();
+const qAxis = (ax, a) => new THREE.Quaternion().setFromAxisAngle(ax, a);
+const XA = V3(1, 0, 0), YA = V3(0, 1, 0), ZA = V3(0, 0, 1);
+function cranePose(t) {
+  const M = new THREE.Matrix4();
+  // glide in and settle
+  const u = clamp01(t / 0.55), e = easeOut(u);
+  let pos = V3(lerp(-1.6, 0, e), 1.7 * (1 - easeOut(u * 1.05)) + 0.04 * Math.sin(u * PI) * (1 - u), lerp(-2.2, 0, e));
+  let q = qAxis(YA, (1 - e) * -28 * DEG).multiply(qAxis(XA, (1 - easeInOut(u)) * PI + (1 - e) * 10 * DEG * Math.sin(u * 5))).multiply(qAxis(ZA, (1 - e) * 7 * DEG * Math.cos(u * 4)));
+  // stand up on the keel
+  const st = t < 3.12 ? 0 : backOut((t - 3.12) / 0.46, 1.5);
+  q = qAxis(YA, -24 * DEG * easeInOut((t - 3.1) / 0.7)).multiply(q).multiply(qAxis(XA, 90 * DEG * st));
+  pos.y += 0.1 * Math.sin(PI * clamp01((t - 3.12) / 0.46));
+  // take-off: rise, bank toward the camera and away to the right
+  if (t > T_FLY + 0.08) {
+    const f = t - T_FLY - 0.08;
+    pos.add(V3(2.2 * f * f + 0.5 * f + 0.92 * (camPose(t).l.x - camPose(T_FLY).l.x), 2.3 * Math.pow(f, 1.1) + 1.4 * f * f + 0.06 * Math.sin(TAU * 2.7 * f), 2.4 * f * f));
+    const yaw = -22 * DEG * sstep(0, 0.9, f), pitch = 12 * DEG * Math.sin(PI * clamp01(f / 1.1)), roll = -8 * DEG * sstep(0.1, 0.8, f);
+    q = qAxis(YA, yaw).multiply(qAxis(ZA, pitch)).multiply(qAxis(XA, roll)).multiply(q);
+  }
+  return M.compose(pos, q, V3(1, 1, 1));
+}
+function camPose(t) {
+  const c1 = { p: V3(0.6, 3.4, 4.5), l: V3(0.3, 0.55, 0.0) }, c2 = { p: V3(X2, 4.0, 6.2), l: V3(X2, 0.55, 1.05) };
+  const c0 = { p: V3(0.2, 5.4, 4.6), l: V3(0.1, 0.1, 0.1) };
+  const d = easeInOut((t - 2.85) / 0.9), u = easeInOut((t - 4.35) / 0.95);
+  const p = c0.p.clone().lerp(c1.p, d).lerp(c2.p, u), l = c0.l.clone().lerp(c1.l, d).lerp(c2.l, u);
+  p.y += 0.35 * Math.sin(PI * u);                                  // lift slightly over the pan
+  p.add(V3(0.12 * Math.sin(t * 0.5), 0.05 * Math.sin(t * 0.7), -0.25 * t / DUR));   // slow breathing drift
+  return { p, l };
+}
+function camMatrix(t) { const c = camPose(t), m = new THREE.Matrix4().lookAt(c.p, c.l, YA); return { c, m }; }
+// title pose: sheet square to the camera at T_TITLE, landscape (paper long side along screen x)
+const titlePose = (() => {
+  const { c, m } = camMatrix(T_TITLE + 0.6);
+  const Rv = V3().setFromMatrixColumn(m, 0), Uv = V3().setFromMatrixColumn(m, 1), Fv = V3().setFromMatrixColumn(m, 2);
+  const basis = new THREE.Matrix4().makeBasis(Uv.clone().negate(), Fv, Rv.clone().negate());
+  const pos = c.p.clone().sub(Fv.clone().multiplyScalar(4.7)).add(Uv.clone().multiplyScalar(0.02));
+  return { pos, q: new THREE.Quaternion().setFromRotationMatrix(basis) };
+})();
+function boatFloatPose(t) {
+  const st = t < 6.72 ? 0 : backOut((t - 6.72) / 0.45, 1.6);
+  const bob = sstep(6.8, 7.3, t);
+  const y = 0.012 + lerp(0, 0.1, sstep(6.6, 7.0, t)) + bob * 0.035 * Math.sin(TAU * 0.95 * (t - 6.8));
+  const x = X2 + 0.3 * sstep(6.8, 8.0, t);
+  const pos = V3(x, y, BZ);
+  const q = qAxis(ZA, bob * 3.2 * DEG * Math.sin(TAU * 0.8 * (t - 6.9))).multiply(qAxis(YA, bob * 4 * DEG * Math.sin(TAU * 0.45 * (t - 6.9))));
+  // pivot about the hull bottom (model z = +BA after folding)
+  const M = new THREE.Matrix4().compose(pos, q, V3(1, 1, 1));
+  M.multiply(new THREE.Matrix4().makeTranslation(0, 0, BA)).multiply(new THREE.Matrix4().makeRotationX(90 * DEG * st)).multiply(new THREE.Matrix4().makeTranslation(0, 0, -BA));
+  return M;
+}
+function boatPose(t) {
+  const u = easeInOut((t - T_UNF - 0.05) / 0.95);
+  const M = boatFloatPose(Math.min(t, T_UNF + 0.05));
+  if (u <= 0) return M;
+  const p0 = V3(), q0 = new THREE.Quaternion(), s0 = V3(); M.decompose(p0, q0, s0);
+  const p = p0.clone().lerp(titlePose.pos, u); p.y += 0.7 * Math.sin(PI * u);
+  const q = q0.clone().slerp(titlePose.q, u);
+  // settle: tiny paper float after landing in front of the lens
+  const s = clamp01((t - T_UNF - 1.0) / 1.2);
+  q.multiply(qAxis(XA, 1.2 * DEG * Math.sin(TAU * 0.5 * s) * (1 - s)));
+  return new THREE.Matrix4().compose(p, q, V3(1, 1, 1));
+}
+
+/* ================================================= title ink */
+const TITLE_1 = 'Every idea', TITLE_2 = 'starts flat.';
+function drawTitle(t) {
+  const g = textCanvas.getContext('2d'), w = textCanvas.width, h = textCanvas.height;
+  g.clearRect(0, 0, w, h);
+  const words = [[TITLE_1.split(' ')[0], 0, "normal"], [TITLE_1.split(' ')[1], 0, "normal"], ['starts', 1, "normal"], ['flat.', 1, "italic"]];
+  const fs = 250, lh = 262, y0 = h / 2 - lh / 2 + 88;
+  g.textBaseline = 'alphabetic'; g.fillStyle = '#000';
+  const lines = [[], []]; words.forEach((wd, i) => lines[wd[1]].push({ s: wd[0], st: wd[2], i }));
+  lines.forEach((ln, li) => {
+    const parts = ln.map(p => { g.font = `${p.st} 400 ${fs}px 'DM Serif Display'`; return { ...p, w: g.measureText(p.s).width }; });
+    const sp = fs * 0.24, tw = parts.reduce((a, p) => a + p.w, 0) + sp * (parts.length - 1);
+    let x = w / 2 - tw / 2;
+    for (const p of parts) {
+      const lt = t - T_TITLE - p.i * 0.11, a = easeOut(lt / 0.32);
+      if (a > 0) {
+        g.save(); g.font = `${p.st} 400 ${fs}px 'DM Serif Display'`;
+        // ink soaks in: a soft bleed first, then the sharp letter
+        g.globalAlpha = a * 0.35; g.filter = `blur(${(1 - a) * 14 + 2}px)`; g.fillText(p.s, x, y0 + li * lh);
+        g.filter = 'none'; g.globalAlpha = a; g.fillText(p.s, x, y0 + li * lh + (1 - a) * 10);
+        g.restore();
+      }
+      x += p.w + sp;
+    }
+  });
+  // hairline rule and folio
+  const ra = easeOut((t - T_TITLE - 0.62) / 0.4);
+  if (ra > 0) { g.globalAlpha = ra * 0.8; g.fillRect(w / 2 - 150 * ra, y0 + lh + 92, 300 * ra, 4); g.globalAlpha = 1; }
+  textTex.needsUpdate = true;
+}
+
+/* ================================================= compositing */
+const out = document.getElementById('out'), octx = out.getContext('2d');
+const grain = (() => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'), img = g.createImageData(W, H), r = mulberry32(7);
+  for (let i = 0; i < img.data.length; i += 4) { const v = 128 + (r() + r() + r() - 1.5) * 44; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+  g.putImageData(img, 0, 0); return c; })();
+const vignette = (() => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(W / 2, H * 0.48, H * 0.35, W / 2, H / 2, H * 1.1); gr.addColorStop(0, 'rgba(60,40,20,0)'); gr.addColorStop(1, 'rgba(60,40,20,0.30)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H); return c; })();
+
+function setScene(t) {
+  const { c } = camMatrix(t);
+  camera.position.copy(c.p); camera.lookAt(c.l); camera.updateMatrixWorld();
+  sun.target.position.copy(c.l); sun.position.copy(c.l).add(SUN_DIR.clone().multiplyScalar(18));
+  poseSheet(craneMesh, t, (op, tt) => op.angle(tt)); craneMesh.matrix.copy(cranePose(t)); craneMesh.visible = t < 5.6;
+  poseSheet(boatMesh, t, (op, tt) => op.angle(tt)); boatMesh.matrix.copy(boatPose(t)); boatMesh.visible = t > 3.5;
+  poseWater(t);
+  if (t > T_TITLE - 0.05) drawTitle(t);
+  boatMat.userData.U.uHasText.value = t > T_TITLE - 0.05 ? 1 : 0;
+}
+function composite(t) {
+  octx.globalCompositeOperation = 'source-over'; octx.globalAlpha = 1; octx.drawImage(glc, 0, 0);
+  octx.globalCompositeOperation = 'multiply'; octx.drawImage(vignette, 0, 0);
+  octx.globalCompositeOperation = 'overlay'; octx.globalAlpha = 0.10; octx.drawImage(grain, 0, 0);
+  octx.globalCompositeOperation = 'source-over'; octx.globalAlpha = 1;
+  const fin = clamp01(t / 0.25), fo = sstep(9.7, 10, t);
+  if (fin < 1 || fo > 0) { octx.fillStyle = '#efe9dd'; octx.globalAlpha = Math.max(1 - fin, fo); octx.fillRect(0, 0, W, H); octx.globalAlpha = 1; }
+}
+
+window.ready = (async () => {
+  await document.fonts.load("250px 'DM Serif Display'", TITLE_1 + TITLE_2);
+  await document.fonts.load("italic 250px 'DM Serif Display'", TITLE_2);
+  await document.fonts.ready;
+  setScene(0); renderer.render(scene, camera); renderer.getContext().finish();
+})();
+
+window.draw = ({ t }) => {
+  setScene(t); renderer.render(scene, camera); composite(t);
+  return out.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+
+window.events = () => {
+  const ev = [{ k: 'land', t: 0.5 }];
+  const folds = [...crane.ops.filter(o => o.full === PI), ...boat.ops];
+  folds.forEach((o, i) => { ev.push({ k: 'fold', t: o.t0, d: o.t1 - o.t0, i }); ev.push({ k: 'crease', t: o.t0 + (o.t1 - o.t0) * FOLD_LAND, i }); });
+  ev.push({ k: 'stand', t: 3.14 }, { k: 'open', t: T_OPEN });
+  for (let k = 0; k < 5; k++) ev.push({ k: 'flap', t: T_FLY + (k + 0.3) / 2.7, i: k });
+  ev.push({ k: 'takeoff', t: T_FLY + 0.1 }, { k: 'water', t: T_WATER }, { k: 'standboat', t: 6.74 }, { k: 'splash', t: 7.0 });
+  Object.values(BF).forEach((o, i) => ev.push({ k: 'unfold', t: o.u0, i }));
+  ev.push({ k: 'flatten', t: T_UNF + 0.95 });
+  [0, 1, 2, 3].forEach(i => ev.push({ k: 'word', t: T_TITLE + i * 0.11, i }));
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body>
+</html>
