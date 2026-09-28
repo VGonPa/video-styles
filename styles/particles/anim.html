@@ -1,0 +1,358 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// Generative Particles — 40,000 particles in a curl-noise flow field (WebGL2, additive HDR + bloom).
+// Chaos → the particles organise into the word EMERGE → burst into a spiral galaxy → spiral into one glowing point → fade.
+// Determinism: the whole simulation runs once in window.ready with a fixed step from t = 0 (seeded RNG, pre-baked flow
+// grid) and every frame's positions are stored (Int16). draw({t}) only reads that history, so frames can be rendered
+// in any order by parallel workers. Trails = the last K stored positions; colour = speed; point size/softness = depth (DOF).
+const W = 1920, H = 1080, FPS = 30, DUR = 10, NF = DUR * FPS + 1, TAU = Math.PI * 2;
+const N = 40000, NT = 34000, SUBS = 2, DT = 1 / (FPS * SUBS), Q = 0.08, K = 7, KS = 2, F = 2400;
+const T_ANT = 5.0, T_BURST = 5.35, T_GAL = 5.6, T_CONV = 7.55;
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const sstep = (a, b, x) => { const u = clamp((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(0x31A7);
+const gauss = () => { let u = 0, v = 0; while (u === 0) u = rnd(); v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * v); };
+
+// ── seeded 3D gradient noise ──
+const perm = new Uint8Array(512); { const p = [...Array(256).keys()]; for (let i = 255; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; } for (let i = 0; i < 512; i++) perm[i] = p[i & 255]; }
+const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+function grad(h, x, y, z) { const u = (h & 15) < 8 ? x : y, v = (h & 15) < 4 ? y : ((h & 15) === 12 || (h & 15) === 14 ? x : z); return ((h & 1) ? -u : u) + ((h & 2) ? -v : v); }
+function noise(x, y, z) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255; x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+  const u = fade(x), v = fade(y), w = fade(z), A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z, B = perm[X + 1] + Y, BA = perm[B] + Z, BB = perm[B + 1] + Z;
+  const L = (a, b, t) => a + t * (b - a);
+  return L(L(L(grad(perm[AA], x, y, z), grad(perm[BA], x - 1, y, z), u), L(grad(perm[AB], x, y - 1, z), grad(perm[BB], x - 1, y - 1, z), u), v),
+    L(L(grad(perm[AA + 1], x, y, z - 1), grad(perm[BA + 1], x - 1, y, z - 1), u), L(grad(perm[AB + 1], x, y - 1, z - 1), grad(perm[BB + 1], x - 1, y - 1, z - 1), u), v), w);
+}
+
+// ── curl-noise flow field, baked on a grid (x, y, time) ──
+const GX = 145, GY = 85, GT = 21, GC = 20, GX0 = -1440, GY0 = -840, GDT = 0.5;
+const flowG = new Float32Array(GT * GY * GX * 3);
+function bakeFlow() {
+  const psi = new Float32Array(GY * GX), zz = new Float32Array(GY * GX);
+  let s2 = 0, n2 = 0;
+  for (let k = 0; k < GT; k++) {
+    const tt = k * GDT;
+    for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++) {
+      const x = GX0 + i * GC, y = GY0 + j * GC;
+      psi[j * GX + i] = noise(x * .0014, y * .0014, tt * .11) + .5 * noise(x * .0031 + 5.2, y * .0031 - 1.7, tt * .19 + 3) + .22 * noise(x * .0068 - 9, y * .0068 + 4, tt * .3 + 7);
+      zz[j * GX + i] = noise(x * .002 + 20, y * .002, tt * .15 + 11);
+    }
+    for (let j = 0; j < GY; j++) for (let i = 0; i < GX; i++) {
+      const i0 = Math.max(0, i - 1), i1 = Math.min(GX - 1, i + 1), j0 = Math.max(0, j - 1), j1 = Math.min(GY - 1, j + 1);
+      const dx = (psi[j * GX + i1] - psi[j * GX + i0]) / ((i1 - i0) * GC), dy = (psi[j1 * GX + i] - psi[j0 * GX + i]) / ((j1 - j0) * GC);
+      const o = ((k * GY + j) * GX + i) * 3;
+      flowG[o] = dy; flowG[o + 1] = -dx; flowG[o + 2] = zz[j * GX + i];
+      s2 += dx * dx + dy * dy; n2++;
+    }
+  }
+  const sc = 1 / Math.sqrt(s2 / n2);
+  for (let i = 0; i < flowG.length; i += 3) { flowG[i] *= sc; flowG[i + 1] *= sc; flowG[i + 2] *= 1.6; }
+}
+const FL = [0, 0, 0];
+function flow(x, y, t) {
+  let gx = clamp((x - GX0) / GC, 0, GX - 1.001), gy = clamp((y - GY0) / GC, 0, GY - 1.001), gt = clamp(t / GDT, 0, GT - 1.001);
+  const i = gx | 0, j = gy | 0, k = gt | 0; gx -= i; gy -= j; gt -= k;
+  for (let c = 0; c < 3; c++) {
+    const b0 = ((k * GY + j) * GX + i) * 3 + c, b1 = b0 + GY * GX * 3;
+    const a00 = flowG[b0] + (flowG[b0 + 3] - flowG[b0]) * gx, a01 = flowG[b0 + GX * 3] + (flowG[b0 + GX * 3 + 3] - flowG[b0 + GX * 3]) * gx;
+    const b00 = flowG[b1] + (flowG[b1 + 3] - flowG[b1]) * gx, b01 = flowG[b1 + GX * 3] + (flowG[b1 + GX * 3 + 3] - flowG[b1 + GX * 3]) * gx;
+    const a = a00 + (a01 - a00) * gy, b = b00 + (b01 - b00) * gy;
+    FL[c] = a + (b - a) * gt;
+  }
+  return FL;
+}
+
+// ── particles ──
+const px = new Float32Array(N), py = new Float32Array(N), pz = new Float32Array(N), vx = new Float32Array(N), vy = new Float32Array(N), vz = new Float32Array(N);
+const tx = new Float32Array(N), ty = new Float32Array(N), tz = new Float32Array(N), del = new Float32Array(N);
+const gR = new Float32Array(N), gTh = new Float32Array(N), gH = new Float32Array(N), gW = new Float32Array(N), cDel = new Float32Array(N);
+const hist = new Int16Array(NF * N * 3), meanV = new Float32Array(NF);
+const TEXT_CY = -40, GAL_CY = 30, SIN_A = 0.40, COS_A = Math.sqrt(1 - SIN_A * SIN_A), ROLL = -0.2;
+let letterT = [];
+function textTargets() {
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  let size = 300; x.font = `700 ${size}px Unbounded`; x.letterSpacing = '6px';
+  size *= 1420 / x.measureText('EMERGE').width; x.font = `700 ${size}px Unbounded`;
+  x.fillText('EMERGE', W / 2, H / 2 + TEXT_CY);
+  const d = x.getImageData(0, 0, W, H).data, px_ = [];
+  for (let i = 0; i < W * H; i++) if (d[i * 4 + 3] > 127) px_.push(i);
+  // letter boundaries (for the lock-in chimes)
+  x.textAlign = 'left'; const w = x.measureText('EMERGE').width, x0 = W / 2 - w / 2, bounds = [];
+  for (let k = 1; k <= 6; k++) bounds.push(x0 + x.measureText('EMERGE'.slice(0, k)).width);
+  const pts = [];
+  for (let n = 0; n < NT; n++) { const j = n + Math.floor(rnd() * (px_.length - n)); [px_[n], px_[j]] = [px_[j], px_[n]]; const p = px_[n]; pts.push([p % W + rnd() - W / 2, Math.floor(p / W) + rnd() - H / 2]); }
+  return { pts, bounds: bounds.map(b => b - W / 2), x0: x0 - W / 2 };
+}
+function galaxyAt(i, t, o) {
+  const r0 = gR[i], sp = t > cDel[i] ? Math.pow(sstep(cDel[i], cDel[i] + 1.05, t), 1.6) : 0, s = 1 - sp;
+  const th = gTh[i] + gW[i] * (t - T_BURST) + 5.5 * sp * sp;
+  const r = r0 * s, X = r * Math.cos(th), Zd = r * Math.sin(th), Yd = gH[i] * s;
+  const y = Zd * SIN_A + Yd * COS_A, z = Zd * COS_A - Yd * SIN_A;
+  o[0] = X * Math.cos(ROLL) - y * Math.sin(ROLL); o[1] = X * Math.sin(ROLL) + y * Math.cos(ROLL) + GAL_CY; o[2] = z;
+  return sp;
+}
+function simulate() {
+  const T = textTargets();
+  // initial chaos: a wide, deep cloud
+  for (let i = 0; i < N; i++) {
+    px[i] = (rnd() * 2 - 1) * 1150; py[i] = (rnd() * 2 - 1) * 680;
+    pz[i] = i < NT ? (rnd() * 2 - 1) * 320 : -700 + rnd() * 1650;
+  }
+  // text particles sorted by x meet targets sorted by x (loosely), so the word assembles left → right
+  const ord = [...Array(NT).keys()].map(i => [i, px[i] + gauss() * 260]).sort((a, b) => a[1] - b[1]).map(a => a[0]);
+  const tg = T.pts.map(p => p).sort((a, b) => a[0] - b[0]);
+  const letterDel = [[], [], [], [], [], []];
+  for (let n = 0; n < NT; n++) {
+    const i = ord[n]; tx[i] = tg[n][0]; ty[i] = tg[n][1]; tz[i] = gauss() * 5;
+    del[i] = 1.85 + 1.05 * clamp((tx[i] + 710) / 1420) + 0.25 * rnd();
+    let L = 0; while (L < 5 && tx[i] > T.bounds[L]) L++; letterDel[L].push(del[i]);
+  }
+  letterT = letterDel.map(a => a.reduce((s, v) => s + v, 0) / Math.max(1, a.length) + 0.42);
+  // galaxy slots: distance from the word's centre (rank) → galaxy radius (quantile), so the burst maps outward naturally
+  const dr = [...Array(NT).keys()].map(i => [i, Math.hypot(tx[i], (ty[i] - TEXT_CY) * 2.2)]).sort((a, b) => a[1] - b[1]);
+  for (let n = 0; n < NT; n++) {
+    const i = dr[n][0], q = (n + 0.5) / NT;
+    let r, th, h;
+    if (q < 0.1) { r = 8 + 110 * Math.pow(q / 0.1, 0.8) * (0.6 + 0.4 * rnd()); th = rnd() * TAU; h = gauss() * r * 0.55; }   // bulge
+    else {
+      r = 70 + 250 * -Math.log(1 - (q - 0.1) / 0.9 * 0.955);
+      const arm = rnd() < 0.5 ? 0 : Math.PI;
+      th = arm + 2.4 * Math.log(r / 70) + gauss() * (0.22 + 0.1 * rnd()); h = gauss() * (9 + r * 0.02);
+    }
+    gR[i] = r; gTh[i] = th; gH[i] = h; gW[i] = 0.25 + 0.95 / (1 + r / 260);
+    cDel[i] = T_CONV + 0.42 * clamp(r / 850) + 0.1 * rnd();
+  }
+  for (let i = NT; i < N; i++) {   // ambient dust: bokeh drifting in depth, later the galaxy's halo
+    gR[i] = 260 + 720 * Math.sqrt(rnd()); gTh[i] = rnd() * TAU; gH[i] = gauss() * 70; gW[i] = 0.25 + 0.95 / (1 + gR[i] / 260);
+    cDel[i] = T_CONV + 0.3 + 0.2 * rnd(); del[i] = 99;
+  }
+  const G = [0, 0, 0], G2 = [0, 0, 0];
+  const store = f => {
+    let sv = 0;
+    for (let i = 0; i < N; i++) {
+      const o = (f * N + i) * 3;
+      hist[o] = clamp(Math.round(px[i] / Q), -32767, 32767); hist[o + 1] = clamp(Math.round(py[i] / Q), -32767, 32767); hist[o + 2] = clamp(Math.round(pz[i] / Q), -32767, 32767);
+      sv += Math.hypot(vx[i], vy[i]);
+    }
+    meanV[f] = sv / N;
+  };
+  for (let i = 0; i < N; i++) { const fl = flow(px[i], py[i], 0); vx[i] = fl[0] * 240; vy[i] = fl[1] * 240; vz[i] = fl[2] * 60; }
+  store(0);
+  for (let f = 1; f < NF; f++) for (let s = 0; s < SUBS; s++) {
+    const t = ((f - 1) * SUBS + s) * DT;
+    const burst = t < T_BURST && t + DT >= T_BURST;
+    const waveOn = t > 4.05 && t < 4.95, wx = -900 + 1800 * (t - 4.05) / 0.9;
+    for (let i = 0; i < N; i++) {
+      let x = px[i], y = py[i], z = pz[i], ax = 0, ay = 0, az = 0;
+      const fl = flow(x, y, t), dust = i >= NT;
+      if (burst) {   // the word explodes: radial kick + a clockwise swirl that seeds the galaxy's rotation
+        const dx = x, dy = y - TEXT_CY, d = Math.hypot(dx, dy) + 1e-3, m = (dust ? 200 : 480 + 620 * rnd()) * (0.2 + 1.0 * clamp(d / 700));
+        vx[i] += dx / d * m - dy / d * 420; vy[i] += dy / d * m + dx / d * 420; vz[i] += gauss() * 260;
+      }
+      if (t < T_GAL || (dust && t < T_GAL)) {
+        if (dust || t < T_ANT) {
+          const w = dust ? 0 : sstep(del[i], del[i] + 0.75, t);
+          const amp = dust ? 150 : 250 * (1 - w) + 12 * w, dr = dust ? 1.4 : 2 * (1 - w) + 0.8 * w;
+          ax += dr * (fl[0] * amp - vx[i]); ay += dr * (fl[1] * amp - vy[i]); az += dr * (fl[2] * (dust ? 70 : 60 * (1 - w)) - vz[i]);
+          if (w > 0) {   // spring to the glyph target: capped pull, under-damped so letters overshoot and settle
+            const k = 42 * w, c = 2 * 0.42 * Math.sqrt(k) * (1 + 0.3 * (1 - w)); let fx = k * (tx[i] - x), fy = k * (ty[i] - y); const fm = Math.abs(fx) + Math.abs(fy), cap = 9000;
+            if (fm > cap) { fx *= cap / fm; fy *= cap / fm; }
+            ax += fx - c * vx[i]; ay += fy - c * vy[i]; az += k * (tz[i] - z) - c * vz[i]; }
+          if (waveOn && !dust) { const g = Math.exp(-Math.pow((x - wx) / 90, 2)); ay -= 5200 * g * Math.sin(y * 0.03 + 1); ax += 2200 * g; }
+        } else if (t < T_BURST) {   // anticipation: the word inhales
+          const u = sstep(T_ANT, T_BURST, t), sc = 1 - 0.075 * u;
+          const k = 70, c = 11; ax += k * (tx[i] * sc - x) - c * vx[i]; ay += k * (TEXT_CY + (ty[i] - TEXT_CY) * sc - y) - c * vy[i]; az += k * (tz[i] - z) - c * vz[i];
+        } else { ax += 1.1 * (fl[0] * 80 - vx[i]); ay += 1.1 * (fl[1] * 80 - vy[i]); az += 1.1 * (-vz[i]); }
+        if (t < T_BURST) {   // soft walls keep the chaos on screen
+          if (Math.abs(x) > 1020) ax -= (x - Math.sign(x) * 1020) * 5; if (Math.abs(y) > 600) ay -= (y - Math.sign(y) * 600) * 5;
+        }
+      } else {   // galaxy, then the collapse into the singularity
+        const sp = galaxyAt(i, t, G); galaxyAt(i, t + 0.01, G2);
+        const gvx = (G2[0] - G[0]) / 0.01, gvy = (G2[1] - G[1]) / 0.01, gvz = (G2[2] - G[2]) / 0.01;
+        const kr = dust ? sstep(T_GAL - 0.15, 6.9, t) : sstep(T_GAL - 0.2, 6.15, t), k = 9 * kr + 70 * sp, c = 2 * 0.75 * Math.sqrt(k + 1e-4);
+        ax += k * (G[0] - x) + c * (gvx - vx[i]); ay += k * (G[1] - y) + c * (gvy - vy[i]); az += k * (G[2] - z) + c * (gvz - vz[i]);
+        const na = 55 * (1 - sp); ax += fl[0] * na; ay += fl[1] * na; az += fl[2] * na * 0.5;
+        ax += 1.2 * (1 - kr) * (fl[0] * 60 - vx[i]); ay += 1.2 * (1 - kr) * (fl[1] * 60 - vy[i]);
+      }
+      vx[i] += ax * DT; vy[i] += ay * DT; vz[i] += az * DT;
+      px[i] = x + vx[i] * DT; py[i] = y + vy[i] * DT; pz[i] = clamp(z + vz[i] * DT, -1500, 2600);
+    }
+    if (s === SUBS - 1) store(f);
+  }
+}
+
+// ── WebGL2 ──
+const out = document.getElementById('c'), ctx = out.getContext('2d');
+const gc = document.createElement('canvas'); gc.width = W; gc.height = H;
+const gl = gc.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false, alpha: false });
+const HALF = !!gl.getExtension('EXT_color_buffer_float');
+function prog(vs, fs) {
+  const p = gl.createProgram();
+  for (const [ty, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(ty); gl.shaderSource(s, '#version 300 es\nprecision highp float;\n' + src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); gl.attachShader(p, s);
+  }
+  gl.bindAttribLocation(p, 0, 'a_p'); gl.bindAttribLocation(p, 1, 'a_a'); gl.bindAttribLocation(p, 2, 'a_s');
+  gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); for (let i = 0; i < n; i++) { const a = gl.getActiveUniform(p, i); u[a.name] = gl.getUniformLocation(p, a.name); }
+  return { p, u };
+}
+const RAMP = `vec3 ramp(float u){ u = clamp(u,0.,1.)*4.;
+  vec3 c0=vec3(.46,.30,1.), c1=vec3(.18,.46,1.), c2=vec3(.10,.86,1.), c3=vec3(1.,.72,.42), c4=vec3(1.,.97,.9);
+  if(u<1.) return mix(c0,c1,u); if(u<2.) return mix(c1,c2,u-1.); if(u<3.) return mix(c2,c3,u-2.); return mix(c3,c4,u-3.); }`;
+const PVS = `${RAMP}
+in vec3 a_p; in float a_a; in float a_s;
+uniform vec2 u_c; uniform float u_zoom, u_F, u_I, u_pt;
+out vec3 v_col; out float v_a; out float v_coc;
+void main(){
+  float zz = max(a_p.z, -u_F*0.8); float sc = u_F/(u_F+zz)*u_zoom; vec2 s = u_c + a_p.xy*sc;
+  gl_Position = vec4(s.x/960.-1., 1.-s.y/540., 0., 1.);
+  float coc = clamp(abs(a_p.z)/480., 0., 2.2); float u = pow(clamp(a_s/1400.,0.,1.), .55);
+  v_col = ramp(u)*(.8+.3*u); v_coc = coc;
+  if (u_pt > 0.5) { float sz = (1.9 + coc*4. + coc*coc*7.)*sqrt(sc); gl_PointSize = sz; v_a = a_a*u_I*pow(1.9/sz, 1.55); }
+  else { gl_PointSize = 1.; v_a = a_a*u_I/(1.+coc*coc*5.); }
+}`;
+const PFS = `in vec3 v_col; in float v_a; in float v_coc; uniform float u_pt; out vec4 o;
+void main(){ float f = 1.;
+  if (u_pt > .5) { float d = length(gl_PointCoord*2.-1.); if (d > 1.) discard;
+    f = mix(exp(-d*d*3.2), smoothstep(1., .78, d)*(.7+.4*d*d), clamp(v_coc*1.4-.2, 0., 1.)); }
+  o = vec4(v_col*v_a*f, 1.); }`;
+const QVS = `out vec2 uv; void main(){ vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2); uv = p; gl_Position = vec4(p*2.-1., 0., 1.); }`;
+const pPart = prog(PVS, PFS);
+const pDown = prog(QVS, `in vec2 uv; uniform sampler2D u_t; uniform vec2 u_px; out vec4 o;
+  void main(){ o = .25*(texture(u_t,uv+u_px*vec2(-1,-1))+texture(u_t,uv+u_px*vec2(1,-1))+texture(u_t,uv+u_px*vec2(-1,1))+texture(u_t,uv+u_px*vec2(1,1))); }`);
+const pBlur = prog(QVS, `in vec2 uv; uniform sampler2D u_t; uniform vec2 u_d; out vec4 o;
+  void main(){ vec4 s = texture(u_t,uv)*.2270;
+    s += (texture(u_t,uv+u_d*1.385)+texture(u_t,uv-u_d*1.385))*.3162; s += (texture(u_t,uv+u_d*3.231)+texture(u_t,uv-u_d*3.231))*.0703; o = s; }`);
+const pComp = prog(QVS, `in vec2 uv; uniform sampler2D u_h, u_b1, u_b2; uniform vec3 u_core; uniform float u_fade, u_bg, u_seed, u_flash; out vec4 o;
+  float hash(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
+  void main(){ vec2 fc = vec2(gl_FragCoord.x, 1080.-gl_FragCoord.y);
+    vec3 c = texelFetch(u_h, ivec2(gl_FragCoord.xy), 0).rgb + texture(u_b1,uv).rgb*.55 + texture(u_b2,uv).rgb*.85;
+    float r = length(fc - u_core.xy);
+    c += u_core.z*(vec3(1.,.93,.82)*exp(-r*r/(2.*14.*14.)) + vec3(.45,.55,1.)*.30*exp(-r/120.) + vec3(.5,.3,1.)*.08*exp(-r/420.));
+    c += u_flash*vec3(.55,.62,1.)*.25*exp(-r/700.);
+    c *= u_fade;
+    vec3 bg = mix(vec3(.006,.007,.018), vec3(.030,.026,.068), exp(-pow(length((fc-vec2(960.,560.))/vec2(1150.,760.)),2.)*1.4)) * u_bg;
+    c = 1. - exp(-(c + bg)*1.15);
+    vec2 q = (uv-.5)*vec2(1.,.82); c *= 1. - .42*pow(clamp(length(q)*1.35,0.,1.), 2.4);
+    c += (hash(fc + u_seed) - .5)*(4./255.);
+    o = vec4(c, 1.); }`);
+function tex(w, h) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, HALF ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA, HALF ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+  for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+  const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  return { t, fb, w, h };
+}
+const RT = { h: tex(W, H), d1: tex(480, 270), a1: tex(480, 270), b1: tex(480, 270), a2: tex(160, 90), b2: tex(160, 90) };
+const vao = gl.createVertexArray(), qvao = gl.createVertexArray(), vbo = gl.createBuffer();
+gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 20, 0);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 20, 12);
+gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 20, 16);
+const LV = new Float32Array(N * K * 2 * 5), PV = new Float32Array(N * 5);
+function pass(p, rt, bind) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, rt ? rt.fb : null); gl.viewport(0, 0, rt ? rt.w : W, rt ? rt.h : H);
+  gl.useProgram(p.p); bind(p.u); gl.bindVertexArray(qvao); gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function texU(u, name, unit, t) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t.t); gl.uniform1i(u[name], unit); }
+
+// ── timeline helpers (shared with the overlay and the sound events) ──
+const zoomAt = t => 1 + 0.025 * t / DUR + 0.07 * sstep(7.5, 9.3, t);
+const fadeAt = t => sstep(0, 1.0, t) * (1 - sstep(9.15, 9.8, t));
+const coreAt = t => 0.35 * sstep(7.9, 9.0, t) * (1 - sstep(9.3, 9.9, t)) + 2.6 * Math.exp(-Math.pow((t - 9.05) / 0.11, 2)) * (t < 9.05 ? 0.35 : 1) + 0.9 * sstep(8.95, 9.05, t) * (1 - sstep(9.05, 9.85, t));
+const flashAt = t => Math.exp(-Math.pow((t - 9.06) / 0.14, 2));
+const PHASES = [[0, '01', 'CHAOS'], [2.1, '02', 'FORM'], [T_BURST, '03', 'GALAXY'], [T_CONV + 0.1, '04', 'SINGULARITY']];
+
+function renderGL(t) {
+  const f = clamp(Math.round(t * FPS), 0, NF - 1), zoom = zoomAt(t), fd = fadeAt(t);
+  let lp = 0;
+  for (let i = 0; i < N; i++) {
+    // collapsing particles dim as they pile up, so the singularity is a point of light rather than a white blob
+    const cp = t > cDel[i] ? Math.pow(sstep(cDel[i], cDel[i] + 1.05, t), 1.6) : 0, cw = Math.pow(1 - cp, 2) * 0.97 + 0.03;
+    for (let j = 0; j < K; j++) {
+      const oa = (Math.max(0, f - j * KS) * N + i) * 3, ob = (Math.max(0, f - j * KS - KS) * N + i) * 3;
+      const ax = hist[oa] * Q, ay = hist[oa + 1] * Q, az = hist[oa + 2] * Q, bx = hist[ob] * Q, by = hist[ob + 1] * Q, bz = hist[ob + 2] * Q;
+      const len = Math.hypot(ax - bx, ay - by), sp = len * FPS / KS, sd = Math.min(1, 13 / (len + 1e-3)) / (1 + sp / 2500), a = cw * 0.26 * Math.pow(1 - j / K, 1.4) * Math.min(1, len / 2.8) * sd * 1.6;
+      LV[lp] = ax; LV[lp + 1] = ay; LV[lp + 2] = az; LV[lp + 3] = a; LV[lp + 4] = sp;
+      LV[lp + 5] = bx; LV[lp + 6] = by; LV[lp + 7] = bz; LV[lp + 8] = a * 0.35; LV[lp + 9] = sp; lp += 10;
+      if (j === 0) { const q = i * 5; PV[q] = ax; PV[q + 1] = ay; PV[q + 2] = az; PV[q + 3] = cw * (0.3 + 0.7 * sd); PV[q + 4] = sp; }
+    }
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, RT.h.fb); gl.viewport(0, 0, W, H); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(pPart.p); const u = pPart.u;
+  gl.uniform2f(u.u_c, W / 2, H / 2); gl.uniform1f(u.u_zoom, zoom); gl.uniform1f(u.u_F, F);
+  gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, LV, gl.STREAM_DRAW); gl.uniform1f(u.u_pt, 0); gl.uniform1f(u.u_I, fd); gl.drawArrays(gl.LINES, 0, N * K * 2);
+  gl.bufferData(gl.ARRAY_BUFFER, PV, gl.STREAM_DRAW); gl.uniform1f(u.u_pt, 1); gl.uniform1f(u.u_I, 0.8 * fd); gl.drawArrays(gl.POINTS, 0, N);
+  gl.disable(gl.BLEND);
+  pass(pDown, RT.d1, u => { texU(u, 'u_t', 0, RT.h); gl.uniform2f(u.u_px, 1 / W, 1 / H); });
+  pass(pBlur, RT.a1, u => { texU(u, 'u_t', 0, RT.d1); gl.uniform2f(u.u_d, 1.6 / 480, 0); });
+  pass(pBlur, RT.b1, u => { texU(u, 'u_t', 0, RT.a1); gl.uniform2f(u.u_d, 0, 1.6 / 270); });
+  pass(pDown, RT.a2, u => { texU(u, 'u_t', 0, RT.b1); gl.uniform2f(u.u_px, 0.5 / 480, 0.5 / 270); });
+  pass(pBlur, RT.b2, u => { texU(u, 'u_t', 0, RT.a2); gl.uniform2f(u.u_d, 2.2 / 160, 0); });
+  pass(pBlur, RT.a2, u => { texU(u, 'u_t', 0, RT.b2); gl.uniform2f(u.u_d, 0, 2.2 / 90); });
+  const zc = zoom * F / F;
+  pass(pComp, null, u => {
+    texU(u, 'u_h', 0, RT.h); texU(u, 'u_b1', 1, RT.b1); texU(u, 'u_b2', 2, RT.a2);
+    gl.uniform3f(u.u_core, W / 2, H / 2 + GAL_CY * zc, coreAt(t)); gl.uniform1f(u.u_fade, 1); gl.uniform1f(u.u_flash, flashAt(t));
+    gl.uniform1f(u.u_bg, sstep(0, 0.6, t) * (1 - sstep(9.2, 9.95, t))); gl.uniform1f(u.u_seed, f * 7.31);
+  });
+  return f;
+}
+
+// ── 2D overlay: lab-notebook labels ──
+const MONO = '"JetBrains Mono"';
+function overlay(t, f) {
+  const a = sstep(0.5, 1.3, t) * (1 - sstep(8.9, 9.5, t)); if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = 'rgba(214,224,255,0.82)'; ctx.font = `500 19px ${MONO}`; ctx.letterSpacing = '3px'; ctx.textAlign = 'left';
+  ctx.fillText('GENERATIVE FIELD  /  STUDY 049', 76, 88);
+  ctx.fillStyle = 'rgba(160,176,230,0.55)'; ctx.font = `400 15px ${MONO}`; ctx.letterSpacing = '1px';
+  ctx.fillText('40,000 particles  ·  curl-noise flow  ·  seed 0x31A7', 76, 116);
+  // phase label, cross-faded
+  ctx.textAlign = 'right';
+  for (let k = 0; k < PHASES.length; k++) {
+    const [t0, n, name] = PHASES[k], t1 = k + 1 < PHASES.length ? PHASES[k + 1][0] : 99;
+    const pa = sstep(t0, t0 + 0.3, t) * (1 - sstep(t1 - 0.25, t1, t)); if (pa <= 0) continue;
+    ctx.globalAlpha = a * pa; const dy = (1 - sstep(t0, t0 + 0.35, t)) * 10;
+    ctx.fillStyle = 'rgba(214,224,255,0.82)'; ctx.font = `500 19px ${MONO}`; ctx.letterSpacing = '3px';
+    ctx.fillText(`${n}  ${name}`, 1844, 88 + dy);
+  }
+  ctx.globalAlpha = a; ctx.fillStyle = 'rgba(160,176,230,0.55)'; ctx.font = `400 15px ${MONO}`; ctx.letterSpacing = '1px';
+  ctx.fillText(`t = ${t.toFixed(2).padStart(5, '0')} s`, 1844, 116);
+  // velocity legend (matches the shader ramp)
+  const lx = 76, ly = 1000, lw = 240;
+  ctx.textAlign = 'left'; ctx.fillText('velocity', lx, ly - 18);
+  const g = ctx.createLinearGradient(lx, 0, lx + lw, 0);
+  [['#6b33ff', 0], ['#2466ff', .12], ['#1adbff', .32], ['#ffb86b', .62], ['#fff7e6', 1]].forEach(([c, s]) => g.addColorStop(s, c));
+  ctx.fillStyle = g; ctx.fillRect(lx, ly, lw, 4);
+  ctx.fillStyle = 'rgba(160,176,230,0.55)'; ctx.fillText('slow', lx, ly + 28); ctx.textAlign = 'right'; ctx.fillText('fast', lx + lw, ly + 28);
+  ctx.fillText(`mean |v|  ${String(Math.round(meanV[f])).padStart(4, ' ')} px/s`, 1844, 1028);
+  ctx.restore();
+}
+function render(t) {
+  const f = renderGL(t);
+  ctx.globalAlpha = 1; ctx.drawImage(gc, 0, 0);
+  overlay(t, f);
+}
+window.events = () => {
+  const ev = [{ t: 0.05, k: 'rise' }];
+  letterT.forEach((t, i) => ev.push({ t, k: 'lock', i }));
+  ev.push({ t: 0, k: 'speed', v: Array.from({ length: NF }, (_, f) => Math.round(meanV[f])) });
+  ev.push({ t: 4.05, k: 'wave' }, { t: T_ANT, k: 'inhale' }, { t: T_BURST, k: 'burst' }, { t: 5.9, k: 'galaxy' }, { t: T_CONV, k: 'collapse' }, { t: 9.05, k: 'flash' });
+  return ev;
+};
+window.ready = (async () => {
+  await document.fonts.load('700 100px Unbounded'); await document.fonts.load(`400 20px ${MONO}`); await document.fonts.load(`500 20px ${MONO}`); await document.fonts.ready;
+  const t0 = performance.now(); bakeFlow(); simulate(); window.simMs = performance.now() - t0;
+})();
+window.draw = ({ t }) => { render(t); return out.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+</script></body></html>
