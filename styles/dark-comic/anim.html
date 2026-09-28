@@ -125,38 +125,53 @@ function build() {
 }
 
 // ── figure: hooded vigilante crouched on the ledge, profile facing right ──
-function figurePath(t) {
-  const wind = Math.sin(t * 7.3) * 0.5 + Math.sin(t * 12.1 + 1) * 0.35, w2 = Math.sin(t * 9.7 + 2);
-  const p = new Path2D(), s = FS, X = x => FX + x * s, Y = y => LEDGE_Y + y * s;
-  const M = (a, b) => p.moveTo(X(a), Y(b)), L = (a, b) => p.lineTo(X(a), Y(b));
-  const Q = (a, b, c, d) => p.quadraticCurveTo(X(a), Y(b), X(c), Y(d));
-  const C = (a, b, c, d, e, f) => p.bezierCurveTo(X(a), Y(b), X(c), Y(d), X(e), Y(f));
-  // leaning-forward crouch in profile. hood crown and its lip over the brow
-  M(95, -262); C(117, -266, 135, -258, 143, -244); L(141, -238);
-  // profile in the hood opening: brow, nose, lips, chin
-  L(138, -234); L(140, -227); L(148, -219); L(142, -216); L(144, -212); L(141, -208); L(143, -202); Q(138, -196, 131, -194);
-  // collar and chest
-  C(140, -190, 148, -180, 150, -168); C(152, -162, 152, -156, 151, -150);
-  // forearm laid across the knee, gloved hand hanging past it
-  C(162, -148, 176, -146, 188, -144); C(196, -143, 201, -138, 204, -129);
-  L(207, -116); Q(208, -106, 203, -102); L(199, -112); L(197, -104); Q(192, -102, 191, -110); L(189, -124);
-  Q(180, -128, 170, -130);
-  // knee, shin, boot
-  C(178, -122, 180, -104, 175, -88); L(162, -22); C(174, -14, 188, -10, 194, -4); L(194, 0); L(122, 0); L(119, -10);
-  // haunch and lower back
-  C(90, -10, 50, -8, 26, -14); C(8, -20, 2, -50, 8, -84);
-  // back rising diagonally to the shoulders, peaked hood
-  C(14, -130, 36, -176, 60, -204); C(70, -214, 74, -222, 78, -232);
-  C(76, -246, 80, -258, 95, -262);
+// Built from overlapping body parts (all wound the same way, so they fill as one silhouette).
+// Points are [x, y] in figure units (feet at y = 0, facing right); a third value 1 marks a sharp corner.
+function shapePath(p, pts, X, Y) {
+  let A = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; A += a[0] * b[1] - b[0] * a[1]; }
+  if (A < 0) pts = pts.slice().reverse();
+  const n = pts.length, P = i => pts[(i + n) % n], mid = (a, b) => [(X(a[0]) + X(b[0])) / 2, (Y(a[1]) + Y(b[1])) / 2];
+  const s0 = P(0)[2] ? [X(P(0)[0]), Y(P(0)[1])] : mid(P(-1), P(0));
+  p.moveTo(s0[0], s0[1]);
+  for (let i = P(0)[2] ? 1 : 0; i <= n; i++) {
+    const c = P(i); if (i === n && P(0)[2]) { p.lineTo(X(c[0]), Y(c[1])); break; }
+    if (c[2]) p.lineTo(X(c[0]), Y(c[1])); else { const m = mid(c, P(i + 1)); p.quadraticCurveTo(X(c[0]), Y(c[1]), m[0], m[1]); }
+  }
   p.closePath();
-  // trench-coat skirt and scarf streaming back in the wind
-  const q = new Path2D(), QM = (a, b) => q.moveTo(X(a), Y(b)), QC = (a, b, c, d, e, f) => q.bezierCurveTo(X(a), Y(b), X(c), Y(d), X(e), Y(f)), QL = (a, b) => q.lineTo(X(a), Y(b));
-  const wv = k => Math.sin(t * 8.5 - k * 1.3) * (3 + k * 4) + Math.sin(t * 13.7 - k * 2.1) * (1.5 + k * 1.5);
-  QM(30, -96); QC(-20, -102 + wv(1), -80, -98 + wv(2), -150, -84 + wv(3)); QL(-134, -72 + wv(3)); QL(-162, -60 + wv(3.5));
-  QC(-100, -52 + wv(2), -40, -30 + wv(1), 24, -18); q.closePath();
-  QM(88, -224); QC(40, -236 + wv(1), -10, -240 + wv(2), -84, -232 + wv(3)); QL(-70, -224 + wv(3)); QL(-92, -214 + wv(3.4));
-  QC(-20, -218 + wv(2), 30, -210 + wv(1), 90, -208); q.closePath();
-  return [p, q];
+}
+function figurePath(t) {
+  const s = FS, X = x => FX + x * s, Y = y => LEDGE_Y + y * s, p = new Path2D();
+  const wv = (k, a) => (Math.sin(t * 8.5 - k * 1.4) * 0.7 + Math.sin(t * 13.3 - k * 2.3) * 0.3) * a;
+  const parts = [
+    // hood with the profile set in its opening: brow, nose, lips, chin
+    [[98, -240], [104, -260], [124, -268], [146, -258], [153, -250, 1], [147, -245], [149, -238], [157, -229, 1], [151, -226], [153, -222], [150, -219], [152, -213, 1],
+     [143, -206], [140, -198], [120, -204], [100, -218]],
+    // coat over the torso: straight back leaning forward, shoulder line, chest
+    [[2, -102, 1], [94, -226, 1], [112, -224], [138, -202], [148, -184], [144, -156], [128, -128], [60, -110], [20, -92]],
+    // upper arm hanging from the shoulder to the elbow
+    [[108, -214], [132, -214], [138, -176], [134, -150], [118, -138], [106, -148], [104, -180]],
+    // forearm laid across the raised knee
+    [[112, -158], [150, -160], [182, -158], [188, -150], [184, -140], [150, -138], [114, -136]],
+    // gloved hand hanging past the knee, thumb forward
+    [[176, -158], [190, -154], [197, -142], [198, -124], [196, -110, 1], [190, -108, 1], [187, -122], [184, -114, 1], [179, -115, 1], [180, -130], [176, -138], [175, -148]],
+    // raised thigh: hip to knee
+    [[46, -124], [110, -150], [158, -150], [176, -140], [176, -124], [160, -112], [100, -100], [56, -92]],
+    // shin of the raised leg down to the ankle
+    [[154, -144], [178, -134], [172, -96], [158, -20], [140, -16], [138, -40], [150, -110]],
+    // boot planted on the ledge
+    [[136, -30], [158, -26], [172, -16], [184, -8], [186, 0, 1], [132, 0, 1], [130, -14]],
+    // folded leg: thigh down to the knee on the ledge
+    [[16, -110], [58, -116], [84, -70], [104, -20], [100, -2, 1], [80, -2], [60, -40], [30, -80]],
+    // folded leg: shin lying back along the ledge, toes planted
+    [[102, -4, 1], [94, -18], [40, -24], [6, -26], [-8, -30], [-20, -18], [-26, 0, 1]],
+    // long coat skirt from the hips, torn by the wind into three tails
+    [[20, -118], [-10, -122 + wv(0, 3)], [-60, -128 + wv(1, 6)], [-112, -130 + wv(2, 10)], [-156, -136 + wv(3, 14), 1],
+     [-118, -116 + wv(2.4, 10)], [-86, -110 + wv(2, 8), 1], [-126, -96 + wv(3, 12)], [-176, -94 + wv(3.6, 16), 1],
+     [-128, -78 + wv(3, 12)], [-90, -72 + wv(2.4, 8), 1], [-120, -58 + wv(3.2, 12)], [-150, -48 + wv(3.8, 14), 1],
+     [-96, -44 + wv(2.6, 8)], [-40, -40 + wv(1.4, 4)], [10, -46], [40, -64], [44, -96]],
+  ];
+  for (const pt of parts) shapePath(p, pt, X, Y);
+  return [p, new Path2D()];
 }
 
 // ── world drawing ──
@@ -299,12 +314,12 @@ function drawWorld(g, t, o = {}) {
   g.fillStyle = 'rgba(255,79,139,0.5)'; g.fillRect(ROOF_END - 3, LEDGE_Y, 3, 420);
   // the vigilante: pure black, a thin magenta rim where the neon finds him
   const [fp, sp] = figurePath(t);
-  g.save(); g.clip(fp); g.fillStyle = NEON; g.fill(fp); g.translate(-4.5, 2.5); g.fillStyle = INK; g.fill(fp); g.restore();
+  g.save(); g.clip(fp); g.fillStyle = NEON; g.fill(fp); g.translate(-3.6, 3.4); g.fillStyle = INK; g.fill(fp); g.restore();
   g.save(); g.clip(sp); g.fillStyle = 'rgba(255,79,139,0.8)'; g.fill(sp); g.translate(-3, 2.5); g.fillStyle = INK; g.fill(sp); g.restore();
   // drips from the coat hem
   g.fillStyle = 'rgba(255,140,180,0.8)';
   for (let i = 0; i < 7; i++) { const px = FX + (-150 + i * 22) * FS, per = 0.5 + hh(i) * .5, ph = ((t + hh(i * 3) * per) % per) / per;
-    const py = LEDGE_Y + (-66 + i * 6) * FS + 700 * ph * ph; if (py > LEDGE_Y - 4) continue; g.fillRect(px - 1, py, 2, 7); }
+    const py = LEDGE_Y + (-130 + i * 12) * FS + 700 * ph * ph; if (py > LEDGE_Y - 4) continue; g.fillRect(px - 1, py, 2, 7); }
 }
 function drawFireEscape(g) {
   const x0 = WIN.x0 + 5 * WIN.dx - 26, x1 = WIN.x0 + 6 * WIN.dx + WIN.w + 26;
