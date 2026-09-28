@@ -1,6 +1,6 @@
-# Comics & Cartoons
+# Generative & 3D
 
-Visual family · Panels, strips, and cartoon traditions from every decade.
+Visual family · Code-driven systems, particles, and 3D forms.
 
 [← All styles](../../README.md)
 
@@ -10,12 +10,10 @@ Visual family · Panels, strips, and cartoon traditions from every decade.
 
 <table>
 <tr>
-<td width="25%" align="center"><a href="../../styles/comic-book/comic-book.mp4"><img src="../../styles/comic-book/preview.gif" alt="Comic Book" width="100%"></a><br><b>16 · Comic Book</b><br><a href="../../styles/comic-book/comic-book.mp4">video</a> · <a href="../../styles/comic-book">source</a></td>
-<td width="25%" align="center"><a href="../../styles/manga/manga.mp4"><img src="../../styles/manga/preview.gif" alt="Manga" width="100%"></a><br><b>43 · Manga</b><br><a href="../../styles/manga/manga.mp4">video</a> · <a href="../../styles/manga">source</a></td>
+<td width="25%" align="center"><a href="../../styles/watercolor-memory/watercolor-memory.mp4"><img src="../../styles/watercolor-memory/preview.gif" alt="Watercolor Memory" width="100%"></a><br><b>115 · Watercolor Memory</b><br><a href="../../styles/watercolor-memory/watercolor-memory.mp4">video</a> · <a href="../../styles/watercolor-memory">source</a></td>
 </tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
 |---|---|---|---|---|---|
-| 16 | [Comic Book](../../styles/comic-book/) | Newspaper comic panels | Dialogue, humor, and tension | [Comics & Cartoons](../../categories/families/comics.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md) |
-| 43 | [Manga](../../styles/manga/) | Inked panels, screentone and speed lines | Tense moments, big reveals, and dramatic countdowns | [Comics & Cartoons](../../categories/families/comics.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md) |
+| 115 | [Watercolor Memory](../../styles/watercolor-memory/) | Pencil memory blooming into watercolor | Nostalgic stories, memories and soft title reveals | [Generative & 3D](../../categories/families/generative-3d.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
