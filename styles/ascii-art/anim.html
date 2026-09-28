@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── ascii-art · "Made of characters" ───────────────────────────────────────────────────────
+// Everything on screen is a monospace glyph on a 160 × 54 cell grid (12 × 20 px cells).
+// Character rain sweeps the empty screen and lays the grid; where it passes, a ray-marched 3D globe
+// resolves out of scrambled characters (density ramp " .:-=+*#%@", lit + coloured per cell) and spins →
+// anticipation squash, the implicit surface morphs sphere → heart while still turning, lands facing front
+// and beats twice (lub-dub, overshoot, ripple rings of characters) → the heart dissolves radially into
+// scramble while the title "MADE OF CHARACTERS" (rasterised into the same grid) assembles left to right →
+// a highlight sweeps it → cells thin out down the ramp to black.
+// Rendering: glyph atlas → white glyph layer → coloured per cell with a 160×54 colour map ('source-in')
+// → soft glow from a quarter-res blurred copy. Deterministic: every value depends only on t (seeded hashes).
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const COLS = 160, ROWS = 54, CW = 12, CH = 20, N = COLS * ROWS;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const sstep = u => u * u * (3 - 2 * u);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function hash(a, b, c) { let h = Math.imul(a, 374761393) + Math.imul(b, 668265263) + Math.imul(c, 2147483647) | 0; h = Math.imul(h ^ h >>> 13, 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const MONO = '"IBM Plex Mono"';
+
+const RAMP = ' .:-=+*#%@';
+const RC = [...RAMP].map(c => c.charCodeAt(0));
+const SCR = '#%&@$*+=?!/\\|<>{}[]()^~;:0123456789ABCDEFGHKMNRSWXZ';
+const SC = [...SCR].map(c => c.charCodeAt(0));
+const rampCode = l => RC[clamp(Math.round(l * 9), 0, 9)];
+
+// ── per-frame cell buffers ──
+const G = new Uint8Array(N);                 // char code (0 = blank)
+const CR = new Float32Array(N), CG = new Float32Array(N), CB = new Float32Array(N);
+const LM = new Float32Array(N);              // lum used for ramp chars (-1 = literal glyph)
+const setCell = (i, code, r, g, b, l = -1) => { G[i] = code; CR[i] = r; CG[i] = g; CB[i] = b; LM[i] = l; };
+
+// ── static per-cell randoms ──
+const R1 = new Float32Array(N), R2 = new Float32Array(N), R3 = new Float32Array(N);
+{ const r = rng(50); for (let i = 0; i < N; i++) { R1[i] = r(); R2[i] = r(); R3[i] = r(); } }
+// rain: one drop per column sweeps the screen top → bottom
+const RAIN = [];
+{ const r = rng(7); for (let c = 0; c < COLS; c++) {
+  const wave = 0.18 + 0.42 * Math.abs(Math.sin(c * 0.037 + 0.6)) * 0.6 + 0.38 * r();
+  RAIN.push({ t0: wave, spd: 52 + 40 * r(), len: 7 + Math.floor(18 * r()) }); } }
+// stars
+const STARS = [];
+{ const r = rng(11); for (let k = 0; k < 170; k++) STARS.push({ i: Math.floor(r() * COLS) + COLS * (4 + Math.floor(r() * (ROWS - 9))), ch: ".'.`+*."[Math.floor(r() * 7)].charCodeAt(0), ph: r() * TAU, sp: 1 + 3 * r(), b: 0.25 + 0.55 * r() }); }
+
+// ── land texture (fictional continents): wrapped fbm value noise, 256 × 128 ──
+const LW = 256, LH = 128, LAND = new Float32Array(LW * LH);
+{ const r = rng(3); const g = []; const GS = 16;
+  for (let o = 0; o < 5; o++) { const n = GS << o, a = new Float32Array(n * (n >> 1) + n); for (let k = 0; k < a.length; k++) a[k] = r(); g.push({ n, a }); }
+  for (let y = 0; y < LH; y++) for (let x = 0; x < LW; x++) {
+    let v = 0, amp = 1, tot = 0;
+    for (let o = 0; o < 5; o++) { const { n, a } = g[o], gw = n, gh = n >> 1;
+      const fx = x / LW * gw, fy = y / LH * gh, x0 = Math.floor(fx), y0 = Math.floor(fy), ux = sstep(fx - x0), uy = sstep(fy - y0);
+      const at = (i, j) => a[((i % gw) + gw) % gw + Math.min(j, gh) * gw];
+      v += amp * lerp(lerp(at(x0, y0), at(x0 + 1, y0), ux), lerp(at(x0, y0 + 1), at(x0 + 1, y0 + 1), ux), uy); tot += amp; amp *= 0.5; }
+    v /= tot; const lat = (y / LH - 0.5) * 2; v -= 0.12 * lat * lat;
+    LAND[y * LW + x] = v; } }
+const landAt = (lon, lat) => { const x = Math.floor((lon / TAU + 0.5) * LW) & (LW - 1), y = clamp(Math.floor((0.5 - lat / Math.PI) * LH), 0, LH - 1); return LAND[y * LW + x]; };
+
+// ── palettes (lum 0..1 → rgb) ──
+const pal = stops => l => { l = clamp(l) * (stops.length - 1); const i = Math.min(stops.length - 2, Math.floor(l)), u = l - i, a = stops[i], b = stops[i + 1]; return [lerp(a[0], b[0], u), lerp(a[1], b[1], u), lerp(a[2], b[2], u)]; };
+const P_OCEAN = pal([[8, 22, 60], [18, 70, 160], [40, 150, 230], [150, 225, 255], [235, 250, 255]]);
+const P_LAND = pal([[18, 40, 22], [46, 120, 66], [140, 200, 90], [235, 230, 150], [255, 250, 225]]);
+const P_HEART = pal([[50, 4, 18], [150, 14, 44], [240, 50, 78], [255, 140, 150], [255, 235, 235]]);
+const P_TITLE = pal([[70, 34, 10], [200, 110, 30], [255, 176, 64], [255, 222, 150], [255, 250, 235]]);
+
+// ── scene geometry ──
+const CX = 960, CY = 530, RAD = 400;
+const BEATS = [[5.95, 0.10], [6.2, 0.065], [6.95, 0.10], [7.2, 0.065]];
+const T_MORPH0 = 4.35, T_MORPH1 = 5.35, T_DIS = 7.45;
+function theta(t) {
+  if (t < 4.2) return 1.69 + 0.9 * t;
+  if (t < 6.0) { const u = t - 4.2; return 5.47 + 0.9 * (u - u * u / 3.6); }
+  return TAU + 0.26 * Math.sin((t - 6.0) * 1.7) * seg(t, 6.0, 6.6);
+}
+const gpulse = (u, k) => u <= 0 ? 0 : (u / k) * Math.exp(1 - u / k);
+function scaleAt(t) {
+  let s;
+  if (t < 4.05) s = lerp(0.9, 1.0, eOut(seg(t, 0.3, 1.9)));
+  else if (t < 4.4) s = 1 - 0.07 * eInOut(seg(t, 4.05, 4.4));
+  else if (t < T_MORPH1) s = lerp(0.93, 1.07, eOut(seg(t, 4.4, T_MORPH1)));
+  else { const u = t - T_MORPH1; s = 1 + 0.07 * Math.exp(-5 * u) * Math.cos(9 * u); }
+  for (const [bt, a] of BEATS) { const u = t - bt; s += a * gpulse(u, 0.07) - 0.4 * a * gpulse(u - 0.1, 0.1); }
+  return s;
+}
+function heart2(x, y) { const k = 1.22, X = x * k, Z = y * k + 0.12, a = X * X + Z * Z - 1; return a * a * a - X * X * Z * Z * Z; }
+function heartF(x, y, z) {   // y up, z towards viewer (object space)
+  const k = 1.22, X = x * k, Zv = y * k + 0.12, Yd = z * k;
+  const a = X * X + 2.25 * Yd * Yd + Zv * Zv - 1, z3 = Zv * Zv * Zv;
+  return a * a * a - X * X * z3 - 0.1125 * Yd * Yd * z3;
+}
+
+let M = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+function buildM(th, pitch, tilt) {  // q = Ry(-th) · Rx(-pitch) · Rz(-tilt) · p
+  const cy = Math.cos(-th), sy = Math.sin(-th), cx = Math.cos(-pitch), sx = Math.sin(-pitch), cz = Math.cos(-tilt), sz = Math.sin(-tilt);
+  const Rz = [cz, -sz, 0, sz, cz, 0, 0, 0, 1], Rx = [1, 0, 0, 0, cx, -sx, 0, sx, cx], Ry = [cy, 0, sy, 0, 1, 0, -sy, 0, cy];
+  const mul = (A, B) => { const o = []; for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o.push(A[r * 3] * B[c] + A[r * 3 + 1] * B[3 + c] + A[r * 3 + 2] * B[6 + c]); return o; };
+  return mul(Ry, mul(Rx, Rz));
+}
+const app = (m, x, y, z) => [m[0] * x + m[1] * y + m[2] * z, m[3] * x + m[4] * y + m[5] * z, m[6] * x + m[7] * y + m[8] * z];
+
+// object → cell buffers (only cells inside its bounding ellipse)
+function drawObject(t, onlyInside) {
+  const m = eInOut(seg(t, T_MORPH0, T_MORPH1));
+  const s = scaleAt(t), th = theta(t);
+  M = buildM(th, 0.32 * (1 - m), 0.36 * (1 - m));
+  const F = (x, y, z) => (1 - m) * (x * x + y * y + z * z - 1) + (m > 0 ? m * heartF(x, y, z) : 0);
+  const Lv = [-0.55, 0.62, 0.56], ln = Math.hypot(...Lv); const L = app(M, Lv[0] / ln, Lv[1] / ln, Lv[2] / ln), V = app(M, 0, 0, 1);
+  const Hh = [L[0] + V[0], L[1] + V[1], L[2] + V[2]], hn = Math.hypot(...Hh); Hh[0] /= hn; Hh[1] /= hn; Hh[2] /= hn;
+  const rs = RAD * s, ext = 1.32;
+  const c0 = Math.max(0, Math.floor((CX - rs * ext) / CW)), c1 = Math.min(COLS - 1, Math.ceil((CX + rs * ext) / CW));
+  const r0 = Math.max(0, Math.floor((CY - rs * ext) / CH)), r1 = Math.min(ROWS - 1, Math.ceil((CY + rs * ext) / CH));
+  const morphNoise = Math.sin(Math.PI * seg(t, T_MORPH0, T_MORPH1));
+  const fr = Math.floor(t * 24);
+  let glow = 0; for (const [bt, a] of BEATS) glow += a * gpulse(t - bt, 0.09);
+  const flash = 0.45 * morphNoise;
+  let lit = 0;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const i = r * COLS + c;
+    const x = ((c + 0.5) * CW - CX) / rs, y = -((r + 0.5) * CH - CY) / rs;
+    const rr = x * x + y * y; if (rr > ext * ext) continue;
+    // ray march along view z (orthographic) in view space, evaluate in object space
+    let zPrev = 1.5, fPrev, hit = false, zHit = 0;
+    { const q = app(M, x, y, zPrev); fPrev = F(q[0], q[1], q[2]); }
+    for (let k = 1; k <= 34; k++) {
+      const z = 1.5 - k * 3.0 / 34; const q = app(M, x, y, z); const f = F(q[0], q[1], q[2]);
+      if (f < 0 && fPrev >= 0) { let a = zPrev, b = z; for (let j = 0; j < 7; j++) { const mz = (a + b) / 2, qq = app(M, x, y, mz); if (F(qq[0], qq[1], qq[2]) < 0) b = mz; else a = mz; } zHit = (a + b) / 2; hit = true; break; }
+      zPrev = z; fPrev = f;
+    }
+    if (!hit) {
+      // atmosphere halo around the globe
+      const d = Math.sqrt(rr) - 1;
+      if (m < 0.8 && d > 0 && d < 0.075) { const a = (1 - d / 0.075) * (1 - m / 0.8) * 0.5; setCell(i, rampCode(a * 0.7 + 0.1), 60 * a * 2, 150 * a * 2, 230 * a * 2, a * 0.7 + 0.1); lit++; }
+      continue;
+    }
+    const q = app(M, x, y, zHit), e = 0.012;
+    let nx = F(q[0] + e, q[1], q[2]) - F(q[0] - e, q[1], q[2]), ny = F(q[0], q[1] + e, q[2]) - F(q[0], q[1] - e, q[2]), nz = F(q[0], q[1], q[2] + e) - F(q[0], q[1], q[2] - e);
+    const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+    const dif = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]) + 0.22 * Math.max(0, -(nx * L[0] + ny * L[1] + nz * L[2])) * m;
+    const spec = Math.pow(Math.max(0, nx * Hh[0] + ny * Hh[1] + nz * Hh[2]), 28);
+    const ndv = Math.max(0, nx * V[0] + ny * V[1] + nz * V[2]), rim = Math.pow(1 - ndv, 3);
+    // globe albedo
+    const ql = Math.hypot(q[0], q[1], q[2]) || 1, lon = Math.atan2(q[0], q[2]), lat = Math.asin(clamp(q[1] / ql, -1, 1));
+    const lv = landAt(lon, lat), land = lv > 0.5;
+    const gl = (Math.abs(((lon / (Math.PI / 6)) % 1 + 1) % 1 - 0.5) > 0.47) || (Math.abs(((lat / (Math.PI / 6)) % 1 + 1) % 1 - 0.5) > 0.465);
+    const alb = land ? 0.95 + 0.4 * (lv - 0.5) : 0.62;
+    const lumG = 0.05 + 0.88 * dif * alb + 0.55 * spec * (land ? 0.3 : 1);
+    const lumH = (0.06 + 0.85 * dif + 0.6 * spec) * (1 + 0.5 * glow);
+    const lum = clamp(lerp(lumG, lumH, m) + 0.25 * rim);
+    let col = land ? P_LAND(lumG) : P_OCEAN(lumG);
+    if (gl && m < 1) col = [lerp(col[0], 150, 0.35), lerp(col[1], 220, 0.35), lerp(col[2], 255, 0.35)];
+    col = [col[0] + rim * 70, col[1] + rim * 160, col[2] + rim * 220];
+    if (m > 0) { let ch = P_HEART(lumH); ch = [ch[0] + rim * 255, ch[1] + rim * 90, ch[2] + rim * 110]; col = [lerp(col[0], ch[0], m), lerp(col[1], ch[1], m), lerp(col[2], ch[2], m)]; }
+    if (flash > 0) col = [lerp(col[0], 255, flash * 0.6), lerp(col[1], 225, flash * 0.6), lerp(col[2], 235, flash * 0.6)];
+    let code = RC[clamp(Math.round(lum * 9), 1, 9)];
+    if (gl && m < 0.5 && lum > 0.2) code = (Math.abs(((lat / (Math.PI / 6)) % 1 + 1) % 1 - 0.5) > 0.465) ? 45 : 124;   // '-' '|' graticule
+    if (morphNoise > 0 && hash(i, fr, 3) < 0.4 * morphNoise) code = SC[Math.floor(hash(i, fr, 4) * SC.length)];
+    setCell(i, code, col[0], col[1], col[2], -1); lit++;
+  }
+  return lit;
+}
+
+// ── title (rasterised into the grid) ──
+const TG = new Uint8Array(N), TL = new Float32Array(N), TSH = new Uint8Array(N);
+function buildTitle() {
+  const SS = 4, tc = mk(COLS * SS, ROWS * SS), g = tc.getContext('2d');
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  // cell aspect is 12:20, so draw into a grid-space canvas squashed vertically by 12/20
+  g.save(); g.scale(SS / CW, SS / CH);
+  g.font = `700 220px ${MONO}`; g.fillText('MADE OF', W / 2, 412);
+  g.font = `700 290px ${MONO}`; g.fillText('CHARACTERS', W / 2, 692);
+  g.restore();
+  const d = g.getImageData(0, 0, tc.width, tc.height).data, cov = new Float32Array(N);
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    let s = 0; for (let y = 0; y < SS; y++) for (let x = 0; x < SS; x++) s += d[((r * SS + y) * tc.width + c * SS + x) * 4 + 3];
+    cov[r * COLS + c] = s / (SS * SS * 255);
+  }
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const i = r * COLS + c, v = cov[i];
+    if (v > 0.06) { const y = (r + 0.5) * CH, f = y < 450 ? clamp((y - 250) / 170) : clamp((y - 480) / 215); TL[i] = clamp(v * (1.02 - 0.3 * f)); TG[i] = 1; }
+    else if (r > 0 && c > 0 && cov[(r - 1) * COLS + c - 1] > 0.45) TSH[i] = 1;   // drop shadow (+1, +1)
+  }
+}
+const SUB = 'a picture drawn with ten characters';
+const SUB_ROW = 42, SUB_COL = Math.floor((COLS - SUB.length) / 2);
+
+// ── labels typed into the grid ──
+const LABELS = [
+  { s: '01 / SPHERE', c: 3, r: 2, t0: 1.1, t1: 4.35 },
+  { s: '02 / HEART', c: 3, r: 2, t0: 4.6, t1: 7.45 },
+  { s: '03 / TYPE', c: 3, r: 2, t0: 7.75, t1: 99 },
+  { s: '160 x 54 CELLS', c: COLS - 3 - 14, r: 2, t0: 1.25, t1: 99 },
+  { s: 'RAMP [ .:-=+*#%@]', c: 3, r: ROWS - 3, t0: 1.4, t1: 99, ramp: true },
+];
+const LIT_COL = COLS - 3 - 15, LIT_ROW = ROWS - 3;
+function typeText(s, c, r, t, t0, t1, rgb, stats, sp = 0.028) {
+  for (let k = 0; k < s.length; k++) {
+    const ti = t0 + k * sp, to = t1 + k * 0.015; if (t < ti || t > to + 0.14) continue;
+    const i = r * COLS + c + k; if (s[k] === ' ' && t > ti + 0.12 && t < to) { setCell(i, 0, 0, 0, 0); continue; }
+    let code = s.charCodeAt(k), b = 1;
+    if (t < ti + 0.12) { code = SC[Math.floor(hash(i, Math.floor(t * 30), 9) * SC.length)]; b = 1.4; if (stats && t - 1 / 30 < ti + 0.12 - 1e-6 && t >= ti + 0.12 - 1 / 30) stats.tk++; }
+    else if (t > to) { code = SC[Math.floor(hash(i, Math.floor(t * 30), 8) * SC.length)]; b = 0.7; }
+    setCell(i, code, rgb[0] * b, rgb[1] * b, rgb[2] * b, -1);
+  }
+}
+
+// ── compose one frame into the cell buffers ──
+function compose(t, stats) {
+  G.fill(0); LM.fill(-1);
+  const dt = 1 / 30;
+  // faint grid dots (laid down by the rain)
+  for (let i = 0; i < N; i++) setCell(i, 46, 20, 26, 34, -1);
+  // stars
+  const starA = 1 - seg(t, T_DIS, T_DIS + 0.8);
+  for (const s of STARS) { const b = s.b * (0.55 + 0.45 * Math.sin(s.ph + t * s.sp)) * starA; if (b > 0.05) setCell(s.i, s.ch, 120 * b + 20, 150 * b + 26, 200 * b + 34, -1); }
+  // heart-beat ripple rings
+  for (const [bt, a] of BEATS) {
+    const u = t - bt; if (u < 0 || u > 1.3) continue;
+    const g = 1.04 + u * 1.9, rad = RAD * 1.1 * g, fade = (1 - u / 1.3) * (a / 0.1);
+    const rr0 = Math.max(0, Math.floor((CY - rad - 20) / CH)), rr1 = Math.min(ROWS - 1, Math.ceil((CY + rad + 20) / CH));
+    for (let r = rr0; r <= rr1; r++) for (let c = 0; c < COLS; c++) {
+      const gx = ((c + 0.5) * CW - CX) / (RAD * g), gy = -((r + 0.5) * CH - CY) / (RAD * g);
+      const f0 = heart2(gx, gy); if (Math.abs(f0) > 0.5) continue;
+      const gdx = (heart2(gx + 0.01, gy) - heart2(gx - 0.01, gy)) / 0.02, gdy = (heart2(gx, gy + 0.01) - heart2(gx, gy - 0.01)) / 0.02;
+      const d = f0 / (Math.hypot(gdx, gdy) || 1) * RAD * g;
+      if (Math.abs(d) < 20) { const cusp = gy > 0.55 ? sstep(clamp(Math.abs(gx) / 0.3)) : 1;
+        const l = (1 - Math.abs(d) / 20) * 0.5 * fade * cusp; if (l > 0.05) { const i = r * COLS + c; setCell(i, rampCode(l + 0.08), 40 + 230 * l, 12 + 50 * l, 26 + 80 * l, -1); } }
+    }
+  }
+  // the object (globe → heart)
+  if (t < T_DIS + 1.2) drawObject(t);
+  // intro: character rain lays the grid and resolves the scene
+  if (t < 2.4) {
+    for (let c = 0; c < COLS; c++) {
+      const { t0, spd, len } = RAIN[c], head = (t - t0) * spd;
+      for (let r = 0; r < ROWS; r++) {
+        const i = r * COLS + c, d = head - r;
+        if (d < 0) { setCell(i, 0, 0, 0, 0); continue; }
+        const tr = t0 + r / spd, settle = tr + 0.12 + 0.45 * R1[i];
+        const sceneCh = G[i] !== 46 && G[i] !== 0;
+        if (d < 1.2) { setCell(i, SC[Math.floor(hash(i, Math.floor(t * 30), 1) * SC.length)], 235, 250, 255, -1); continue; }
+        if (sceneCh && t < settle) {
+          const u = (t - tr) / (settle - tr);
+          setCell(i, SC[Math.floor(hash(i, Math.floor(t * 20), 2) * SC.length)], lerp(200, CR[i], u), lerp(240, CG[i], u), lerp(255, CB[i], u), -1);
+          if (stats && settle > t - dt && settle <= t) stats.tk++;
+          continue;
+        }
+        if (!sceneCh && d < len) {
+          const b = Math.pow(1 - d / len, 1.6);
+          setCell(i, SC[Math.floor(hash(i, Math.floor(t * 16), 5) * SC.length)], lerp(20, 90, b), lerp(26, 200, b), lerp(34, 235, b), -1);
+        }
+      }
+    }
+  }
+  // outro: heart dissolves radially, title assembles left → right
+  if (t >= T_DIS) {
+    const fr = Math.floor(t * 30);
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      const i = r * COLS + c;
+      const dn = clamp(Math.hypot((c + 0.5) * CW - CX, (r + 0.5) * CH - CY) / 900);
+      const td = T_DIS + 0.5 * dn + 0.14 * R2[i];
+      const ts = Math.max(td + 0.16, 7.8 + 0.62 * (c / COLS) + 0.28 * R3[i]);
+      if (t < td) continue;
+      const had = G[i] !== 0 && G[i] !== 46, isT = TG[i] === 1, isS = TSH[i] === 1;
+      if (t < ts) {
+        if (had || isT || R1[i] < 0.05) {
+          const u = (t - td) / (ts - td), tc = isT ? P_TITLE(TL[i]) : [90, 70, 60];
+          const pr = had ? CR[i] : 60, pg = had ? CG[i] : 60, pb = had ? CB[i] : 70;
+          const fadeOut = (isT || had) ? 1 : Math.sin(Math.PI * u);
+          setCell(i, SC[Math.floor(hash(i, fr, 6) * SC.length)], lerp(pr, tc[0] * 1.2, u) * fadeOut, lerp(pg, tc[1] * 1.2, u) * fadeOut, lerp(pb, tc[2] * 1.2, u) * fadeOut, -1);
+          if (!isT && !had && fadeOut < 0.2) setCell(i, 46, 20, 26, 34, -1);
+        } else setCell(i, 46, 20, 26, 34, -1);
+        continue;
+      }
+      if (stats && isT && ts > t - dt && ts <= t) stats.tk++;
+      if (isT) {
+        // highlight sweep across the title
+        const sw = Math.exp(-Math.pow(((c - lerp(-30, COLS + 30, seg(t, 8.55, 9.35))) + (r - 28) * 0.6) / 7, 2));
+        const l = clamp(TL[i] + 0.35 * sw), col = P_TITLE(clamp(TL[i] * 0.95 + 0.45 * sw));
+        setCell(i, rampCode(Math.max(l, 0.12)), col[0], col[1], col[2], Math.max(l, 0.12));
+      } else if (isS) setCell(i, 58, 92, 46, 30, 0.22);
+      else setCell(i, 46, 20, 26, 34, -1);
+    }
+    // subtitle typed under the title
+    typeText(SUB, SUB_COL, SUB_ROW, t, 8.0, 99, [170, 176, 186], stats, 0.018);
+  }
+  // labels
+  for (const L of LABELS) {
+    typeText(L.s, L.c, L.r, t, L.t0, L.t1, [104, 124, 146], stats);
+    if (L.ramp && t > L.t0 + 0.6) for (let k = 0; k < 10; k++) { const i = L.r * COLS + L.c + 6 + k; if (G[i] || k === 0) { const l = k / 9; setCell(i, RC[k] || 32, 110 + 145 * l, 130 + 110 * l, 150 + 80 * l, -1); } }
+  }
+  // live counter of lit cells
+  if (t > 1.3) {
+    let lit = 0; for (let i = 0; i < N; i++) if (G[i] && G[i] !== 46) lit++;
+    typeText('LIT ' + String(lit).padStart(5, ' ') + ' CELLS', LIT_COL, LIT_ROW, t, 1.3, 99, [104, 124, 146], null);
+  }
+  // ending: every cell thins out down the density ramp, left → right
+  if (t > 9.1) {
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      const i = r * COLS + c, a = 9.1 + 0.42 * (c / COLS) + 0.06 * R2[i], f = 1 - eInOut(seg(t, a, a + 0.42));
+      if (f >= 1 || !G[i]) continue;
+      CR[i] *= f; CG[i] *= f; CB[i] *= f;
+      if (LM[i] >= 0) { const l = LM[i] * f; G[i] = l < 0.06 ? 0 : rampCode(Math.max(l, 0.12)); }
+      else if (f < 0.25) G[i] = G[i] === 46 ? 0 : 46;
+    }
+  }
+  // opening: grid dots only exist where the rain has passed (handled above); fade-in of global light
+}
+
+// ── rendering ──
+const atlas = mk(96 * CW, CH), gl = mk(W, H), glx = gl.getContext('2d');
+const cmap = mk(COLS, ROWS), cmx = cmap.getContext('2d'), cimg = cmx.createImageData(COLS, ROWS);
+const small = mk(480, 270), smx = small.getContext('2d');
+const bg = mk(W, H);
+function buildStatic() {
+  const a = atlas.getContext('2d'); a.fillStyle = '#fff'; a.font = `600 17px ${MONO}`; a.textAlign = 'center'; a.textBaseline = 'middle';
+  for (let k = 32; k < 127; k++) a.fillText(String.fromCharCode(k), (k - 32) * CW + CW / 2, CH / 2 + 1);
+  const b = bg.getContext('2d'); b.fillStyle = '#05070a'; b.fillRect(0, 0, W, H);
+  const gr = b.createRadialGradient(CX, CY, 80, CX, CY, 1150); gr.addColorStop(0, 'rgba(24,34,48,0.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  b.fillStyle = gr; b.fillRect(0, 0, W, H);
+  buildTitle();
+}
+function render(t) {
+  compose(t);
+  glx.globalCompositeOperation = 'source-over'; glx.clearRect(0, 0, W, H);
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const code = G[r * COLS + c]; if (code > 32 && code < 127) glx.drawImage(atlas, (code - 32) * CW, 0, CW, CH, c * CW, r * CH, CW, CH);
+  }
+  const d = cimg.data;
+  for (let i = 0; i < N; i++) { d[i * 4] = clamp(CR[i], 0, 255); d[i * 4 + 1] = clamp(CG[i], 0, 255); d[i * 4 + 2] = clamp(CB[i], 0, 255); d[i * 4 + 3] = 255; }
+  cmx.putImageData(cimg, 0, 0);
+  glx.globalCompositeOperation = 'source-in'; glx.imageSmoothingEnabled = false; glx.drawImage(cmap, 0, 0, W, H); glx.imageSmoothingEnabled = true;
+  glx.globalCompositeOperation = 'source-over';
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.drawImage(bg, 0, 0);
+  ctx.drawImage(gl, 0, 0);
+  smx.clearRect(0, 0, 480, 270); smx.filter = 'blur(3px)'; smx.drawImage(gl, 0, 0, 480, 270); smx.filter = 'none';
+  ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.7; ctx.drawImage(small, 0, 0, W, H);
+  ctx.globalAlpha = 0.35; ctx.filter = 'blur(10px)'; ctx.drawImage(small, 0, 0, W, H); ctx.filter = 'none';
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  // global fade in / out
+  const fade = Math.min(seg(t, 0, 0.25), 1 - seg(t, 9.75, 10));
+  if (fade < 1) { ctx.fillStyle = `rgba(0,0,0,${1 - fade})`; ctx.fillRect(0, 0, W, H); }
+}
+window.events = () => {
+  const ev = [{ k: 'rain', t: 0.15 }, { k: 'whoosh', t: T_MORPH0 - 0.25, d: 1.3 }, { k: 'dissolve', t: T_DIS, d: 1.1 }, { k: 'chord', t: 8.5 }, { k: 'sweep', t: 8.55, d: 0.8 }, { k: 'fade', t: 9.1 }];
+  for (const [bt, a] of BEATS) ev.push({ k: 'beat', t: bt, a });
+  for (let f = 0; f < DUR * 30; f++) { const st = { tk: 0 }; compose(f / 30, st); if (st.tk) ev.push({ k: 'tk', t: f / 30, n: st.tk }); }
+  return ev;
+};
+window.ready = (async () => {
+  await document.fonts.load(`600 17px ${MONO}`); await document.fonts.load(`700 200px ${MONO}`); await document.fonts.ready;
+  buildStatic();
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+</script>
+</body></html>
