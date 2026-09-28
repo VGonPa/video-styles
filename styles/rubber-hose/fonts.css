@@ -1,0 +1,15 @@
+/* OFL fonts from Google Fonts (latin subset: covers all visible text incl. U+2014 em dash and curly quotes) */
+@font-face {
+  font-family: 'Rye';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/Rye-400-latin.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Oleo Script';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url(fonts/OleoScript-700-latin.woff2) format('woff2');
+}
