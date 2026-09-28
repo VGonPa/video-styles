@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── glitch · digital corruption title sequence: "SIGNAL LOST / SIGNAL FOUND" ─────────────────────────────
+// A clean broadcast card buffers in from macroblocks, the title slams in letter by letter, then the stream breaks:
+// beat-synced bursts (RGB channel split, block displacement, scanline tearing, compression macroblocks with DCT
+// ringing, bitcrush quantization), a hard frame freeze/stutter → a vertical pixel-sort melt into the "SEARCHING"
+// scene → a datamosh melt (the new scene's motion vectors drag the old picture's pixels) into "SIGNAL FOUND" →
+// clean resolve → glitch out to black through packet loss, the last fragments settling.
+// Everything is a pure function of t (hash-seeded randomness; the datamosh re-integrates its motion from its key frame).
+const W = 1920, H = 1080, DUR = 10.0;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d', { willReadFrequently: true });
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eBack = u => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); };
+function hash(a, b = 0, c = 0) {
+  let h = Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul((b | 0) + 0x3c6ef372, 0x165667b1) ^ Math.imul((c | 0) + 0x5bd1e995, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b); h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35); h ^= h >>> 16; return (h >>> 0) / 4294967296;
+}
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const g2 = (c, o) => c.getContext('2d', o);
+
+const TF = '"Archivo Black"', MF = '"JetBrains Mono"';
+const BG = '#0a0a0f', INK = '#f4f4ef', CY = '#00e5ff', MG = '#ff2d78', YL = '#e6ff3a', DIM = '#2a2a36', MUT = '#8a8a9a';
+
+// ── buffers ──
+const base = mk(W, H), bctx = g2(base, { willReadFrequently: true });
+const work = mk(W, H), wctx = g2(work, { willReadFrequently: true });
+const cC = mk(W, H), cctx = g2(cC);
+const small = mk(120, 68), sctx = g2(small);
+const HW = 960, HH = 540, half = mk(HW, HH), hctx = g2(half, { willReadFrequently: true });
+const outImg = ctx.createImageData(W, H);
+let gridC, dctC, B0 = null;
+
+// timeline tables (also drive the audio) ─────────────────────────────────────────────
+// bursts: [time, duration, amplitude]; on the 120 bpm grid (beats every 0.5 s) plus off-beat stabs
+const BURSTS = [[0.20, .12, .55], [1.50, .14, .30], [2.00, .20, .50], [2.25, .12, .38], [2.50, .30, .85], [3.00, .18, .70], [3.25, .12, .95],
+  [3.85, .16, .80], [4.50, .10, .25], [5.00, .12, .30], [5.50, .14, .40], [5.75, .06, .55], [6.00, .18, .60], [6.25, .12, .70],
+  [8.00, .10, .24], [8.75, .22, .70], [9.00, .16, .95]];
+const SLAM_A = 0.82, STAG = 0.06;              // "SIGNAL" letters
+const STRONG_T = 1.30, LOST_T = 2.50;
+const SORT0 = 3.35, SORT1 = 3.85, SORT2 = 4.35; // pixel-sort melt A → B
+const MOSH0 = 6.25, MOSH1 = 7.35;               // datamosh B → C
+const LOCK_T = 7.40;
+const CH = [['07', 3.85], ['12', 4.40], ['19', 4.90], ['23', 5.40]];
+
+function burstI(t) {
+  let g = 0;
+  for (const [bt, d, a] of BURSTS) { if (t >= bt && t < bt + d) { const u = (t - bt) / d; g = Math.max(g, a * (1 - Math.floor(u * 3) / 3)); } }
+  return g;
+}
+function burstIx(t) { let k = -1; BURSTS.forEach(([bt, d], i) => { if (t >= bt && t < bt + d) k = i; }); return k; }
+// frame freezes: hold / stutter between two stuck frames (time itself stops, so the glitch seeds stop too)
+function freezeMap(t) {
+  if (t >= 2.75 && t < 3.0) { const k = Math.floor((t - 2.75) * 15 + 1e-4); return k < 2 ? 2.62 : (k % 2 ? 2.70 : 2.62); }
+  if (t >= 5.80 && t < 5.94) return 5.78;
+  if (t >= 9.05 && t < 9.16) return 9.03;
+  return t;
+}
+
+// ── precomputed textures ──
+function buildTextures() {
+  gridC = mk(W, H); const g = g2(gridC);
+  g.fillStyle = BG; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#181822';
+  for (let y = 36; y < H; y += 48) for (let x = 40; x < W; x += 48) g.fillRect(x - 1, y - 1, 3, 3);
+  g.fillStyle = '#262632';
+  for (let y = 36 + 48 * 2; y < H; y += 240) for (let x = 40 + 48 * 2; x < W; x += 240) { g.fillRect(x - 9, y, 19, 1); g.fillRect(x, y - 9, 1, 19); }
+  // DCT basis tiles: 8×8 cosine patterns → the ringing inside broken compression blocks
+  dctC = mk(256, 256); const d = g2(dctC); const im = d.createImageData(256, 256);
+  for (let by = 0; by < 32; by++) for (let bx = 0; bx < 32; bx++) {
+    const u = 1 + Math.floor(hash(bx, by, 7) * 6), v = Math.floor(hash(bx, by, 8) * 6), amp = 0.4 + 0.6 * hash(bx, by, 9);
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const c = Math.cos((2 * x + 1) * u * Math.PI / 16) * Math.cos((2 * y + 1) * v * Math.PI / 16);
+      const val = 128 + 127 * c * amp, i = ((by * 8 + y) * 256 + bx * 8 + x) * 4;
+      im.data[i] = im.data[i + 1] = im.data[i + 2] = val; im.data[i + 3] = 255;
+    }
+  }
+  d.putImageData(im, 0, 0);
+}
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => v / 16 - 0.47);
+
+// ── drawing helpers ──
+function text(c, s, x, y, font, color, align = 'left', ls = '0px') { c.font = font; c.letterSpacing = ls; c.textAlign = align; c.fillStyle = color; c.fillText(s, x, y); c.letterSpacing = '0px'; }
+function typed(s, t, t0, cps = 45) { if (t < t0) return ''; return s.slice(0, Math.floor((t - t0) * cps) + 1); }
+const pad = n => String(n).padStart(2, '0');
+
+function hud(c, t, st) {
+  c.fillStyle = DIM; c.fillRect(112, 128, 1696, 2); c.fillRect(112, 952, 1696, 2);
+  const blink = Math.floor(t * 2) % 2 === 0;
+  if (st.dot === 'live') { c.fillStyle = MG; if (blink) { c.beginPath(); c.arc(124, 97, 9, 0, 7); c.fill(); } }
+  else if (st.dot === 'lock') { c.fillStyle = CY; c.beginPath(); c.arc(124, 97, 9, 0, 7); c.fill(); }
+  else { c.strokeStyle = MUT; c.lineWidth = 3; c.beginPath(); c.arc(124, 97, 8, 0, 7); c.stroke(); }
+  text(c, st.ch, 150, 107, `700 26px ${MF}`, INK, 'left', '4px');
+  text(c, st.label, 270, 107, `500 26px ${MF}`, st.labelColor || MUT, 'left', '4px');
+  const f = Math.floor(t * 30 + 1e-4);
+  text(c, `TC 00:00:${pad(Math.floor(f / 30))}:${pad(f % 30)}`, 1808, 107, `500 26px ${MF}`, MUT, 'right', '4px');
+  text(c, 'STREAM 1920x1080 / 30P', 112, 1000, `500 24px ${MF}`, MUT, 'left', '4px');
+  text(c, 'PKT LOSS', 1640, 1000, `500 24px ${MF}`, MUT, 'right', '4px');
+  text(c, st.loss, 1808, 1000, `700 24px ${MF}`, st.lossColor || INK, 'right', '4px');
+}
+
+// a word whose letters slam in one by one: overshoot scale + a two-frame chromatic kick per letter
+function slam(c, word, x, y, size, t, t0, stag, fill, stroke) {
+  c.font = `${size}px ${TF}`; c.textAlign = 'left'; c.letterSpacing = '0px';
+  for (let i = 0; i < word.length; i++) {
+    const ti = t0 + i * stag; if (t < ti) continue;
+    const k = clamp((t - ti) / 0.16), s = lerp(1.55, 1, eBack(k));
+    const xi = x + c.measureText(word.slice(0, i)).width, wi = c.measureText(word[i]).width;
+    c.save(); c.translate(xi + wi / 2, y - size * 0.36); c.scale(s, s); c.translate(-wi / 2, size * 0.36);
+    if (k < 0.5) {
+      const dx = 22 * (1 - k * 2);
+      c.globalCompositeOperation = 'screen';
+      c.fillStyle = CY; c.fillText(word[i], -dx, 0); c.fillStyle = MG; c.fillText(word[i], dx, 0);
+      c.globalCompositeOperation = 'source-over';
+    }
+    if (stroke) { c.lineWidth = 5; c.strokeStyle = stroke; c.lineJoin = 'miter'; c.strokeText(word[i], 0, 0); }
+    else { c.fillStyle = fill; c.fillText(word[i], 0, 0); }
+    c.restore();
+  }
+}
+
+// broadcast icon (dot + arcs) and a 5-bar signal meter
+const ICX = 1565, ICY = 400;
+function icon(c, level, t, color = INK, slash = false, pulse = -1) {
+  const arcs = level >= 5 ? 3 : level >= 3 ? 2 : level >= 1 ? 1 : 0;
+  c.fillStyle = color; c.beginPath(); c.arc(ICX, ICY, 22, 0, 7); c.fill();
+  c.lineCap = 'round'; c.lineWidth = 17;
+  for (let i = 0; i < 3; i++) {
+    const r = 72 + i * 52; c.strokeStyle = i < arcs ? color : DIM;
+    c.beginPath(); c.arc(ICX, ICY, r, -0.72, 0.72); c.stroke();
+    c.beginPath(); c.arc(ICX, ICY, r, Math.PI - 0.72, Math.PI + 0.72); c.stroke();
+  }
+  c.lineCap = 'butt';
+  if (pulse >= 0) {           // expanding rings (scene C re-acquire)
+    for (let k = 0; k < 3; k++) {
+      const u = ((pulse + k / 3) % 1); c.strokeStyle = `rgba(0,229,255,${(1 - u) * 0.7})`; c.lineWidth = 4;
+      c.beginPath(); c.arc(ICX, ICY, 40 + u * 330, 0, 7); c.stroke();
+    }
+  }
+  const bx = 1415, bw = 46, gap = 20, by = 780;
+  for (let i = 0; i < 5; i++) {
+    const h = 44 + i * 34, x = bx + i * (bw + gap);
+    if (i < level) { c.fillStyle = i === 4 ? YL : color; c.fillRect(x, by - h, bw, h); }
+    else { c.strokeStyle = '#3a3a48'; c.lineWidth = 3; c.strokeRect(x + 1.5, by - h + 1.5, bw - 3, h - 3); }
+  }
+  if (slash) {
+    c.strokeStyle = MG; c.lineWidth = 16; c.beginPath(); c.moveTo(ICX - 150, ICY + 150); c.lineTo(ICX + 150, ICY - 150); c.stroke();
+  }
+}
+
+// ── scene A: SIGNAL STRONG → SIGNAL LOST ──
+function levelA(t) { return t < 1.0 ? 5 : t < 2.0 ? 5 : t < 2.25 ? 3 : t < 2.5 ? 2 : t < 3.0 ? 1 : 0; }
+function lossA(t) { return t < 2.0 ? '0.0%' : t < 2.25 ? '12.5%' : t < 2.5 ? '31.0%' : t < 3.0 ? '68.4%' : '100%'; }
+function drawA(c, t) {
+  c.drawImage(gridC, 0, 0);
+  const lost = t >= LOST_T;
+  hud(c, t, { dot: 'live', ch: 'CH 07', label: lost ? 'SIGNAL INTERRUPTED' : 'LIVE FEED', labelColor: lost ? MG : MUT, loss: lossA(t), lossColor: t >= 2.0 ? MG : INK });
+  icon(c, levelA(t), t, INK, t >= 3.0);
+  slam(c, 'SIGNAL', 104, 520, 250, t, SLAM_A, STAG, INK);
+  if (!lost) slam(c, 'STRONG', 104, 780, 250, t, STRONG_T, 0.045, null, INK);
+  else slam(c, 'LOST', 104, 780, 250, t, LOST_T, 0.035, MG);
+  const rw = 300 * eOut(seg(t, 1.2, 1.45)); c.fillStyle = lost ? MG : YL; c.fillRect(112, 842, rw, 10);
+  const cap = lost ? typed('ERR 07 / PACKET STREAM INTERRUPTED', t, LOST_T + 0.05, 60) : typed('BROADCAST NOMINAL / 5 OF 5 BARS', t, 1.4, 50);
+  text(c, cap, 112, 905, `500 28px ${MF}`, lost ? INK : MUT, 'left', '5px');
+}
+
+// ── scene B: SEARCHING (radar + channel scan) ──
+const BLIPS = [[0.9, 0.55], [2.3, 0.8], [3.6, 0.35], [4.8, 0.7], [5.6, 0.5]];
+const RX = 1475, RY = 540, RR = 300;
+function chAt(t) { let k = 0; CH.forEach(([, ct], i) => { if (t >= ct) k = i; }); return k; }
+function drawB(c, t) {
+  c.drawImage(gridC, 0, 0);
+  const locked = t >= 6.0;
+  hud(c, t, { dot: locked ? 'lock' : 'none', ch: 'CH --', label: locked ? 'SIGNAL DETECTED' : 'NO SIGNAL', labelColor: locked ? CY : MUT, loss: '100%', lossColor: MG });
+  // title
+  c.font = `140px ${TF}`; const tw = c.measureText('SEARCHING').width, sc = Math.min(1, 1000 / tw);
+  c.save(); c.translate(104, 420); c.scale(sc, sc); text(c, 'SEARCHING', 0, 0, `140px ${TF}`, INK); c.restore();
+  const dots = Math.floor(t * 4) % 4;
+  for (let i = 0; i < 3; i++) { c.fillStyle = i < dots ? YL : DIM; c.fillRect(104 + tw * sc + 24 + i * 34, 396, 22, 22); }
+  // channel chips
+  const cur = chAt(t);
+  for (let i = 0; i < 5; i++) {
+    const x = 112 + i * 170, y = 480, lab = ['07', '12', '19', '23', '31'][i];
+    const isCur = i === cur, done = i < cur, lockMe = locked && i === 3;
+    if (lockMe) { c.fillStyle = CY; c.fillRect(x, y, 150, 86); }
+    c.strokeStyle = lockMe ? CY : isCur ? YL : '#3a3a48'; c.lineWidth = 4; c.strokeRect(x + 2, y + 2, 146, 82);
+    text(c, lab, x + 75, y + 60, `800 44px ${MF}`, lockMe ? BG : isCur ? YL : done ? '#555566' : MUT, 'center');
+    if (done && !lockMe) { c.strokeStyle = MG; c.lineWidth = 4; c.beginPath(); c.moveTo(x + 18, y + 70); c.lineTo(x + 132, y + 16); c.stroke(); }
+  }
+  // readout (digits scramble for three frames when the channel changes)
+  const ct = CH[cur][1], f = Math.floor(t * 30 + 1e-4), since = f - Math.round(ct * 30);
+  let rd = CH[cur][0]; if (since >= 0 && since < 3) rd = pad(Math.floor(hash(f, 3, 1) * 100));
+  text(c, 'CH ' + rd, 104, 800, `800 170px ${MF}`, locked ? CY : YL);
+  text(c, locked ? 'CARRIER FOUND ON CH 23 / LOCKING' : `SCANNING / ${cur + 1} OF 5 CHANNELS`, 112, 905, `500 28px ${MF}`, locked ? INK : MUT, 'left', '5px');
+  // radar
+  c.strokeStyle = '#2e2e3c'; c.lineWidth = 2;
+  for (const r of [RR / 3, RR * 2 / 3, RR]) { c.beginPath(); c.arc(RX, RY, r, 0, 7); c.stroke(); }
+  c.beginPath(); c.moveTo(RX - RR - 30, RY); c.lineTo(RX + RR + 30, RY); c.moveTo(RX, RY - RR - 30); c.lineTo(RX, RY + RR + 30); c.stroke();
+  c.fillStyle = MUT; for (let k = 0; k < 72; k++) { const a = k / 72 * Math.PI * 2, l = k % 6 ? 8 : 20; c.save(); c.translate(RX, RY); c.rotate(a); c.fillRect(RR + 6, -1, l, 2); c.restore(); }
+  const ang = (t - 3.85) * 2.6 - 1.2;
+  for (let k = 0; k < 24; k++) {
+    const a0 = ang - k * 0.035; c.fillStyle = `rgba(230,255,58,${0.26 * (1 - k / 24)})`;
+    c.beginPath(); c.moveTo(RX, RY); c.arc(RX, RY, RR, a0 - 0.036, a0); c.closePath(); c.fill();
+  }
+  c.strokeStyle = YL; c.lineWidth = 4; c.beginPath(); c.moveTo(RX, RY); c.lineTo(RX + Math.cos(ang) * RR, RY + Math.sin(ang) * RR); c.stroke();
+  BLIPS.forEach(([ba, br], i) => {
+    const a = ba, d = ((ang - a) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    const lvl = (ang >= a) ? Math.exp(-d / 1.4) : 0; const x = RX + Math.cos(a) * br * RR, y = RY + Math.sin(a) * br * RR;
+    if (i === 3 && locked) return;
+    if (lvl > 0.02) { c.fillStyle = `rgba(244,244,239,${lvl})`; c.fillRect(x - 9, y - 9, 18, 18); }
+  });
+  if (locked) {            // lock-on brackets around the carrier blip
+    const [ba, br] = BLIPS[3], x = RX + Math.cos(ba) * br * RR, y = RY + Math.sin(ba) * br * RR;
+    const k = eOut(seg(t, 6.0, 6.15)), s = lerp(90, 34, k);
+    c.fillStyle = CY; c.fillRect(x - 11, y - 11, 22, 22);
+    c.strokeStyle = CY; c.lineWidth = 5;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      c.beginPath(); c.moveTo(x + sx * s, y + sy * (s - 16)); c.lineTo(x + sx * s, y + sy * s); c.lineTo(x + sx * (s - 16), y + sy * s); c.stroke();
+    }
+  }
+}
+
+// ── scene C: SIGNAL FOUND ──
+function slideC(t) { return (1 - eOut(seg(t, MOSH0, 7.2))) * 1100; }
+function drawC(c, t) {
+  c.drawImage(gridC, 0, 0);
+  const lk = t >= LOCK_T;
+  const level = lk ? Math.min(5, 1 + Math.floor((t - LOCK_T) / 0.09)) : 0;
+  hud(c, t, { dot: lk ? 'lock' : 'none', ch: 'CH 23', label: lk ? 'LOCKED' : 'ACQUIRING', labelColor: lk ? CY : MUT, loss: lk ? '0.0%' : '--', lossColor: lk ? CY : MUT });
+  icon(c, level, t, INK, false, t < 8.2 ? (t - MOSH0) * 1.1 : -1);
+  slam(c, 'SIGNAL', 104, 520, 250, 99, 0, 0, INK);
+  c.save(); c.translate(slideC(t), 0); slam(c, 'FOUND', 104, 780, 250, 99, 0, 0, CY); c.restore();
+  c.fillStyle = CY; c.fillRect(112, 842, 300 * eOut(seg(t, 7.3, 7.6)), 10);
+  text(c, typed('CH 23 / STREAM RESTORED', t, 7.5, 50), 112, 905, `500 28px ${MF}`, INK, 'left', '5px');
+}
+
+// ── datamosh: iterate block motion vectors of scene C over the frozen last key frame of scene B ──
+function flow(x, y, ts) {
+  const u = seg(ts, MOSH0, 7.2);
+  const dx = x - ICX, dy = y - ICY, d = Math.hypot(dx, dy) + 1e-3;
+  const sp = 9 * (1 - 0.6 * u) * (0.35 + Math.min(1, d / 800));
+  let vx = dx / d * sp, vy = dy / d * sp;
+  if (y > 560 && y < 830) vx -= Math.min(44, 3300 * Math.pow(1 - u, 2) / 30);   // FOUND sliding in from the right
+  vx += 7 * Math.sin(y / 70 + ts * 5); vy += 3;
+  return [vx, vy];
+}
+const cH = mk(HW, HH), chx = g2(cH, { willReadFrequently: true });
+function halfC(ts) { drawC(cctx, ts); chx.drawImage(cC, 0, 0, HW, HH); return chx.getImageData(0, 0, HW, HH).data; }
+function mosh(te) {
+  if (!B0) { drawB(bctx, MOSH0 - 1 / 30); hctx.imageSmoothingEnabled = true; hctx.drawImage(base, 0, 0, HW, HH); B0 = new Uint32Array(hctx.getImageData(0, 0, HW, HH).data.buffer.slice(0)); }
+  let a = B0.slice(0), b = new Uint32Array(a.length), prevC = halfC(MOSH0);
+  const n = Math.floor((te - MOSH0) * 30 + 1e-4), BS = 8;
+  for (let s = 0; s < n; s++) {
+    const ts = MOSH0 + s / 30;
+    for (let by = 0; by < HH; by += BS) for (let bx = 0; bx < HW; bx += BS) {
+      let [vx, vy] = flow(bx * 2 + 8, by * 2 + 8, ts);
+      if (hash(bx, by, s) < 0.04) { vx += (hash(bx, by, s + 99) - .5) * 60; vy += (hash(by, bx, s) - .5) * 40; } // stray vectors
+      const ox = Math.round(vx / 2), oy = Math.round(vy / 2);
+      for (let y = 0; y < BS; y++) {
+        const yy = by + y, sy = clamp(yy - oy, 0, HH - 1) | 0, ro = yy * HW, rs = sy * HW;
+        for (let x = 0; x < BS; x++) { const sx = clamp(bx + x - ox, 0, HW - 1) | 0; b[ro + bx + x] = a[rs + sx]; }
+      }
+    }
+    const tmp = a; a = b; b = tmp;
+    if (s % 2 === 1) {                     // P-frame residuals: only what MOVES in the new scene gets painted in, then dragged on
+      const cur = halfC(ts), A8 = new Uint8ClampedArray(a.buffer);
+      for (let i = 0; i < A8.length; i += 4) {
+        const dr = cur[i] - prevC[i], dg = cur[i + 1] - prevC[i + 1], db = cur[i + 2] - prevC[i + 2];
+        if (dr | dg | db) { A8[i] += dr; A8[i + 1] += dg; A8[i + 2] += db; }
+      }
+      prevC = cur;
+    }
+  }
+  const im = new ImageData(new Uint8ClampedArray(a.buffer), HW, HH); hctx.putImageData(im, 0, 0);
+  bctx.imageSmoothingEnabled = false; bctx.drawImage(half, 0, 0, W, H); bctx.imageSmoothingEnabled = true;
+  // the new scene: ghosts through as residual, then a refresh (key frame) sweeps block by block from the icon outward
+  drawC(cctx, te);
+  const u = seg(te, MOSH0, MOSH1);
+  bctx.globalAlpha = 0.04 + 0.3 * u * u; bctx.globalCompositeOperation = 'screen'; bctx.drawImage(cC, 0, 0);
+  bctx.globalAlpha = 1; bctx.globalCompositeOperation = 'source-over';
+  for (let by = 0; by < H; by += 16) for (let bx = 0; bx < W; bx += 16) {
+    const d = Math.hypot(bx - ICX, by - ICY) / 1700;
+    const thr = 0.5 + 0.28 * Math.min(1, d) + 0.17 * hash(bx >> 4, by >> 4, 5);
+    if (u > thr) bctx.drawImage(cC, bx, by, 16, 16, bx, by, 16, 16);
+  }
+}
+
+// ── pixel sort (vertical, descending luminance, with a stretch that pours the bright end downward) ──
+const SPAN = new Uint32Array(H);
+function pixelSort(data, amt, seed) {
+  if (amt <= 0) return;
+  const d32 = new Uint32Array(data.buffer);
+  const thrBase = lerp(210, -10, eInOut(amt)), gam = 1 + 2.2 * amt;
+  for (let x = 0; x < W; x++) {
+    const cr = hash(x >> 2, seed, 11), thr = thrBase + (hash(x, 3, seed) - 0.5) * 60;
+    const Lmax = lerp(30, H, Math.pow(amt, 0.8)) * (0.35 + 0.65 * cr);
+    let y = 0;
+    while (y < H) {
+      const i = y * W + x, p = d32[i], lum = ((p & 255) * 54 + ((p >> 8) & 255) * 183 + ((p >> 16) & 255) * 19) >> 8;
+      if (lum < thr) { y++; continue; }
+      const len = Math.min(H - y, Math.max(2, Math.round(Lmax))); let n = 0;
+      for (let k = 0; k < len; k++) {
+        const q = d32[(y + k) * W + x], l = ((q & 255) * 54 + ((q >> 8) & 255) * 183 + ((q >> 16) & 255) * 19) >> 8;
+        SPAN[n++] = ((l << 24) | (q & 0xffffff)) >>> 0;
+      }
+      const s = SPAN.subarray(0, n); s.sort(); // ascending → read backwards for descending
+      for (let k = 0; k < n; k++) {
+        const src = Math.min(n - 1, Math.floor(n * Math.pow(k / n, gam)));
+        d32[(y + k) * W + x] = (0xff000000 | (s[n - 1 - src] & 0xffffff)) >>> 0;
+      }
+      y += n;
+    }
+  }
+}
+
+// ── per-row/per-channel pass: RGB split + scanline tearing + bitcrush with ordered dither ──
+const TEAR = new Int16Array(H), RJ = new Int16Array(H);
+function pixelPass(src, dst, rgb, tearOn, levels) {
+  const s = src, o = dst;
+  const q = levels > 1 ? 255 / (levels - 1) : 0;
+  for (let y = 0; y < H; y++) {
+    const off = tearOn ? TEAR[y] : 0, dr = rgb + RJ[y], ro = y * W * 4;
+    const by = (y & 3) * 4;
+    for (let x = 0; x < W; x++) {
+      let xg = x + off; if (xg < 0) xg += W; else if (xg >= W) xg -= W;
+      let xr = xg + dr, xb = xg - dr; if (xr < 0) xr = 0; else if (xr >= W) xr = W - 1; if (xb < 0) xb = 0; else if (xb >= W) xb = W - 1;
+      let r = s[ro + xr * 4], g = s[ro + xg * 4 + 1], b = s[ro + xb * 4 + 2];
+      if (q) { const dth = BAYER[by + (x & 3)] * q; r = Math.round((r + dth) / q) * q; g = Math.round((g + dth) / q) * q; b = Math.round((b + dth) / q) * q; }
+      const i = ro + x * 4; o[i] = r; o[i + 1] = g; o[i + 2] = b; o[i + 3] = 255;
+    }
+  }
+}
+
+// ── block-level corruption on the work canvas ──
+function mosaicRect(c, x, y, w, h) { c.imageSmoothingEnabled = false; c.drawImage(small, x / 16, y / 16, w / 16, h / 16, x, y, w, h); c.imageSmoothingEnabled = true; }
+function corrupt(te, g, seedStep) {
+  const bi = burstIx(te), sd = bi * 131 + seedStep;
+  sctx.imageSmoothingEnabled = true; sctx.drawImage(base, 0, 0, 120, 68);
+  const nb = Math.round(g * 16);
+  for (let i = 0; i < nb; i++) {                         // displaced slabs
+    const w = 80 + hash(sd, i, 1) * 560, h = 10 + Math.pow(hash(sd, i, 2), 2) * 150;
+    const x = hash(sd, i, 3) * W - 40, y = hash(sd, i, 4) * H;
+    const dx = (hash(sd, i, 5) - .5) * 2 * g * 380, dy = hash(sd, i, 6) < .25 ? (hash(sd, i, 7) - .5) * 90 : 0;
+    wctx.drawImage(base, x, y, w, h, x + dx, y + dy, w, h);
+  }
+  const nm = Math.round(g * 9);
+  for (let i = 0; i < nm; i++) {                         // compression macroblocks + DCT ringing + chroma errors
+    const w = 16 * (4 + Math.floor(hash(sd, i, 11) * 22)), h = 16 * (2 + Math.floor(hash(sd, i, 12) * 9));
+    const x = 16 * Math.floor(hash(sd, i, 13) * (W - w) / 16), y = 16 * Math.floor(hash(sd, i, 14) * (H - h) / 16);
+    mosaicRect(wctx, x, y, w, h);
+    wctx.globalAlpha = 0.28; wctx.globalCompositeOperation = 'overlay';
+    wctx.drawImage(dctC, (hash(sd, i, 15) * 128) | 0, (hash(sd, i, 16) * 128) | 0, Math.min(128, w), Math.min(128, h), x, y, w, h);
+    const r = hash(sd, i, 17);
+    if (r < 0.45) { wctx.globalAlpha = 0.75; wctx.globalCompositeOperation = 'color'; wctx.fillStyle = r < .15 ? '#00ff84' : r < .3 ? MG : CY; wctx.fillRect(x, y, w, h); }
+    wctx.globalAlpha = 1; wctx.globalCompositeOperation = 'source-over';
+  }
+  // tearing bands + row jitter
+  TEAR.fill(0); RJ.fill(0);
+  const nt = Math.round(g * 11);
+  for (let i = 0; i < nt; i++) {
+    const y0 = (hash(sd, i, 21) * H) | 0, h = 4 + (Math.pow(hash(sd, i, 22), 1.6) * 110) | 0, off = ((hash(sd, i, 23) - .5) * 2 * g * 260) | 0;
+    for (let y = y0; y < Math.min(H, y0 + h); y++) TEAR[y] = off;
+  }
+  for (let y = 0; y < H; y += 2) if (hash(sd, y >> 3, 31) < g * 0.3) { const j = ((hash(sd, y >> 3, 32) - .5) * g * 40) | 0; RJ[y] = j; if (y + 1 < H) RJ[y + 1] = j; }
+}
+
+// ── frame ──
+function draw({ t }) {
+  const te = freezeMap(t);
+  const f = Math.floor(te * 30 + 1e-4), step = f >> 1;
+  if (t < 0.2) {                                   // black; a stuck row of pixels hunting for the stream
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    if (t > 0.06) { const k = Math.floor(t * 30); ctx.fillStyle = k % 2 ? CY : INK; const w = 200 + hash(k, 1) * 900; ctx.fillRect(W / 2 - w / 2 + (hash(k, 2) - .5) * 300, 540 + (k % 3) * 2, w, 3); }
+    return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+  }
+  if (t >= 9.88) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; }
+
+  // 1. clean picture
+  if (te >= MOSH0 && te < MOSH1) mosh(te);
+  else if (te < SORT1) drawA(bctx, te);
+  else if (te < MOSH0) drawB(bctx, te);
+  else drawC(bctx, te);
+  wctx.drawImage(base, 0, 0);
+
+  // 2. buffering intro: the stream resolves from coarse macroblocks
+  let levels = 0;
+  if (te < 0.8) {
+    const bs = [96, 48, 24, 12][Math.min(3, Math.floor((te - 0.2) / 0.15))];
+    const sw = Math.ceil(W / bs), sh = Math.ceil(H / bs), tc = mk(sw, sh), tg = g2(tc);
+    tg.drawImage(base, 0, 0, sw, sh); wctx.imageSmoothingEnabled = false; wctx.drawImage(tc, 0, 0, sw, sh, 0, 0, sw * bs, sh * bs); wctx.imageSmoothingEnabled = true;
+    if (te < 0.35) for (let by = 0; by < sh; by++) for (let bx = 0; bx < sw; bx++) if (hash(bx, by, 77) < .4) { wctx.fillStyle = '#000'; wctx.fillRect(bx * bs, by * bs, bs, bs); }
+    levels = 4 + Math.floor((te - 0.2) / 0.15);
+  }
+
+  // 3. glitch bursts
+  let g = burstI(te);
+  if (te >= 2.75 && te < 3.0) g = Math.max(g, 0.45);
+  if (g > 0) corrupt(te, g, step); else { TEAR.fill(0); RJ.fill(0); }
+  const img = wctx.getImageData(0, 0, W, H);
+
+  // 4. pixel-sort melt A → B
+  if (te >= SORT0 && te < SORT2) {
+    const amt = te < SORT1 ? eIn(seg(te, SORT0, SORT1)) : 1 - eOut(seg(te, SORT1, SORT2));
+    pixelSort(img.data, amt, step);
+  }
+
+  // 5. RGB split / tearing / bitcrush
+  let rgb = Math.round(g * 34 * (step % 2 ? 1 : -0.7));
+  if (t >= 2.75 && t < 3.0) levels = Math.max(2, 6 - Math.floor((t - 2.75) * 16));        // freeze escalates into colour-depth loss
+  if (g > 0.6) levels = levels || 5;
+  if (te >= 9.0) { levels = te < 9.3 ? 4 : 3; rgb = Math.round(18 + 30 * seg(te, 9.0, 9.6)) * (step % 2 ? 1 : -1); }
+  pixelPass(img.data, outImg.data, rgb, g > 0 || te >= 9.0, levels);
+  ctx.putImageData(outImg, 0, 0);
+
+  // 6. glitch out: packet loss eats the picture, the last fragments settle into black
+  if (te >= 9.0) {
+    const u = seg(te, 9.05, 9.62), B = 48;
+    ctx.fillStyle = '#000';
+    for (let by = 0; by < H; by += B) for (let bx = 0; bx < W; bx += B) {
+      const hh = hash(bx / B, by / B, 41);
+      if (hh < eIn(u) * 1.02 || (te > 9.1 && hash(bx / B, by / B, step) < 0.12 * u)) ctx.fillRect(bx, by, B, B);
+    }
+    if (t >= 9.6) {
+      const v = seg(t, 9.6, 9.87);
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+      for (let i = 0; i < 9; i++) {                 // stuck fragments blink out one by one
+        if (hash(i, 51) > 1 - v * 1.1 || (Math.floor(t * 30) + i) % 3 === 0) continue;
+        const x = Math.floor(hash(i, 52) * 36) * B, y = 480 + Math.floor((hash(i, 53) - .5) * 6) * B;
+        ctx.globalAlpha = 1 - v; ctx.drawImage(work, x, y, B, B, x, y, B, B);
+      }
+      ctx.globalAlpha = 1;
+      const lw = W * (1 - eIn(v)); ctx.fillStyle = `rgba(0,229,255,${1 - v})`; ctx.fillRect(W / 2 - lw / 2, 539, lw, 2);
+    }
+  }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+}
+
+// ── audio events (read by events.mjs → audio.py) ──
+window.events = () => {
+  const ev = [];
+  [0.2, 0.35, 0.5, 0.65].forEach((t, i) => ev.push({ k: 'boot', t, v: 1 - i * 0.15 }));
+  for (let i = 0; i < 6; i++) ev.push({ k: 'blip', t: SLAM_A + i * STAG, f: 900 + i * 110 });
+  for (let i = 0; i < 6; i++) ev.push({ k: 'blip', t: STRONG_T + i * 0.045, f: 700 + i * 60, v: 0.6 });
+  BURSTS.forEach(([t, d, a]) => ev.push({ k: 'hit', t, d, v: a }));
+  ev.push({ k: 'stutter', t: 2.75, d: 0.25 });
+  ev.push({ k: 'sort', t: SORT0, d: SORT2 - SORT0 });
+  CH.slice(1).forEach(([, t]) => ev.push({ k: 'chan', t }));
+  ev.push({ k: 'ping', t: 6.0 });
+  ev.push({ k: 'mosh', t: MOSH0, d: MOSH1 - MOSH0 });
+  ev.push({ k: 'lock', t: LOCK_T });
+  for (let i = 0; i < 5; i++) ev.push({ k: 'bar', t: LOCK_T + i * 0.09, f: 1200 + i * 150 });
+  ev.push({ k: 'out', t: 9.0 });
+  for (let b = 1.0; b < 6.2; b += 0.5) ev.push({ k: 'kick', t: b });
+  for (let b = 7.5; b < 8.8; b += 0.5) ev.push({ k: 'kick', t: b, v: 0.7 });
+  return ev;
+};
+window.draw = draw;
+window.ready = (async () => {
+  await Promise.all([document.fonts.load(`250px ${TF}`), document.fonts.load(`500 26px ${MF}`), document.fonts.load(`800 44px ${MF}`), document.fonts.load(`700 26px ${MF}`)]);
+  await document.fonts.ready;
+  buildTextures();
+})();
+</script>
+</body></html>
