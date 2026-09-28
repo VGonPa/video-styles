@@ -4,9 +4,9 @@ Visual family · Physical materials: paper, graphite, ink, clay.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (14) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (13) · [Social & Short-Form](../../categories/use-cases/social.md) (22) · [Storytelling & Brand](../../categories/use-cases/story.md) (27) · [Data & Results](../../categories/use-cases/data.md) (5) · [News & Current Affairs](../../categories/use-cases/news.md) (5) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (20)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (14) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (13) · [Social & Short-Form](../../categories/use-cases/social.md) (23) · [Storytelling & Brand](../../categories/use-cases/story.md) (28) · [Data & Results](../../categories/use-cases/data.md) (5) · [News & Current Affairs](../../categories/use-cases/news.md) (5) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (20)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (9) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (5) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (4) · [Comics & Cartoons](../../categories/families/comics.md) (2) · [Games](../../categories/families/games.md) (3)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (10) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (5) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (4) · [Comics & Cartoons](../../categories/families/comics.md) (2) · [Games](../../categories/families/games.md) (3)
 
 <table>
 <tr>
@@ -23,6 +23,7 @@ Visual family · Physical materials: paper, graphite, ink, clay.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/stained-glass/stained-glass.mp4"><img src="../../styles/stained-glass/preview.gif" alt="Stained Glass" width="100%"></a><br><b>45 · Stained Glass</b><br><a href="../../styles/stained-glass/stained-glass.mp4">video</a> · <a href="../../styles/stained-glass">source</a></td>
+<td width="25%" align="center"><a href="../../styles/embroidery/embroidery.mp4"><img src="../../styles/embroidery/preview.gif" alt="Embroidery" width="100%"></a><br><b>55 · Embroidery</b><br><a href="../../styles/embroidery/embroidery.mp4">video</a> · <a href="../../styles/embroidery">source</a></td>
 </tr>
 </table>
 
@@ -37,3 +38,4 @@ Visual family · Physical materials: paper, graphite, ink, clay.
 | 26 | [Risograph](../../styles/risograph/) | Fluorescent overprint with halftone dots | Event posters, bold titles, and punchy social hooks | [Texture & Craft](../../categories/families/texture-craft.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
 | 42 | [Silhouette Theater](../../styles/silhouette/) | Backlit cut-paper shadow puppets | Fables, fairy tales and gentle, wordless storytelling | [Texture & Craft](../../categories/families/texture-craft.md) | [Storytelling & Brand](../../categories/use-cases/story.md) |
 | 45 | [Stained Glass](../../styles/stained-glass/) | Leaded jewel glass, sunlight through | Warm openings, luminous titles and quietly grand stories | [Texture & Craft](../../categories/families/texture-craft.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
+| 55 | [Embroidery](../../styles/embroidery/) | Hand-stitched thread in a wooden hoop | Heartfelt stories, handmade brands, and cozy social posts | [Texture & Craft](../../categories/families/texture-craft.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md) |
