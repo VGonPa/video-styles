@@ -1,0 +1,14 @@
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url(fonts/CourierPrime-700-latin.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Oswald';
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url(fonts/Oswald-600-latin.woff2) format('woff2');
+}
