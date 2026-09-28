@@ -1,0 +1,15 @@
+/* DM Serif Display by Colophon Foundry (SIL Open Font License 1.1), from Google Fonts */
+@font-face {
+  font-family: 'DM Serif Display';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/DMSerifDisplay-Regular-latin.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'DM Serif Display';
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/DMSerifDisplay-Italic-latin.woff2) format('woff2');
+}
