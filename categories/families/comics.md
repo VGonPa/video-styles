@@ -4,9 +4,9 @@ Visual family · Panels, strips, and cartoon traditions from every decade.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (25) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (7) · [Product & Launches](../../categories/use-cases/product.md) (17) · [Social & Short-Form](../../categories/use-cases/social.md) (39) · [Storytelling & Brand](../../categories/use-cases/story.md) (40) · [Data & Results](../../categories/use-cases/data.md) (7) · [News & Current Affairs](../../categories/use-cases/news.md) (7) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (23)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (25) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (7) · [Product & Launches](../../categories/use-cases/product.md) (17) · [Social & Short-Form](../../categories/use-cases/social.md) (40) · [Storytelling & Brand](../../categories/use-cases/story.md) (41) · [Data & Results](../../categories/use-cases/data.md) (7) · [News & Current Affairs](../../categories/use-cases/news.md) (7) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (23)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (7) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (8) · [Texture & Craft](../../categories/families/texture-craft.md) (14) · [Nostalgia](../../categories/families/nostalgia.md) (9) · [Technical](../../categories/families/technical.md) (8) · [Experimental](../../categories/families/experimental.md) (7) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (8) · [Comics & Cartoons](../../categories/families/comics.md) (9) · [Games](../../categories/families/games.md) (8)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (7) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (8) · [Texture & Craft](../../categories/families/texture-craft.md) (14) · [Nostalgia](../../categories/families/nostalgia.md) (9) · [Technical](../../categories/families/technical.md) (8) · [Experimental](../../categories/families/experimental.md) (7) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (8) · [Comics & Cartoons](../../categories/families/comics.md) (10) · [Games](../../categories/families/games.md) (8)
 
 <table>
 <tr>
@@ -23,6 +23,7 @@ Visual family · Panels, strips, and cartoon traditions from every decade.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/magazine-cartoon/magazine-cartoon.mp4"><img src="../../styles/magazine-cartoon/preview.gif" alt="Magazine Cartoon" width="100%"></a><br><b>63 · Magazine Cartoon</b><br><a href="../../styles/magazine-cartoon/magazine-cartoon.mp4">video</a> · <a href="../../styles/magazine-cartoon">source</a></td>
+<td width="25%" align="center"><a href="../../styles/office-strip/office-strip.mp4"><img src="../../styles/office-strip/preview.gif" alt="Office Satire Strip" width="100%"></a><br><b>85 · Office Satire Strip</b><br><a href="../../styles/office-strip/office-strip.mp4">video</a> · <a href="../../styles/office-strip">source</a></td>
 </tr>
 </table>
 
@@ -37,3 +38,4 @@ Visual family · Panels, strips, and cartoon traditions from every decade.
 | 61 | [2000s Digital Comic](../../styles/digital-comic/) | Glossy airbrush, rim light, flares | Launch teasers, hero moments and high-energy product reveals | [Comics & Cartoons](../../categories/families/comics.md) | [Product & Launches](../../categories/use-cases/product.md), [Social & Short-Form](../../categories/use-cases/social.md) |
 | 62 | [Underground Comix](../../styles/underground-comix/) | Boiling hatching, melting psychedelic swagger | Irreverent social clips, laid-back gags and trippy reveals | [Comics & Cartoons](../../categories/families/comics.md) | [Social & Short-Form](../../categories/use-cases/social.md) |
 | 63 | [Magazine Cartoon](../../styles/magazine-cartoon/) | Dry wit, pen and wash | Punchlines, wry observations, and understated social commentary | [Comics & Cartoons](../../categories/families/comics.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
+| 85 | [Office Satire Strip](../../styles/office-strip/) | Deadpan cubicle wit, flat ink | Workplace satire, buzzwords, and a dry final-panel punchline | [Comics & Cartoons](../../categories/families/comics.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
