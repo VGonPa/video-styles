@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── storytime · storytime-YouTuber animation ──────────────────────────
+// "The time I tried to cook pasta for the first time". A simple, very expressive self-insert
+// character (original), flat background colour per beat, handwritten inner-thought captions,
+// quick expression swaps, character animated on twos (12 fps) while the camera moves on ones.
+// Beats: confident start → smoke → comedic snap zoom → sepia wobbly-frame flashback
+// ("10 minutes earlier": no water) → smoke-alarm cutaway → embarrassed ending + iris out.
+const W = 1920, H = 1080, DUR = 10.0;
+const HAND = '"Patrick Hand"', SFX = '"Bangers"';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const mk = (w = W, h = H) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const BUF1 = mk(), B1 = BUF1.getContext('2d'), BUF2 = mk(), B2 = BUF2.getContext('2d');
+const FBC = mk(), FG = FBC.getContext('2d'), SEP = mk(), SG = SEP.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, k) => a + (b - a) * k;
+const eo = x => 1 - Math.pow(1 - x, 3);
+const eio = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const eob = x => { const c = 2.0; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const rnd = s => { let a = s >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; };
+const TW = t => Math.floor(t * 12 + 1e-6) / 12;          // "on twos"
+const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const shade = (h, k) => { const c = hex(h).map(v => Math.round(k > 0 ? v + (255 - v) * k : v * (1 + k))); return `rgb(${c[0]},${c[1]},${c[2]})`; };
+
+// ── palette ────────────────────────────────────────────────────────────
+const INK = '#2a2230', PAPER = '#fffdf5';
+const C = { skin: '#ffd8bc', hair: '#4b2f25', hood: '#45b48d', hoodD: '#35987a', pants: '#3f4c7e', shoe: '#f7f3ea', sole: '#d7cfc0',
+  blush: '#ff8a8a', sweat: '#a6dcff', pot: '#aab4c1', potL: '#d3d9e2', potD: '#5b6272', smoke: '#8c8993', smokeL: '#b7b4bc', char: '#2b2428' };
+const BG = { a: '#ffd35c', b: '#ffac5f', zoom: '#ff5b50', alarm: '#e8453f', end: '#a3d5e8' };
+
+// ── timeline ───────────────────────────────────────────────────────────
+const T = { pop: 0.15, label: 0.5, capA: 0.85, ding: 1.4, wisp: 1.75, b: 2.3, capB: 2.45, conf: 2.8, antic: 3.1, real: 3.2,
+  z1: 3.55, z2: 3.85, capZ: 3.95, fbIn: 4.55, fb: 4.95, capFB: 5.1, pour: 5.2, pourEnd: 6.0, fbOut: 6.4, alarm: 6.75,
+  capAl: 7.05, end: 8.05, capE: 8.3, iris: 9.1, irisHold: 9.42, irisClose: 9.62, irisEnd: 9.9 };
+
+// ── generic drawing helpers ────────────────────────────────────────────
+let LWK = 3.4;  // outline width in character-local units (set per draw)
+function sf(g, fill, lw, stroke = INK) { if (fill) { g.fillStyle = fill; g.fill(); } if (lw) { g.lineWidth = lw; g.strokeStyle = stroke; g.lineJoin = 'round'; g.lineCap = 'round'; g.stroke(); } }
+function poly(g, pts) { g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); }
+function limb(g, pts, w, col) {
+  g.lineCap = 'round'; g.lineJoin = 'round'; poly(g, pts);
+  g.strokeStyle = INK; g.lineWidth = w + LWK * 2; g.stroke(); g.strokeStyle = col; g.lineWidth = w; g.stroke();
+}
+function ell(g, x, y, rx, ry, rot = 0) { g.beginPath(); g.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); }
+function ik(S, Tg, L1, L2, pick) {
+  let dx = Tg[0] - S[0], dy = Tg[1] - S[1], d = Math.hypot(dx, dy); const md = L1 + L2 - 0.6;
+  if (d > md) { dx *= md / d; dy *= md / d; d = md; } d = Math.max(d, Math.abs(L1 - L2) + 2);
+  const base = Math.atan2(dy, dx), A = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+  const e1 = [S[0] + Math.cos(base + A) * L1, S[1] + Math.sin(base + A) * L1], e2 = [S[0] + Math.cos(base - A) * L1, S[1] + Math.sin(base - A) * L1];
+  return [S, pick(e1) >= pick(e2) ? e1 : e2, [S[0] + dx, S[1] + dy]];
+}
+const picker = (b, sgn) => b === 'out' ? e => sgn * e[0] : b === 'in' ? e => -sgn * e[0] : b === 'up' ? e => -e[1] : e => e[1];
+
+// ── the self-insert character ("me") ───────────────────────────────────
+// local units: feet at y=0, head centre at y=-238 (≈ 300 units tall); drawn scaled by P.s
+function handShape(g, Wp, dir, type, thumbSide) {
+  const cx = Wp[0] + Math.cos(dir) * 6, cy = Wp[1] + Math.sin(dir) * 6;
+  const caps = [];
+  const fl = type === 'open' ? 19 : 11;
+  for (let k = 0; k < 4; k++) { const a = dir + (-0.5 + k * 0.333) * (type === 'open' ? 1.15 : 0.9); caps.push([cx + Math.cos(a) * fl, cy + Math.sin(a) * fl, 7.2]); }
+  const ta = dir + thumbSide * 1.25; caps.push([cx + Math.cos(ta) * 15, cy + Math.sin(ta) * 15, 8]);
+  g.lineCap = 'round';
+  for (const pass of [0, 1]) {
+    g.strokeStyle = pass ? C.skin : INK; g.fillStyle = pass ? C.skin : INK;
+    for (const c of caps) { g.beginPath(); g.moveTo(cx, cy); g.lineTo(c[0], c[1]); g.lineWidth = c[2] + (pass ? 0 : LWK * 2); g.stroke(); }
+    ell(g, cx, cy, 12 + (pass ? 0 : LWK), 12 + (pass ? 0 : LWK)); g.fill();
+  }
+  if (type !== 'open') { // knuckle creases
+    g.strokeStyle = INK; g.lineWidth = LWK * 0.55;
+    for (let k = 1; k < 3; k++) { const a = dir + (-0.5 + k * 0.333) * 0.9 - 0.15; g.beginPath(); g.moveTo(cx + Math.cos(a) * 6, cy + Math.sin(a) * 6); g.lineTo(cx + Math.cos(a) * 13, cy + Math.sin(a) * 13); g.stroke(); }
+  }
+}
+function arm(g, side, tg, bend, htype) {
+  const sgn = side === 'L' ? -1 : 1; const S = [sgn * 34, -163];
+  const pts = ik(S, tg, 46, 44, picker(bend, sgn));
+  limb(g, pts, 21, C.hood);
+  // cuff
+  const E = pts[1], Wp = pts[2], dir = Math.atan2(Wp[1] - E[1], Wp[0] - E[0]);
+  const cu = [Wp[0] - Math.cos(dir) * 5, Wp[1] - Math.sin(dir) * 5];
+  g.beginPath(); g.moveTo(cu[0] - Math.sin(dir) * 11, cu[1] + Math.cos(dir) * 11); g.lineTo(cu[0] + Math.sin(dir) * 11, cu[1] - Math.cos(dir) * 11);
+  g.strokeStyle = INK; g.lineWidth = LWK * 0.8; g.stroke();
+  // thumb toward the side of the hand facing up (always visible)
+  const px = -Math.sin(dir), py = Math.cos(dir);
+  handShape(g, Wp, dir, htype, py < 0 ? 1 : -1);
+  return pts;
+}
+function leg(g, side, tg, bend) {
+  const sgn = side === 'L' ? -1 : 1; const Hp = [sgn * 17, -90];
+  const pts = ik(Hp, tg, 46, 45, picker(bend, sgn));
+  limb(g, pts, 23, C.pants);
+  const A = pts[2];
+  ell(g, A[0] + sgn * 7, A[1] + 3, 18, 10); sf(g, C.shoe, LWK);
+  g.beginPath(); g.moveTo(A[0] + sgn * 7 - 16, A[1] + 7); g.lineTo(A[0] + sgn * 7 + 16, A[1] + 7); g.strokeStyle = INK; g.lineWidth = LWK * 0.7; g.stroke();
+}
+function torso(g) {
+  g.beginPath(); g.moveTo(-26, -178); g.quadraticCurveTo(-45, -177, -47, -157); g.lineTo(-41, -96); g.quadraticCurveTo(-41, -83, -28, -83);
+  g.lineTo(28, -83); g.quadraticCurveTo(41, -83, 41, -96); g.lineTo(47, -157); g.quadraticCurveTo(45, -177, 26, -178); g.closePath();
+  sf(g, C.hood, LWK);
+  g.beginPath(); g.moveTo(-41, -97); g.lineTo(41, -97); g.strokeStyle = INK; g.lineWidth = LWK * 0.7; g.stroke();
+  g.beginPath(); g.moveTo(-24, -97); g.lineTo(-19, -125); g.lineTo(19, -125); g.lineTo(24, -97); g.fillStyle = C.hoodD; g.fill(); g.stroke();
+}
+function neckCollar(g) {
+  g.beginPath(); g.rect(-9, -190, 18, 16); sf(g, C.skin, 0);
+  g.beginPath(); g.moveTo(-9, -190); g.lineTo(-9, -176); g.moveTo(9, -190); g.lineTo(9, -176); g.strokeStyle = INK; g.lineWidth = LWK; g.stroke();
+  ell(g, 0, -176, 28, 9); sf(g, C.hoodD, LWK);
+  g.beginPath(); g.ellipse(0, -178, 12, 5, 0, 0, Math.PI); sf(g, C.skin, 0);
+  for (const s of [-1, 1]) { g.beginPath(); g.moveTo(s * 10, -171); g.lineTo(s * 12, -146); g.strokeStyle = INK; g.lineWidth = 4 + LWK * 1.4; g.stroke(); g.strokeStyle = C.shoe; g.lineWidth = 4; g.stroke(); }
+}
+function brow(g, x, y, ang, len = 22) { g.save(); g.translate(x, y); g.rotate(ang); g.beginPath(); g.moveTo(-len / 2, 0); g.lineTo(len / 2, 0); g.strokeStyle = INK; g.lineCap = 'round'; g.lineWidth = LWK * 1.7; g.stroke(); g.restore(); }
+function eyeWide(g, x, y, rx, ry, pr, px, py) { ell(g, x, y, rx, ry); sf(g, '#fff', LWK); ell(g, x + px, y + py, pr, pr * 1.1); sf(g, INK, 0); }
+function eyeArc(g, x, y, w = 11) { g.beginPath(); g.moveTo(x - w, y + 4); g.quadraticCurveTo(x, y - 11, x + w, y + 4); g.strokeStyle = INK; g.lineWidth = LWK * 1.5; g.lineCap = 'round'; g.stroke(); }
+function eyeDot(g, x, y, rx = 6.5, ry = 8.5) { ell(g, x, y, rx, ry); sf(g, INK, 0); ell(g, x - rx * 0.3, y - ry * 0.35, rx * 0.3, rx * 0.3); sf(g, '#fff', 0); }
+function drop(g, x, y, s) { g.beginPath(); g.moveTo(x, y - 14 * s); g.bezierCurveTo(x + 10 * s, y - 2 * s, x + 9 * s, y + 9 * s, x, y + 9 * s); g.bezierCurveTo(x - 9 * s, y + 9 * s, x - 10 * s, y - 2 * s, x, y - 14 * s); sf(g, C.sweat, LWK * 0.8); }
+function face(g, P) {
+  const fx = P.look || 0, ex = 22, ey = -234, Lx = -ex + fx * 9, Rx = ex + fx * 9;
+  const f = P.face, bl = P.blink;
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  // nose
+  g.beginPath(); g.moveTo(fx * 12 - 2, -228); g.quadraticCurveTo(fx * 12 + 7, -221, fx * 12 - 1, -216); g.strokeStyle = INK; g.lineWidth = LWK * 0.9; g.stroke();
+  const blinkEyes = () => { for (const x of [Lx, Rx]) { g.beginPath(); g.moveTo(x - 10, ey); g.lineTo(x + 10, ey); g.lineWidth = LWK * 1.5; g.stroke(); } };
+  if (f === 'smug') {
+    if (bl) blinkEyes(); else for (const x of [Lx, Rx]) {
+      g.save(); ell(g, x, ey, 11, 13); g.clip(); g.fillStyle = '#fff'; g.fill(); ell(g, x + 4, ey + 3, 5.5, 6.5); sf(g, INK, 0);
+      g.fillStyle = C.skin; g.fillRect(x - 14, ey - 16, 28, 13); g.restore();
+      g.beginPath(); g.ellipse(x, ey, 11, 13, 0, -0.25, Math.PI + 0.25); g.strokeStyle = INK; g.lineWidth = LWK; g.stroke();
+      g.beginPath(); g.moveTo(x - 12, ey - 3); g.lineTo(x + 12, ey - 3); g.lineWidth = LWK * 1.6; g.stroke();
+    }
+    const up = P.browUp || 0;
+    brow(g, Lx, -256 - up * 3, 0.12); brow(g, Rx, -261 - up * 8, -0.28);
+    g.beginPath(); g.moveTo(-15 + fx * 6, -205); g.quadraticCurveTo(4 + fx * 6, -197, 21 + fx * 6, -212); g.lineWidth = LWK * 1.2; g.stroke();
+    g.beginPath(); g.moveTo(19 + fx * 6, -216); g.lineTo(24 + fx * 6, -208); g.lineWidth = LWK * 0.8; g.stroke();
+  } else if (f === 'content') {
+    eyeArc(g, Lx, ey); eyeArc(g, Rx, ey);
+    brow(g, Lx, -262, -0.08, 18); brow(g, Rx, -262, 0.08, 18);
+    g.beginPath(); g.moveTo(-9, -207); g.quadraticCurveTo(0, -200, 9, -207); g.lineWidth = LWK * 1.1; g.stroke();
+  } else if (f === 'confused') {
+    if (bl) blinkEyes(); else { eyeDot(g, Lx, ey, 6.5, 8.5); eyeDot(g, Rx, ey - 2, 5.5, 7); }
+    brow(g, Lx, -254, 0.14); g.beginPath(); g.moveTo(Rx - 11, -262); g.quadraticCurveTo(Rx, -276, Rx + 12, -266); g.lineWidth = LWK * 1.7; g.stroke();
+    g.beginPath(); g.moveTo(-6 + fx * 6, -205); g.bezierCurveTo(0 + fx * 6, -210, 5 + fx * 6, -200, 12 + fx * 6, -206); g.lineWidth = LWK * 1.1; g.stroke();
+  } else if (f === 'alarm') {
+    eyeWide(g, Lx, ey, 12, 15, 4.5, fx * 5, 0); eyeWide(g, Rx, ey, 12, 15, 4.5, fx * 5, 0);
+    brow(g, Lx, -268, -0.1); brow(g, Rx, -268, 0.1);
+    ell(g, fx * 8, -203, 7, 9); sf(g, '#6b1d2a', LWK);
+  } else if (f === 'panic') {
+    const j = P.jit || 0;
+    eyeWide(g, Lx, ey - 2, 17, 21, 3.4, j, -j * 0.5); eyeWide(g, Rx, ey - 2, 17, 21, 3.4, -j, j * 0.5);
+    brow(g, Lx, -271, -0.38, 24); brow(g, Rx, -271, 0.38, 24);
+    const mp = () => { g.beginPath(); g.moveTo(-16, -217); g.quadraticCurveTo(0, -222, 16, -217); g.quadraticCurveTo(25, -196, 15, -185); g.quadraticCurveTo(0, -180, -15, -185); g.quadraticCurveTo(-25, -196, -16, -217); g.closePath(); };
+    g.save(); mp(); sf(g, '#6b1d2a', 0); g.clip(); g.fillStyle = '#fff'; g.fillRect(-30, -224, 60, 11); ell(g, 0, -184, 13, 8); sf(g, '#ff8a9a', 0); g.restore();
+    mp(); sf(g, null, LWK);
+  } else if (f === 'happy') {
+    eyeArc(g, Lx, ey); eyeArc(g, Rx, ey);
+    brow(g, Lx, -262, -0.1, 18); brow(g, Rx, -262, 0.1, 18);
+    const mx = fx * 6;
+    g.save(); g.beginPath(); g.moveTo(mx - 19, -211); g.lineTo(mx + 19, -211); g.quadraticCurveTo(mx + 17, -190, mx, -189); g.quadraticCurveTo(mx - 17, -190, mx - 19, -211); g.closePath();
+    sf(g, '#6b1d2a', 0); g.clip(); ell(g, mx, -191, 11, 6); sf(g, '#ff8a9a', 0); g.restore();
+    g.beginPath(); g.moveTo(mx - 19, -211); g.lineTo(mx + 19, -211); g.quadraticCurveTo(mx + 17, -190, mx, -189); g.quadraticCurveTo(mx - 17, -190, mx - 19, -211); g.closePath(); sf(g, null, LWK);
+  } else if (f === 'awkward') {
+    if (bl) blinkEyes(); else { eyeDot(g, Lx - 3, ey, 6, 8); eyeDot(g, Rx - 3, ey, 6, 8); }
+    brow(g, Lx, -258, -0.3, 20); brow(g, Rx, -258, 0.3, 20);
+    g.beginPath(); g.moveTo(-19, -205); g.bezierCurveTo(-12, -212, -6, -199, 0, -205); g.bezierCurveTo(6, -212, 12, -199, 19, -205); g.lineWidth = LWK * 1.2; g.stroke();
+    g.strokeStyle = C.blush; g.lineWidth = LWK * 1.1;
+    for (const s of [-1, 1]) for (let k = 0; k < 3; k++) { const x = s * 40 + (k - 1) * 7; g.beginPath(); g.moveTo(x - 3, -210); g.lineTo(x + 3, -220); g.stroke(); }
+  }
+}
+function hair(g, frazzle) {
+  g.beginPath(); g.moveTo(-65, -236);
+  g.bezierCurveTo(-74, -316, 64, -332, 67, -238);
+  g.quadraticCurveTo(58, -266, 44, -266); g.quadraticCurveTo(32, -284, 14, -272); g.quadraticCurveTo(0, -288, -16, -273);
+  g.quadraticCurveTo(-34, -284, -46, -266); g.quadraticCurveTo(-60, -266, -65, -236); g.closePath();
+  sf(g, C.hair, LWK);
+  // cowlick
+  g.beginPath(); g.moveTo(-6, -298); g.quadraticCurveTo(-14, -330, 16, -334); g.quadraticCurveTo(0, -322, 8, -299); sf(g, C.hair, LWK);
+}
+function head(g, P) {
+  g.save(); g.translate(0, -184); g.rotate(P.tilt || 0); g.translate(0, 184);
+  for (const s of [-1, 1]) { ell(g, s * 63, -232, 11, 14); sf(g, C.skin, LWK); }
+  ell(g, 0, -238, 64, 60); sf(g, C.skin, LWK);
+  if (P.dread) { g.save(); ell(g, 0, -238, 64, 60); g.clip(); g.globalAlpha = 0.45 * P.dread; g.fillStyle = '#8eb0ff'; g.fillRect(-70, -300, 140, 40);
+    g.globalAlpha = P.dread; g.strokeStyle = '#6f93ef'; g.lineWidth = LWK * 1.1; for (let x = -36; x <= 36; x += 12) { g.beginPath(); g.moveTo(x, -300); g.lineTo(x, -262 + Math.abs(x) * 0.3); g.stroke(); } g.restore(); }
+  if (P.soot) { g.save(); ell(g, 0, -238, 64, 60); g.clip(); g.fillStyle = 'rgba(70,62,72,0.55)'; ell(g, -38, -212, 14, 9, 0.3); g.fill(); ell(g, 30, -262, 11, 7, -0.4); g.fill(); ell(g, 44, -206, 7, 5); g.fill(); g.restore(); }
+  face(g, P);
+  hair(g, P.soot);
+  g.restore();
+}
+function drawMe(g, P) {
+  if (P.vis === 0) return;
+  g.save(); g.translate(P.x, P.y);
+  const sx = P.s * (1 + (P.sq || 0)), sy = P.s * (1 - (P.sq || 0));
+  if (P.shadow !== false) { g.fillStyle = 'rgba(40,20,30,0.14)'; ell(g, 0, 4, 70 * sx, 12 * P.s); g.fill(); }
+  g.translate(0, P.lift || 0); g.scale(sx, sy);
+  LWK = 3.4 * (P.lw || 1);
+  const po = P.pose;
+  const ak = P.legs === 'knock' ? [[-30, -8, 'in'], [30, -8, 'in']] : [[-21, -3, 'out'], [21, -3, 'out']];
+  leg(g, 'L', ak[0], ak[0][2]); leg(g, 'R', ak[1], ak[1][2]);
+  if (!po.fL) arm(g, 'L', po.L, po.bL, po.hL);
+  if (!po.fR && !P.holdPot) arm(g, 'R', po.R, po.bR, po.hR);
+  torso(g); neckCollar(g);
+  if (P.holdPot) { heldPot(g, po.R); arm(g, 'R', po.R, po.bR, po.hR); }
+  head(g, P);
+  if (P.holdBox) pastaBox(g, po.R, P.boxTilt || 0);
+  if (po.fL) arm(g, 'L', po.L, po.bL, po.hL);
+  if (po.fR && !P.holdPot) arm(g, 'R', po.R, po.bR, po.hR);
+  g.restore();
+}
+// poses: hand targets (local), elbow bend preference, hand type, arm in front of head?
+const POSES = {
+  hips: { L: [-42, -106], R: [42, -106], bL: 'out', bR: 'out', hL: 'fist', hR: 'fist' },
+  chin: { L: [-42, -106], R: [12, -186], bL: 'out', bR: 'down', hL: 'fist', hR: 'fist', fR: true },
+  startle: { L: [-86, -148], R: [86, -148], bL: 'down', bR: 'down', hL: 'open', hR: 'open' },
+  scream: { L: [-50, -198], R: [50, -198], bL: 'out', bR: 'out', hL: 'open', hR: 'open', fL: true, fR: true },
+  pour: { L: [-42, -106], R: [112, -212], bL: 'out', bR: 'down', hL: 'fist', hR: 'fist' },
+  endp: { L: [-60, -254], R: [40, -100], bL: 'out', bR: 'out', hL: 'open', hR: 'fist' },
+};
+function blendPose(a, b, k) {
+  const A = POSES[a], B = POSES[b]; if (k >= 1) return B; if (k <= 0) return A;
+  return { L: [lerp(A.L[0], B.L[0], k), lerp(A.L[1], B.L[1], k)], R: [lerp(A.R[0], B.R[0], k), lerp(A.R[1], B.R[1], k)],
+    bL: k < 0.5 ? A.bL : B.bL, bR: k < 0.5 ? A.bR : B.bR, hL: k < 0.5 ? A.hL : B.hL, hR: k < 0.5 ? A.hR : B.hR, fL: k < 0.5 ? A.fL : B.fL, fR: k < 0.5 ? A.fR : B.fR };
+}
+
+// ── props ──────────────────────────────────────────────────────────────
+function potShape(g, x, yb, w, h, lw, charred, tq) {
+  if (charred) {
+    g.beginPath(); g.moveTo(x - w * 0.42, yb - h); g.bezierCurveTo(x - w * 0.46, yb - h - h * 0.55, x - w * 0.1, yb - h - h * 0.75, x + w * 0.05, yb - h - h * 0.5);
+    g.bezierCurveTo(x + w * 0.2, yb - h - h * 0.8, x + w * 0.5, yb - h - h * 0.45, x + w * 0.42, yb - h); g.closePath(); sf(g, C.char, lw);
+    g.strokeStyle = '#6a6168'; g.lineWidth = lw * 0.8;
+    for (const [a, b, c, d] of [[-0.25, -0.3, -0.33, -0.95], [0.12, -0.35, 0.26, -1.0], [-0.02, -0.5, 0.02, -1.08]]) { g.beginPath(); g.moveTo(x + w * a, yb - h + h * b); g.lineTo(x + w * c, yb - h + h * d); g.stroke(); }
+  }
+  for (const s of [-1, 1]) { g.beginPath(); g.roundRect(s > 0 ? x + w / 2 - 4 : x - w / 2 - w * 0.16 + 4, yb - h + h * 0.18, w * 0.16, h * 0.16, h * 0.08); sf(g, C.potD, lw); }
+  g.beginPath(); g.moveTo(x - w / 2, yb - h); g.lineTo(x - w / 2, yb - h * 0.2); g.quadraticCurveTo(x - w / 2, yb, x - w / 2 + h * 0.2, yb);
+  g.lineTo(x + w / 2 - h * 0.2, yb); g.quadraticCurveTo(x + w / 2, yb, x + w / 2, yb - h * 0.2); g.lineTo(x + w / 2, yb - h); sf(g, C.pot, lw);
+  g.fillStyle = C.potL; g.fillRect(x - w * 0.33, yb - h * 0.85, w * 0.07, h * 0.62);
+  ell(g, x, yb - h, w / 2 + w * 0.05, h * 0.12); sf(g, C.potL, lw);
+  ell(g, x, yb - h, w / 2 - w * 0.03, h * 0.07); sf(g, charred ? C.char : C.potD, 0);
+  if (charred) { g.beginPath(); g.moveTo(x - w * 0.42, yb - h); g.bezierCurveTo(x - w * 0.46, yb - h - h * 0.55, x - w * 0.1, yb - h - h * 0.75, x + w * 0.05, yb - h - h * 0.5);
+    g.bezierCurveTo(x + w * 0.2, yb - h - h * 0.8, x + w * 0.5, yb - h - h * 0.45, x + w * 0.42, yb - h); sf(g, C.char, lw); }
+}
+function heldPot(g, handPos) { potShape(g, handPos[0] + 50, handPos[1] + 46, 72, 46, LWK, true); }
+function pastaBox(g, hp, tilt) {
+  g.save(); g.translate(hp[0] + 6, hp[1] - 4); g.rotate(tilt);
+  g.beginPath(); g.roundRect(-16, -44, 60, 36, 4); sf(g, '#4a7fd8', LWK);
+  g.beginPath(); g.roundRect(-4, -38, 34, 24, 3); sf(g, '#f6d47a', LWK * 0.7);
+  g.strokeStyle = '#d9a940'; g.lineWidth = 2.5; for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(-1, -33 + i * 5); g.lineTo(27, -33 + i * 5); g.stroke(); }
+  g.restore();
+}
+function stove(g, x0, top, flame, tq, stain) {
+  const w = 460, fl = 960;
+  g.beginPath(); g.roundRect(x0, top + 16, w, fl - top - 16, [0, 0, 10, 10]); sf(g, '#f5f0e6', 7);
+  g.beginPath(); g.roundRect(x0 - 10, top, w + 20, 22, 6); sf(g, '#3a3440', 7);
+  for (let k = 0; k < 4; k++) { ell(g, x0 + 70 + k * 107, top + 52, 15, 15); sf(g, '#ded6c8', 6); g.beginPath(); g.moveTo(x0 + 70 + k * 107, top + 52); g.lineTo(x0 + 70 + k * 107 + (k === 2 ? 11 : 0), top + 52 - (k === 2 ? 3 : 11)); g.lineWidth = 5; g.stroke(); }
+  g.beginPath(); g.roundRect(x0 + 34, top + 92, w - 68, fl - top - 128, 12); sf(g, '#ebe4d6', 7);
+  g.beginPath(); g.roundRect(x0 + 70, top + 130, w - 140, fl - top - 210, 10); sf(g, '#57505e', 6);
+  g.beginPath(); g.roundRect(x0 + 90, top + 104, w - 180, 12, 6); sf(g, '#c7bfb0', 5);
+  if (stain) { g.fillStyle = 'rgba(60,50,62,0.55)'; g.beginPath(); g.ellipse(x0 + 220, top - 10, 150, 40, 0, Math.PI, 0); g.fill(); }
+  if (flame > 0) {
+    const r = rnd(900 + Math.round(tq * 12));
+    const cx = x0 + 220;
+    for (let i = -3; i <= 3; i++) {
+      const fx = cx + i * 26, hgt = (16 + r() * 14) * flame * (1 - Math.abs(i) * 0.08);
+      g.beginPath(); g.moveTo(fx - 11, top + 2); g.quadraticCurveTo(fx - 10, top - hgt * 0.5, fx + (r() - 0.5) * 8, top - hgt); g.quadraticCurveTo(fx + 10, top - hgt * 0.5, fx + 11, top + 2); g.closePath();
+      sf(g, flame > 1.3 ? '#ff9b3d' : '#5f8dff', 4);
+      if (flame > 1.3) { g.beginPath(); g.moveTo(fx - 5, top + 2); g.quadraticCurveTo(fx - 4, top - hgt * 0.3, fx, top - hgt * 0.55); g.quadraticCurveTo(fx + 4, top - hgt * 0.3, fx + 5, top + 2); sf(g, '#ffe066', 0); }
+    }
+  }
+}
+function kitchenBG(g, bg, stain) {
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  g.fillStyle = shade(bg, 0.28); g.beginPath(); g.roundRect(930, 110, 540, 220, 14); g.fill();
+  g.strokeStyle = shade(bg, 0.1); g.lineWidth = 6; g.beginPath(); g.moveTo(1200, 126); g.lineTo(1200, 314); g.stroke();
+  g.fillStyle = shade(bg, 0.1); g.fillRect(1170, 206, 12, 36); g.fillRect(1218, 206, 12, 36);
+  if (stain) { g.fillStyle = 'rgba(60,50,62,0.5)'; g.beginPath(); g.ellipse(1200, 330, 170, 70, 0, Math.PI, 0); g.fill(); }
+  g.fillStyle = shade(bg, -0.12); g.fillRect(0, 960, W, 120);
+  g.strokeStyle = INK; g.lineWidth = 7; g.beginPath(); g.moveTo(0, 960); g.lineTo(W, 960); g.stroke();
+}
+// smoke puffs: cartoon cloud clusters rising from (x0,y0)
+function smoke(g, t, t0, x0, y0, gap, n, spd, grow, seed, col = C.smoke) {
+  const tq = TW(t), r = rnd(seed); const cl = [];
+  for (let i = 0; i < n; i++) {
+    const bi = t0 + i * gap + r() * gap * 0.3, age = tq - bi, ph = r() * 6, sz = 0.7 + r() * 0.6, dx = (r() - 0.5) * 60;
+    if (age < 0) continue;
+    const life = clamp(age / 2.4); if (life >= 1) continue;
+    const x = x0 + dx + Math.sin(age * 2.2 + ph) * 26 + age * 30, y = y0 - age * spd;
+    const rad = (22 + age * grow) * sz * (life > 0.8 ? (1 - life) / 0.2 : 1) * Math.min(1, age * 6);
+    cl.push([x, y, rad, ph]);
+  }
+  for (const pass of [0, 1]) {
+    for (const [x, y, rad, ph] of cl) for (let k = 0; k < 4; k++) {
+      const a = ph + k * 1.7, rr = rad * (k === 0 ? 1 : 0.68);
+      ell(g, x + (k ? Math.cos(a) * rad * 0.7 : 0), y + (k ? Math.sin(a) * rad * 0.55 : 0), rr + (pass ? 0 : 6), rr + (pass ? 0 : 6));
+      g.fillStyle = pass ? col : INK; g.fill();
+    }
+    if (pass) for (const [x, y, rad] of cl) { ell(g, x - rad * 0.3, y - rad * 0.3, rad * 0.3, rad * 0.22); g.fillStyle = C.smokeL; g.fill(); }
+  }
+}
+function sparkle(g, x, y, s, col = '#fff7c2') {
+  g.beginPath(); for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4, rr = i % 2 ? s * 0.28 : s; g.lineTo(x + Math.cos(a - Math.PI / 2) * rr, y + Math.sin(a - Math.PI / 2) * rr); } g.closePath(); sf(g, col, 5);
+}
+function note(g, x, y, s, rot) {
+  g.save(); g.translate(x, y); g.rotate(rot); g.scale(s, s);
+  ell(g, 0, 0, 11, 8, -0.4); sf(g, INK, 0); g.beginPath(); g.moveTo(9, -3); g.lineTo(9, -42); g.quadraticCurveTo(22, -34, 24, -20); g.strokeStyle = INK; g.lineWidth = 5; g.stroke();
+  g.restore();
+}
+
+// ── captions: handwritten inner-thought clouds, words appear one by one ─
+function wordTimes(text, t0, per = 0.062) { return text.split(/\s+/).map((w, i) => t0 + 0.12 + i * per); }
+function thought(g, t, text, cx, cy, size, t0, tail, opts = {}) {
+  if (t < t0) return;
+  const lines = text.split('\n'); g.font = `${size}px ${HAND}`;
+  const lw = Math.max(...lines.map(l => g.measureText(l).width)), lh = size * 1.08;
+  const bw = lw + size * 1.0, bh = lines.length * lh + size * 0.5;
+  const p = seg(t, t0, t0 + 0.26), sc = eob(p) * (opts.fadeOut ? 1 - eio(seg(t, opts.fadeOut, opts.fadeOut + 0.15)) : 1);
+  if (sc <= 0.001) return;
+  g.save(); g.translate(cx, cy); g.rotate(opts.rot || -0.015); g.scale(sc, sc);
+  // cloud outline: bumps along the rounded box
+  const bumps = []; const rb = size * 0.42;
+  const per = 2 * (bw + bh); const nb = Math.round(per / (rb * 1.25));
+  for (let i = 0; i < nb; i++) { let d = i / nb * per, x, y;
+    if (d < bw) { x = -bw / 2 + d; y = -bh / 2; } else if (d < bw + bh) { x = bw / 2; y = -bh / 2 + d - bw; } else if (d < 2 * bw + bh) { x = bw / 2 - (d - bw - bh); y = bh / 2; } else { x = -bw / 2; y = bh / 2 - (d - 2 * bw - bh); }
+    bumps.push([x, y, rb * (0.85 + 0.25 * Math.sin(i * 2.3))]); }
+  const tails = [];
+  if (tail) { const tx = tail[0] - cx, ty = tail[1] - cy; for (let k = 0; k < 3; k++) { const f = 0.62 + k * 0.15; tails.push([tx * f, ty * f, size * (0.26 - k * 0.07)]); } }
+  const col = opts.fill || PAPER;
+  for (const pass of [0, 1]) {
+    g.fillStyle = pass ? col : INK; const o = pass ? 0 : 6;
+    for (const [x, y, r] of bumps) { ell(g, x, y, r + o, r + o); g.fill(); }
+    g.beginPath(); g.rect(-bw / 2 - o, -bh / 2 - o, bw + 2 * o, bh + 2 * o); g.fill();
+    for (const [x, y, r] of tails) { ell(g, x, y, r + o, r + o); g.fill(); }
+  }
+  g.fillStyle = opts.ink || INK; g.textBaseline = 'middle';
+  const wt = wordTimes(text, t0); let wi = 0;
+  lines.forEach((l, li) => {
+    const ws = l.split(' '); let x = -g.measureText(l).width / 2; const y = -bh / 2 + size * 0.25 + lh * (li + 0.5);
+    for (const w of ws) { const a = clamp((t - wt[wi]) / 0.06); if (a > 0) { g.globalAlpha = a; g.fillText(w, x, y + (1 - a) * 6); } x += g.measureText(w + ' ').width; wi++; }
+  });
+  g.globalAlpha = 1; g.restore();
+}
+function outlinedText(g, text, x, y, size, font, fill, lw, rot = 0, sc = 1, align = 'center') {
+  g.save(); g.translate(x, y); g.rotate(rot); g.scale(sc, sc); g.font = `${size}px ${font}`; g.textAlign = align; g.textBaseline = 'middle';
+  g.lineJoin = 'round'; g.strokeStyle = INK; g.lineWidth = lw; g.strokeText(text, 0, 0); g.fillStyle = fill; g.fillText(text, 0, 0); g.restore();
+}
+
+// ── character state in the kitchen (beats A, B, zoom) ──────────────────
+const ME_X = 700, ME_Y = 960, ME_S = 2.1;
+function meKitchen(t) {
+  const tq = TW(t);
+  const P = { x: ME_X, y: ME_Y, s: ME_S, face: 'smug', look: 0.35, tilt: 0, sq: 0, legs: 'stand', lift: 0 };
+  if (t < T.pop) P.vis = 0;
+  const pp = seg(tq, T.pop, T.pop + 0.4);
+  P.s *= Math.max(0.001, eob(pp)); P.sq = 0.16 * Math.sin(pp * Math.PI * 2.2) * (1 - pp);
+  P.sq += 0.008 * Math.sin(tq * 5);
+  let pa = 'hips', pb = 'hips', pt = 0;
+  if (tq >= T.ding && tq < T.b) { P.browUp = eo(seg(tq, T.ding, T.ding + 0.1)) * (1 - seg(tq, T.ding + 0.5, T.ding + 0.6)); P.tilt = 0.07 * Math.sin(seg(tq, T.ding, T.ding + 0.6) * Math.PI); }
+  if (tq >= 1.95 && tq < 2.04) P.blink = true;
+  if (tq >= T.b) { P.face = 'content'; P.tilt = -0.1; P.look = 0.2; }
+  if (tq >= T.conf) { P.face = 'confused'; P.tilt = 0.1; P.look = 0.1; pa = 'hips'; pb = 'chin'; pt = T.conf; }
+  if (tq >= 3.02 && tq < 3.1) P.blink = true;
+  if (tq >= T.antic) { P.sq = 0.07 * seg(tq, T.antic, T.real); P.tilt = 0.04; }
+  if (tq >= T.real) { P.face = 'alarm'; P.look = 1; P.tilt = -0.04; pa = 'chin'; pb = 'startle'; pt = T.real;
+    const j = seg(tq, T.real, T.real + 0.3); P.lift = -34 * Math.sin(j * Math.PI); P.sq = -0.06 * Math.sin(j * Math.PI); }
+  if (tq >= T.z1) { P.face = 'panic'; P.look = 0; P.tilt = 0; pa = 'startle'; pb = 'scream'; pt = T.z1; P.lift = 0; P.sq = 0; P.dread = seg(tq, T.z1, T.z1 + 0.2); P.jit = Math.sin(tq * 90) * 1.6; }
+  P.pose = blendPose(pa, pb, pt ? eo(seg(tq, pt, pt + 0.1)) : 1);
+  return P;
+}
+// A + B: the kitchen, flat colour per beat (hard cut at T.b)
+function kitchenScene(g, t) {
+  const tq = TW(t), bB = t >= T.b;
+  const bg = bB ? BG.b : BG.a;
+  const z = 1 + 0.07 * eio(seg(t, T.b, T.z1));
+  g.save(); g.translate(ME_X + 180, 560); g.scale(z, z); g.translate(-(ME_X + 180), -560);
+  kitchenBG(g, bg, false);
+  stove(g, 980, 700, bB ? 1.5 : 1, tq, false);
+  // smoke: a tiny unnoticed wisp in A, then real smoke in B
+  if (t >= T.wisp) smoke(g, t, T.wisp, 1200, 590, 0.5, 2, 90, 14, 11);
+  if (bB) smoke(g, t, T.b - 0.2, 1200, 600, 0.13, 14, 150 + 0, 44, 7);
+  potShape(g, 1200, 690, 190, 108, 7, false);
+  if (bB) smoke(g, t, T.b + 0.15, 1190, 590, 0.19, 8, 190, 34, 23);
+  const P = meKitchen(t); drawMe(g, P);
+  // sniff marks
+  if (tq >= T.b && tq < T.conf) { const k = Math.floor((tq - T.b) * 6) % 2; g.strokeStyle = INK; g.lineWidth = 6; g.lineCap = 'round';
+    for (let i = 0; i < 2; i++) { const x = ME_X + 70 + i * 26 + k * 6, y = 470 - i * 18; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 14, y - 10, x + 6, y - 24); g.stroke(); } }
+  // "?" pop over head when confused, "!" on realisation
+  if (tq >= T.conf && tq < T.real) outlinedText(g, '?', ME_X + 120, 250, 150, HAND, '#fff', 12, 0.18, eob(seg(tq, T.conf, T.conf + 0.2)));
+  if (tq >= T.real && tq < T.z1) outlinedText(g, '!', ME_X + 125, 250 - 20 * Math.sin(seg(tq, T.real, T.real + 0.3) * Math.PI), 190, SFX, '#ffe14d', 14, 0.1, eob(seg(tq, T.real, T.real + 0.16)));
+  // smug sparkle
+  if (tq >= T.ding && tq < T.ding + 0.55) { const k = seg(tq, T.ding, T.ding + 0.55); sparkle(g, ME_X + 95, 505, 34 * Math.sin(k * Math.PI)); sparkle(g, ME_X + 130, 470, 18 * Math.sin(seg(k, 0.2, 1) * Math.PI)); }
+  g.restore();
+  // "me" label with hand-drawn arrow
+  if (t >= T.label && !bB) {
+    const k = eob(seg(t, T.label, T.label + 0.25));
+    outlinedText(g, 'me', 250, 330, 120, HAND, INK, 0, -0.06, k);
+    g.save(); g.globalAlpha = clamp((t - T.label - 0.15) / 0.15); g.font = `48px ${HAND}`; g.fillStyle = INK; g.textAlign = 'center'; g.translate(250, 410); g.rotate(-0.04); g.fillText('(19, dangerously confident)', 0, 0); g.restore();
+    const ap = eo(seg(t, T.label + 0.2, T.label + 0.45));
+    if (ap > 0) { g.save(); g.strokeStyle = INK; g.lineWidth = 7; g.lineCap = 'round'; g.lineJoin = 'round';
+      const pth = new Path2D('M 330 300 Q 470 250 545 385'); g.setLineDash([400]); g.lineDashOffset = 400 * (1 - ap); g.stroke(pth); g.setLineDash([]);
+      if (ap > 0.95) { g.beginPath(); g.moveTo(515, 372); g.lineTo(548, 392); g.lineTo(556, 352); g.stroke(); } g.restore(); }
+  }
+  thought(g, t, 'How hard can pasta be?', 1180, 170, 76, T.capA, [ME_X + 70, 330], { fadeOut: T.b - 0.16 });
+  if (bB) thought(g, t, '...is pasta supposed to smell\nlike a campfire?', 1210, 180, 66, T.capB, [ME_X + 80, 330]);
+}
+// comedic snap zoom: dramatic speed lines + panic face
+function zoomScene(g, t) {
+  const tq = TW(t);
+  const z = t < T.z2 ? lerp(1, 2.0, eob(seg(t, T.z1, T.z1 + 0.11))) : lerp(2.0, 3.05, eob(seg(t, T.z2, T.z2 + 0.11))) + 0.14 * seg(t, T.z2 + 0.11, T.fb);
+  const k = seg(z, 1, 3.05);  // pan target reached at the second snap
+  const fwx = ME_X, fwy = ME_Y - 236 * ME_S;
+  const sxp = lerp(fwx, 900, k), syp = lerp(fwy, 560, k);
+  const shake = [[6, -4], [-5, 3], [4, 5], [-6, -2], [3, -5], [-3, 4]][Math.floor(t * 30) % 6];
+  // radial speed-line burst behind the face
+  g.fillStyle = BG.zoom; g.fillRect(0, 0, W, H);
+  const r = rnd(4000 + Math.floor(tq * 12)); g.fillStyle = '#ff8a64';
+  for (let i = 0; i < 44; i++) { const a = i / 44 * Math.PI * 2 + r() * 0.08, w = 0.025 + r() * 0.035; g.beginPath(); g.moveTo(sxp + Math.cos(a) * 200, syp + Math.sin(a) * 200);
+    g.lineTo(sxp + Math.cos(a - w) * 2400, syp + Math.sin(a - w) * 2400); g.lineTo(sxp + Math.cos(a + w) * 2400, syp + Math.sin(a + w) * 2400); g.closePath(); g.fill(); }
+  g.fillStyle = '#ffd0a0'; for (let i = 0; i < 18; i++) { const a = r() * Math.PI * 2, w = 0.006 + r() * 0.01, r0 = 500 + r() * 200; g.beginPath(); g.moveTo(sxp + Math.cos(a) * r0, syp + Math.sin(a) * r0);
+    g.lineTo(sxp + Math.cos(a - w) * 2400, syp + Math.sin(a - w) * 2400); g.lineTo(sxp + Math.cos(a + w) * 2400, syp + Math.sin(a + w) * 2400); g.closePath(); g.fill(); }
+  g.save(); g.translate(sxp + shake[0], syp + shake[1]); g.scale(z, z); g.translate(-fwx, -fwy);
+  const P = meKitchen(t); P.lw = Math.pow(z, -0.45); P.shadow = false; drawMe(g, P);
+  // flying sweat drops
+  LWK = 3.4 * P.lw;
+  g.save(); g.translate(fwx, fwy); g.scale(ME_S, ME_S);
+  const sp = (tq - T.z1) % 0.5 / 0.5;
+  drop(g, -80 - sp * 40, -30 - sp * 30 + sp * sp * 60, 1.2); drop(g, 82 + sp * 44, -40 - sp * 26 + sp * sp * 60, 1.0);
+  g.restore(); g.restore();
+  // shaky "oh no."
+  if (t >= T.capZ) { const s = eob(seg(t, T.capZ, T.capZ + 0.2)); const letters = 'oh no.'.split(''); let x = 1500;
+    g.save(); g.font = `150px ${HAND}`; const ww = letters.map(c => g.measureText(c).width); g.restore();
+    letters.forEach((c, i) => { const j = rnd(i * 31 + Math.floor(t * 15)); outlinedText(g, c, x + ww[i] / 2 + (j() - 0.5) * 8, 880 + (j() - 0.5) * 10, 150, HAND, PAPER, 16, (j() - 0.5) * 0.2, s); x += ww[i]; }); }
+}
+
+// ── flashback: "10 minutes earlier" (drawn in colour, then sepia + wobbly frame) ─
+function flashContent(g, t) {
+  const tq = TW(t);
+  kitchenBG(g, BG.a, false);
+  stove(g, 980, 700, 1.6, tq, false);
+  potShape(g, 1200, 690, 190, 108, 7, false);
+  const X = 830;
+  const P = { x: X, y: 960, s: 2.1, face: 'happy', look: 0.6, tilt: 0.06 * Math.sin(tq * 9), sq: 0.01 * Math.sin(tq * 9), legs: 'stand',
+    pose: POSES.pour, holdBox: true, boxTilt: lerp(-0.2, 0.75, eo(seg(tq, T.pour - 0.1, T.pour + 0.15))) };
+  drawMe(g, P);
+  // spaghetti sticks sliding out of the box into the (dry) pot
+  if (tq > T.pour && tq < T.pourEnd) {
+    const r = rnd(77);
+    for (let i = 0; i < 16; i++) { const ph = ((tq - T.pour) * 2.2 + r()) % 1, x = 1110 + ph * 70 + (r() - 0.5) * 30, y = 530 + ph * ph * 80;
+      g.save(); g.translate(x, y); g.rotate(1.1 + (r() - 0.5) * 0.35); g.beginPath(); g.moveTo(-34, 0); g.lineTo(34, 0); g.strokeStyle = INK; g.lineWidth = 6.5; g.lineCap = 'round'; g.stroke(); g.strokeStyle = '#f6d47a'; g.lineWidth = 2.6; g.stroke(); g.restore(); }
+  }
+  // whistled notes
+  for (let i = 0; i < 3; i++) { const ph = (tq * 0.9 + i / 3) % 1; note(g, X + 90 + ph * 120 + i * 10, 490 - ph * 160, 1.1 + 0.3 * Math.sin(i), -0.2 + 0.3 * Math.sin(ph * 6 + i)); }
+  outlinedText(g, '10 minutes earlier', 430, 175, 78, HAND, PAPER, 12, -0.03);
+  thought(g, t, 'Water is for soup, right?', 1330, 215, 70, T.capFB, [X + 120, 330]);
+}
+function wobblePath(g, t, inset, amp) {
+  const ph = Math.floor(t * 8) * 1.7, r = rnd(Math.floor(t * 8) + 5);
+  const pts = []; const x0 = inset, y0 = inset * 0.8, x1 = W - inset, y1 = H - inset * 0.8;
+  const N = 18;
+  const side = (ax, ay, bx, by, nx, ny) => { for (let i = 0; i < N; i++) { const k = i / N, w = amp * (Math.sin(k * 7 + ph) * 0.6 + (r() - 0.5) * 0.8); pts.push([lerp(ax, bx, k) + nx * w, lerp(ay, by, k) + ny * w]); } };
+  side(x0, y0, x1, y0, 0, -1); side(x1, y0, x1, y1, 1, 0); side(x1, y1, x0, y1, 0, 1); side(x0, y1, x0, y0, -1, 0);
+  g.beginPath(); for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2; if (i === 0) g.moveTo(mx, my); else g.quadraticCurveTo(p[0], p[1], mx, my); }
+  const p = pts[0], q = pts[1]; g.quadraticCurveTo(p[0], p[1], (p[0] + q[0]) / 2, (p[1] + q[1]) / 2); g.closePath();
+}
+let GRAIN = null;
+function buildGrain() {
+  const c = mk(480, 270), x = c.getContext('2d'), id = x.createImageData(480, 270), r = rnd(4242);
+  for (let i = 0; i < id.data.length; i += 4) { const v = 110 + r() * 110; id.data[i] = v; id.data[i + 1] = v * 0.92; id.data[i + 2] = v * 0.8; id.data[i + 3] = 255; }
+  x.putImageData(id, 0, 0); GRAIN = c;
+  // flecks + hairlines, like an old print
+  x.fillStyle = 'rgba(40,25,15,0.7)'; for (let i = 0; i < 40; i++) { x.fillRect(r() * 480, r() * 270, 1 + r() * 1.5, 1 + r() * 1.5); }
+}
+function flashbackScene(g, t) {
+  FG.setTransform(1, 0, 0, 1, 0, 0); flashContent(FG, t);
+  SG.setTransform(1, 0, 0, 1, 0, 0); SG.filter = 'sepia(1) saturate(0.75) contrast(0.92) brightness(1.03)'; SG.drawImage(FBC, 0, 0); SG.filter = 'none';
+  g.fillStyle = '#3b2a1d'; g.fillRect(0, 0, W, H);
+  const gs = Math.floor(t * 12);
+  g.save(); g.globalCompositeOperation = 'multiply'; g.globalAlpha = 0.5; g.drawImage(GRAIN, (gs % 3) * -40, (gs % 2) * -30, W + 160, H + 120); g.restore();
+  // slight drift/zoom so the memory feels dreamy
+  const zz = 1 + 0.02 * Math.sin(t * 1.3);
+  g.save(); wobblePath(g, t, 70, 12); g.save(); g.clip();
+  g.translate(W / 2, H / 2); g.scale(zz, zz); g.translate(-W / 2, -H / 2); g.drawImage(SEP, 0, 0);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = 'multiply'; g.globalAlpha = 0.28; g.drawImage(GRAIN, (gs % 4) * -30, (gs % 3) * -24, W + 160, H + 120);
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  const vg = g.createRadialGradient(W / 2, H / 2, 380, W / 2, H / 2, 1100); vg.addColorStop(0, 'rgba(60,35,15,0)'); vg.addColorStop(1, 'rgba(60,35,15,0.55)'); g.fillStyle = vg; g.fillRect(0, 0, W, H);
+  g.restore();
+  wobblePath(g, t, 70, 12); g.strokeStyle = '#f1e2c2'; g.lineWidth = 14; g.lineJoin = 'round'; g.stroke(); g.strokeStyle = '#2a1c12'; g.lineWidth = 4; g.stroke();
+  g.restore();
+}
+
+// ── smoke-alarm cutaway ────────────────────────────────────────────────
+const BEEPS = []; for (let i = 0; i < 4; i++) BEEPS.push(T.alarm + 0.1 + i * 0.3);
+function alarmScene(g, t) {
+  const tq = TW(t);
+  let last = -1; for (let i = 0; i < BEEPS.length; i++) if (t >= BEEPS[i]) last = i;
+  const on = last >= 0 && t - BEEPS[last] < 0.15;
+  g.fillStyle = on ? '#f2554a' : '#d23a38'; g.fillRect(0, 0, W, H);
+  // warning stripes rotating behind
+  g.save(); g.translate(960, 330); g.rotate(tq * 0.8); g.fillStyle = on ? '#ff7063' : '#df4944';
+  for (let i = 0; i < 12; i++) { g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, 2000, i * Math.PI / 6, i * Math.PI / 6 + Math.PI / 12); g.closePath(); g.fill(); }
+  g.restore();
+  // ceiling
+  g.fillStyle = '#f4e4cf'; g.fillRect(0, 0, W, 170); g.strokeStyle = INK; g.lineWidth = 7; g.beginPath(); g.moveTo(0, 170); g.lineTo(W, 170); g.stroke();
+  // detector body (shakes on each beep)
+  const sh = on ? [[10, 0], [-9, 2], [7, -2], [-6, 1]][Math.floor(t * 30) % 4] : [0, 0];
+  g.save(); g.translate(960 + sh[0], sh[1]);
+  g.beginPath(); g.roundRect(-300, 170, 600, 34, [0, 0, 14, 14]); sf(g, '#dcd3c6', 7);
+  g.beginPath(); g.moveTo(-340, 204); g.lineTo(340, 204); g.quadraticCurveTo(330, 420, 0, 430); g.quadraticCurveTo(-330, 420, -340, 204); g.closePath(); sf(g, '#fbf8f2', 8);
+  for (let k = 0; k < 3; k++) { g.beginPath(); g.moveTo(-260 + k * 40, 250 + k * 34); g.quadraticCurveTo(0, 262 + k * 44, 260 - k * 40, 250 + k * 34); g.strokeStyle = '#cfc6b8'; g.lineWidth = 6; g.stroke(); }
+  for (let k = -3; k <= 3; k++) { g.beginPath(); g.roundRect(k * 44 - 8, 330, 16, 50, 8); sf(g, '#d7cebf', 4); }
+  // LED + glow
+  if (on) { const gr = g.createRadialGradient(230, 250, 0, 230, 250, 110); gr.addColorStop(0, 'rgba(255,60,50,0.9)'); gr.addColorStop(1, 'rgba(255,60,50,0)'); g.fillStyle = gr; g.fillRect(120, 140, 220, 220); }
+  ell(g, 230, 250, 18, 18); sf(g, on ? '#ff2d2d' : '#8a2020', 6);
+  // vibration marks
+  if (on) { g.strokeStyle = INK; g.lineWidth = 9; g.lineCap = 'round'; for (const s of [-1, 1]) for (let k = 0; k < 3; k++) { g.beginPath(); g.arc(s * 330, 290, 60 + k * 40, s > 0 ? -0.5 : Math.PI - 0.5, s > 0 ? 0.5 : Math.PI + 0.5); g.stroke(); } }
+  g.restore();
+  // drifting smoke along the ceiling
+  smoke(g, t, T.alarm - 1.2, 150, 520, 0.16, 16, -20, 30, 91);
+  for (let i = 0; i <= last; i++) {
+    const pos = [[470, 560, -0.14], [1440, 600, 0.12], [640, 750, 0.08], [1290, 790, -0.1]][i];
+    const age = t - BEEPS[i]; const s = eob(seg(age, 0, 0.12)) * (i < last - 1 ? 0.9 : 1);
+    outlinedText(g, 'BEEP!', pos[0], pos[1], 190, SFX, i === last ? '#ffe14d' : '#ffd0b0', 16, pos[2], s);
+  }
+  thought(g, t, 'The smoke alarm had waited its whole life for this.', 960, 955, 62, T.capAl, null, { rot: 0.01 });
+}
+
+// ── embarrassed ending ─────────────────────────────────────────────────
+function endMe(t) {
+  const tq = TW(t);
+  const P = { x: 640, y: 960, s: 2.1, face: 'awkward', look: -0.4, tilt: 0.08 + 0.02 * Math.sin(tq * 3), sq: 0.006 * Math.sin(tq * 4), legs: 'knock', soot: true, holdPot: true, pose: POSES.endp };
+  // arrival: small settle overshoot after the cut
+  const k = seg(tq, T.end, T.end + 0.3); P.sq += -0.05 * Math.sin(k * Math.PI * 2) * (1 - k);
+  // scratch the head (hand moves up and down on twos)
+  const sc = Math.floor(tq * 6) % 2; P.pose = { ...POSES.endp, L: [POSES.endp.L[0] + sc * 4, POSES.endp.L[1] + sc * 8] };
+  if ((tq >= 8.95 && tq < 9.04) || (tq >= T.irisHold + 0.02 && tq < T.irisHold + 0.1)) P.blink = true;
+  return P;
+}
+function endScene(g, t) {
+  const tq = TW(t);
+  kitchenBG(g, BG.end, true);
+  stove(g, 980, 700, 0, tq, true);
+  smoke(g, t, T.end - 1.4, 1210, 660, 0.6, 5, 60, 16, 55, '#9b98a2');
+  const P = endMe(t); drawMe(g, P);
+  // a last sad wisp from the charred brick
+  smoke(g, t, T.end + 0.2, P.x + (40 + 50) * 2.1, 960 - (100 + 46 + 40) * 2.1 + 40, 0.55, 3, 60, 12, 66, '#9b98a2');
+  smoke(g, t, T.end - 0.3, P.x + 20, 960 - 330 * 2.1, 0.5, 4, 50, 10, 71, '#9b98a2');
+  thought(g, t, 'Anyway. I order takeout now.', 1230, 150, 80, T.capE, [P.x + 90, 330]);
+  // iris out onto the face, pause, close
+  if (t >= T.iris) {
+    const fx = P.x - 10, fy = 960 - 238 * 2.1;
+    const r = t < T.irisHold ? lerp(1300, 230, eio(seg(t, T.iris, T.irisHold))) : t < T.irisClose ? 230 : lerp(230, 0, eio(seg(t, T.irisClose, T.irisEnd)));
+    g.fillStyle = '#16111a'; g.beginPath(); g.rect(0, 0, W, H); if (r > 0.5) g.arc(fx, fy, r, 0, Math.PI * 2, true); g.fill('evenodd');
+  }
+}
+
+// ── transitions ────────────────────────────────────────────────────────
+function wobble(g, src, amp, ph, alpha) {
+  g.globalAlpha = alpha; const sh = 8;
+  for (let y = 0; y < H; y += sh) { const dx = amp * Math.sin(y / 60 + ph) + amp * 0.4 * Math.sin(y / 23 - ph * 1.7); g.drawImage(src, 0, y, W, sh, dx, y, W, sh); }
+  g.globalAlpha = 1;
+}
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (t < T.z1) kitchenScene(ctx, t);
+  else if (t < T.fbIn) zoomScene(ctx, t);
+  else if (t < T.fb) {                                    // ripple dissolve into the memory
+    const p = seg(t, T.fbIn, T.fb), amp = 70 * Math.sin(p * Math.PI);
+    B1.setTransform(1, 0, 0, 1, 0, 0); zoomScene(B1, t); B2.setTransform(1, 0, 0, 1, 0, 0); flashbackScene(B2, t);
+    ctx.fillStyle = '#3b2a1d'; ctx.fillRect(0, 0, W, H);
+    wobble(ctx, BUF1, amp, t * 18, 1); wobble(ctx, BUF2, amp, t * 18 + 1, eio(p));
+  }
+  else if (t < T.fbOut) flashbackScene(ctx, t);
+  else if (t < T.alarm) {                                 // ripple back out, straight into the alarm
+    const p = seg(t, T.fbOut, T.alarm), amp = 70 * Math.sin(p * Math.PI);
+    B1.setTransform(1, 0, 0, 1, 0, 0); flashbackScene(B1, t); B2.setTransform(1, 0, 0, 1, 0, 0); alarmScene(B2, t);
+    wobble(ctx, BUF1, amp, t * 18, 1); wobble(ctx, BUF2, amp, t * 18 + 1, eio(p));
+  }
+  else if (t < T.end) alarmScene(ctx, t);
+  else endScene(ctx, t);
+  // brief fade-in from white at the very start
+  if (t < 0.12) { ctx.fillStyle = `rgba(255,253,245,${1 - t / 0.12})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await document.fonts.load(`60px ${HAND}`); await document.fonts.load(`60px ${SFX}`); await document.fonts.ready;
+  buildGrain();
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => {
+  const ev = [];
+  const cap = (text, t0) => wordTimes(text, t0).forEach(x => ev.push({ t: x, k: 'word' }));
+  ev.push({ t: T.pop, k: 'pop' }, { t: T.label, k: 'scribble' }, { t: T.capA, k: 'bubble' }, { t: T.ding, k: 'ding' });
+  cap('How hard can pasta be?', T.capA);
+  ev.push({ t: T.b, k: 'cut' }, { t: T.b, k: 'sizzle' }, { t: T.b + 0.02, k: 'sniff' }, { t: T.capB, k: 'bubble' });
+  cap('...is pasta supposed to smell like a campfire?', T.capB);
+  ev.push({ t: T.conf, k: 'huh' }, { t: T.real, k: 'gasp' }, { t: T.z1, k: 'scratch' }, { t: T.z1, k: 'zoom' }, { t: T.z2, k: 'zoom' }, { t: T.z2, k: 'sting' }, { t: T.capZ, k: 'shake' });
+  ev.push({ t: T.fbIn, k: 'harpUp' }, { t: T.fb, k: 'memory' }, { t: T.capFB, k: 'bubble' }, { t: T.pour, k: 'rattle' });
+  cap('Water is for soup, right?', T.capFB);
+  ev.push({ t: T.fbOut, k: 'harpDown' });
+  BEEPS.forEach(b => ev.push({ t: b, k: 'beep' }));
+  ev.push({ t: T.capAl, k: 'bubble' });
+  ev.push({ t: T.end, k: 'cut' }, { t: T.end + 0.05, k: 'womp' }, { t: T.capE, k: 'bubble' });
+  cap('Anyway. I order takeout now.', T.capE);
+  ev.push({ t: T.iris, k: 'iris' }, { t: T.irisClose, k: 'irisClose' });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
