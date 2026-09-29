@@ -4,9 +4,9 @@ Visual family · Recreations of older media and eras.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (18) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (16) · [Social & Short-Form](../../categories/use-cases/social.md) (30) · [Storytelling & Brand](../../categories/use-cases/story.md) (34) · [Data & Results](../../categories/use-cases/data.md) (5) · [News & Current Affairs](../../categories/use-cases/news.md) (6) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (20)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (18) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (16) · [Social & Short-Form](../../categories/use-cases/social.md) (30) · [Storytelling & Brand](../../categories/use-cases/story.md) (35) · [Data & Results](../../categories/use-cases/data.md) (5) · [News & Current Affairs](../../categories/use-cases/news.md) (6) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (21)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (12) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (5) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (5) · [Comics & Cartoons](../../categories/families/comics.md) (9) · [Games](../../categories/families/games.md) (3)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (12) · [Nostalgia](../../categories/families/nostalgia.md) (9) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (5) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (5) · [Comics & Cartoons](../../categories/families/comics.md) (9) · [Games](../../categories/families/games.md) (3)
 
 <table>
 <tr>
@@ -21,6 +21,9 @@ Visual family · Recreations of older media and eras.
 <td width="25%" align="center"><a href="../../styles/vhs-camcorder/vhs-camcorder.mp4"><img src="../../styles/vhs-camcorder/preview.gif" alt="VHS Camcorder" width="100%"></a><br><b>34 · VHS Camcorder</b><br><a href="../../styles/vhs-camcorder/vhs-camcorder.mp4">video</a> · <a href="../../styles/vhs-camcorder">source</a></td>
 <td width="25%" align="center"><a href="../../styles/retro-desktop/retro-desktop.mp4"><img src="../../styles/retro-desktop/preview.gif" alt="Retro Desktop" width="100%"></a><br><b>35 · Retro Desktop</b><br><a href="../../styles/retro-desktop/retro-desktop.mp4">video</a> · <a href="../../styles/retro-desktop">source</a></td>
 </tr>
+<tr>
+<td width="25%" align="center"><a href="../../styles/anime-80s/anime-80s.mp4"><img src="../../styles/anime-80s/preview.gif" alt="80s Anime" width="100%"></a><br><b>67 · 80s Anime</b><br><a href="../../styles/anime-80s/anime-80s.mp4">video</a> · <a href="../../styles/anime-80s">source</a></td>
+</tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
@@ -33,3 +36,4 @@ Visual family · Recreations of older media and eras.
 | 33 | [Frutiger Aero](../../styles/frutiger-aero/) | Glossy bubbles, blue skies, green grass | Cheerful app launches, playful promos, and nostalgic social posts | [Nostalgia](../../categories/families/nostalgia.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Product & Launches](../../categories/use-cases/product.md) |
 | 34 | [VHS Camcorder](../../styles/vhs-camcorder/) | 90s home video on a VCR | Nostalgic memories, throwbacks, and found-footage hooks | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md) |
 | 35 | [Retro Desktop](../../styles/retro-desktop/) | Mid-90s desktop on a CRT | Nostalgic stories, tech humor, and step-by-step computer tutorials | [Nostalgia](../../categories/families/nostalgia.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Tutorials & Training](../../categories/use-cases/tutorial.md) |
+| 67 | [80s Anime](../../styles/anime-80s/) | Sunset cels, city-pop coastal drive | Retro title openers, road-trip stories, and nostalgic intros | [Nostalgia](../../categories/families/nostalgia.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
