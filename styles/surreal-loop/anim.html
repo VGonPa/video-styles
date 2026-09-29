@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Surreal Replication</title>
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#8fd6f7;overflow:hidden}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* ======================================================================
+ * Surreal Replication: one cartoon sheep on a hill clones itself into a
+ * line, the line (on stilt legs) swirls into a two-armed spiral, the spiral
+ * packs itself into the wool of a giant sheep, and the camera falls
+ * through the giant's bulging eye (a mirrored tunnel of sheep) back onto
+ * the same hill with the same single sheep. Counting sheep, recursively.
+ *
+ * Canvas 2D, all vector; each frame depends only on t (seeded RNG only).
+ * ====================================================================== */
+const W = 1920, H = 1080, CX = 960, CY = 540, DUR = 10;
+const clamp01 = x => Math.min(1, Math.max(0, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const sstep = (a, b, x) => { const u = clamp01((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+const easeOut = x => 1 - Math.pow(1 - clamp01(x), 3);
+const easeInOut = x => { x = clamp01(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const easeBack = (x, k = 1.9) => { x = clamp01(x); const c3 = k + 1; return 1 + c3 * Math.pow(x - 1, 3) + k * Math.pow(x - 1, 2); };
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+
+/* ------------------------------------------------------------ palette */
+const INK = '#221c2b', FACE = '#2d2536', LEG_B = '#3d3448', WOOL_D = '#e4d9c4', WOOL_L = '#fbf7ee',
+      PINK = '#f49ab8', PINK_D = '#c9577f';
+
+/* ------------------------------------------------------------ the sheep
+ * Local units: body centre (0,0), wool ~ -118..118 × -84..84, head on the right,
+ * legs from y=30 down to y=30+L, hooves end at y=35+L (the anchor).           */
+const PUFFS = [];
+for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; PUFFS.push([Math.cos(a) * 88, Math.sin(a) * 54 - 4, 30 + (i % 3 === 0 ? 4 : 0)]); }
+PUFFS.push([-104, -14, 17]); // tail
+const legX = [-58, -32, 40, 66];
+function woolPath(c, grow = 0) {
+  c.beginPath(); c.ellipse(0, -4, 90 + grow, 58 + grow, 0, 0, Math.PI * 2);
+  for (const [x, y, r] of PUFFS) { c.moveTo(x + r + grow, y); c.arc(x, y, r + grow, 0, Math.PI * 2); }
+}
+function drawLegs(c, L, stride = 0) {
+  c.lineCap = 'round';
+  legX.forEach((x, i) => {
+    const back = i === 0 || i === 2, sw = (i % 2 ? 1 : -1) * stride;
+    c.strokeStyle = INK; c.lineWidth = 20;
+    c.beginPath(); c.moveTo(x, 20); c.lineTo(x + sw, 30 + L); c.stroke();
+    c.strokeStyle = back ? LEG_B : FACE; c.lineWidth = 12;
+    c.beginPath(); c.moveTo(x, 20); c.lineTo(x + sw, 30 + L); c.stroke();
+    c.fillStyle = INK; c.beginPath(); c.ellipse(x + sw + 2, 31 + L, 11, 6, 0, 0, Math.PI * 2); c.fill();
+  });
+}
+function drawWool(c) {
+  c.fillStyle = INK; woolPath(c, 7); c.fill();
+  c.fillStyle = WOOL_D; woolPath(c, 0); c.fill();
+  c.fillStyle = WOOL_L; c.beginPath(); c.ellipse(-6, -12, 82, 48, 0, 0, Math.PI * 2);
+  for (const [x, y, r] of PUFFS) { c.moveTo(x - 4 + r - 6, y - 6); c.arc(x - 4, y - 6, r - 6, 0, Math.PI * 2); }
+  c.fill();
+  c.fillStyle = '#ffffff';
+  for (const [x, y, r] of PUFFS) { if (y < 10) { c.beginPath(); c.ellipse(x - 9, y - 12, r * .32, r * .22, -.5, 0, Math.PI * 2); c.fill(); } }
+}
+// o: blink 0..1, look [x,y] -1..1, mouth 0..1, eye: optional override(c, ex, ey) for the right eye
+function drawHead(c, o = {}) {
+  const hx = 98, hy = -30;
+  // ears
+  for (const [ex, rot] of [[62, -.55], [134, .55]]) {
+    c.save(); c.translate(hx + (ex - 98), hy - 22); c.rotate(rot);
+    c.fillStyle = INK; c.beginPath(); c.ellipse(ex < 98 ? -16 : 16, 0, 29, 14, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = FACE; c.beginPath(); c.ellipse(ex < 98 ? -16 : 16, 0, 24, 9.5, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = PINK; c.beginPath(); c.ellipse(ex < 98 ? -19 : 19, 0, 14, 4.5, 0, 0, Math.PI * 2); c.fill();
+    c.restore();
+  }
+  c.fillStyle = INK; c.beginPath(); c.ellipse(hx, hy, 44, 52, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = FACE; c.beginPath(); c.ellipse(hx, hy, 38, 46, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.07)'; c.beginPath(); c.ellipse(hx - 12, hy - 14, 16, 22, -.3, 0, Math.PI * 2); c.fill();
+  // tuft
+  c.fillStyle = INK; for (const [x, y, r] of [[82, -74, 16], [98, -82, 18], [114, -74, 16]]) { c.beginPath(); c.arc(x, y, r + 6, 0, Math.PI * 2); c.fill(); }
+  for (const [x, y, r] of [[82, -74, 16], [98, -82, 18], [114, -74, 16]]) { c.fillStyle = WOOL_D; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+    c.fillStyle = WOOL_L; c.beginPath(); c.arc(x - 3, y - 3, r - 5, 0, Math.PI * 2); c.fill(); }
+  // eyes
+  const lk = o.look || [0, 0], bl = o.blink || 0;
+  const eye = (ex, ey, r) => {
+    c.fillStyle = INK; c.beginPath(); c.arc(ex, ey, r + 3.5, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(ex, ey, r, 0, Math.PI * 2); c.fill();
+    c.fillStyle = INK; c.beginPath(); c.arc(ex + lk[0] * r * .35, ey + lk[1] * r * .3, r * .52, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(ex + lk[0] * r * .35 - r * .18, ey + lk[1] * r * .3 - r * .2, r * .16, 0, Math.PI * 2); c.fill();
+    if (bl > 0) { c.save(); c.beginPath(); c.arc(ex, ey, r + 3.5, 0, Math.PI * 2); c.clip();
+      c.fillStyle = FACE; c.fillRect(ex - r - 4, ey - r - 4, 2 * r + 8, (2 * r + 8) * bl);
+      c.strokeStyle = INK; c.lineWidth = 3; c.beginPath(); c.moveTo(ex - r - 4, ey - r - 4 + (2 * r + 8) * bl); c.lineTo(ex + r + 4, ey - r - 4 + (2 * r + 8) * bl); c.stroke(); c.restore(); }
+  };
+  eye(84, -38, 11.5);
+  if (o.eye) o.eye(c, 112, -38); else eye(112, -38, 11.5);
+  // nose + mouth
+  c.fillStyle = PINK; c.beginPath(); c.ellipse(hx, -6, 10, 5.5, 0, 0, Math.PI * 2); c.fill();
+  const m = o.mouth || 0;
+  if (m > .02) { c.fillStyle = PINK_D; c.beginPath(); c.ellipse(hx, 6, 8, 2 + 8 * m, 0, 0, Math.PI * 2); c.fill(); }
+  else { c.strokeStyle = PINK; c.lineWidth = 3; c.lineCap = 'round'; c.beginPath(); c.arc(hx, 1, 8, .35, Math.PI - .35); c.stroke(); }
+}
+// full sheep anchored at the hooves (x, fy). o: s, L, sx, sy, flip, rot, blink, look, mouth, stride
+function drawSheep(c, x, fy, o = {}) {
+  const s = o.s || 1, L = o.L == null ? 50 : o.L;
+  c.save(); c.translate(x, fy); if (o.rot) c.rotate(o.rot);
+  c.scale(s * (o.sx || 1) * (o.flip ? -1 : 1), s * (o.sy || 1)); c.translate(0, -(35 + L));
+  drawLegs(c, L, o.stride || 0); drawWool(c); drawHead(c, o);
+  c.restore();
+}
+
+/* ------------------------------------------------------------ sprites (crowds) */
+const SPR_K = 2, SPR_X = 140, SPR_Y = 112; // sprite local origin = body centre
+function makeSprite(silhouette) {
+  const c = document.createElement('canvas'); c.width = 290 * SPR_K; c.height = 214 * SPR_K;
+  const g = c.getContext('2d'); g.scale(SPR_K, SPR_K); g.translate(SPR_X, SPR_Y);
+  drawLegs(g, 50); drawWool(g); drawHead(g, { look: [0.5, 0.2] });
+  if (silhouette) { g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); }
+  return c;
+}
+let SPR, SIL, GRAIN;
+// draw sprite with body centre at (x,y), scale s (1 = local units), rotation, flip
+function spr(c, img, x, y, s, rot = 0, flip = false) {
+  c.save(); c.translate(x, y); if (rot) c.rotate(rot); c.scale(flip ? -s : s, s);
+  c.drawImage(img, -SPR_X, -SPR_Y, 290, 214); c.restore();
+}
+
+/* ------------------------------------------------------------ pastoral hill (drawn over a huge extent for the portal) */
+const FLOWERS = (() => { const r = mulberry32(77), a = []; for (let i = 0; i < 150; i++) a.push([-1400 + r() * 4700, 800 + r() * 1900, r(), r()]); return a; })();
+const hillY = x => 790 - 70 * Math.exp(-Math.pow((x - 520) / 520, 2)) - 40 * Math.exp(-Math.pow((x - 1560) / 420, 2));
+function drawPastoral(c, t, night = 0) {
+  // sky
+  const g = c.createLinearGradient(0, -400, 0, 820); g.addColorStop(0, '#46a9ea'); g.addColorStop(.55, '#8fd6f7'); g.addColorStop(1, '#e3f6fb');
+  c.fillStyle = g; c.fillRect(-1500, -1800, 4900, 2700);
+  // sun with slowly turning rays
+  const SY = 210 + 700 * night * night;
+  c.save(); c.translate(1560, SY); c.rotate(t * .25);
+  c.fillStyle = 'rgba(255,236,150,.55)';
+  for (let i = 0; i < 14; i++) { c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, 175, i / 14 * Math.PI * 2, (i + .5) / 14 * Math.PI * 2); c.fill(); }
+  c.restore();
+  c.fillStyle = INK; c.beginPath(); c.arc(1560, SY, 84, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#ffd84a'; c.beginPath(); c.arc(1560, SY, 78, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#ffec9a'; c.beginPath(); c.arc(1540, SY - 20, 46, 0, Math.PI * 2); c.fill();
+  // clouds: suspiciously sheep-shaped (no legs)
+  for (const [x0, y, s, v] of [[240, 170, .9, 14], [760, 110, .65, -10], [1180, 250, .55, 18], [-500, 200, .8, 12], [2300, 140, .8, -12]]) {
+    const x = x0 + v * t;
+    c.save(); c.translate(x, y); c.scale(s * 1.25, s);
+    c.fillStyle = 'rgba(34,28,43,.9)'; woolPath(c, 6); c.fill(); c.fillStyle = '#ffffff'; woolPath(c, 0); c.fill();
+    c.fillStyle = '#e9f5fb'; c.beginPath(); c.ellipse(0, 26, 88, 22, 0, 0, Math.PI * 2); c.fill();
+    c.restore();
+  }
+  // far hills
+  c.fillStyle = INK; c.beginPath(); c.moveTo(-1500, 720);
+  for (let x = -1500; x <= 3400; x += 40) c.lineTo(x, 690 - 60 * Math.sin(x / 260) - 30 * Math.sin(x / 97) - 6);
+  c.lineTo(3400, 2800); c.lineTo(-1500, 2800); c.fill();
+  c.fillStyle = '#8fd26b'; c.beginPath(); c.moveTo(-1500, 720);
+  for (let x = -1500; x <= 3400; x += 40) c.lineTo(x, 690 - 60 * Math.sin(x / 260) - 30 * Math.sin(x / 97));
+  c.lineTo(3400, 2800); c.lineTo(-1500, 2800); c.fill();
+  // near hill with mowed stripes
+  c.fillStyle = INK; c.beginPath(); c.moveTo(-1500, 2800);
+  for (let x = -1500; x <= 3400; x += 30) c.lineTo(x, hillY(x) - 7);
+  c.lineTo(3400, 2800); c.fill();
+  c.fillStyle = '#62bd45'; c.beginPath(); c.moveTo(-1500, 2800);
+  for (let x = -1500; x <= 3400; x += 30) c.lineTo(x, hillY(x));
+  c.lineTo(3400, 2800); c.fill();
+  c.save(); c.clip();
+  c.fillStyle = '#6fca50';
+  for (let k = -12; k < 20; k++) { c.beginPath(); c.moveTo(-1500 + k * 260, 2800); c.lineTo(-1400 + k * 260 + 1100, 600); c.lineTo(-1400 + k * 260 + 1230, 600); c.lineTo(-1500 + k * 260 + 130, 2800); c.fill(); }
+  for (const [x, y, a, b] of FLOWERS) {
+    if (y < hillY(x) + 20) continue;
+    c.fillStyle = a < .5 ? '#fff6d8' : (a < .8 ? '#ffb3cf' : '#ffe066');
+    for (let p = 0; p < 5; p++) { const an = p / 5 * Math.PI * 2 + b * 6; c.beginPath(); c.arc(x + Math.cos(an) * 7, y + Math.sin(an) * 7, 5.5, 0, Math.PI * 2); c.fill(); }
+    c.fillStyle = '#f2a33a'; c.beginPath(); c.arc(x, y, 4.5, 0, Math.PI * 2); c.fill();
+  }
+  c.restore();
+  // a small fence on the left
+  c.strokeStyle = INK; c.lineCap = 'round';
+  for (let i = 0; i < 6; i++) { const x = 90 + i * 74, y = hillY(x) + 8; c.lineWidth = 16; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y - 92); c.stroke();
+    c.strokeStyle = '#b98555'; c.lineWidth = 9; c.beginPath(); c.moveTo(x, y - 4); c.lineTo(x, y - 88); c.stroke(); c.strokeStyle = INK; }
+  for (const dy of [30, 66]) { c.lineWidth = 13; c.beginPath(); c.moveTo(80, hillY(80) + 8 - dy); c.lineTo(470, hillY(470) + 8 - dy); c.stroke();
+    c.strokeStyle = '#c99565'; c.lineWidth = 6; c.beginPath(); c.moveTo(80, hillY(80) + 8 - dy); c.lineTo(470, hillY(470) + 8 - dy); c.stroke(); c.strokeStyle = INK; }
+  if (night > 0) {
+    c.save(); c.globalCompositeOperation = 'multiply'; c.fillStyle = `rgba(52,64,140,${night * .8})`; c.fillRect(-1500, -1800, 4900, 4600); c.restore();
+  }
+}
+const GROUND = 850; // hero hooves
+function shadow(c, x, y, w, a = .22) { c.fillStyle = `rgba(20,40,10,${a})`; c.beginPath(); c.ellipse(x, y, w, w * .16, 0, 0, Math.PI * 2); c.fill(); }
+
+/* ------------------------------------------------------------ hero (scene A / E and inside the portal) */
+const HERO_S = 1.5;
+function heroState(t) {
+  // falls in, lands with squash, blinks, looks at us
+  let y = GROUND, sx = 1, sy = 1;
+  if (t < .62) { const u = clamp01((t - .12) / .5); y = lerp(-380, GROUND, u * u); sy = 1 + .18 * u; sx = 1 - .1 * u; }
+  else { const k = t - .62, sp = Math.exp(-k * 7) * Math.cos(k * 26); sy = 1 - .2 * sp; sx = 1 + .16 * sp; }
+  const bl = Math.max(sstep(1.08, 1.14, t) - sstep(1.2, 1.26, t), 0);
+  return { y, sx, sy, blink: bl, look: [lerp(0.8, 0, sstep(.9, 1.2, t)), 0.25] };
+}
+function drawHero(c, t, endState) {
+  if (t < .12) return;
+  const h = heroState(t), o = Object.assign({ s: HERO_S, sx: h.sx, sy: h.sy, blink: h.blink, look: h.look }, endState || {});
+  shadow(c, CX, GROUND + 4, 150 * clamp01((h.y + 400) / (GROUND + 400)));
+  drawSheep(c, CX - 20 * HERO_S, h.y, o);
+  // landing dust
+  const d = t - .62;
+  if (d > 0 && d < .6) for (let i = 0; i < 6; i++) { const s = i < 3 ? -1 : 1, k = i % 3, u = easeOut(d / .6);
+    c.fillStyle = `rgba(255,250,235,${.9 * (1 - d / .6)})`; c.beginPath(); c.arc(CX + s * (150 + 90 * u + k * 30), GROUND - 10 - k * 18 * u, 18 + 16 * u - k * 4, 0, Math.PI * 2); c.fill(); }
+}
+
+/* ------------------------------------------------------------ line of clones (scene B) */
+const SPLIT = [1.52, 1.86, 2.14, 2.38, 2.58];
+const LV_S = [1.5, 1.05, .74, .52, .36, .24], LV_D = [0, 600, 440, 225, 113, 58];
+function lineLevelPos(k, i) { const N = 1 << k; return CX + (i - (N - 1) / 2) * LV_D[k]; }
+function lineSheep(t) {
+  // returns [{x, fy, s, flip, sy, L}] for the current level
+  let k = 0; while (k < 5 && t >= SPLIT[k]) k++;
+  const N = 1 << k, out = [];
+  const u = k > 0 ? clamp01((t - SPLIT[k - 1]) / .26) : 1;
+  for (let i = 0; i < N; i++) {
+    const p = k > 0 ? i >> 1 : 0;
+    const x0 = k > 0 ? lineLevelPos(k - 1, p) : CX, x1 = lineLevelPos(k, i);
+    const e = easeBack(u, 1.4);
+    const x = lerp(x0, x1, e), s = lerp(k > 0 ? LV_S[k - 1] : LV_S[0], LV_S[k], easeOut(u));
+    const hop = Math.sin(Math.PI * u) * 70 * s;
+    // anticipation before the next split
+    let sy = 1; if (k < 5) { const a = clamp01((t - (SPLIT[k] - .1)) / .1); sy = 1 - .16 * Math.sin(Math.PI * .5 * a); }
+    if (u < 1) sy *= 1 + .12 * Math.sin(Math.PI * u);
+    // stilt legs: a wave travelling out from the centre
+    const di = Math.abs(i - (N - 1) / 2) / Math.max(1, N / 2);
+    const lw = Math.sin(Math.PI * clamp01((t - 2.64 - di * .12) / .48));
+    const L = 50 + 1000 * Math.pow(Math.max(0, lw), 1.3) * sstep(2.62, 2.7, t);
+    out.push({ x, fy: GROUND - hop, s, flip: x < CX - 1, sy, L, i });
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------ the giant sheep and its wool of sheep */
+const G = 5.2, GX = CX - 8 * G, GFY = 1062; // giant hooves
+const gw = (lx, ly, L = 50) => [GX + G * lx, GFY + G * (ly - (35 + L))];
+const WOOL = (() => {
+  const pts = [], sp = 13.2, r = mulberry32(5);
+  for (let j = -9; j <= 9; j++) for (let i = -12; i <= 12; i++) {
+    const lx = i * sp + (j & 1 ? sp / 2 : 0) + (r() - .5) * 3, ly = j * sp * .87 - 4 + (r() - .5) * 3;
+    let inside = (lx * lx) / (86 * 86) + ((ly + 4) * (ly + 4)) / (54 * 54) < 1;
+    for (const [x, y, rr] of PUFFS) if ((lx - x) ** 2 + (ly - y) ** 2 < (rr - 4) ** 2) inside = true;
+    if (!inside) continue;
+    // leave room for the head
+    if ((lx - 98) ** 2 / (48 * 48) + (ly + 30) ** 2 / (58 * 58) < 1) continue;
+    const [x, y] = gw(lx, ly);
+    pts.push({ x, y, d: Math.hypot(lx, (ly + 4) * 1.4), flip: r() < .5, ph: r() * 6.28, rot: (r() - .5) * .3 });
+  }
+  return pts;
+})();
+const M = WOOL.length;
+// order wool targets by distance from the body centre; spiral index m (inner → outer) takes target m
+const WOOL_BY_D = WOOL.map((w, i) => i).sort((a, b) => WOOL[a].d - WOOL[b].d);
+const WOOL_PAINT = WOOL.map((w, i) => i).sort((a, b) => WOOL[a].y - WOOL[b].y);
+const SPIRAL_C = [CX, 520];
+function spiralPos(m, t) {
+  const arm = m & 1, idx = m >> 1, n = M / 2;
+  const f = idx / n, th = idx * .23 + arm * Math.PI + .95 * (t - 3.3);
+  const r = 34 + 560 * Math.pow(f, .8);
+  return { x: SPIRAL_C[0] + Math.cos(th) * r * 1.18, y: SPIRAL_C[1] + Math.sin(th) * r * .92, s: .09 + .26 * Math.pow(f, .9), rot: th + Math.PI / 2 };
+}
+// the 32 line sheep become spiral members LINE2M[j]
+const LINE2M = Array.from({ length: 32 }, (_, j) => Math.round(j * (M - 1) / 31));
+const M2LINE = new Map(LINE2M.map((m, j) => [m, j]));
+const BORN = m => 3.72 + .72 * (m / M);
+const DEPART = m => 4.36 + .5 * (m / M);
+const WOOL_S = .31;
+function crowd(t) {
+  const out = [];
+  const lines = t < 3.3 ? null : lineSheep(3.29);
+  for (let m = 0; m < M; m++) {
+    const w = WOOL[WOOL_BY_D[m]], sp = spiralPos(m, t);
+    let x = sp.x, y = sp.y, s = sp.s, rot = sp.rot, flip = false, a = 1;
+    const j = M2LINE.get(m);
+    if (j != null) {
+      // lift from the ground line and swirl into place (polar interpolation around the spiral centre)
+      const l = lines[j], L = 50, bx = l.x, by = GROUND - (35 + L - 30) * l.s - 30 * l.s;
+      const u = easeInOut((t - 3.3 - Math.abs(j - 15.5) * .012) / .7);
+      const a0 = Math.atan2(by - SPIRAL_C[1], bx - SPIRAL_C[0]), r0 = Math.hypot(bx - SPIRAL_C[0], by - SPIRAL_C[1]);
+      let a1 = Math.atan2(sp.y - SPIRAL_C[1], sp.x - SPIRAL_C[0]); const r1 = Math.hypot(sp.x - SPIRAL_C[0], sp.y - SPIRAL_C[1]);
+      while (a1 < a0) a1 += Math.PI * 2;
+      const aa = lerp(a0, a1, u), rr = lerp(r0, r1, u);
+      if (u < 1) { x = SPIRAL_C[0] + Math.cos(aa) * rr; y = SPIRAL_C[1] + Math.sin(aa) * rr; s = lerp(l.s, sp.s, u); rot = lerp(0, ((sp.rot % 6.2832) + 6.2832) % 6.2832, u); flip = u < .5 && l.flip; }
+    } else {
+      const b = (t - BORN(m)) / .22; if (b <= 0) continue; s *= easeBack(b, 2.2);
+    }
+    // fly into the giant's wool
+    const d = (t - DEPART(m)) / .42;
+    if (d > 0) { const e = easeInOut(d); const bob = d < 1 ? 0 : Math.sin(t * 6 + w.ph) * 1.8;
+      x = lerp(x, w.x, e); y = lerp(y, w.y, e) - Math.sin(Math.PI * clamp01(d)) * 60 + bob;
+      s = lerp(s, WOOL_S, e); let r1 = w.rot; rot = rot % (Math.PI * 2); if (rot > Math.PI) rot -= Math.PI * 2; rot = lerp(rot, r1, e); if (e > .5) flip = w.flip; }
+    out.push({ x, y, s, rot, flip, a, d, y1: d > 0 ? w.y : -1e4 });
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------ tunnel / kaleidoscope: mirrored wedges, sheep flowing outward */
+function drawTunnel(c, cx, cy, rMin, rMax, t, o) {
+  const nW = o.n, a0 = o.spin * t, hue = o.hue;
+  for (let w = 0; w < nW; w++) {
+    c.fillStyle = `hsl(${(hue + w * (360 / nW) * o.hueStep) % 360},${o.sat}%,${w & 1 ? o.l1 : o.l2}%)`;
+    c.beginPath(); c.moveTo(cx, cy); c.arc(cx, cy, rMax, a0 + w / nW * Math.PI * 2, a0 + (w + 1) / nW * Math.PI * 2 + .003); c.fill();
+  }
+  // rings at r = rMin * q^(n + phase): flowing outward forever
+  const q = o.q, ph = (t * o.speed) % 1;
+  for (let n = -1; ; n++) {
+    const r = rMin * Math.pow(q, n + ph); if (r > rMax * 1.15) break; if (r < rMin * .7) continue;
+    const s = r * o.size / 100, alpha = clamp01((r - rMin * .7) / (rMin * .9));
+    c.globalAlpha = alpha * o.alpha;
+    for (let w = 0; w < nW; w++) {
+      const ang = a0 + (w + .5) / nW * Math.PI * 2 + o.twist * Math.log(r / rMin) * (n & 1 ? 1 : 1);
+      spr(c, o.img, cx + Math.cos(ang) * r, cy + Math.sin(ang) * r, s, ang + Math.PI / 2, (w & 1) === 1);
+    }
+  }
+  c.globalAlpha = 1;
+}
+function drawPsy(c, t, R) {
+  drawTunnel(c, CX, CY, 60, R, t, { n: 12, spin: .35, hue: 300 + t * 55, hueStep: 1, sat: 90, l1: 60, l2: 70,
+    q: 1.38, speed: .9, size: .14, twist: .55, alpha: .36, img: SIL });
+  // soft centre so the foreground reads
+  const g = c.createRadialGradient(CX, CY, 0, CX, CY, 520); g.addColorStop(0, 'rgba(255,248,230,.22)'); g.addColorStop(1, 'rgba(255,248,230,0)');
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+}
+
+/* ------------------------------------------------------------ the giant */
+const EYE = gw(112, -38); // right eye centre (giant world)
+const eyeR = t => G * lerp(11.5, 27, easeBack((t - 5.42) / .34, 2.4));
+const portR = t => G * lerp(0, 12.5, easeBack((t - 5.5) / .34, 1.8));
+const K_IN = G * 12.5 / 2250; // pastoral → portal scale
+function drawGiantEye(c, t) {
+  return (g, ex, ey) => {
+    const r = eyeR(t) / G, pr = portR(t) / G;
+    g.fillStyle = INK; g.beginPath(); g.arc(ex, ey, r + 3.5, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(ex, ey, r, 0, Math.PI * 2); g.fill();
+    if (pr < .5) { // ordinary pupil until it opens
+      g.fillStyle = INK; g.beginPath(); g.arc(ex, ey, r * .52, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#fff'; g.beginPath(); g.arc(ex - r * .18, ey - r * .2, r * .16, 0, Math.PI * 2); g.fill();
+    }
+  };
+}
+function drawEyeInterior(c, t) {
+  // drawn in giant world coords: mirrored sheep tunnel between portal and eye white, then the portal
+  const re = eyeR(t), pr = portR(t);
+  if (pr < 1) return;
+  c.save(); c.beginPath(); c.arc(EYE[0], EYE[1], re * .9, 0, Math.PI * 2); c.clip();
+  drawTunnel(c, EYE[0], EYE[1], pr, re * .95, t, { n: 10, spin: -.8, hue: 180 + t * 70, hueStep: 1, sat: 90, l1: 58, l2: 68,
+    q: 1.28, speed: 1.4, size: .18, twist: .9, alpha: 1, img: SPR });
+  c.restore();
+  c.strokeStyle = INK; c.lineWidth = G * 2.2; c.beginPath(); c.arc(EYE[0], EYE[1], re * .9, 0, Math.PI * 2); c.stroke();
+  // portal
+  c.save(); c.beginPath(); c.arc(EYE[0], EYE[1], pr, 0, Math.PI * 2); c.clip();
+  c.translate(EYE[0], EYE[1]); c.scale(K_IN, K_IN); c.translate(-CX, -CY);
+  drawPastoral(c, t); drawHero(c, 3.0 + (t - 5.5) * .5);
+  c.restore();
+  c.strokeStyle = INK; c.lineWidth = G * 1.6; c.beginPath(); c.arc(EYE[0], EYE[1], pr, 0, Math.PI * 2); c.stroke();
+}
+function drawGiant(c, t, cr) {
+  const back = easeBack((t - 4.4) / .35, 1.5);
+  // legs grow (telescoping) under the wool
+  const Lg = 50 * easeBack((t - 4.72) / .4, 1.6);
+  if (t > 4.72) { c.save(); c.translate(GX, GFY - G * (35 + 50)); c.scale(G, G); drawLegs(c, Lg); c.restore(); }
+  if (back > 0) { c.save(); c.translate(...gw(0, 0)); c.scale(G * back, G * back);
+    c.fillStyle = INK; woolPath(c, 7); c.fill(); c.fillStyle = '#d9ccb4'; woolPath(c, 0); c.fill(); c.restore(); }
+  // wool sheep (arrived ones painted back to front; flying ones on top)
+  const arrived = cr.filter(q => q.d >= 1).sort((a, b) => a.y1 - b.y1), flying = cr.filter(q => q.d < 1);
+  for (const q of arrived) spr(c, SPR, q.x, q.y, q.s, q.rot, q.flip);
+  // head pops
+  const hs = easeBack((t - 4.86) / .36, 2.0);
+  if (hs > 0) {
+    const hc = gw(98, -30);
+    const bl = Math.max(sstep(5.24, 5.3, t) - sstep(5.34, 5.4, t), 0);
+    c.save(); c.translate(hc[0], hc[1]); c.scale(hs, hs); c.translate(-hc[0], -hc[1]);
+    c.translate(GX, GFY - G * 85); c.scale(G, G);
+    drawHead(c, { blink: bl, look: [-.3, .35], eye: drawGiantEye(c, t) });
+    c.restore();
+    if (hs > .99) drawEyeInterior(c, t);
+  }
+  return flying;
+}
+
+/* ------------------------------------------------------------ HUD: the counter and captions */
+const fmt = n => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+function countAt(t) {
+  if (t < 1.52) return 1;
+  if (t < 3.3) { let k = 0; while (k < 5 && t >= SPLIT[k]) k++; return 1 << k; }
+  if (t < 5.6) { let n = 32; for (let m = 0; m < M; m++) if (!M2LINE.has(m) && t >= BORN(m)) n++; return n; }
+  if (t < 7.95) { const u = (t - 5.6) / 2.35; return M * Math.pow(10, 7.2 * easeInOut(u)); }
+  return 1;
+}
+function drawHUD(c, t, fade) {
+  const ap = easeBack((t - .7) / .35, 1.8); if (ap <= 0) return;
+  const n = countAt(t), txt = fmt(n);
+  const bump = (() => { const ev = [.7, ...SPLIT, 7.95]; let b = 0; for (const e of ev) { const d = t - e; if (d > 0 && d < .3) b = Math.max(b, Math.sin(d / .3 * Math.PI) * (1 - d / .3)); } return b; })();
+  c.save(); c.globalAlpha = fade; c.translate(84, 78); c.scale(ap, ap);
+  c.font = '600 26px Fredoka'; const lw = c.measureText('SHEEP COUNTED').width;
+  c.font = '700 64px Fredoka'; const nw = c.measureText(txt).width;
+  const bw = Math.max(lw, nw) + 64, bh = 128;
+  c.fillStyle = INK; c.beginPath(); c.roundRect(6, 8, bw, bh, 26); c.fill();
+  c.fillStyle = '#fff8e6'; c.beginPath(); c.roundRect(0, 0, bw, bh, 26); c.fill();
+  c.lineWidth = 5; c.strokeStyle = INK; c.stroke();
+  c.fillStyle = PINK_D; c.font = '600 26px Fredoka'; c.textBaseline = 'alphabetic'; c.fillText('SHEEP COUNTED', 32, 42);
+  c.fillStyle = INK; c.font = '700 64px Fredoka';
+  c.save(); c.translate(32, 106); c.scale(1 + .25 * bump, 1 + .25 * bump); c.fillText(txt, 0, 0); c.restore();
+  c.restore();
+}
+function drawCaption(c, t, fade) {
+  const lines = [['Counting sheep.', 8.35], ['Recursively.', 8.85]];
+  c.save(); c.textAlign = 'center'; c.globalAlpha = fade;
+  lines.forEach(([s, t0], i) => {
+    const u = (t - t0) / .45; if (u <= 0) return;
+    const e = easeBack(u, 2.2), y = 250 + i * 118;
+    c.save(); c.translate(CX - 60, y + (1 - easeOut(u)) * 40); c.scale(e, e); c.rotate((i ? .035 : -.03) * (1 - e * .6));
+    c.font = i ? '700 104px Fredoka' : '600 72px Fredoka';
+    c.lineJoin = 'round'; c.lineWidth = 16; c.strokeStyle = INK; c.strokeText(s, 5, 7);
+    c.strokeText(s, 0, 0); c.fillStyle = i ? '#ffd84a' : '#fff8e6'; c.fillText(s, 0, 0);
+    c.restore();
+  });
+  c.restore();
+}
+
+/* ------------------------------------------------------------ frame */
+function frame(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const ZOOM0 = 5.62, ZOOM1 = 7.95;
+  if (t < ZOOM0) {
+    drawPastoral(ctx, t);
+    // psychedelic iris wipe from the centre
+    const wr = 1250 * easeInOut((t - 3.25) / .8);
+    if (wr > 1) {
+      ctx.save(); ctx.beginPath();
+      for (let i = 0; i <= 96; i++) { const a = i / 96 * Math.PI * 2, rr = wr * (1 + .06 * Math.sin(a * 7 + t * 5)); i ? ctx.lineTo(CX + Math.cos(a) * rr, CY + Math.sin(a) * rr) : ctx.moveTo(CX + rr, CY); }
+      ctx.closePath(); ctx.lineWidth = 14; ctx.strokeStyle = INK; ctx.stroke(); ctx.clip();
+      drawPsy(ctx, t, 1300); ctx.restore();
+    }
+    if (t < 1.52) drawHero(ctx, t);
+    else if (t < 3.3 + .85) {
+      if (t < 3.3) for (const l of lineSheep(t)) { shadow(ctx, l.x, GROUND + 3, 120 * l.s); drawSheep(ctx, l.x - 20 * l.s * (l.flip ? -1 : 1), l.fy, { s: l.s, flip: l.flip, sy: l.sy, L: l.L, look: [0.6, 0.2] }); }
+    }
+    if (t >= 3.3) {
+      const cr = crowd(t);
+      const flying = t > 4.3 ? drawGiant(ctx, t, cr) : cr;
+      for (const q of flying) spr(ctx, SPR, q.x, q.y, q.s, q.rot, q.flip);
+    }
+  } else if (t < ZOOM1) {
+    // fall into the eye: camera C(p) = c + s·R(φ)·(p − F), ending exactly at the portal's inverse
+    const u = (t - ZOOM0) / (ZOOM1 - ZOOM0), sEnd = 1 / K_IN;
+    const s = Math.exp(Math.log(sEnd) * easeInOut(u)), w = 1 - Math.pow(1 - clamp01(u / .8), 3);
+    const F = [lerp(CX, EYE[0], w), lerp(CY, EYE[1], w)], phi = .9 * Math.sin(Math.PI * u) * (1 - u);
+    const pc = [CX + s * (1 - w) * (EYE[0] - CX), CY + s * (1 - w) * (EYE[1] - CY)];
+    const covered = s * portR(t) > Math.max(...[[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => Math.hypot(x - pc[0], y - pc[1]))) + 4;
+    const cam = () => { ctx.translate(CX, CY); ctx.rotate(phi); ctx.scale(s, s); ctx.translate(-F[0], -F[1]); };
+    if (!covered) {
+      drawPsy(ctx, t, 1300);
+      ctx.save(); cam(); drawGiant(ctx, t, crowd(t)); ctx.restore();
+    } else {
+      ctx.save(); cam(); ctx.translate(EYE[0], EYE[1]); ctx.scale(K_IN, K_IN); ctx.translate(-CX, -CY);
+      drawPastoral(ctx, t); drawHero(ctx, 3.0 + (t - 5.5) * .5); ctx.restore();
+    }
+  } else {
+    const night = sstep(9.05, 9.8, t);
+    drawPastoral(ctx, t, night);
+    const tt = t - 7.95;
+    const bl = sstep(9.2, 9.5, t);
+    const mouth = Math.max(0, Math.sin(Math.PI * clamp01((t - 8.12) / .5)));
+    drawHero(ctx, 3.0 + (t - 5.5) * .5, { blink: Math.max(bl, Math.max(sstep(8.8, 8.85, t) - sstep(8.92, 8.97, t), 0)), look: [lerp(0, .7, sstep(8.3, 8.6, t)), lerp(.25, -.4, sstep(8.3, 8.6, t))], mouth });
+    // stars come out
+    if (night > 0) { const r = mulberry32(9); for (let i = 0; i < 60; i++) { const x = r() * W, y = r() * 560, ph = r() * 6;
+      ctx.fillStyle = `rgba(255,246,210,${night * (.5 + .5 * Math.sin(t * 5 + ph))})`; ctx.beginPath(); ctx.arc(x, y, 2 + r() * 2.5, 0, Math.PI * 2); ctx.fill(); } }
+  }
+  const endFade = sstep(9.55, 9.98, t);
+  drawHUD(ctx, t, 1 - endFade);
+  drawCaption(ctx, t, 1 - endFade);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = .07; ctx.drawImage(GRAIN, 0, 0); ctx.globalAlpha = 1;
+  const v = ctx.createRadialGradient(CX, CY, 500, CX, CY, 1150); v.addColorStop(0, 'rgba(20,10,40,0)'); v.addColorStop(1, 'rgba(20,10,40,.28)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  if (t < .25) { ctx.fillStyle = `rgba(13,15,34,${1 - sstep(0, .25, t)})`; ctx.fillRect(0, 0, W, H); }
+  if (endFade > 0) { ctx.fillStyle = `rgba(13,15,34,${endFade})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await document.fonts.load('600 26px Fredoka'); await document.fonts.load('700 64px Fredoka');
+  await document.fonts.ready;
+  SPR = makeSprite(false); SIL = makeSprite(true);
+  GRAIN = document.createElement('canvas'); GRAIN.width = W; GRAIN.height = H;
+  const g = GRAIN.getContext('2d'), id = g.createImageData(W, H), r = mulberry32(123);
+  for (let i = 0; i < id.data.length; i += 4) { const v = r() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; }
+  g.putImageData(id, 0, 0);
+})();
+window.draw = ({ t }) => { frame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [{ k: 'fall', t: .15 }, { k: 'land', t: .62 }, { k: 'tick', t: .75 }];
+  SPLIT.forEach((s, i) => { ev.push({ k: 'squash', t: s - .1 }); ev.push({ k: 'pop', t: s, v: i }); });
+  for (let i = 0; i < 6; i++) ev.push({ k: 'stilt', t: 2.76 + i * .06, v: i });
+  ev.push({ k: 'wipe', t: 3.25 }); ev.push({ k: 'swirl', t: 3.3, d: 1.2 });
+  for (let i = 0; i < 18; i++) ev.push({ k: 'bud', t: 3.72 + .72 * i / 18, v: i });
+  ev.push({ k: 'swirl', t: 4.35, d: 1.0 });
+  for (let i = 0; i < 12; i++) ev.push({ k: 'patter', t: 4.75 + i * .04 });
+  ev.push({ k: 'thud', t: 5.0 }); ev.push({ k: 'boing', t: 4.9 }); ev.push({ k: 'blink', t: 5.26 });
+  ev.push({ k: 'bulge', t: 5.44 }); ev.push({ k: 'zoom', t: 5.55, d: 2.4 });
+  ev.push({ k: 'land', t: 7.95, v: .6 }); ev.push({ k: 'tick', t: 7.97 });
+  ev.push({ k: 'baa', t: 8.12 }); ev.push({ k: 'pop', t: 8.38, v: 2 }); ev.push({ k: 'pop', t: 8.88, v: 4 });
+  ev.push({ k: 'chord', t: 8.9 }); ev.push({ k: 'night', t: 9.05 });
+  return ev;
+};
+</script>
+</body>
+</html>
