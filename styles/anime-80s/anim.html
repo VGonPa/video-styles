@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<!--
+  anime-80s · "MIDNIGHT COAST"
+  A 1980s cel-anime / city-pop opening: an original wedge sports car tracks along a coastal highway at
+  sunset (painted sky, parallax palms, sun glitter) → flare cut to a close-up of the driver in profile,
+  hair streaming in the wind → iris closes on her eye and opens on the night city, the car pulling away
+  toward the skyline → big 80s title card "MIDNIGHT COAST" with a lens-flare glint → fade out.
+  Characters and car animate on held 12 fps cels; background pans run smoothly at 30 fps.
+  Painted layers are built once offscreen; per frame only cheap layers move, then film finish
+  (gate weave, colour bleed, bloom, grain refreshed at 12 fps, dust).
+-->
+<script src="common.js"></script>
+<script src="props.js"></script>
+<script src="shotA.js"></script>
+<script src="shotB.js"></script>
+<script src="shotC.js"></script>
+<script>
+const cv = document.getElementById('c');
+const scene = mk(), sg = scene.getContext('2d');
+const T = { cutB: 3.75, irisA: 6.05, irisB: 6.5, cutC: 6.6, irisO: 7.15, title: 7.7, fade0: 9.25, fade1: 10.0 };
+window.ready = (async () => {
+  await document.fonts.load('400 100px "Russo One"'); await document.fonts.load('600 40px "Barlow Condensed"'); await document.fonts.load('italic 600 40px "Barlow Condensed"');
+  await document.fonts.ready;
+  initFX(); initA(); initB(); initC();
+})();
+function iris(g, x, y, r) {
+  g.save(); g.fillStyle = '#000'; g.beginPath(); g.rect(0, 0, W, H); g.arc(x, y, Math.max(0, r), 0, TAU, true); g.fill(); g.restore();
+}
+function drawFrame(t) {
+  const g = sg; g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  if (t < T.cutB) {
+    drawA(g, t);
+    flare(g, A.SUNX, A.HZ - 30, .35 + .25 * bump(t, 0, 3.75));
+    const f = seg(t, 3.45, T.cutB); flare(g, 1500 - f * 500, 420, eIn(f) * 2.2);            // flare swells into the cut
+    if (f > 0) { g.fillStyle = `rgba(255,240,215,${eIn(f) * .85})`; g.fillRect(0, 0, W, H); }
+  } else if (t < T.cutC) {
+    drawB(g, t);
+    const f = 1 - seg(t, T.cutB, T.cutB + .35); if (f > 0) { g.fillStyle = `rgba(255,240,215,${f * f * .85})`; g.fillRect(0, 0, W, H); }
+    const ir = seg(t, T.irisA, T.irisB); if (ir > 0) iris(g, B.eyeX, B.eyeY, lerp(1500, 0, eInOut(ir)));
+  } else {
+    drawC(g, t);
+    const io = seg(t, T.cutC, T.irisO); if (io < 1) iris(g, C.irisX, C.irisY, lerp(0, 1500, eIn(io)));
+  }
+  const fade = Math.max(1 - seg(t, 0, .6), eInOut(seg(t, T.fade0, T.fade1)));
+  finish(cv, scene, t, { fade });
+}
+window.draw = ({ t }) => { drawFrame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => [
+  { k: 'engine', t: 0.0, d: 3.75 }, { k: 'pass', t: 0.9 }, { k: 'pass', t: 2.05 }, { k: 'pass', t: 3.2 },
+  { k: 'flare', t: 3.45 }, { k: 'wind', t: 3.75, d: 2.4 }, { k: 'pass', t: 4.4 },
+  { k: 'iris', t: T.irisA }, { k: 'iris', t: T.cutC, v: .8 }, { k: 'city', t: T.cutC, d: 3.4 },
+  { k: 'sting', t: T.title }, { k: 'glint', t: T.title + .9 },
+];
+</script>
+</body></html>
