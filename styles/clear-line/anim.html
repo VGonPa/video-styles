@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── clear-line · Franco-Belgian ligne claire ────────────────────────────────────────────────
+// "The Runaway Kite": Juno, a young reporter, and Pepper, her dachshund, chase a kite that broke
+// loose over the old harbour town of Port Meridian. One uniform ink line everywhere, flat colours,
+// no hatching, no gradients; simple cartoon characters on detailed architecture. The camera reads
+// the album page: a long tracking pan along the quay, a sweep down to a map inset, a pan across the
+// lane (the scooter drives straight through the gutter into the next panel), the catch at the
+// lighthouse, then a pull-back that reveals the whole page and its title.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eIO2 = u => u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const backOut = u => { const c = 1.7; return u >= 1 ? 1 : 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ── palette (flat, bright, printed) ──
+const INK = '#1d1a20', PAPER = '#f7f1e2', DESK = '#2e5a5e', DESK_SH = '#23474a';
+const SKY = '#a8d8ee', CLOUD = '#ffffff', SEA = '#3f90c2', SEA_LT = '#79b9dc', SEA_FAR = '#5aa4cf';
+const FAC = ['#eab04c', '#dc6a4f', '#f3e0b5', '#8cc0a9', '#eca0a0', '#a3c8e4', '#d3ad72', '#f0cf7a', '#c9d98f'];
+const ROOF = ['#b5523a', '#c9643f', '#6f8399', '#a24a3c'];
+const SHUT = ['#2f7f6f', '#3a68a8', '#b8483a', '#5c8a3a', null, null];
+const AWN = [['#d8392b', '#fff6e6'], ['#2f7f6f', '#fff6e6'], ['#3a68a8', '#fff6e6'], ['#e9a52e', '#fff6e6']];
+const GLASS = '#c3e3f0', FRAME = '#fffaf0', STONE = '#cfc6b0', ROAD = '#d9ccaf', WALK = '#ebe0c6';
+const SKIN = '#f7d0aa', HAIR = '#6a3320', COAT = '#2c8c86', SCARF = '#f5c332', PANTS = '#2d3f6c', BOOT = '#6b3f22';
+const SCOOT = '#e0413a', SCOOT_DK = '#a92c28', TIRE = '#34343c', HUB = '#cdd1d8', SEAT = '#5b3a26';
+const DOG = '#c4692c', DOG_EAR = '#8a4119', BASKET = '#cf9f5c';
+const KITE_A = '#e3362b', KITE_B = '#f8cf3d', KITE_T = '#3b6fb8';
+const LETTER = '"Patrick Hand"', TITLE = '"Lilita One"';
+const LW = 3.3;                         // the one line weight (world px)
+let LS = 1;                             // local drawing scale → keeps the line uniform
+
+// ── page layout (world px) ──
+const PAGE = { x: 0, y: 0, w: 3400, h: 2440 };
+const P1 = [100, 300, 3200, 1000], P2 = [100, 1360, 960, 960], P3 = [1120, 1360, 960, 960], P4 = [2140, 1360, 1160, 960];
+
+// ── drawing primitives ──
+function st(p, fill, lw) { if (fill) { ctx.fillStyle = fill; ctx.fill(p); } if (lw !== 0) { ctx.lineWidth = (lw || LW) / LS; ctx.strokeStyle = INK; ctx.stroke(p); } }
+function R(x, y, w, h) { const p = new Path2D(); p.rect(x, y, w, h); return p; }
+function RR(x, y, w, h, r) { const p = new Path2D(); p.roundRect(x, y, w, h, r); return p; }
+function E(x, y, rx, ry = rx, rot = 0) { const p = new Path2D(); p.ellipse(x, y, rx, ry, rot, 0, TAU); return p; }
+function PL(pts, close = true) { const p = new Path2D(); p.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) p.lineTo(pts[i][0], pts[i][1]); if (close) p.closePath(); return p; }
+function L(x0, y0, x1, y1, lw) { const p = new Path2D(); p.moveTo(x0, y0); p.lineTo(x1, y1); st(p, null, lw); }
+function D(d) { return new Path2D(d); }
+// limb: an outlined tube (uniform outline around a flat colour)
+function tube(pts, w, col) { const p = PL(pts, false); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = INK; ctx.lineWidth = w + 2 * LW / LS; ctx.stroke(p); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(p); }
+function text(s, x, y, size, font = LETTER, align = 'center', col = INK) { ctx.font = `${size}px ${font}`; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(s, x, y); }
+
+// ── architecture ─────────────────────────────────────────────────────────────────────────
+const SIGNS = ['BAKERY', 'BOOKS', 'CAFE MIRA', 'FRESH FISH', 'MAPS & PRINTS', 'HOTEL SOLEIL', 'TEA ROOM', 'CHANDLERY', 'BICYCLES', 'NEWS', 'FLOWERS', 'PHARMACY'];
+function makeHouses(x0, x1, base, k, seed) {
+  const r = rng(seed), out = []; let x = x0, i = 0;
+  const pick = a => a[Math.floor(r() * a.length)];
+  while (x < x1) {
+    const w = (175 + r() * 110) * k, floors = 3 + (r() < .45 ? 1 : 0), fh = (92 + r() * 16) * k, gf = 128 * k;
+    out.push({ x, w, base, k, floors, fh, gf, h: gf + floors * fh, type: ['step', 'gable', 'cornice', 'gable', 'mansard', 'cornice', 'step'][Math.floor(r() * 7)],
+      col: FAC[(i * 4 + Math.floor(r() * 3)) % FAC.length], roof: pick(ROOF), shut: pick(SHUT), shop: r() < .75, awn: AWN[Math.floor(r() * 4)],
+      sign: SIGNS[(seed + i * 5) % SIGNS.length], cols: w > 225 * k ? 3 : 2, box: r() < .55, chim: r() < .65, door: pick(['#3a68a8', '#2f7f6f', '#8a3b2c', '#5b3a26']), fl: r() });
+    x += w + (r() < .25 ? 0 : 0); i++;
+  }
+  return out;
+}
+function windowAt(cx, top, ww, wh, hs, t) {
+  const k = hs.k;
+  if (hs.shut) { st(R(cx - ww / 2 - ww * .42, top, ww * .42, wh), hs.shut); st(R(cx + ww / 2, top, ww * .42, wh), hs.shut); }
+  st(R(cx - ww / 2, top, ww, wh), FRAME);
+  st(R(cx - ww / 2 + 5 * k, top + 5 * k, ww - 10 * k, wh - 10 * k), GLASS);
+  L(cx, top + 5 * k, cx, top + wh - 5 * k); L(cx - ww / 2 + 5 * k, top + wh * .42, cx + ww / 2 - 5 * k, top + wh * .42);
+  st(R(cx - ww / 2 - 4 * k, top + wh, ww + 8 * k, 6 * k), '#efe6d0');
+}
+function flowerBox(cx, y, ww, k) {
+  st(R(cx - ww / 2, y, ww, 12 * k), '#9a5a34');
+  for (let j = 0; j < 4; j++) { const fx = cx - ww / 2 + ww * (j + .5) / 4; st(E(fx, y - 3 * k, 6 * k, 5 * k), j % 2 ? '#e3362b' : '#f58aa0'); }
+  st(E(cx - ww / 2 + ww * .3, y - 9 * k, 6 * k, 4 * k, .5), '#5f9a44', 0); st(E(cx + ww * .22, y - 9 * k, 6 * k, 4 * k, -.5), '#5f9a44', 0);
+}
+function drawHouse(hs, t) {
+  const { x, w, base, k, gf, fh, floors, h } = hs, top = base - h;
+  // roofline / gable (behind or part of the facade)
+  if (hs.chim) st(R(x + w * .68, top - 70 * k, 26 * k, 70 * k + 8), '#b7735a');
+  if (hs.type === 'cornice') { st(PL([[x + 10 * k, top], [x + 26 * k, top - 40 * k], [x + w - 26 * k, top - 40 * k], [x + w - 10 * k, top]]), hs.roof); }
+  if (hs.type === 'mansard') {
+    st(PL([[x + 4 * k, top], [x + 26 * k, top - 78 * k], [x + w - 26 * k, top - 78 * k], [x + w - 4 * k, top]]), hs.roof);
+    for (let j = 0; j < 2; j++) { const dx = x + w * (.3 + .4 * j); st(PL([[dx - 20 * k, top - 8 * k], [dx - 20 * k, top - 52 * k], [dx, top - 70 * k], [dx + 20 * k, top - 52 * k], [dx + 20 * k, top - 8 * k]]), FRAME);
+      st(R(dx - 12 * k, top - 48 * k, 24 * k, 34 * k), GLASS); }
+  }
+  let facade;
+  if (hs.type === 'gable') facade = PL([[x, base], [x, top], [x + w / 2, top - w * .42], [x + w, top], [x + w, base]]);
+  else if (hs.type === 'step') { const s = w / 7, sh = 34 * k, pts = [[x, base], [x, top]];
+    for (let j = 0; j < 3; j++) { pts.push([x + s * j, top - sh * (j + 1)]); pts.push([x + s * (j + 1), top - sh * (j + 1)]); }
+    pts.push([x + s * 3, top - sh * 4]); pts.push([x + s * 4, top - sh * 4]);
+    for (let j = 2; j >= 0; j--) { pts.push([x + w - s * (j + 1), top - sh * (j + 1)]); pts.push([x + w - s * j, top - sh * (j + 1)]); }
+    pts.push([x + w, top]); pts.push([x + w, base]); facade = PL(pts); }
+  else facade = R(x, top, w, h);
+  st(facade, hs.col);
+  if (hs.type === 'cornice') st(R(x - 4 * k, top - 4 * k, w + 8 * k, 16 * k), '#efe6d0');
+  if (hs.type === 'gable') { st(E(x + w / 2, top - w * .17, 18 * k, 18 * k), GLASS); L(x + w / 2 - 18 * k, top - w * .17, x + w / 2 + 18 * k, top - w * .17); }
+  if (hs.type === 'step') st(RR(x + w / 2 - 16 * k, top - 88 * k, 32 * k, 50 * k, [16 * k, 16 * k, 0, 0]), GLASS);
+  // string course between floors
+  st(R(x, base - gf - 8 * k, w, 10 * k), '#efe6d0');
+  // upper windows
+  const ww = Math.min(44 * k, w / (hs.cols * 2.4)), wh = fh * .62;
+  for (let f = 0; f < floors; f++) {
+    const y0 = base - gf - fh * (f + 1) + fh * .2;
+    for (let c = 0; c < hs.cols; c++) {
+      const cx = x + w * (c + .5) / hs.cols; windowAt(cx, y0, ww, wh, hs, t);
+      if (hs.box && f === 0) flowerBox(cx, y0 + wh - 6 * k, ww + 10 * k, k);
+    }
+  }
+  // ground floor
+  if (hs.shop) {
+    const sw = w * .56, sx = x + w * .08;
+    st(R(sx, base - gf + 38 * k, sw, gf - 50 * k), GLASS); L(sx + sw / 2, base - gf + 38 * k, sx + sw / 2, base - 12 * k);
+    st(R(sx - 4 * k, base - 14 * k, sw + 8 * k, 14 * k), '#efe6d0');
+    const dx = x + w * .72, dw = w * .2; st(R(dx, base - gf + 34 * k, dw, gf - 34 * k), hs.door); st(R(dx + dw * .2, base - gf + 46 * k, dw * .6, gf * .3), GLASS);
+    // sign board + awning
+    const bw = w * .86, bx = x + w * .07, by = base - gf - 4 * k;
+    st(R(bx, by, bw, 34 * k), '#fbf3dc');
+    ctx.save(); ctx.font = `${24 * k}px ${TITLE}`; const tw = ctx.measureText(hs.sign).width; const fs = Math.min(24 * k, 24 * k * (bw - 14 * k) / tw); ctx.restore();
+    text(hs.sign, bx + bw / 2, by + 18 * k, fs, TITLE, 'center', INK);
+    const ay = by + 34 * k, ah = 44 * k, n = Math.max(4, Math.round(sw / (26 * k)));
+    const flap = Math.sin(t * 3.1 + hs.fl * 6) * 1.5 * k;
+    for (let j = 0; j < n; j++) { const a = sx - 8 * k + (sw + 16 * k) * j / n, b = sx - 8 * k + (sw + 16 * k) * (j + 1) / n;
+      st(PL([[a, ay], [b, ay], [b + 6 * k, ay + ah + flap], [a + 6 * k, ay + ah + flap]]), hs.awn[j % 2]); }
+    const pS = new Path2D(); pS.moveTo(sx - 2 * k, ay + ah + flap);
+    for (let j = 0; j < n; j++) { const a = sx - 2 * k + (sw + 16 * k) * j / n, b = sx - 2 * k + (sw + 16 * k) * (j + 1) / n; pS.arc((a + b) / 2, ay + ah + flap, (b - a) / 2, 0, Math.PI, false); }
+    ctx.save(); st(pS, hs.awn[0], 0); ctx.restore();
+    for (let j = 0; j < n; j++) { const a = sx - 2 * k + (sw + 16 * k) * j / n, b = sx - 2 * k + (sw + 16 * k) * (j + 1) / n; const pa = new Path2D(); pa.arc((a + b) / 2, ay + ah + flap, (b - a) / 2, 0, Math.PI, false); st(pa, hs.awn[j % 2]); }
+  } else {
+    const dx = x + w / 2 - w * .13, dw = w * .26;
+    st(RR(dx, base - gf + 20 * k, dw, gf - 20 * k, [dw / 2, dw / 2, 0, 0]), hs.door); st(E(dx + dw * .78, base - gf * .45, 3.5 * k), '#f5c332');
+    for (const s of [-1, 1]) windowAt(x + w / 2 + s * w * .32, base - gf + 34 * k, ww, gf * .5, hs, t);
+    st(R(dx - 10 * k, base - 12 * k, dw + 20 * k, 12 * k), STONE);
+  }
+  st(R(x, base - 16 * k, w, 16 * k), '#d8cdb3', 0); L(x, base - 16 * k, x + w, base - 16 * k);
+  st(facade, null);
+}
+function lamp(x, base, k) {
+  st(R(x - 5 * k, base - 280 * k, 10 * k, 280 * k), '#2f4f4f'); st(R(x - 12 * k, base - 20 * k, 24 * k, 20 * k), '#2f4f4f');
+  st(PL([[x - 18 * k, base - 290 * k], [x + 18 * k, base - 290 * k], [x + 12 * k, base - 330 * k], [x - 12 * k, base - 330 * k]]), '#fff1a8');
+  st(PL([[x - 24 * k, base - 330 * k], [x + 24 * k, base - 330 * k], [x, base - 350 * k]]), '#2f4f4f');
+}
+function bollard(x, base, k) { st(RR(x - 13 * k, base - 36 * k, 26 * k, 36 * k, [10 * k, 10 * k, 0, 0]), '#3b3f48'); st(R(x - 17 * k, base - 30 * k, 34 * k, 6 * k), '#3b3f48'); }
+function cloud(x, y, k) { const p = new Path2D(); p.moveTo(x - 110 * k, y);
+  p.arc(x - 70 * k, y, 40 * k, Math.PI, Math.PI * 1.65); p.arc(x - 10 * k, y - 20 * k, 55 * k, Math.PI * 1.15, Math.PI * 1.9); p.arc(x + 60 * k, y - 4 * k, 44 * k, Math.PI * 1.3, 0); p.lineTo(x + 104 * k, y); p.closePath(); st(p, CLOUD); }
+function gull(x, y, k, ph) { const f = Math.sin(ph); const p = new Path2D();
+  p.moveTo(x - 30 * k, y - 10 * k * f); p.quadraticCurveTo(x - 14 * k, y - 18 * k * f - 6 * k, x, y); p.quadraticCurveTo(x + 14 * k, y - 18 * k * f - 6 * k, x + 30 * k, y - 10 * k * f); st(p, null, 3.4); }
+function boat(x, wl, k, col, bob, sail) {
+  ctx.save(); ctx.translate(x, wl + bob); ctx.rotate(bob * .004);
+  if (sail) { L(0, -30 * k, 0, -330 * k); L(0, -330 * k, 90 * k, -40 * k, 2.2); L(0, -330 * k, -100 * k, -40 * k, 2.2); st(R(-8 * k, -80 * k, 70 * k, 8 * k), '#8a5a3a'); }
+  st(PL([[-60 * k, -48 * k], [30 * k, -48 * k], [30 * k, -86 * k], [-40 * k, -86 * k]]), '#fff6e6');
+  st(R(-26 * k, -78 * k, 16 * k, 16 * k), GLASS); st(R(0, -78 * k, 16 * k, 16 * k), GLASS);
+  const hull = D(`M ${-120 * k} ${-50 * k} L ${110 * k} ${-50 * k} Q ${130 * k} ${-50 * k} ${140 * k} ${-64 * k} L ${118 * k} 0 L ${-100 * k} 0 Q ${-116 * k} ${-20 * k} ${-120 * k} ${-50 * k} Z`);
+  st(hull, col); L(-112 * k, -34 * k, 124 * k, -34 * k); ctx.restore();
+}
+function waves(x0, x1, y, t, k, n = 6) { for (let i = 0; i < n; i++) { const r = rng(900 + i); const wx = x0 + (x1 - x0) * r() + Math.sin(t * .9 + i) * 10 * k, wy = y + r() * 60 * k;
+  const p = new Path2D(); p.moveTo(wx - 22 * k, wy); p.quadraticCurveTo(wx - 11 * k, wy - 7 * k, wx, wy); p.quadraticCurveTo(wx + 11 * k, wy - 7 * k, wx + 22 * k, wy); ctx.strokeStyle = '#eaf6fb'; ctx.lineWidth = 3.2; ctx.stroke(p); } }
+function bunting(x0, y0, x1, y1, sag, t, k) {
+  const pts = []; const n = 14;
+  for (let i = 0; i <= n; i++) { const u = i / n; pts.push([lerp(x0, x1, u), lerp(y0, y1, u) + sag * 4 * u * (1 - u)]); }
+  st(PL(pts, false), null, 2.4);
+  const cols = ['#e3362b', '#f8cf3d', '#3b6fb8', '#fff6e6', '#2f9c6a'];
+  for (let i = 0; i < n; i++) { const a = pts[i], b = pts[i + 1], mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2; const sw = Math.sin(t * 5 + i * 1.3) * 6 * k;
+    st(PL([[a[0] + 4 * k, a[1]], [b[0] - 4 * k, b[1]], [mx + sw, my + 34 * k]]), cols[i % cols.length], 2.6); }
+}
+
+// ── characters ────────────────────────────────────────────────────────────────────────────
+// Juno (bob haircut, teal coat, yellow scarf) on a red scooter with Pepper (a red dachshund) in the basket.
+function rider(x, gy, k, o) {
+  const t = o.t, dist = o.dist || 0, reach = o.reach || 0, talk = o.talk || 0, bark = o.bark || 0, moving = o.moving ?? 1;
+  ctx.save(); ctx.translate(x, gy); ctx.scale(k, k); LS = k;
+  ctx.translate(74, 0); ctx.rotate(o.tilt || 0); ctx.translate(-74, 0);          // tilt about the front contact
+  // speed lines (just three, as ligne claire does it)
+  if (moving > 0.05) { ctx.globalAlpha = moving; for (let j = 0; j < 3; j++) { const yy = -70 - j * 46, ph = (t * 5 + j * .37) % 1; L(-150 - ph * 30, yy, -210 - ph * 40 - j * 12, yy, 3); } ctx.globalAlpha = 1; }
+  for (const wx of [-68, 74]) { st(E(wx, -24, 24), TIRE); st(E(wx, -24, 11), HUB); const a = -dist / (24 * k);
+    for (let j = 0; j < 3; j++) { const b = a + j * TAU / 3; ctx.beginPath(); ctx.arc(wx + Math.cos(b) * 6, -24 + Math.sin(b) * 6, 1.8, 0, TAU); ctx.fillStyle = INK; ctx.fill(); } }
+  const bob = Math.sin(t * 23) * 1.3 * moving;
+  ctx.translate(0, bob);
+  tube([[62, -156], [74, -26]], 7, '#8d939c');                                     // fork
+  st(D('M -106 -46 C -108 -84 -82 -108 -42 -108 L -10 -108 C 4 -108 10 -96 8 -82 L 4 -58 L 46 -58 L 46 -46 L -28 -46 C -44 -46 -54 -40 -62 -48 C -76 -56 -94 -54 -106 -46 Z'), SCOOT);
+  L(-96, -60, -36, -60, 2.6);
+  st(RR(-94, -122, 70, 18, 9), SEAT);
+  // Juno
+  const scarfW = Math.sin(t * 12) * 6, scarfW2 = Math.sin(t * 12 + 1.4) * 7;
+  st(D(`M -30 -206 Q -60 ${-214 + scarfW} -92 ${-206 + scarfW2} L -94 ${-192 + scarfW2} Q -60 ${-198 + scarfW} -32 -194 Z`), SCARF);
+  tube([[-50, -122], [6, -132], [16, -70]], 25, PANTS);                             // leg
+  st(D('M 4 -78 L 24 -78 C 34 -76 40 -66 40 -58 L 4 -58 Z'), BOOT);
+  let hdR = null;
+  if (reach > 0) { const el = [lerp(-20, -4, reach), lerp(-176, -262, reach)]; hdR = [lerp(10, 34, reach), lerp(-176, -330, reach)];
+    tube([[-32, -192], el, hdR], 16, '#237571'); st(E(hdR[0], hdR[1], 9, 8), SKIN); }
+  st(D('M -72 -112 C -76 -150 -64 -194 -44 -206 L -20 -204 C -10 -188 -10 -150 -16 -122 L -22 -112 Z'), COAT); // torso
+  const flap = Math.sin(t * 16) * 5 * moving;
+  st(D(`M -76 -112 L -20 -112 L -26 -96 L ${-84 + flap} ${-92 - flap * .4} Z`), COAT);
+  st(R(-38, -150, 14, 5), '#1f6a66', 0);
+  // head
+  st(E(-26, -212, 8, 10), SKIN, 0); st(E(-20, -238, 25, 27), SKIN);
+  st(E(5, -232, 5.5, 5), SKIN);                                                       // nose
+  st(D('M 4 -252 C 4 -272 -20 -280 -38 -272 C -54 -264 -58 -244 -54 -224 C -52 -214 -46 -208 -38 -206 L -34 -216 C -38 -226 -38 -236 -32 -244 C -24 -250 -8 -246 4 -252 Z'), HAIR);
+  st(E(-33, -232, 5.5, 7.5), SKIN);                                                   // ear
+  const blink = (t % 2.6) > 2.48; if (blink) L(-9, -240, -1, -240, 2.6); else st(E(-4, -241, 3.2, 4.2), INK, 0);
+  L(-10, -251, 1, -252, 2.6);                                                        // brow
+  if (talk > 0) { const m = 2.5 + 3 * Math.abs(Math.sin(t * 17)) * talk; st(E(-3, -220, 3.8, m * .8), '#6b1f1f', 2.2); }
+  else { const p = new Path2D(); p.moveTo(-6, -221); p.quadraticCurveTo(-1, -218, 3, -222); st(p, null, 2.6); }
+  // front of scooter
+  st(D('M 36 -58 L 52 -60 C 62 -96 64 -132 60 -166 L 48 -166 C 48 -130 44 -94 30 -58 Z'), SCOOT);    // leg shield
+  st(D('M 50 -34 C 54 -62 96 -62 102 -34 L 92 -34 C 88 -50 62 -50 60 -34 Z'), SCOOT);                 // fender
+  st(RR(42, -182, 40, 18, 7), SCOOT_DK);
+  // Pepper in the basket
+  ctx.save(); ctx.translate(92, -112); ctx.scale(1.3, 1.3); ctx.translate(-84, 114); LS = k * 1.3;
+  const earA = moving * (0.9 + Math.sin(t * 19) * .25) + (1 - moving) * .1;
+  ctx.save(); ctx.translate(86, -176); ctx.rotate(earA * .9);
+  st(D('M 0 0 C -6 8 -10 24 -6 34 C 0 36 6 30 6 18 C 6 10 4 4 0 0 Z'), DOG_EAR); ctx.restore();
+  st(E(90, -168, 16, 14), DOG);
+  st(E(107, -163 - bark * 3, 14, 8.5), DOG); st(E(120, -166 - bark * 3, 4, 3.5), INK, 0);
+  if (bark > 0) st(D(`M 96 -156 L 118 -156 L 112 ${-150 + bark * 8} L 100 ${-150 + bark * 7} Z`), '#8c2b2b', 2.6);
+  st(E(95, -172, 2.6, 3.2), INK, 0);
+  ctx.save(); ctx.translate(84, -178); ctx.rotate(earA * .9 - .2);
+  st(D('M 0 0 C -8 6 -12 22 -8 32 C -2 34 4 28 4 16 C 4 8 3 3 0 0 Z'), DOG_EAR); ctx.restore();
+  st(D('M 58 -156 L 112 -156 L 106 -114 L 64 -114 Z'), BASKET);
+  L(62, -142, 110, -142, 2.2); L(63, -128, 108, -128, 2.2);
+  st(E(92, -156, 6, 4), DOG); st(E(104, -156, 6, 4), DOG);
+  ctx.restore(); LS = k;
+  st(E(50, -192, 10, 9), '#fff4b0'); st(E(50, -192, 5, 4.5), '#fffbe0', 0);            // headlamp
+  // arm (handlebar ↔ reaching up)
+  const sh = [-30, -196], el = [0, -168], hd = [46, -182];
+  tube([[48, -182], [30, -186]], 7, INK);
+  tube([sh, el, hd], 17, COAT);
+  st(E(hd[0], hd[1], 9, 8), SKIN);
+  ctx.restore(); LS = 1;
+  // hand position in world coords (for the kite string)
+  const hh = hdR || hd, a = o.tilt || 0, lx = hh[0] - 74, ly = hh[1] + bob;
+  return [x + (74 + lx * Math.cos(a) - ly * Math.sin(a)) * k, gy + (lx * Math.sin(a) + ly * Math.cos(a)) * k];
+}
+// kite: centre (x,y); free=true trails a snapped string; returns the string's free end
+function kite(x, y, k, rot, t, free = true) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(k, k); LS = k;
+  let end = null;
+  // tail
+  const tp = []; for (let i = 0; i <= 12; i++) tp.push([Math.sin(i * .8 - t * 7) * 12 * i / 12 - i * 5, 74 + i * 20]);
+  st(PL(tp, false), null, 2.4);
+  for (let i = 3; i <= 12; i += 3) { const [bx, by] = tp[i]; st(PL([[bx - 14, by - 7], [bx + 14, by + 7], [bx + 14, by - 7], [bx - 14, by + 7]]), i % 6 ? KITE_T : '#fff6e6', 2.4); }
+  if (free) { const sp = []; for (let i = 0; i <= 14; i++) { const u = i / 14; sp.push([-u * 150 + Math.sin(u * 5 - t * 5) * 14 * u, -12 + u * 250 + Math.sin(u * 3 - t * 3) * 10 * u]); }
+    st(PL(sp, false), null, 2.2); end = sp[sp.length - 1]; }
+  const T = [0, -64], Rt = [44, -12], B = [0, 76], Lf = [-44, -12], C = [0, -12];
+  st(PL([T, Rt, C]), KITE_A, 0); st(PL([Rt, B, C]), KITE_B, 0); st(PL([B, Lf, C]), KITE_A, 0); st(PL([Lf, T, C]), KITE_B, 0);
+  L(T[0], T[1], B[0], B[1], 2.4); L(Lf[0], Lf[1], Rt[0], Rt[1], 2.4); st(PL([T, Rt, B, Lf]), null);
+  ctx.restore(); LS = 1;
+  if (end) { const c = Math.cos(rot), s = Math.sin(rot); return [x + (end[0] * c - end[1] * s) * k, y + (end[0] * s + end[1] * c) * k]; }
+  return null;
+}
+
+// ── lettering ────────────────────────────────────────────────────────────────────────────
+function balloon(cx, cy, lines, tip, u, size = 38) {
+  if (u <= 0) return; const s = backOut(u);
+  ctx.save(); ctx.font = `${size}px ${LETTER}`; const lh = size * 1.12;
+  const tw = Math.max(...lines.map(l => ctx.measureText(l).width)), bw = tw + size * 1.3, bh = lines.length * lh + size * .75;
+  ctx.translate(cx, cy); ctx.scale(s, s); ctx.translate(-cx, -cy);
+  const body = RR(cx - bw / 2, cy - bh / 2, bw, bh, Math.min(bh / 2, 46));
+  const tl = new Path2D(); const bx = lerp(cx, tip[0], .12), by = cy + bh / 2 - 6;
+  tl.moveTo(bx - 20, by); tl.quadraticCurveTo(lerp(bx, tip[0], .5) - 6, lerp(by, tip[1], .5), tip[0], tip[1]); tl.quadraticCurveTo(lerp(bx, tip[0], .5) + 10, lerp(by, tip[1], .5), bx + 16, by); tl.closePath();
+  ctx.lineJoin = 'round'; ctx.strokeStyle = INK; ctx.lineWidth = LW * 2; ctx.stroke(body); ctx.stroke(tl);
+  ctx.fillStyle = '#fffdf6'; ctx.fill(body); ctx.fill(tl);
+  lines.forEach((l, i) => text(l, cx, cy - (lines.length - 1) * lh / 2 + i * lh + size * .04, size));
+  ctx.restore();
+}
+function caption(x, y, lines, u, size = 34) {
+  if (u <= 0) return; ctx.save(); ctx.font = `${size}px ${LETTER}`;
+  const tw = Math.max(...lines.map(l => ctx.measureText(l).width)), bw = tw + 36, bh = lines.length * size * 1.1 + 22;
+  ctx.globalAlpha = eOut(u); ctx.translate(0, (1 - eOut(u)) * -10);
+  st(R(x, y, bw, bh), '#fbe8a2');
+  lines.forEach((l, i) => text(l, x + 18, y + 11 + size * .56 + i * size * 1.1, size, LETTER, 'left'));
+  ctx.restore();
+}
+function clipRect(r) { ctx.beginPath(); ctx.rect(r[0], r[1], r[2], r[3]); ctx.clip(); }
+function border(r) { st(R(r[0], r[1], r[2], r[3]), null, LW * 1.35); }
+
+// ── scene data (built once) ──
+let H1, H3;
+function build() {
+  H1 = makeHouses(1060, 3320, 1060, 1, 7);
+  H3 = makeHouses(1000, 2120, 2140, 1.55, 31); buildBlocks(); dedupe();
+}
+
+// ── panel 1: tracking shot along the quay ─────────────────────────────────────────────
+const sx1 = t => 40 + 860 * t;
+function panel1(t) {
+  const [x, y, w, h] = P1; ctx.save(); clipRect(P1);
+  st(R(x, y, w, h), SKY, 0);
+  cloud(520, 470, 1.1); cloud(1500, 420, .9); cloud(2350, 500, 1.2); cloud(3050, 410, .8);
+  // harbour: distant breakwater and lighthouse, far town
+  st(R(x, 860, 1000, 200), SEA_FAR, 0);
+  st(D('M 100 862 L 180 850 L 260 858 L 900 858 L 980 862 Z'), '#b9c9a4');
+  st(R(360, 842, 360, 18), STONE);
+  st(PL([[640, 842], [652, 740], [676, 740], [688, 842]]), '#fff6e6'); st(R(648, 772, 36, 16), '#e3362b', 2.6); st(R(645, 722, 42, 18), '#f8e27a', 2.6); st(PL([[642, 722], [666, 704], [690, 722]]), '#e3362b', 2.6);
+  st(R(x, 900, 1000, 160), SEA, 0); L(x, 900, 1100, 900, 2.6);
+  waves(140, 1000, 920, t, 1, 9);
+  const bb = i => Math.sin(t * 1.8 + i * 2) * 4;
+  boat(260, 1008, 1.0, '#3a68a8', bb(0), true); boat(620, 1016, .9, '#fff6e6', bb(1), false); boat(930, 1010, 1.05, '#2f9c6a', bb(2), true);
+  st(R(x, 1040, 1000, 22), STONE); for (let i = 0; i < 9; i++) L(130 + i * 110, 1040, 130 + i * 110, 1062, 2.4);
+  // town
+  for (const hs of H1) drawHouse(hs, t);
+  bunting(1300, 690, 1820, 700, 70, t, 1); bunting(2280, 640, 2860, 660, 80, t, 1);
+  // quay road
+  st(R(x, 1060, w, 26), WALK); st(R(x, 1086, w, 220), ROAD);
+  L(x, 1086, x + w, 1086);
+  for (let i = 0; i < 26; i++) { const r = rng(40 + i); const cx = 130 + i * 125 + r() * 40, cy = 1140 + r() * 120; const p = new Path2D(); p.moveTo(cx - 18, cy); p.lineTo(cx + 18, cy); ctx.strokeStyle = '#bfb193'; ctx.lineWidth = 3; ctx.stroke(p); }
+  st(R(x, 1272, w, 30), WALK); L(x, 1272, x + w, 1272);
+  for (let i = 0; i < 16; i++) L(160 + i * 205, 1272, 150 + i * 205, 1300, 2.4);
+  for (const bx of [200, 480, 760]) bollard(bx, 1062, 1);
+  lamp(1000, 1062, 1); lamp(1960, 1062, 1); lamp(2900, 1062, 1);
+  st(R(2440, 1020, 80, 42), '#b7874f'); L(2440, 1040, 2520, 1040, 2.4); st(R(2460, 986, 70, 34), '#c99a5c');   // crates
+  for (let i = 0; i < 3; i++) { const gx = 1180 + i * 620 + ((t * 70 + i * 200) % 300), gy = 520 + i * 40 + Math.sin(t * 2 + i) * 12; gull(gx, gy, 1, t * 11 + i * 2); }
+  // Juno + Pepper
+  const tt = Math.min(t, 3.35), sx = sx1(tt);
+  const talk = t > 1.05 && t < 2.0 ? 1 : 0, bark = t > 1.95 && t < 2.35 ? Math.abs(Math.sin((t - 1.95) * 16)) : 0;
+  rider(sx, 1262, 1.3, { t: tt, dist: sx, talk, bark });
+  ctx.restore();
+  // lettering: caption + balloons (inside the panel)
+  ctx.save(); clipRect(P1);
+  caption(124, 324, ['PORT MERIDIAN, 9:14 A.M.', 'A GUST OF WIND, A SNAPPED STRING...'], seg(t, 0.25, 0.6));
+  const hx = sx1(Math.min(t, 3.35));
+  balloon(hx + 40, 800, ['AFTER THAT KITE,', 'PEPPER!'], [hx - 20, 928], seg(t, 1.0, 1.3));
+  balloon(hx + 330, 860, ['WOOF!'], [hx + 150, 1010], seg(t, 1.9, 2.15) * (1 - seg(t, 2.75, 2.95)), 34);
+  ctx.restore();
+}
+function kite1(t) {                             // the kite in panel 1 (may fly out over the border)
+  t = Math.min(t, 3.3);
+  const kx = 620 + 800 * t + Math.sin(t * 2.2) * 30, ky = 650 - 90 * t + Math.sin(t * 3.1) * 26;
+  ctx.save(); ctx.beginPath(); ctx.rect(P1[0], 0, P1[2] + 200, P1[1] + P1[3]); ctx.clip();
+  kite(kx, ky, 1.0, -0.35 + Math.sin(t * 2.7) * .18, t); ctx.restore();
+}
+
+// ── panel 2: map inset ────────────────────────────────────────────────────────────────
+const ROUTE = [[150, 820], [230, 760], [300, 700], [330, 610], [420, 560], [470, 470], [560, 430], [640, 410], [700, 440], [740, 484], [800, 540], [868, 604]];
+const SEA_D = 'M 960 250 C 880 290 820 330 780 380 C 740 430 690 470 650 540 C 610 610 540 660 460 700 C 380 740 300 790 230 850 C 170 900 80 920 0 930 L 0 960 L 960 960 Z';
+let SEAP, BLOCKS = [];
+function buildBlocks() {
+  const g = document.createElement('canvas').getContext('2d'), sea = new Path2D(SEA_D), r = rng(22);
+  for (let gy = 120; gy < 880; gy += 78) for (let gx = 40; gx < 900; gx += 84) {
+    const cx = gx + 30 + r() * 10, cy = gy + 26 + r() * 8, w = 64 + r() * 6, h = 58 + r() * 6, rc = r(), rt = r();
+    if (g.isPointInPath(sea, cx, cy) || g.isPointInPath(sea, gx + 76, gy + 70) || g.isPointInPath(sea, gx + 6, gy + 70) || g.isPointInPath(sea, gx + 76, gy + 6)) continue;
+    if (gx < 250 && gy > 700) continue;                                 // the old quay
+    if (gx > 700 && gy < 250) continue;                                 // room for the compass
+    if (gx < 380 && gy < 200) continue;                                 // room for the caption
+    const park = gx > 500 && gx < 700 && gy > 150 && gy < 320;
+    if (!park && rt > .93) continue;                                    // little squares
+    const wide = !park && rt < .22 && !g.isPointInPath(sea, gx + 150, gy + 60), tall = !park && !wide && rt > .8 && !g.isPointInPath(sea, gx + 60, gy + 130);
+    BLOCKS.push({ x: gx + 6, y: gy + 6, w: wide ? w + 84 : w, h: tall ? h + 78 : h, c: park ? '#a8cf8e' : (rc < .2 ? '#e7a27a' : '#eec39a'), tree: park && rt < .6 });
+  }
+}
+function dedupe() { const out = []; for (const b of BLOCKS) { if (out.some(o => b.x >= o.x - 1 && b.x < o.x + o.w && b.y >= o.y - 1 && b.y < o.y + o.h)) continue;
+  if (out.some(o => o.x < b.x + b.w && b.x < o.x + o.w && o.y < b.y + b.h && b.y < o.y + o.h)) { b.w = 64; b.h = 58; } out.push(b); } BLOCKS = out; }
+function panel2(t) {
+  const [x, y, w, h] = P2; ctx.save(); clipRect(P2); ctx.translate(x, y);
+  st(R(0, 0, w, h), '#f3e6c4', 0);
+  if (!SEAP) SEAP = D(SEA_D);
+  st(SEAP, '#8fc8e2');
+  // harbour basin and pier
+  st(D('M 90 860 C 120 820 190 800 220 830 L 190 870 Z'), '#8fc8e2', 0);
+  st(PL([[700, 468], [722, 448], [888, 600], [866, 620]]), STONE);
+  // town blocks (laid out once in build())
+  for (const b of BLOCKS) { st(RR(b.x, b.y, b.w, b.h, 6), b.c, 2.6); if (b.tree) st(E(b.x + 32, b.y + 30, 12), '#6fae5a', 2.4); }
+  for (let i = 0; i < 9; i++) { const rr = rng(70 + i); const wx = 300 + i * 80 + rr() * 60, wy = 760 + i * 12 + rr() * 150; if (wx > 940) continue;
+    const p = new Path2D(); p.moveTo(wx - 16, wy); p.quadraticCurveTo(wx - 8, wy - 6, wx, wy); p.quadraticCurveTo(wx + 8, wy - 6, wx + 16, wy); ctx.strokeStyle = '#eaf6fb'; ctx.lineWidth = 3; ctx.stroke(p); }
+  // lighthouse icon
+  st(PL([[866, 616], [872, 560], [884, 560], [890, 616]]), '#fff6e6', 2.6); st(R(868, 578, 20, 10), '#e3362b', 2.2); st(E(878, 552, 9, 7), '#f8e27a', 2.2);
+  // compass rose
+  ctx.save(); ctx.translate(840, 140); st(PL([[0, -58], [12, 0], [0, 58], [-12, 0]]), '#fff6e6', 2.6); st(PL([[0, -58], [12, 0], [-12, 0]]), '#e3362b', 2.6);
+  st(PL([[-44, 0], [0, -10], [44, 0], [0, 10]]), '#fff6e6', 2.6); text('N', 0, -80, 34, TITLE); ctx.restore();
+  // labels
+  const lab = (s, lx, ly, sz = 28) => { ctx.font = `${sz}px ${LETTER}`; const tw = ctx.measureText(s).width; st(RR(lx - tw / 2 - 10, ly - sz * .62, tw + 20, sz * 1.24, 6), '#fffdf6', 2.4); text(s, lx, ly + 1, sz); };
+  // route
+  const u = eIO2(seg(t, 4.15, 5.45)); let tot = 0; const segL = [];
+  for (let i = 1; i < ROUTE.length; i++) { const d = Math.hypot(ROUTE[i][0] - ROUTE[i - 1][0], ROUTE[i][1] - ROUTE[i - 1][1]); segL.push(d); tot += d; }
+  let rem = u * tot, pos = ROUTE[0]; const rp = new Path2D(); rp.moveTo(ROUTE[0][0], ROUTE[0][1]);
+  for (let i = 1; i < ROUTE.length && rem > 0; i++) { const f = Math.min(1, rem / segL[i - 1]); pos = [lerp(ROUTE[i - 1][0], ROUTE[i][0], f), lerp(ROUTE[i - 1][1], ROUTE[i][1], f)]; rp.lineTo(pos[0], pos[1]); rem -= segL[i - 1]; }
+  if (u > 0) { ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]); ctx.strokeStyle = '#fffdf6'; ctx.lineWidth = 16; ctx.stroke(rp);
+    ctx.setLineDash([16, 14]); ctx.strokeStyle = '#d8392b'; ctx.lineWidth = 7; ctx.stroke(rp); ctx.setLineDash([]); }
+  lab('OLD QUAY', 170, 740); lab('MARKET SQ.', 330, 500); lab('ROSE GARDEN', 600, 130); lab('LIGHTHOUSE', 800, 680);
+  // kite marker (ahead) and scooter marker
+  const ku = clamp(u + .12 + Math.sin(t * 4) * .01, 0, 1); let kr = ku * tot, kp = ROUTE[0];
+  for (let i = 1; i < ROUTE.length; i++) { const f = Math.min(1, kr / segL[i - 1]); kp = [lerp(ROUTE[i - 1][0], ROUTE[i][0], f), lerp(ROUTE[i - 1][1], ROUTE[i][1], f)]; kr -= segL[i - 1]; if (kr <= 0) break; }
+  if (t > 4.0) { ctx.save(); ctx.translate(kp[0] + 10, kp[1] - 46); ctx.rotate(-.3 + Math.sin(t * 3) * .15); LS = 1; ctx.scale(.42, .42); LS = .42;
+    st(PL([[0, -64], [44, -12], [0, 76], [-44, -12]]), KITE_A); st(PL([[0, -64], [44, -12], [0, -12]]), KITE_B, 0); st(PL([[0, 76], [-44, -12], [0, -12]]), KITE_B, 0); st(PL([[0, -64], [44, -12], [0, 76], [-44, -12]]), null); ctx.restore(); LS = 1; }
+  const pu = seg(t, 4.0, 4.3); if (pu > 0) { const sc = backOut(pu); st(E(pos[0], pos[1], 20 * sc), '#d8392b', 3); st(E(pos[0], pos[1], 8 * sc), '#fffdf6', 2.4); }
+  // cartouche
+  st(R(40, 872, 330, 60), '#fffdf6'); text('PORT MERIDIAN', 205, 903, 36, TITLE);
+  ctx.restore();
+  ctx.save(); clipRect(P2); caption(P2[0] + 22, P2[1] + 22, ['THROUGH THE OLD TOWN,', 'DOWN TO THE SEA...'], seg(t, 3.9, 4.25)); ctx.restore();
+}
+
+// ── panel 3: the lane; panel 4: the lighthouse pier ──────────────────────────────────
+function sx34(t) { // scooter x for the lane → pier run (constant speed, then braking to a stop)
+  const v = 830; if (t < 7.0) return 2140 - v * (7.0 - t);
+  const tau = Math.min(t - 7.0, 0.62); return 2140 + v * (tau - tau * tau / (2 * 0.62));
+}
+function panel3(t) {
+  const [x, y, w, h] = P3; ctx.save(); clipRect(P3);
+  st(R(x, y, w, h), SKY, 0); cloud(1700, 1420, .8);
+  for (const hs of H3) drawHouse(hs, t);
+  // laundry line across the lane
+  const ly0 = 1560; const lp = []; for (let i = 0; i <= 12; i++) { const u = i / 12; lp.push([lerp(1150, 2060, u), ly0 + 60 * 4 * u * (1 - u)]); }
+  st(PL(lp, false), null, 2.4);
+  const cl = ['#fff6e6', '#e3362b', '#3b6fb8', '#f8cf3d', '#fff6e6'];
+  for (let i = 0; i < 5; i++) { const u = .15 + i * .17, cx = lerp(1150, 2060, u), cy = ly0 + 240 * u * (1 - u), sw = Math.sin(t * 3 + i) * .06;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(sw);
+    if (i % 2) st(D('M -34 0 L 34 0 L 46 22 L 30 30 L 26 18 L 26 76 L -26 76 L -26 18 L -30 30 L -46 22 Z'), cl[i]); else st(R(-30, 0, 60, 70), cl[i]);
+    L(-18, -6, -18, 8, 2.6); L(18, -6, 18, 8, 2.6); ctx.restore(); }
+  // lane
+  st(R(x, 2140, w, 22), WALK); st(R(x, 2162, w, 200), '#cdbd9c'); L(x, 2162, x + w, 2162);
+  for (let i = 0; i < 8; i++) { const r = rng(140 + i); const cx = x + 60 + i * 120 + r() * 40, cy = 2200 + r() * 90; const p = new Path2D(); p.moveTo(cx - 22, cy); p.lineTo(cx + 22, cy); ctx.strokeStyle = '#b0a080'; ctx.lineWidth = 3; ctx.stroke(p); }
+  // hanging inn sign
+  L(1260, 1790, 1360, 1790, 3.2); ctx.save(); ctx.translate(1330, 1790); ctx.rotate(Math.sin(t * 2.4) * .06);
+  L(-24, 0, -24, 16, 2.4); L(24, 0, 24, 16, 2.4); st(R(-54, 16, 108, 60), '#2f7f6f'); text('INN', 0, 47, 36, TITLE, 'center', '#fff6e6'); ctx.restore();
+  // cat on a windowsill
+  ctx.save(); ctx.translate(1920, 1985); const tl = Math.sin(t * 3) * 6;
+  st(D(`M 18 0 Q 44 ${-10 + tl} 40 ${-40 + tl}`), null, 5); st(E(0, -18, 24, 18), '#2d2d33'); st(E(-18, -40, 14, 13), '#2d2d33');
+  st(PL([[-28, -48], [-26, -64], [-16, -52]]), '#2d2d33', 2.6); st(PL([[-14, -52], [-6, -64], [-4, -48]]), '#2d2d33', 2.6);
+  st(E(-22, -42, 2.5, 3), '#f8cf3d', 0); ctx.restore();
+  ctx.restore();
+  ctx.save(); clipRect(P3);
+  const bu = seg(t, 5.95, 6.25) * (1 - seg(t, 7.05, 7.3));
+  const hx = clamp(sx34(Math.min(t, 7.1)) - 30, 1200, 2060);
+  balloon(1500, 1470, ["IT'S HEADING FOR", 'THE LIGHTHOUSE!'], [clamp(hx, 1380, 1760), 1690], bu);
+  ctx.restore();
+}
+function panel4(t) {
+  const [x, y, w, h] = P4; ctx.save(); clipRect(P4);
+  st(R(x, y, w, h), SKY, 0); cloud(2790, 1470, .8);
+  st(R(x, 1960, w, 200), SEA, 0); L(x, 1960, x + w, 1960, 2.8);
+  waves(2160, 3000, 1985, t, 1, 8);
+  // distant sailboat
+  const bx = 2560 + t * 8; st(PL([[bx - 36, 1946], [bx + 36, 1946], [bx + 26, 1962], [bx - 26, 1962]]), '#fff6e6', 2.6); st(PL([[bx, 1942], [bx, 1868], [bx + 30, 1936]]), '#fff6e6', 2.6);
+  // lighthouse
+  const lx = 3120;
+  st(PL([[3000, 2160], [3030, 2080], [3210, 2080], [3250, 2160]]), '#9aa08f');
+  st(PL([[lx - 72, 2090], [lx - 50, 1500], [lx + 50, 1500], [lx + 72, 2090]]), '#fff6e6');
+  for (const [a, b] of [[1640, 1720], [1860, 1940]]) { const wa = 50 + 22 * (a - 1500) / 590, wb = 50 + 22 * (b - 1500) / 590; st(PL([[lx - wa, a], [lx + wa, a], [lx + wb, b], [lx - wb, b]]), '#e3362b'); }
+  st(RR(lx - 14, 1990, 28, 70, [14, 14, 0, 0]), '#2f4f4f'); st(R(lx - 10, 1780, 20, 34), GLASS);
+  st(R(lx - 78, 1486, 156, 16), '#2f4f4f'); for (let i = 0; i < 7; i++) L(lx - 70 + i * 23.3, 1452, lx - 70 + i * 23.3, 1486, 2.6); L(lx - 74, 1452, lx + 74, 1452, 2.6);
+  st(R(lx - 44, 1400, 88, 86), '#f8e27a'); L(lx - 14, 1400, lx - 14, 1486, 2.6); L(lx + 16, 1400, lx + 16, 1486, 2.6);
+  st(D(`M ${lx - 54} 1400 Q ${lx} 1340 ${lx + 54} 1400 Z`), '#e3362b');
+  // pier deck
+  st(R(x, 2150, w, 20), '#c79a62'); st(R(x, 2170, w, 200), '#a9784a');
+  for (let i = 0; i < 16; i++) L(x + 40 + i * 76, 2170, x + 40 + i * 76, 2320, 2.4);
+  for (let i = 0; i < 9; i++) { const px = x + 60 + i * 140; st(R(px - 8, 2080, 16, 72), '#8a5a3a'); }
+  const rp = new Path2D(); rp.moveTo(x, 2100); for (let i = 0; i < 9; i++) { const px = x + 60 + i * 140; rp.quadraticCurveTo(px - 70, 2118, px, 2092); } st(rp, null, 3);
+  for (let i = 0; i < 2; i++) { const gx = 2500 + i * 220 + Math.sin(t * .8 + i) * 40, gy = 1560 + i * 70 + Math.sin(t * 1.9 + i * 2) * 10; gull(gx, gy, 1.1, t * 10 + i * 3); }
+  ctx.restore();
+}
+// the scooter run across panels 3→4, drawn in one clip so it can cross the gutter
+function run34(t) {
+  if (t < 5.4) return;
+  ctx.save(); ctx.beginPath(); ctx.rect(P3[0], P3[1], P4[0] + P4[2] - P3[0], P3[3]); ctx.clip();
+  const sx = sx34(t), stopT = 7.62, moving = t < 7.0 ? 1 : clamp(1 - (t - 7.0) / 0.62);
+  const brake = Math.sin(Math.PI * seg(t, 7.35, 7.95)) * (t < 7.95 ? 1 : 0), settle = t > 7.95 ? Math.sin((t - 7.95) * 14) * Math.exp(-(t - 7.95) * 6) : 0;
+  const tilt = 0.045 * brake + 0.012 * settle;
+  const reach = eOut(seg(t, 7.6, 7.92)), catchT = 7.95;
+  const bark = t > 8.1 && t < 8.55 ? Math.abs(Math.sin((t - 8.1) * 15)) : 0, talk = t > 7.98 && t < 8.6 ? 1 : 0;
+  if (t > 7.0 && t < 8.1) { const du = seg(t, 7.0, 8.1); ctx.globalAlpha = 1 - du; for (let j = 0; j < 3; j++) { const px = sx - 60 - j * 50 - du * 80; st(E(px, 2218 - j * 8 - du * 20, 20 + du * 26 + j * 4, 12 + du * 12), '#efe6d0', 2.6); } ctx.globalAlpha = 1; }
+  const hand = rider(sx, 2240, 1.5, { t, dist: sx, moving, tilt, reach, bark, talk });
+  // kite: flies in above the lane, dips over the pier, the dangling string is caught
+  const kIn = eOut(seg(t, 5.5, 6.3));
+  let kx, ky;
+  if (t < 7.0) { kx = sx + 460 + Math.sin(t * 2.1) * 30; ky = 1540 - 420 * (1 - kIn) + Math.sin(t * 3) * 24; }
+  else { const u = eIO2(seg(t, 7.0, 7.9)); const a0x = 2140 + 460 + Math.sin(7 * 2.1) * 30, a0y = 1540 + Math.sin(21) * 24;
+    kx = lerp(a0x, hand[0] + 150, u) + Math.sin(t * 2.3) * 12 * (1 - u); ky = lerp(a0y, 1600, u) + Math.sin(t * 3) * 20 * (1 - u); }
+  if (t < catchT) kite(kx, ky, 1.1, -0.3 + Math.sin(t * 2.6) * .16, t, true);
+  else { const tug = Math.sin((t - catchT) * 5) * 14; kx = hand[0] + 160 + Math.sin(t * 2) * 16; ky = hand[1] - 250 + tug;
+    const sp = new Path2D(); sp.moveTo(hand[0], hand[1]); sp.quadraticCurveTo(lerp(hand[0], kx, .5) + 20, lerp(hand[1], ky, .5) + 40, kx - 4, ky - 12); st(sp, null, 2.6);
+    kite(kx, ky, 1.1, -0.1 + Math.sin(t * 2.6) * .1, t, false); st(E(hand[0], hand[1], 13, 12), SKIN); }
+  ctx.restore();
+  ctx.save(); clipRect(P4);
+  balloon(2330, 1590, ['GOT YOU!'], [clamp(sx - 40, 2250, 2500), 1810], seg(t, 7.98, 8.25), 44);
+  balloon(2800, 1830, ['WOOF!'], [sx + 175, 1985], seg(t, 8.1, 8.3), 34);
+  caption(P4[0] + 22, P4[1] + 22, ['...AND A SCOOP FOR THE', 'MORNING EDITION.'], seg(t, 8.1, 8.4));
+  ctx.restore();
+}
+
+// ── page ──
+function page(t) {
+  st(R(PAGE.x + 28, PAGE.y + 34, PAGE.w, PAGE.h), DESK_SH, 0);
+  st(R(PAGE.x, PAGE.y, PAGE.w, PAGE.h), PAPER, 0);
+  ctx.save(); ctx.lineJoin = 'round';
+  ctx.font = `150px ${TITLE}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 14; ctx.strokeStyle = INK; ctx.strokeText('THE RUNAWAY KITE', 1700, 125); ctx.fillStyle = '#e0413a'; ctx.fillText('THE RUNAWAY KITE', 1700, 125);
+  ctx.restore();
+  text('A JUNO & PEPPER ADVENTURE', 1700, 222, 42, LETTER);
+  L(1080, 222, 1350, 222, 3); L(2050, 222, 2320, 222, 3);
+  text('- 12 -', 1700, 2388, 40, LETTER);
+}
+
+// ── camera ──
+const CAM = [
+  { t: 0.0, fx: 1020, fy: 800, s: 1.0 }, { t: 0.4, fx: 1020, fy: 800, s: 1.0 },
+  { t: 3.2, fx: 2380, fy: 800, s: 1.0 },
+  { t: 4.05, fx: 780, fy: 1840, s: 1.0, dip: 0.24 }, { t: 5.5, fx: 780, fy: 1840, s: 1.0 },
+  { t: 6.1, fx: 1600, fy: 1840, s: 1.0, dip: 0.03 }, { t: 6.6, fx: 1600, fy: 1840, s: 1.0 },
+  { t: 7.35, fx: 2720, fy: 1840, s: 1.0, dip: 0.03 }, { t: 8.6, fx: 2700, fy: 1830, s: 1.04 },
+  { t: 9.35, fx: 1700, fy: 1225, s: 0.418 }, { t: 10.0, fx: 1700, fy: 1225, s: 0.412 },
+];
+function camera(t) {
+  let i = 0; while (i < CAM.length - 2 && t > CAM[i + 1].t) i++;
+  const a = CAM[i], b = CAM[i + 1], u = seg(t, a.t, b.t), e = i === 1 ? eIO2(u) : eInOut(u);
+  const s = Math.exp(lerp(Math.log(a.s), Math.log(b.s), e)) * (1 - (b.dip || 0) * Math.sin(Math.PI * u));
+  return { fx: lerp(a.fx, b.fx, e), fy: lerp(a.fy, b.fy, e), s };
+}
+
+window.draw = ({ t }) => {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = DESK; ctx.fillRect(0, 0, W, H);
+  const c = camera(t);
+  ctx.setTransform(c.s, 0, 0, c.s, 960 - c.fx * c.s, 540 - c.fy * c.s);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round'; LS = 1;
+  page(t);
+  panel1(t); border(P1); kite1(t);
+  panel2(t); border(P2);
+  panel3(t); panel4(t); border(P3); border(P4);
+  run34(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const fade = Math.max(1 - seg(t, 0, 0.35), seg(t, 9.62, 10.0));
+  if (fade > 0) { ctx.globalAlpha = fade; ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+window.events = () => [
+  { k: 'engine', t: 0.0, d: 7.7 }, { k: 'flutter', t: 0.2, d: 3.2 }, { k: 'pop', t: 0.25, v: 0.6 },
+  { k: 'pop', t: 1.0 }, { k: 'bark', t: 1.95 }, { k: 'pop', t: 1.9, v: 0.8 }, { k: 'gull', t: 0.9 }, { k: 'gull', t: 2.6 },
+  { k: 'whoosh', t: 3.2, d: 0.85 }, { k: 'pop', t: 3.9, v: 0.6 }, { k: 'pen', t: 4.15, d: 1.3 }, { k: 'pop', t: 4.0, v: 0.7 },
+  { k: 'whoosh', t: 5.5, d: 0.6 }, { k: 'flutter', t: 5.5, d: 2.4 }, { k: 'pop', t: 5.95 }, { k: 'whoosh', t: 6.6, d: 0.75 },
+  { k: 'brake', t: 7.05, d: 0.6 }, { k: 'catch', t: 7.95 }, { k: 'pop', t: 7.98, v: 1.2 }, { k: 'bark', t: 8.1 }, { k: 'gull', t: 7.4 },
+  { k: 'pop', t: 8.1, v: 0.6 }, { k: 'whoosh', t: 8.6, d: 0.8 }, { k: 'chord', t: 9.1 },
+];
+window.ready = (async () => {
+  await document.fonts.load(`40px ${LETTER}`); await document.fonts.load(`80px ${TITLE}`); await document.fonts.ready; build();
+})();
+</script>
+</body></html>
