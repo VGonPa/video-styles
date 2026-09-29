@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── roman-mosaic · a Roman floor mosaic laid tessera by tessera ─────────────────────────────
+// Bare mortar bed with a red-ochre sinopia underdrawing → black tesserae fall in and write SALVE, the
+// fine emblema background flows in rows (andamento) that hug the letters → laurel wreath and rings close
+// the medallion → the camera rises: two dolphins are laid head to tail and start to "swim" by re-tiling,
+// the field, the guilloche and the meander border race around the floor → a raking light sweeps the whole
+// pavement and makes the glass and gold tesserae glint → hold, fade out.
+// The layout is procedural: a label image of the design → distance field → tesserae placed along its
+// iso-lines (opus vermiculatum / andamento), plain grids in the borders (opus tessellatum), small cut
+// tesserae fill the gaps. Everything is seeded; each frame depends only on t.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const WW = 3200, WH = 1800, CX = 1600, CY = 900;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const sstep = u => u * u * (3 - 2 * u);
+const smoother = u => { u = clamp(u); return u * u * u * (u * (u * 6 - 15) + 10); };
+const eOut = u => 1 - Math.pow(1 - u, 3);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const wrapA = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+
+// ── palette (label index → stone / glass colour) ──
+const PAL = [
+  [236, 229, 212], // 0 white marble (field)
+  [40, 36, 33],    // 1 black limestone
+  [176, 80, 47],   // 2 terracotta
+  [204, 156, 60],  // 3 ochre / gold glass
+  [33, 64, 108],   // 4 deep blue glass
+  [84, 124, 164],  // 5 mid blue
+  [88, 96, 50],    // 6 olive
+  [146, 152, 92],  // 7 sage
+  [226, 212, 181], // 8 cream (emblema ground)
+  [178, 186, 190], // 9 pale grey (dolphin belly)
+];
+const NL = PAL.length, NV = 12;
+const hex = c => 'rgb(' + c.map(v => Math.round(clamp(v, 0, 255))).join(',') + ')';
+const LAB = PAL.map((c, i) => `rgb(${i * 3 + 1},${i * 7 + 2},${i * 11 + 3})`);   // exact label colours on the design canvas
+const BUCKET = [];                                  // NL*NV fill colours: tone variants per label
+for (let l = 0; l < NL; l++) for (let v = 0; v < NV; v++) {
+  const k = 0.84 + 0.3 * v / (NV - 1), warm = (v % 3 - 1) * 4;
+  const c = PAL[l]; BUCKET.push(hex([c[0] * k + warm, c[1] * k, c[2] * k - warm]));
+}
+// zones: s = tessera size, K = number of andamento rows hugging the edges (99 = everything follows the edges)
+const ZONES = [
+  null,
+  { s: 25, K: 0, ox: 0, oy: 0 },      // 1 outer margin (grid)
+  { s: 20, K: 0, ox: 50, oy: 50 },    // 2 meander band (grid, the key is drawn on the grid)
+  { s: 10, K: 99 },                   // 3 guilloche band
+  { s: 14, K: 3, ox: 400, oy: 400 },  // 4 field
+  { s: 10, K: 99 },                   // 5 emblema rings + laurel
+  { s: 7, K: 99 },                    // 6 emblema disc (finest, vermiculatum)
+];
+function zoneAt(x, y) {
+  const r = Math.hypot(x - CX, y - CY);
+  if (r < 322) return 6; if (r < 482) return 5;
+  if (x < 50 || y < 50 || x >= 3150 || y >= 1750) return 1;
+  if (x < 230 || y < 230 || x >= 2970 || y >= 1570) return 2;
+  if (x < 400 || y < 400 || x >= 2800 || y >= 1400) return 3;
+  return 4;
+}
+
+// ── dolphins: a parametric body evaluated per point (used for the design AND for re-tiling) ──
+const DL = 520;
+const wProf = u => {
+  if (u < 0.07) return 22 + 6 * (u / 0.07);
+  if (u < 0.16) return 28 + 28 * sstep((u - 0.07) / 0.09);
+  if (u < 0.36) return 56 + 16 * sstep((u - 0.16) / 0.2);
+  if (u < 0.9) return 72 - 58 * sstep((u - 0.36) / 0.54);
+  return 14 - 3 * (u - 0.9) / 0.1;
+};
+function dolphinPose(side, t, amp) {   // side -1 = left dolphin (faces right), +1 = right (faces left)
+  const N = 44, P = [];
+  const cx = side < 0 ? 810 : 2390, cy = 915;
+  const bob = amp * 9 * Math.sin(TAU * 0.55 * t + (side > 0 ? 1.7 : 0));
+  const surge = amp * 10 * Math.sin(TAU * 0.55 * t + (side > 0 ? 1.7 : 0) + 1.2);
+  for (let i = 0; i <= N; i++) {
+    const u = i / N;
+    const lx = (0.5 - u) * DL + surge;                     // head at +x (local)
+    let ly = -86 * Math.sin(Math.PI * u) + 40 * (u - 0.5) + bob;
+    ly += amp * 22 * Math.pow(u, 1.6) * Math.sin(TAU * (1.05 * u - 1.25 * t) + (side > 0 ? 1.7 : 0));
+    P.push([cx - side * lx, cy + ly]);
+  }
+  const T = [], Nn = [];
+  for (let i = 0; i <= N; i++) {
+    const a = P[Math.max(0, i - 1)], b = P[Math.min(N, i + 1)];
+    let tx = b[0] - a[0], ty = b[1] - a[1]; const l = Math.hypot(tx, ty); tx /= l; ty /= l;
+    T.push([tx, ty]); let nx = -ty, ny = tx; if (ny > 0) { nx = -nx; ny = -ny; }  // normal points "up" (dorsal)
+    Nn.push([nx, ny]);
+  }
+  const at = (u, v) => { const f = clamp(u) * N, i = Math.min(N - 1, Math.floor(f)), r = f - i;
+    const x = lerp(P[i][0], P[i + 1][0], r), y = lerp(P[i][1], P[i + 1][1], r);
+    const nx = lerp(Nn[i][0], Nn[i + 1][0], r), ny = lerp(Nn[i][1], Nn[i + 1][1], r);
+    return [x + nx * v, y + ny * v]; };
+  const w = u => wProf(u) * 1.12;
+  const dorsal = [[0.32, 0.7], [0.42, 1], [0.52, 1], [0.49, 0.6]].map(([u, k], j) => at(u, j === 1 ? w(u) + 62 : j === 2 ? w(u) + 66 : w(u) * k));
+  const pect = [[0.19, -0.5], [0.4, -1], [0.37, -1], [0.31, -0.5]].map(([u, k], j) => at(u, j === 1 ? -(w(u) + 58) : j === 2 ? -(w(u) + 30) : w(u) * k));
+  const tp = P[N], tt = T[N], tn = Nn[N];
+  const fl = (a, v) => [tp[0] + tt[0] * a + tn[0] * v, tp[1] + tt[1] * a + tn[1] * v];
+  const fk = [[-26, 8], [0, 60], [28, 104], [68, 108], [42, 56], [32, 6]]; const flukeU = fk.map(([a, v]) => fl(a, v)), flukeD = fk.map(([a, v]) => fl(a, -v));
+  const eye = at(0.12, 16);
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const p of [...P, ...dorsal, ...pect, ...flukeU, ...flukeD]) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
+  return { P, T, Nn, N, w, polys: [dorsal, pect, flukeU, flukeD], eye, bb: [x0 - 70, y0 - 70, x1 + 70, y1 + 70] };
+}
+function inPoly(x, y, poly) { let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; }
+function segD(x, y, a, b) { const dx = b[0] - a[0], dy = b[1] - a[1]; const u = clamp(((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy));
+  return [Math.hypot(x - a[0] - dx * u, y - a[1] - dy * u), u]; }
+const OL = 16;  // black outline thickness
+function dolphinLabel(x, y, D) {  // → label, or -1 if the point is not on the dolphin
+  if (x < D.bb[0] || x > D.bb[2] || y < D.bb[1] || y > D.bb[3]) return -1;
+  let best = 1e9, bu = 0, bi = 0;
+  for (let i = 0; i < D.N; i++) { const [d, u] = segD(x, y, D.P[i], D.P[i + 1]); if (d < best) { best = d; bu = (i + u) / D.N; bi = i; } }
+  const w = D.w(bu);
+  if (best < w && bu > 0.0005 && bu < 0.9995) {
+    if (Math.hypot(x - D.eye[0], y - D.eye[1]) < 7.5) return 1;
+    if (w - best < OL) return 1;
+    const n = D.Nn[bi], sd = (x - D.P[bi][0]) * n[0] + (y - D.P[bi][1]) * n[1];
+    if (sd < 0 && best > 0.2 * w && bu > 0.04 && bu < 0.8) return 9;    // pale belly
+    if (sd > 0 && best > 0.4 * w) return 4;                             // dark back
+    if (bu < 0.07 && Math.abs(sd) < 3.5 && best < 0.5 * w) return 1;    // mouth line
+    return 5;
+  }
+  if (best < 8 && (bu <= 0.0005)) return 1;  // round snout tip
+  for (const poly of D.polys) {
+    if (inPoly(x, y, poly)) {
+      let e = 1e9; for (let i = 0; i < poly.length; i++) e = Math.min(e, segD(x, y, poly[i], poly[(i + 1) % poly.length])[0]);
+      return e < OL ? 1 : 4;
+    }
+  }
+  return -1;
+}
+const DREST = [dolphinPose(-1, 0, 0), dolphinPose(1, 0, 0)];
+const swimAmp = t => sstep(seg(t, 4.4, 5.3));
+const SWIM_STEP = 6;       // re-tiling rate (states per second)
+
+// ── design (label image) ──
+let LABEL, LABEL0, ZONE;
+let SALVE_BOX;
+function drawDesign(g) {
+  g.fillStyle = LAB[0]; g.fillRect(0, 0, WW, WH);
+  // margin: black frame line
+  g.fillStyle = LAB[1]; g.fillRect(25, 25, WW - 50, 25); g.fillRect(25, WH - 50, WW - 50, 25); g.fillRect(25, 25, 25, WH - 50); g.fillRect(WW - 50, 25, 25, WH - 50);
+  g.fillStyle = LAB[0]; g.fillRect(50, 50, WW - 100, WH - 100);
+  // meander band on the 20px grid
+  const cell = (side, u, v, lab) => { g.fillStyle = LAB[lab]; let x, y;
+    if (side === 0) { x = 230 + u * 20; y = 50 + v * 20; } else if (side === 2) { x = 230 + u * 20; y = 1750 - (v + 1) * 20; }
+    else if (side === 3) { x = 50 + v * 20; y = 230 + u * 20; } else { x = 3150 - (v + 1) * 20; y = 230 + u * 20; }
+    g.fillRect(x, y, 20, 20); };
+  const key = (c, r) => r === 6 || (c === 0) || (r === 0 && c <= 6) || (c === 6 && r <= 4) || (r === 4 && c >= 2 && c <= 6) || (c === 2 && r >= 2 && r <= 4) || (r === 2 && c >= 2 && c <= 4);
+  for (const side of [0, 1, 2, 3]) {
+    const len = side % 2 === 0 ? 137 : 67, off = side % 2 === 0 ? 1 : 2, units = side % 2 === 0 ? 17 : 8;
+    for (let u = 0; u < len; u++) for (let r = 0; r < 7; r++) {
+      const k = u - off; let on;
+      if (k < 0 || k >= units * 8) on = r === 6; else on = key(k % 8, r);
+      if (on) cell(side, u, r + 1, 1);
+    }
+  }
+  // meander corner blocks: concentric squares
+  for (const [x, y] of [[50, 50], [2970, 50], [50, 1570], [2970, 1570]]) {
+    g.fillStyle = LAB[1]; g.fillRect(x + 20, y + 20, 140, 140);
+    g.fillStyle = LAB[2]; g.fillRect(x + 40, y + 40, 100, 100);
+    g.fillStyle = LAB[3]; g.fillRect(x + 60, y + 60, 60, 60);
+    g.fillStyle = LAB[1]; g.fillRect(x + 80, y + 80, 20, 20);
+  }
+  // guilloche band: black lines + two interlaced strands
+  g.fillStyle = LAB[1]; g.fillRect(230, 230, 2740, 14); g.fillRect(230, 1556, 2740, 14); g.fillRect(230, 230, 14, 1340); g.fillRect(2956, 230, 14, 1340);
+  g.fillRect(230, 386, 2740, 14); g.fillRect(230, 1400, 2740, 14); g.fillRect(386, 386, 14, 1028); g.fillRect(2800, 386, 14, 1028);
+  // centre-line rectangle 315..2885 × 315..1485, both strands cross at every corner
+  const sides = [[[315, 315], [2885, 315]], [[2885, 315], [2885, 1485]], [[2885, 1485], [315, 1485]], [[315, 1485], [315, 315]]];
+  const A = 30, layers = [[62, 1], [40, -1], [12, -2]];
+  const strandCol = (s, j) => j === 1 ? 1 : j === -1 ? (s ? 4 : 2) : (s ? 5 : 3);
+  const strokeSeg = (a, b, n0, n1, lam, s) => {        // strand s over [n0,n1] (length units along side)
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), tx = (b[0] - a[0]) / L, ty = (b[1] - a[1]) / L, nx = -ty, ny = tx;
+    for (const [lw, j] of layers) {
+      g.strokeStyle = LAB[strandCol(s, j)]; g.lineWidth = lw; g.lineCap = 'butt'; g.lineJoin = 'round'; g.beginPath();
+      for (let d = n0; d <= n1 + 0.01; d += 3) { const dd = Math.min(d, n1), off = (s ? -1 : 1) * A * Math.sin(TAU * dd / lam);
+        const x = a[0] + tx * dd + nx * off, y = a[1] + ty * dd + ny * off; d === n0 ? g.moveTo(x, y) : g.lineTo(x, y); }
+      g.stroke();
+    }
+  };
+  for (const [a, b] of sides) {
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.round(L / 130), lam = L / n, hl = lam / 2;
+    // segments bounded by extrema (quarter periods): each contains one crossing; over/under alternates
+    const cuts = [0]; for (let q = lam / 4; q < L - 1; q += hl) cuts.push(q); cuts.push(L);
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const top = i % 2; const n0 = Math.max(0, cuts[i] - 1), n1 = Math.min(L, cuts[i + 1] + 1);
+      strokeSeg(a, b, n0, n1, lam, 1 - top); strokeSeg(a, b, n0, n1, lam, top);
+    }
+  }
+  // field corner rosettes
+  for (const [x, y] of [[540, 540], [2660, 540], [540, 1260], [2660, 1260]]) {
+    for (const [r, l] of [[76, 1], [62, 3], [48, 1], [36, 2], [20, 0], [9, 1]]) { g.fillStyle = LAB[l]; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+  }
+  // scattered crosslets on the field grid (kept clear of the big motifs)
+  const cross = (cx, cy) => { const s = 14, gx = 400 + Math.round((cx - 400) / s) * s, gy = 400 + Math.round((cy - 400) / s) * s;
+    g.fillStyle = LAB[1]; for (const [i, j] of [[0, -1], [-1, 0], [1, 0], [0, 1]]) g.fillRect(gx + i * s, gy + j * s, s, s);
+    g.fillStyle = LAB[2]; g.fillRect(gx, gy, s, s); };
+  for (let gy = 0; gy < 5; gy++) for (let gx = 0; gx < 12; gx++) {
+    const x = 500 + gx * 200 + (gy % 2) * 100, y = 500 + gy * 200;
+    if (x > 2720 || y > 1320) continue;
+    if (Math.hypot(x - CX, y - CY) < 580) continue;
+    if (Math.hypot(x - 540, y - 540) < 160 || Math.hypot(x - 2660, y - 540) < 160 || Math.hypot(x - 540, y - 1260) < 160 || Math.hypot(x - 2660, y - 1260) < 160) continue;
+    let near = false; for (const D of DREST) if (x > D.bb[0] - 40 && x < D.bb[2] + 40 && y > D.bb[1] - 40 && y < D.bb[3] + 90) near = true;
+    if (near) continue; cross(x, y);
+  }
+  // waves under the dolphins
+  g.lineCap = 'round';
+  for (const side of [-1, 1]) for (const [x0, x1, y, ph] of [[700, 1020, 1150, 0], [620, 900, 1215, 1.5]]) {
+    const xa = side < 0 ? x0 : 3200 - x1, xb = side < 0 ? x1 : 3200 - x0;
+    for (const [lw, l] of [[16, 1]]) { g.strokeStyle = LAB[l]; g.lineWidth = lw; g.beginPath();
+      for (let x = xa; x <= xb; x += 3) { const yy = y + 13 * Math.sin((x - xa) / 46 + ph); x === xa ? g.moveTo(x, yy) : g.lineTo(x, yy); } g.stroke(); }
+  }
+  // emblema rings
+  for (const [r, l] of [[482, 1], [470, 3], [448, 1], [436, 0], [334, 1], [322, 8]]) { g.fillStyle = LAB[l]; g.beginPath(); g.arc(CX, CY, r, 0, TAU); g.fill(); }
+  // laurel wreath: two branches rising from a tie at the bottom, meeting at the top
+  g.save(); g.beginPath(); g.arc(CX, CY, 432, 0, TAU); g.arc(CX, CY, 338, 0, TAU, true); g.clip();
+  const RC = 385;
+  const leaf = (th, dir, out, k) => {         // dir: +1 clockwise growth, out: +1 outer leaf
+    const bx = CX + Math.cos(th) * RC, by = CY + Math.sin(th) * RC;
+    const tang = th + dir * Math.PI / 2, a = tang - dir * out * 0.5;
+    const L = 70, Wd = 32, ex = bx + Math.cos(a) * L, ey = by + Math.sin(a) * L;
+    const nx = -Math.sin(a), ny = Math.cos(a);
+    const p = new Path2D(); p.moveTo(bx, by);
+    p.quadraticCurveTo(bx + Math.cos(a) * L * 0.5 + nx * Wd * 1.25, by + Math.sin(a) * L * 0.5 + ny * Wd * 1.25, ex, ey);
+    p.quadraticCurveTo(bx + Math.cos(a) * L * 0.5 - nx * Wd * 1.25, by + Math.sin(a) * L * 0.5 - ny * Wd * 1.25, bx, by);
+    g.lineJoin = 'round'; g.strokeStyle = LAB[k ? 6 : 1]; g.lineWidth = 20; g.stroke(p); g.fillStyle = LAB[7]; g.fill(p);
+  };
+  for (const dir of [-1, 1]) for (let i = 0; i < 17; i++) {
+    const th = Math.PI / 2 - dir * (0.16 + i * 0.172);
+    leaf(th, -dir, 1, i % 2); leaf(th + dir * 0.06, -dir, -1, (i + 1) % 2);
+    if (i % 3 === 1) { const bth = th - dir * 0.09; g.fillStyle = LAB[1]; g.beginPath(); g.arc(CX + Math.cos(bth) * RC, CY + Math.sin(bth) * RC, 14, 0, TAU); g.fill();
+      g.fillStyle = LAB[2]; g.beginPath(); g.arc(CX + Math.cos(bth) * RC, CY + Math.sin(bth) * RC, 7, 0, TAU); g.fill(); }
+  }
+  g.fillStyle = LAB[1]; g.beginPath(); g.arc(CX, CY - 385, 30, 0, TAU); g.fill(); g.fillStyle = LAB[3]; g.beginPath(); g.arc(CX, CY - 385, 17, 0, TAU); g.fill();
+  g.fillStyle = LAB[1]; g.fillRect(CX - 26, CY + 346, 52, 80); g.fillStyle = LAB[2]; g.fillRect(CX - 14, CY + 356, 28, 60);   // tie
+  g.restore();
+  // SALVE + WELCOME in Roman square capitals
+  g.fillStyle = LAB[1]; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  g.font = '700 150px Cinzel'; let m = g.measureText('SALVE'); const fs = 150 * 530 / m.width;
+  g.font = `700 ${fs}px Cinzel`; m = g.measureText('SALVE');
+  const cap = m.actualBoundingBoxAscent; g.fillText('SALVE', CX, 862 + cap / 2);
+  SALVE_BOX = [CX - m.width / 2, 862 - cap / 2, CX + m.width / 2, 862 + cap / 2];
+  g.fillStyle = LAB[2]; g.font = '700 66px Cinzel'; g.letterSpacing = '10px';
+  const m2 = g.measureText('WELCOME'); const cap2 = m2.actualBoundingBoxAscent; g.fillText('WELCOME', CX + 5, 1002 + cap2 / 2);
+  g.letterSpacing = '0px';
+  // hederae (ivy-leaf stops) either side of WELCOME
+  for (const sd of [-1, 1]) { const hx = CX + sd * (m2.width / 2 + 42), hy = 1002; g.save(); g.translate(hx, hy); g.rotate(sd * -Math.PI / 2);
+    g.fillStyle = LAB[2]; g.beginPath(); g.moveTo(0, 22); g.bezierCurveTo(-30, 2, -24, -24, 0, -12); g.bezierCurveTo(24, -24, 30, 2, 0, 22); g.fill();
+    g.fillRect(-3, -30, 6, 20); g.restore(); }
+  // dividing line of small gold tesserae between the words
+  g.fillStyle = LAB[3]; g.fillRect(CX - 150, 938, 300, 8);
+}
+
+// ── texture helpers ──
+function noiseCanvas(n, seed, fn) { const c = mk(n, n), g = c.getContext('2d'), id = g.createImageData(n, n), r = rng(seed);
+  const G = 64, grid = new Float32Array(G * G); for (let i = 0; i < G * G; i++) grid[i] = r();
+  const vn = (x, y, f) => { x = x * f / n; y = y * f / n; const x0 = Math.floor(x), y0 = Math.floor(y), fx = sstep(x - x0), fy = sstep(y - y0);
+    const q = (i, j) => grid[(j % f) * G + (i % f)];
+    return lerp(lerp(q(x0, y0), q(x0 + 1, y0), fx), lerp(q(x0, y0 + 1), q(x0 + 1, y0 + 1), fx), fy); };
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { const [R, Gc, B, A] = fn(x, y, vn, r); const i = (y * n + x) * 4; id.data[i] = R; id.data[i + 1] = Gc; id.data[i + 2] = B; id.data[i + 3] = A; }
+  g.putImageData(id, 0, 0); return c; }
+
+let TILES = [], NT = 0, mortarPat, stonePat, sinopia, grains = [], vign;
+let TX, TY, TS, TA, TLAB, TBK, TSPEC, TDZ, TCOR, THL, TROT, DZ = [];
+const FD = 0.3;          // fall duration
+
+function build() {
+  // 1. design → label image
+  const dc = mk(WW, WH), g = dc.getContext('2d', { willReadFrequently: true });
+  drawDesign(g);
+  const img = g.getImageData(0, 0, WW, WH).data;
+  const lut = new Map(); LAB.forEach((s, i) => lut.set(((i * 3 + 1) << 16) | ((i * 7 + 2) << 8) | (i * 11 + 3), i));
+  LABEL = new Uint8Array(WW * WH);
+  for (let i = 0, p = 0; i < WW * WH; i++, p += 4) { const k = lut.get((img[p] << 16) | (img[p + 1] << 8) | img[p + 2]); LABEL[i] = k === undefined ? 255 : k; }
+  for (let pass = 0; pass < 3; pass++) for (let y = 1; y < WH - 1; y++) for (let x = 1; x < WW - 1; x++) { const i = y * WW + x;
+    if (LABEL[i] !== 255) continue; const c = [LABEL[i - WW], LABEL[i - 1], LABEL[i + 1], LABEL[i + WW]].find(v => v !== 255); if (c !== undefined) LABEL[i] = c; }
+  for (let i = 0; i < WW * WH; i++) if (LABEL[i] === 255) LABEL[i] = 0;
+  LABEL0 = LABEL.slice();
+  for (const D of DREST) { const [x0, y0, x1, y1] = D.bb.map(Math.round);
+    for (let y = Math.max(0, y0); y < Math.min(WH, y1); y++) for (let x = Math.max(0, x0); x < Math.min(WW, x1); x++) { const l = dolphinLabel(x + 0.5, y + 0.5, D); if (l >= 0) LABEL[y * WW + x] = l; } }
+  // sinopia underdrawing from the label edges
+  sinopia = mk(WW / 2, WH / 2); { const sg = sinopia.getContext('2d'), sid = sg.createImageData(WW / 2, WH / 2);
+    for (let y = 1; y < WH / 2 - 1; y++) for (let x = 1; x < WW / 2 - 1; x++) { const i = (y * 2) * WW + x * 2, l = LABEL[i];
+      if (l !== LABEL[i + 2] || l !== LABEL[i + 2 * WW]) { const p = (y * WW / 2 + x) * 4; sid.data[p] = 150; sid.data[p + 1] = 62; sid.data[p + 2] = 40; sid.data[p + 3] = 200; } }
+    sg.putImageData(sid, 0, 0); const s2 = mk(WW / 2, WH / 2), g2 = s2.getContext('2d'); g2.filter = 'blur(0.7px)'; g2.drawImage(sinopia, 0, 0); sinopia = s2; }
+
+  // 2. node grid (2px) → edges → distance field
+  const GS = 2, GW = WW / GS, GH = WH / GS, NN = GW * GH;
+  const NL_ = new Uint8Array(NN), NZ = new Uint8Array(NN);
+  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const x = i * GS + 1, y = j * GS + 1; NL_[j * GW + i] = LABEL[y * WW + x]; NZ[j * GW + i] = zoneAt(x, y); }
+  const INF = 1e20, f = new Float64Array(NN);
+  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const k = j * GW + i, l = NL_[k], z = NZ[k]; let e = false;
+    if (i > 0 && (NL_[k - 1] !== l || NZ[k - 1] !== z)) e = true; if (i < GW - 1 && (NL_[k + 1] !== l || NZ[k + 1] !== z)) e = true;
+    if (j > 0 && (NL_[k - GW] !== l || NZ[k - GW] !== z)) e = true; if (j < GH - 1 && (NL_[k + GW] !== l || NZ[k + GW] !== z)) e = true;
+    f[k] = e ? 0 : INF; }
+  const edt1 = (src, n, stride, off) => { const v = new Int32Array(n), z = new Float64Array(n + 1), d = new Float64Array(n), q0 = new Float64Array(n);
+    for (let q = 0; q < n; q++) q0[q] = src[off + q * stride];
+    let k = 0; v[0] = 0; z[0] = -INF; z[1] = INF;
+    for (let q = 1; q < n; q++) { let s; do { const p = v[k]; s = ((q0[q] + q * q) - (q0[p] + p * p)) / (2 * q - 2 * p); if (s <= z[k]) k--; else break; } while (k >= 0);
+      k++; v[k] = q; z[k] = s; z[k + 1] = INF; }
+    k = 0; for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; const p = v[k]; d[q] = (q - p) * (q - p) + q0[p]; }
+    for (let q = 0; q < n; q++) src[off + q * stride] = d[q]; };
+  for (let i = 0; i < GW; i++) edt1(f, GH, GW, i);
+  for (let j = 0; j < GH; j++) edt1(f, GW, 1, j * GW);
+  const DF = new Float32Array(NN); for (let k = 0; k < NN; k++) DF[k] = Math.sqrt(f[k]) * GS + 1;
+  const Dat = (x, y) => DF[clamp(Math.round((y - 1) / GS), 0, GH - 1) * GW + clamp(Math.round((x - 1) / GS), 0, GW - 1)];
+  const gradA = (i, j) => { const k = j * GW + i; const gx = DF[k + 1] - DF[k - 1], gy = DF[k + GW] - DF[k - GW]; return Math.atan2(gy, gx) + Math.PI / 2; };
+
+  // 3. placement with a spatial hash
+  const HC = 24, HW = Math.ceil(WW / HC), HH = Math.ceil(WH / HC), hash = Array.from({ length: HW * HH }, () => []);
+  const T = []; const R = rng(7);
+  const free = (x, y, r, fac) => { const hx = Math.floor(x / HC), hy = Math.floor(y / HC);
+    for (let b = hy - 1; b <= hy + 1; b++) for (let a = hx - 1; a <= hx + 1; a++) { if (a < 0 || b < 0 || a >= HW || b >= HH) continue;
+      for (const q of hash[b * HW + a]) { const dx = q.x - x, dy = q.y - y, m = (q.r + r) * fac; if (dx * dx + dy * dy < m * m) return false; } } return true; };
+  const add = (x, y, s, ang, lab, zone, lvl, kind) => { const t = { x, y, s, ang, lab, zone, lvl, kind, r: 0.45 * s }; T.push(t); hash[Math.floor(y / HC) * HW + Math.floor(x / HC)].push(t); return t; };
+  const labAt = (x, y) => LABEL[clamp(y | 0, 0, WH - 1) * WW + clamp(x | 0, 0, WW - 1)];
+  const uniform = (x, y, h, ang) => { const l = labAt(x, y), c = Math.cos(ang), s = Math.sin(ang), z = zoneAt(x, y);
+    for (const [a, b] of [[1, 1], [1, -1], [-1, 1], [-1, -1], [1, 0], [-1, 0], [0, 1], [0, -1]]) { const px = x + (a * c - b * s) * h, py = y + (a * s + b * c) * h; if (labAt(px, py) !== l || zoneAt(px, py) !== z) return -1; }
+    return l; };
+  // 3a. andamento rows along the iso-lines of the distance field (raster greedy)
+  for (let j = 1; j < GH - 2; j++) for (let i = 1; i < GW - 2; i++) {
+    const k1 = j * GW + i, z = NZ[k1], Z = ZONES[z]; if (!Z.K) continue;
+    const q1 = DF[k1] / Z.s;
+    for (const k2 of [k1 + 1, k1 + GW]) {
+      if (NZ[k2] !== z || NL_[k2] !== NL_[k1]) continue;
+      const q2 = DF[k2] / Z.s, lo = Math.min(q1, q2), hi = Math.max(q1, q2);
+      const lv = Math.floor(hi - 0.5); if (lv < 0 || lv >= Z.K || lv + 0.5 < lo || hi === lo) continue;
+      const fr = (lv + 0.5 - q1) / (q2 - q1);
+      const x = i * GS + 1 + (k2 === k1 + 1 ? fr * GS : 0), y = j * GS + 1 + (k2 === k1 + GW ? fr * GS : 0);
+      if (!free(x, y, 0.45 * Z.s, 1.0)) continue;
+      add(x, y, Z.s, gradA(i, j), NL_[k1], z, lv, 0);
+    }
+  }
+  // 3b. opus tessellatum grids (margin, meander, open field)
+  for (const zi of [1, 2, 4]) { const Z = ZONES[zi];
+    for (let y = Z.oy + Z.s / 2; y < WH; y += Z.s) for (let x = Z.ox + Z.s / 2; x < WW; x += Z.s) {
+      if (zoneAt(x, y) !== zi) continue;
+      if (Z.K && Dat(x, y) / Z.s < Z.K - 0.05) continue;
+      const jx = x + (R() - 0.5) * 0.06 * Z.s, jy = y + (R() - 0.5) * 0.06 * Z.s, ang = (R() - 0.5) * 0.07;
+      const l = uniform(jx, jy, 0.36 * Z.s, ang); if (l < 0) continue;
+      if (!free(jx, jy, 0.45 * Z.s, 0.94)) continue;
+      add(jx, jy, Z.s, ang, l, zi, -1, 1);
+    }
+  }
+  // 3c. cut pieces fill the gaps
+  for (const fk of [0.66]) for (let y = 1; y < WH; y += 3) for (let x = 1 + (y % 2) * 1.5; x < WW; x += 3) {
+    const zi = zoneAt(x, y), s = ZONES[zi].s * fk, r = 0.45 * s;
+    if (!free(x, y, r, 1.12)) continue;
+    const gi = clamp(Math.round((x - 1) / GS), 1, GW - 2), gj = clamp(Math.round((y - 1) / GS), 1, GH - 2);
+    const ang = ZONES[zi].K ? gradA(gi, gj) : 0;
+    const l = uniform(x, y, 0.36 * s, ang); if (l < 0) continue;
+    add(x, y, s, ang, l, zi, -2, 2);
+  }
+
+  // 4. per-tessera look + timing
+  NT = T.length;
+  TX = new Float32Array(NT); TY = new Float32Array(NT); TS = new Float32Array(NT); TA = new Float32Array(NT); TROT = new Float32Array(NT);
+  TLAB = new Uint8Array(NT); TBK = new Uint16Array(NT); TSPEC = new Float32Array(NT); TDZ = new Int8Array(NT); TCOR = new Float32Array(NT * 8); THL = new Uint8Array(NT);
+  const LX = -0.62, LY = -0.78;
+  const perim = (x, y) => {   // 0 at top centre → 1 at bottom centre, both ways round
+    const px = x - CX, py = y - CY; let a = Math.atan2(px / 1.6, -py); return Math.abs(a) / Math.PI; };
+  for (let n = 0; n < NT; n++) {
+    const t = T[n], r = rng(n * 7919 + 13);
+    TX[n] = t.x; TY[n] = t.y; TS[n] = t.s; TLAB[n] = t.lab;
+    const a = (t.kind === 0 ? 0.41 : 0.42) * t.s * (0.95 + 0.1 * r()), b = (t.kind === 0 ? 0.41 : 0.42) * t.s * (0.95 + 0.1 * r());
+    const c = Math.cos(t.ang), s = Math.sin(t.ang), jit = 0.07 * t.s;
+    const cor = [[-a, -b], [a, -b], [a, b], [-a, b]];
+    let bestE = 0, bestDot = -9;
+    for (let q = 0; q < 4; q++) { const [u, v] = cor[q]; const du = u + (r() - 0.5) * jit, dv = v + (r() - 0.5) * jit;
+      TCOR[n * 8 + q * 2] = du * c - dv * s; TCOR[n * 8 + q * 2 + 1] = du * s + dv * c; }
+    for (let q = 0; q < 4; q++) { const q2 = (q + 1) % 4; const ex = TCOR[n * 8 + q2 * 2] - TCOR[n * 8 + q * 2], ey = TCOR[n * 8 + q2 * 2 + 1] - TCOR[n * 8 + q * 2 + 1];
+      const nx = ey, ny = -ex, l = Math.hypot(nx, ny); const d = (nx * LX + ny * LY) / l; if (d > bestDot) { bestDot = d; bestE = q; } }
+    THL[n] = bestE;     // the edge facing the light (a second one is drawn after it)
+    const tiltx = (r() - 0.5) * 0.5, tilty = (r() - 0.5) * 0.5, lit = tiltx * LX + tilty * LY;
+    const v = clamp(Math.round((0.5 + 0.6 * (r() - 0.5) + 0.9 * lit) * (NV - 1)), 0, NV - 1);
+    TBK[n] = t.lab * NV + v;
+    const glass = t.lab === 3 ? 1 : (t.lab === 4 || t.lab === 5) ? 0.6 : t.lab === 8 || t.lab === 0 ? 0.28 : 0.2;
+    TSPEC[n] = glass * Math.pow(r(), 1.6) * (0.6 + 0.8 * clamp(0.5 + lit));
+    TROT[n] = (r() - 0.5) * 1.4;
+    // landing time: the floor is laid from the centre outwards, each row flowing along its line
+    const dc = Math.hypot(t.x - CX, t.y - CY), th = Math.atan2(t.y - CY, t.x - CX);
+    const lv = t.lvl >= 0 ? t.lvl : Math.floor(Dat(t.x, t.y) / t.s);
+    const jt = r() * 0.05;
+    let ta;
+    if (t.zone === 6) {
+      if (t.lab === 1) ta = 0.45 + (t.x - SALVE_BOX[0]) / (SALVE_BOX[2] - SALVE_BOX[0]) * 1.25 + lv * 0.03 + jt;
+      else if (t.lab === 2 || t.lab === 3) ta = 1.2 + clamp((t.x - 1330) / 540) * 0.65 + jt;
+      else { const af = (wrapA(th - Math.PI / 2) + Math.PI) / TAU; ta = 1.75 + Math.min(lv, 22) * 0.045 + af * 0.45 + jt; }
+    } else if (t.zone === 5) {
+      const up = Math.abs(wrapA(th - Math.PI / 2)) / Math.PI;
+      ta = 2.55 + up * 1.0 + (482 - dc) / 160 * 0.2 + jt;
+    } else if (t.zone === 4) {
+      let du = -1; for (let s = 0; s < 2; s++) { if (dolphinLabel(t.x, t.y, DREST[s]) >= 0) { let best = 1e9, bu = 0; const D = DREST[s];
+        for (let i = 0; i < D.N; i++) { const [d, u] = segD(t.x, t.y, D.P[i], D.P[i + 1]); if (d < best) { best = d; bu = (i + u) / D.N; } } du = bu; } }
+      if (du >= 0) ta = 3.3 + du * 0.9 + jt;
+      else ta = 3.35 + clamp((dc - 482) / 1300) * 1.7 + Math.min(lv, 3) * 0.05 + r() * 0.1;
+    } else if (t.zone === 3) ta = 4.6 + perim(t.x, t.y) * 1.25 + jt;
+    else if (t.zone === 2) ta = 5.0 + perim(t.x, t.y) * 1.3 + jt;
+    else ta = 5.55 + perim(t.x, t.y) * 1.0 + jt;
+    TA[n] = ta;
+    TDZ[n] = -1; for (let s = 0; s < 2; s++) { const bb = DREST[s].bb; if (t.x > bb[0] - 30 && t.x < bb[2] + 30 && t.y > bb[1] - 30 && t.y < bb[3] + 30 && t.zone === 4) TDZ[n] = s; }
+  }
+  DZ = []; for (let n = 0; n < NT; n++) if (TDZ[n] >= 0) DZ.push(n);
+  TILES = T;
+
+  // 5. textures: mortar bed, stone speckle, grain, vignette
+  const mc = noiseCanvas(512, 3, (x, y, vn, r) => { const n = vn(x, y, 8) * 0.55 + vn(x, y, 32) * 0.37 + r() * 0.08; const k = 0.86 + 0.2 * n;
+    return [176 * k, 165 * k, 146 * k, 255]; });
+  { const g2 = mc.getContext('2d'); const r2 = rng(5); g2.strokeStyle = 'rgba(90,78,60,0.07)'; g2.lineWidth = 2;
+    for (let i = 0; i < 26; i++) { const x = r2() * 512, y = r2() * 512, rr = 60 + r2() * 160, a = r2() * TAU; g2.beginPath(); g2.arc(x, y, rr, a, a + 0.9 + r2()); g2.stroke(); } }
+  mortarPat = ctx.createPattern(mc, 'repeat');
+  const sc = noiseCanvas(256, 9, (x, y, vn, r) => { const n = vn(x, y, 16) * 0.6 + vn(x, y, 64) * 0.34 + r() * 0.06; const v = 128 + (n - 0.5) * 120 + (r() < 0.012 ? -60 : 0);
+    return [v, v, v, 255]; });
+  stonePat = ctx.createPattern(sc, 'repeat');
+  for (let k = 0; k < 3; k++) { const c = mk(960, 540), g3 = c.getContext('2d'), id = g3.createImageData(960, 540), r3 = rng(100 + k);
+    for (let i = 0; i < id.data.length; i += 4) { const v = 128 + (r3() - 0.5) * 90; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; }
+    g3.putImageData(id, 0, 0); grains.push(c); }
+  vign = mk(W, H); { const g4 = vign.getContext('2d'); const gr = g4.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.05);
+    gr.addColorStop(0, 'rgba(20,10,0,0)'); gr.addColorStop(1, 'rgba(20,10,0,0.5)'); g4.fillStyle = gr; g4.fillRect(0, 0, W, H); }
+}
+
+// ── camera: close on the letters, then rises to show the whole floor ──
+function camera(t) {
+  const e = smoother((t - 0.3) / 6.5);
+  const z = Math.exp(lerp(Math.log(2.45), Math.log(0.585), e));
+  const cx = CX, cy = lerp(872, CY, sstep(clamp(e * 1.6)));
+  const rot = -0.03 * (1 - sstep(clamp(e * 1.3)));
+  return { z, cx, cy, rot };
+}
+
+// dolphin label per swim state (cached per step)
+const stateCache = new Map();
+function dzState(step) {
+  if (stateCache.has(step)) return stateCache.get(step);
+  const ts = step / SWIM_STEP, amp = swimAmp(ts), out = new Int8Array(DZ.length);
+  const poses = [dolphinPose(-1, ts, amp), dolphinPose(1, ts, amp)];
+  for (let i = 0; i < DZ.length; i++) { const n = DZ[i]; const l = dolphinLabel(TX[n], TY[n], poses[TDZ[n]]); out[i] = l >= 0 ? l : LABEL0[(TY[n] | 0) * WW + (TX[n] | 0)]; }
+  stateCache.set(step, out); if (stateCache.size > 8) stateCache.delete(stateCache.keys().next().value);
+  return out;
+}
+
+function quad(p, n, ox = 0, oy = 0, sc = 1, rot = 0) {
+  const x = TX[n] + ox, y = TY[n] + oy, o = n * 8;
+  if (rot === 0 && sc === 1) { p.moveTo(x + TCOR[o], y + TCOR[o + 1]); p.lineTo(x + TCOR[o + 2], y + TCOR[o + 3]); p.lineTo(x + TCOR[o + 4], y + TCOR[o + 5]); p.lineTo(x + TCOR[o + 6], y + TCOR[o + 7]); p.closePath(); return; }
+  const c = Math.cos(rot) * sc, s = Math.sin(rot) * sc;
+  for (let q = 0; q < 4; q++) { const u = TCOR[o + q * 2], v = TCOR[o + q * 2 + 1]; const X = x + u * c - v * s, Y = y + u * s + v * c; q ? p.lineTo(X, Y) : p.moveTo(X, Y); }
+  p.closePath();
+}
+
+window.draw = ({ t, cam: camO }) => {
+  const cam = camO || camera(t), z = cam.z, c = Math.cos(cam.rot), s = Math.sin(cam.rot);
+  const M = [z * c, z * s, -z * s, z * c, W / 2 - z * (c * cam.cx - s * cam.cy), H / 2 - z * (s * cam.cx + c * cam.cy)];
+  const vr = Math.hypot(W, H) / 2 / z + 30, vx0 = cam.cx - vr, vx1 = cam.cx + vr, vy0 = cam.cy - vr, vy1 = cam.cy + vr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  ctx.fillStyle = '#2a241e'; ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(...M);
+  // mortar bed + sinopia
+  ctx.fillStyle = mortarPat; ctx.fillRect(0, 0, WW, WH);
+  ctx.globalAlpha = 0.55; ctx.drawImage(sinopia, 0, 0, WW, WH); ctx.globalAlpha = 1;
+
+  // swim state
+  const step = Math.floor(t * SWIM_STEP), cur = t >= 4.4 ? dzState(step) : null, prev = t >= 4.4 ? dzState(step - 1) : null;
+  const flipU = (t - step / SWIM_STEP) / 0.08;
+  const dzIndex = new Map(); if (cur) for (let i = 0; i < DZ.length; i++) dzIndex.set(DZ[i], i);
+
+  const buckets = Array.from({ length: NL * NV }, () => new Path2D());
+  const shadow = new Path2D(), hl = new Path2D();
+  const flying = [], flips = [];
+  for (let n = 0; n < NT; n++) {
+    const x = TX[n], y = TY[n]; if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
+    const ta = TA[n]; if (t < ta - FD) continue;
+    if (t < ta + 0.14) { flying.push(n); continue; }
+    let bk = TBK[n];
+    if (cur && TDZ[n] >= 0) { const i = dzIndex.get(n), ln = cur[i], lp = prev[i];
+      if (ln !== lp && flipU < 1) { flips.push([n, lp, ln]); continue; }
+      bk = ln * NV + (bk % NV); }
+    quad(buckets[bk], n); quad(shadow, n, 1.3, 1.6);
+    const o = n * 8, e = THL[n], e0 = e * 2, e1 = ((e + 1) % 4) * 2, e2 = ((e + 2) % 4) * 2;
+    hl.moveTo(x + TCOR[o + (e + 3) % 4 * 2] * 0.92, y + TCOR[o + (e + 3) % 4 * 2 + 1] * 0.92); hl.lineTo(x + TCOR[o + e0] * 0.92, y + TCOR[o + e0 + 1] * 0.92); hl.lineTo(x + TCOR[o + e1] * 0.92, y + TCOR[o + e1 + 1] * 0.92);
+  }
+  ctx.fillStyle = 'rgba(52,40,28,0.55)'; ctx.fill(shadow);
+  for (let b = 0; b < buckets.length; b++) { ctx.fillStyle = BUCKET[b]; ctx.fill(buckets[b]); }
+  ctx.strokeStyle = 'rgba(255,250,236,0.32)'; ctx.lineWidth = 1.1; ctx.lineJoin = 'round'; ctx.stroke(hl);
+  // re-tiling flips (dolphins swimming)
+  for (const [n, lp, ln] of flips) {
+    const u = clamp(flipU), sq = Math.abs(Math.cos(Math.PI * u)), lab = u < 0.5 ? lp : ln;
+    const p = new Path2D(); const x = TX[n], y = TY[n], o = n * 8, ang = Math.atan2(TCOR[o + 3] - TCOR[o + 1], TCOR[o + 2] - TCOR[o]);
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    for (let q = 0; q < 4; q++) { const u0 = TCOR[o + q * 2], v0 = TCOR[o + q * 2 + 1]; const lu = u0 * ca + v0 * sa, lv = (-u0 * sa + v0 * ca) * Math.max(0.3, sq);
+      const X = x + lu * ca - lv * sa, Y = y + lu * sa + lv * ca; q ? p.lineTo(X, Y) : p.moveTo(X, Y); } p.closePath();
+    ctx.fillStyle = 'rgba(52,40,28,0.5)'; ctx.fill(p);
+    ctx.fillStyle = BUCKET[lab * NV + (TBK[n] % NV)]; ctx.fill(p);
+    if (u > 0.3 && u < 0.7) { ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fill(p); }
+  }
+  // tesserae in flight: drop in from above the camera, spin settles, small landing bounce
+  flying.sort((a, b) => TA[a] - TA[b]);
+  for (const n of flying) {
+    const ta = TA[n];
+    if (t < ta) {
+      const u = (t - (ta - FD)) / FD, h = (1 - u) * (1 - u);
+      const sc = 1 + 0.6 * h, rot = TROT[n] * h;
+      const p = new Path2D(); quad(p, n, 0, 0, sc, rot);
+      const sp = new Path2D(); quad(sp, n, 2 + 16 * h, 3 + 20 * h, 1 + 0.35 * h, rot);
+      ctx.globalAlpha = clamp(u * 4) * (0.5 - 0.25 * h); ctx.fillStyle = 'rgb(40,28,18)'; ctx.fill(sp);
+      ctx.globalAlpha = clamp(u * 6); ctx.fillStyle = BUCKET[TBK[n]]; ctx.fill(p);
+      ctx.globalAlpha = 1;
+    } else {
+      const v = (t - ta) / 0.14, sc = 1 - 0.07 * Math.sin(Math.PI * v) * (1 - v);
+      const p = new Path2D(); quad(p, n, 0, 0, sc + 0.02 * (1 - v), 0);
+      const sp = new Path2D(); quad(sp, n, 1.3, 1.6); ctx.fillStyle = 'rgba(52,40,28,0.55)'; ctx.fill(sp);
+      ctx.fillStyle = BUCKET[TBK[n]]; ctx.fill(p);
+    }
+  }
+  // stone speckle in world space
+  stonePat.setTransform(new DOMMatrix([1, 0, 0, 1, 0, 0]));
+  ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.28; ctx.fillStyle = stonePat; ctx.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+
+  // raking light sweep with glints on glass and gold tesserae
+  const sw = seg(t, 6.75, 8.85);
+  if (sw > 0 && sw < 1) {
+    const p = lerp(-500, WW + 0.55 * WH + 500, sstep(sw));
+    const G = [new Path2D(), new Path2D(), new Path2D(), new Path2D()], stars = [];
+    for (let n = 0; n < NT; n++) { if (t < TA[n] + 0.14) continue; const d = (TX[n] + 0.55 * TY[n] - p) / 170; if (d < -2.5 || d > 2.5) continue;
+      const gI = TSPEC[n] * Math.exp(-d * d); if (gI < 0.08) continue;
+      const lvl = Math.min(3, Math.floor(gI * 4.5)); quad(G[lvl], n); if (gI > 0.62 && TLAB[n] === 3) stars.push([TX[n], TY[n], gI]); }
+    ctx.globalCompositeOperation = 'screen';
+    G.forEach((pp, i) => { ctx.fillStyle = `rgba(255,238,196,${0.3 + i * 0.22})`; ctx.fill(pp); });
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    for (const [x, y, gI] of stars) { const X = M[0] * x + M[2] * y + M[4], Y = M[1] * x + M[3] * y + M[5]; const L = 9 + 16 * gI;
+      const gr = ctx.createRadialGradient(X, Y, 0, X, Y, L); gr.addColorStop(0, 'rgba(255,245,210,0.9)'); gr.addColorStop(1, 'rgba(255,220,150,0)');
+      ctx.fillStyle = gr; ctx.fillRect(X - L, Y - 1.2, 2 * L, 2.4); ctx.fillRect(X - 1.2, Y - L, 2.4, 2 * L); }
+    // broad warm band
+    ctx.setTransform(...M); ctx.globalCompositeOperation = 'soft-light';
+    const k = 1 / Math.hypot(1, 0.55), gx0 = p * k * k, gy0 = p * 0.55 * k * k;   // gradient across the band
+    const gr = ctx.createLinearGradient(gx0 - 520 * k, gy0 - 520 * 0.55 * k, gx0 + 520 * k, gy0 + 520 * 0.55 * k);
+    gr.addColorStop(0, 'rgba(255,220,160,0)'); gr.addColorStop(0.5, `rgba(255,228,176,${0.85 * Math.sin(Math.PI * sw)})`); gr.addColorStop(1, 'rgba(255,220,160,0)');
+    ctx.fillStyle = gr; ctx.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // screen-space finish: warm light from the top left, vignette, grain, fades
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const lg = ctx.createLinearGradient(0, 0, W, H); lg.addColorStop(0, 'rgba(255,236,200,0.10)'); lg.addColorStop(1, 'rgba(40,20,0,0.12)');
+  ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = lg; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(vign, 0, 0);
+  ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.05; ctx.drawImage(grains[0], 0, 0, W, H); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  const fade = Math.max(1 - seg(t, 0, 0.55), seg(t, 9.25, 9.97));
+  if (fade > 0) { ctx.fillStyle = `rgba(14,9,5,${sstep(fade)})`; ctx.fillRect(0, 0, W, H); }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+
+// sound cues: tessera clicks (binned), camera rise, lyre phrases, glints, dolphin swishes
+window.events = () => {
+  const ev = [], bins = new Map();
+  for (let n = 0; n < NT; n++) { const b = Math.round(TA[n] * 60); bins.set(b, (bins.get(b) || 0) + 1); }
+  for (const [b, c] of [...bins.entries()].sort((a, b) => a[0] - b[0])) if (b / 60 < DUR) ev.push({ k: 'tick', t: b / 60, v: c });
+  ev.push({ k: 'lyre', t: 2.05, v: 0 }, { k: 'lyre', t: 3.35, v: 1 }, { k: 'whoosh', t: 2.6, d: 4.2 },
+    { k: 'swish', t: 4.5 }, { k: 'swish', t: 6.3 }, { k: 'swish', t: 8.1 }, { k: 'glint', t: 6.8, d: 2.1 }, { k: 'chord', t: 8.55 });
+  return ev;
+};
+window.ready = (async () => { await document.fonts.load('700 150px Cinzel'); await document.fonts.ready; build(); window.NT = NT; })();
+</script>
+</body></html>
