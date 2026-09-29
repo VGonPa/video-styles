@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── greek-pottery · Greek black-figure amphora ────────────────────────────────────────────────
+// A neck amphora turns in a museum spotlight. Its bands (palmette chain, tongues, meander, rays) spin and lock
+// like a combination dial; the body frieze shows four runners in profile, black silhouettes with incised detail and
+// added red, while horses gallop the other way in the lower band and the meander "track" runs beneath the runners.
+// The vase then unrolls into a flat frieze (a cylinder-to-plane rollout), the camera follows the leader past the
+// turning post (an owl watches from the capital), he wins, and a laurel grows around the painted title.
+// Rendering: every band is painted into one wrap-around texture (u = angle around the vase, v = height); each frame
+// the frieze and horse rows are redrawn, then a per-pixel sampler projects the texture onto the surface of
+// revolution (with a blend towards the flat rollout) and shades it (clay satin, glossy glaze highlights).
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const sstep = u => u * u * (3 - 2 * u);
+const eBack = u => { const c = 1.9; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ── palette ──
+const CLAY = '#d27a41', INC = '#dc8a55', GLAZE = '#16100c', RED = '#8e3321', WHITE = '#eadcc0';
+
+// ── texture space ──
+const S = 2;                       // texels per unit
+const TW = 2080, R0 = TW / TAU;    // u-units around the vase; R0 = design radius of the frieze
+const VH = 960;                    // vase height in units
+const TWt = TW * S, THt = VH * S;
+const VASE_TOP = 60;               // screen y of the lip at zoom 1
+
+// vase profile r(y)
+const PROF = [[0, 124], [10, 131], [40, 127], [47, 103], [70, 96], [130, 94], [200, 104], [240, 140], [265, 190], [300, 250], [345, 300], [420, 330], [500, 327], [590, 302], [680, 258], [760, 200], [830, 142], [868, 110], [890, 100], [903, 112], [930, 156], [948, 166], [960, 166]];
+function monotone(P) {
+  const n = P.length, xs = P.map(p => p[0]), ys = P.map(p => p[1]), d = [], m = new Array(n);
+  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+  m[0] = d[0]; m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+  for (let i = 0; i < n - 1; i++) { if (d[i] === 0) { m[i] = m[i + 1] = 0; continue; } const a = m[i] / d[i], b = m[i + 1] / d[i]; const s = a * a + b * b; if (s > 9) { const tt = 3 / Math.sqrt(s); m[i] = tt * a * d[i]; m[i + 1] = tt * b * d[i]; } }
+  return x => { let i = 0; while (i < n - 2 && x > xs[i + 1]) i++; const h = xs[i + 1] - xs[i], u = clamp((x - xs[i]) / h); const u2 = u * u, u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * ys[i] + (u3 - 2 * u2 + u) * h * m[i] + (-2 * u3 + 3 * u2) * ys[i + 1] + (u3 - u2) * h * m[i + 1]; };
+}
+const rOf = monotone(PROF);
+// pattern bands: id, y0, y1, design radius Rb (the band is painted in arc units, stretched by R0/Rb into u)
+const BANDS = [[1, 52, 222, 100], [2, 252, 336, 250], [3, 346, 640, R0], [4, 640, 700, 285], [5, 712, 812, 215], [6, 822, 878, 135]];
+const Rrow = new Float32Array(THt), dRrow = new Float32Array(THt), RFrow = new Float32Array(THt), BIDrow = new Uint8Array(THt);
+for (let j = 0; j < THt; j++) {
+  const y = (j + .5) / S; Rrow[j] = rOf(y); dRrow[j] = (rOf(y + 1) - rOf(y - 1)) / 2;
+  let id = 0, rf = 0;
+  for (const b of BANDS) if (y >= b[1] && y < b[2]) { id = b[0]; rf = b[3]; }
+  if (!id) { let pa = null, pb = null; for (const b of BANDS) { if (b[2] <= y) pa = b; if (b[1] > y && !pb) pb = b; }
+    if (!pa) rf = pb[3]; else if (!pb) rf = pa[3]; else rf = lerp(pa[3], pb[3], (y - pa[2]) / (pb[1] - pa[2])); }
+  RFrow[j] = rf; BIDrow[j] = id;
+}
+
+// ── canvases ──
+function mk(w, h, rf = false) { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d', { willReadFrequently: rf })]; }
+const FZ0 = 346, FZ1 = 640, HS0 = 712, HS1 = 812;
+const [fzC, fz] = mk(TWt, (FZ1 - FZ0) * S, true);
+const [hsC, hs] = mk(TWt, (HS1 - HS0) * S, true);
+const [vaseC, vctx] = mk(W, H);
+const vaseImg = vctx.createImageData(W, H), out32 = new Uint32Array(vaseImg.data.buffer);
+let tex, tex32, noiseF;
+const [bgC, bg] = mk(W, H);
+const grains = [];
+
+// ── drawing helpers ──
+function path(g, P, closed = true) { // Catmull-Rom through points; a 3rd value of 0 makes a sharp corner
+  const n = P.length; g.moveTo(P[0][0], P[0][1]);
+  const tan = i => { const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], k = P[i][2] === undefined ? 1 : P[i][2]; if (!closed && (i === 0 || i === n - 1)) return [0, 0]; return [(b[0] - a[0]) / 6 * k, (b[1] - a[1]) / 6 * k]; };
+  const m = closed ? n : n - 1;
+  for (let i = 0; i < m; i++) { const p1 = P[i], p2 = P[(i + 1) % n], t1 = tan(i), t2 = tan((i + 1) % n);
+    g.bezierCurveTo(p1[0] + t1[0], p1[1] + t1[1], p2[0] - t2[0], p2[1] - t2[1], p2[0], p2[1]); }
+  if (closed) g.closePath();
+}
+function capsule(g, ax, ay, bx, by, wa, wb) {
+  const an = Math.atan2(by - ay, bx - ax);
+  g.moveTo(ax + Math.cos(an + Math.PI / 2) * wa / 2, ay + Math.sin(an + Math.PI / 2) * wa / 2);
+  g.arc(ax, ay, wa / 2, an + Math.PI / 2, an + Math.PI * 1.5);
+  g.arc(bx, by, wb / 2, an - Math.PI / 2, an + Math.PI / 2);
+  g.closePath();
+}
+const BASE = [1, 0, 0, 1, 0, 0];
+// a black-figure "part": clay incision halo, then glaze fill (incision separates overlapping silhouettes)
+function part(g, build, inc = 1.3) {
+  g.beginPath(); build(); g.save(); g.setTransform(...BASE); g.lineJoin = 'round';
+  g.lineWidth = inc * 2 * S; g.strokeStyle = INC; g.stroke(); g.fillStyle = GLAZE; g.fill(); g.restore();
+}
+function incise(g, fn, w = 1.1, col = INC) { g.beginPath(); fn(); g.save(); g.setTransform(...BASE); g.lineCap = 'round'; g.lineWidth = w * S; g.strokeStyle = col; g.stroke(); g.restore(); }
+
+// ── palmette / lotus ornaments ──
+function palmette(g, x, y, h, n, spread, dir = -Math.PI / 2, redEvery = 2) {
+  for (let i = 0; i < n; i++) {
+    const a = dir + (i / (n - 1) - .5) * spread, len = h * (0.72 + 0.28 * Math.cos((i / (n - 1) - .5) * Math.PI));
+    const w = h * 0.2 * (0.9 + 0.2 * Math.cos((i / (n - 1) - .5) * Math.PI));
+    const tx = x + Math.cos(a) * len, ty = y + Math.sin(a) * len, px = -Math.sin(a), py = Math.cos(a);
+    g.beginPath(); g.moveTo(x + Math.cos(a) * h * .12, y + Math.sin(a) * h * .12);
+    g.quadraticCurveTo(x + Math.cos(a) * len * .7 + px * w, y + Math.sin(a) * len * .7 + py * w, tx, ty);
+    g.quadraticCurveTo(x + Math.cos(a) * len * .7 - px * w, y + Math.sin(a) * len * .7 - py * w, x + Math.cos(a) * h * .12, y + Math.sin(a) * h * .12);
+    g.fillStyle = (i % redEvery === 1) ? RED : GLAZE; g.fill();
+  }
+  g.beginPath(); g.arc(x, y, h * .17, dir - Math.PI / 2 - .3, dir + Math.PI / 2 + .3); g.closePath(); g.fillStyle = GLAZE; g.fill();
+  g.beginPath(); g.arc(x, y, h * .1, dir - Math.PI / 2, dir + Math.PI / 2); g.strokeStyle = INC; g.lineWidth = 1.1; g.stroke();
+}
+function lotus(g, x, y, h) {
+  g.fillStyle = GLAZE; g.beginPath();
+  g.moveTo(x - h * .12, y); g.quadraticCurveTo(x - h * .5, y - h * .45, x - h * .42, y - h * .78); g.quadraticCurveTo(x - h * .22, y - h * .42, x, y - h * .2);
+  g.quadraticCurveTo(x + h * .22, y - h * .42, x + h * .42, y - h * .78); g.quadraticCurveTo(x + h * .5, y - h * .45, x + h * .12, y); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(x - h * .1, y - h * .12); g.quadraticCurveTo(x - h * .14, y - h * .7, x, y - h); g.quadraticCurveTo(x + h * .14, y - h * .7, x + h * .1, y - h * .12); g.closePath(); g.fillStyle = RED; g.fill();
+  g.beginPath(); g.rect(x - h * .16, y - h * .12, h * .32, h * .1); g.fillStyle = GLAZE; g.fill();
+}
+function spiralTendril(g, x0, y0, x1, y1, r, sgn) {
+  g.beginPath(); g.moveTo(x0, y0); g.quadraticCurveTo((x0 + x1) / 2, y1 + 12, x1, y1);
+  const cx = x1, cy = y1 - r;
+  for (let a = 0; a <= TAU * 1.15; a += .1) { const rr = r * (1 - a / (TAU * 1.35)), an = Math.PI / 2 - sgn * a; g.lineTo(cx + rr * Math.cos(an), cy + rr * Math.sin(an)); }
+  g.strokeStyle = GLAZE; g.lineWidth = 3.2; g.lineCap = 'round'; g.stroke();
+}
+
+// ── static bands (painted once) ──
+function paintStatic(g) {
+  g.setTransform(S, 0, 0, S, 0, 0);
+  g.fillStyle = CLAY; g.fillRect(0, 0, TW, VH);
+  g.fillStyle = GLAZE;
+  for (const [a, b] of [[0, 46], [52, 58], [216, 252], [336, 346], [643, 647], [693, 697], [700, 712], [812, 822], [878, 905], [909, 960]]) g.fillRect(0, a, TW, b - a);
+  // neck: palmette–lotus chain (arc units, Rb 100)
+  band(g, 100, (gg, L) => { const N = 6, P = L / N;
+    for (let i = -1; i <= N; i++) { const x = i * P;
+      palmette(gg, x, 198, 98, 9, 2.3); lotus(gg, x + P / 2, 198, 74);
+      gg.beginPath(); gg.moveTo(x + 8, 200); gg.bezierCurveTo(x + P * .2, 214, x + P * .3, 214, x + P / 2 - 7, 200); gg.moveTo(x + P / 2 + 7, 200); gg.bezierCurveTo(x + P * .7, 214, x + P * .8, 214, x + P - 8, 200);
+      gg.strokeStyle = GLAZE; gg.lineWidth = 3; gg.stroke(); } });
+  // shoulder: tongues, alternating glaze and added red
+  band(g, 250, (gg, L) => { const N = 88, P = L / N;
+    for (let i = 0; i <= N; i++) { const x = i * P + 1.4, w = P - 2.8; gg.beginPath(); gg.moveTo(x, 252); gg.lineTo(x, 312); gg.arc(x + w / 2, 312, w / 2, Math.PI, 0, true); gg.lineTo(x + w, 252); gg.closePath();
+      gg.fillStyle = i % 2 ? RED : GLAZE; gg.fill(); } });
+  // meander (key) band, Rb 285
+  band(g, 285, (gg, L) => { const N = 41, P = L / N; gg.strokeStyle = GLAZE; gg.lineWidth = 5.2; gg.lineJoin = 'miter'; gg.lineCap = 'butt';
+    for (let i = -1; i <= N; i++) { const x = i * P, s = P / 44; gg.beginPath();
+      gg.moveTo(x, 688); gg.lineTo(x + P, 688);
+      gg.moveTo(x + 3 * s, 688); gg.lineTo(x + 3 * s, 653); gg.lineTo(x + 38 * s, 653); gg.lineTo(x + 38 * s, 680); gg.lineTo(x + 15 * s, 680); gg.lineTo(x + 15 * s, 664); gg.lineTo(x + 27 * s, 664); gg.lineTo(x + 27 * s, 671);
+      gg.stroke(); } });
+  // rays, Rb 135
+  band(g, 135, (gg, L) => { const N = 30, P = L / N;
+    for (let i = -1; i <= N; i++) { const x = i * P; gg.beginPath(); gg.moveTo(x + P * .08, 878); gg.quadraticCurveTo(x + P * .42, 850, x + P / 2, 826); gg.quadraticCurveTo(x + P * .58, 850, x + P * .92, 878); gg.closePath(); gg.fillStyle = GLAZE; gg.fill(); } });
+  // reserved lines on lip & foot
+  g.fillStyle = CLAY; g.fillRect(0, 22, TW, 2.2); g.fillRect(0, 930, TW, 2.2);
+}
+// paint a band in arc units: the context is stretched by R0/Rb so that it wraps exactly once
+function band(g, Rb, fn) { const L = TAU * Rb; g.save(); g.setTransform(S * R0 / Rb, 0, 0, S, 0, 0); fn(g, L); g.restore(); }
+
+// ── noise (periodic in u) ──
+function buildNoise() {
+  const r = rng(77); const mkLat = (cu, cv_) => { const a = new Float32Array(cu * cv_); for (let i = 0; i < a.length; i++) a[i] = r(); return a; };
+  const layers = [[52, 30, .2], [208, 120, .17], [832, 240, .12]];
+  const lats = layers.map(([cu, cvv]) => mkLat(cu, cvv));
+  noiseF = new Float32Array(TWt * THt);
+  const rowStri = new Float32Array(THt); for (let j = 0; j < THt; j++) rowStri[j] = (r() - .5) * .03 + Math.sin(j * .09) * .008;
+  for (let j = 0; j < THt; j++) {
+    for (let li = 0; li < layers.length; li++) {
+      const [cu, cvv, amp] = layers[li], L = lats[li], fy = j / THt * (cvv - 1), y0 = fy | 0, ty = sstep(fy - y0);
+      for (let i = 0; i < TWt; i++) { const fx = i / TWt * cu, x0 = fx | 0, tx = sstep(fx - x0), x1 = (x0 + 1) % cu;
+        const a = L[y0 * cu + x0], b = L[y0 * cu + x1], c = L[(y0 + 1) * cu + x0], d = L[(y0 + 1) * cu + x1];
+        noiseF[j * TWt + i] += amp * (lerp(lerp(a, b, tx), lerp(c, d, tx), ty) - .5); }
+    }
+    for (let i = 0; i < TWt; i++) noiseF[j * TWt + i] = 1 + noiseF[j * TWt + i] * .42 + rowStri[j] + (r() - .5) * .05;
+  }
+}
+function writeTex(data, row0, rows) { // copy canvas pixels into the texture, modulated by the firing mottle
+  const base = row0 * TWt;
+  for (let p = 0, n = rows * TWt; p < n; p++) { const f = noiseF[base + p], q = (base + p) * 4, s = p * 4;
+    tex[q] = data[s] * f; tex[q + 1] = data[s + 1] * f; tex[q + 2] = data[s + 2] * f; tex[q + 3] = 255; }
+}
+
+// ── figures ──
+const GY = 628; // frieze ground line
+function legPose(psi, v) {
+  const th = lerp(0.08 + 0.62 * Math.sin(psi), 0, v);
+  const kf = lerp(0.22 + 1.35 * Math.pow(Math.max(0, Math.cos(psi + 0.35)), 1.3), 0.04, v);
+  const pf = lerp(0.18 + 0.5 * Math.max(0, Math.cos(psi + 0.35)), 0.02, v);
+  return { th, sa: th - kf, pf };
+}
+function runnerGeom(phase, v, lean) {
+  const phi = TAU * phase, legs = [], arms = [];
+  for (const [side, off] of [['near', 0], ['far', Math.PI]]) {
+    const L = legPose(phi + off, v); if (v > 0) L.th += (side === 'near' ? .13 : -.1) * v, L.sa += (side === 'near' ? .1 : -.1) * v;
+    const knee = [Math.sin(L.th) * 64, Math.cos(L.th) * 64], d = [Math.sin(L.sa), Math.cos(L.sa)];
+    const ankle = [knee[0] + d[0] * 58, knee[1] + d[1] * 58], perp = [d[1], -d[0]];
+    const f = [perp[0] * Math.cos(L.pf) + d[0] * Math.sin(L.pf), perp[1] * Math.cos(L.pf) + d[1] * Math.sin(L.pf)];
+    const heel = [ankle[0] - perp[0] * 5 + d[0] * 4, ankle[1] - perp[1] * 5 + d[1] * 4], toe = [ankle[0] + f[0] * 24 + d[0] * 3, ankle[1] + f[1] * 24 + d[1] * 3];
+    legs.push({ side, knee, ankle, heel, toe, d, psi: phi + off });
+    const psiA = phi + off + Math.PI;
+    let a = -0.95 * Math.sin(psiA), ef = 1.35 + 0.3 * Math.sin(psiA);
+    const aV = side === 'near' ? -2.2 : 2.15, efV = side === 'near' ? -.28 : .22;
+    a = lerp(a, aV, v); ef = lerp(ef, efV, v);
+    arms.push({ side, a, ef });
+  }
+  let low = -1e9; for (const l of legs) low = Math.max(low, l.heel[1] + 4, l.toe[1] + 2.5);
+  const lift = (1 - v) * (3 + 3 * Math.cos(2 * phi * 2));
+  return { legs, arms, hipY: -low - lift, lean: lerp(lean, 0.02, v) };
+}
+function drawRunner(g, u, phase, v, opt) {
+  const G = runnerGeom(phase, v, 0.2), hx = u, hy = GY + G.hipY;
+  const toW = (p) => [hx + p[0], hy + p[1]];
+  const lean = G.lean, cl = Math.cos(lean), sl = Math.sin(lean);
+  const tor = (x, y) => [hx + x * cl - y * sl, hy + x * sl + y * cl]; // torso-local → frieze
+  const sh = tor(-3, -74);
+  const armGeom = A => { const el = [sh[0] + Math.sin(A.a) * 42, sh[1] + Math.cos(A.a) * 42], fa = A.a + A.ef, wr = [el[0] + Math.sin(fa) * 38, el[1] + Math.cos(fa) * 38], hd = [wr[0] + Math.sin(fa) * 11, wr[1] + Math.cos(fa) * 11]; return { el, wr, hd, fa }; };
+  const drawArm = (A) => { const q = armGeom(A); part(g, () => { capsule(g, sh[0], sh[1], q.el[0], q.el[1], 17, 11.5); capsule(g, q.el[0], q.el[1], q.wr[0], q.wr[1], 11, 7); capsule(g, q.wr[0], q.wr[1], q.hd[0], q.hd[1], 8, 5.5);
+      const ta = q.fa + (A.side === 'near' ? -.9 : .9); capsule(g, q.wr[0], q.wr[1], q.wr[0] + Math.sin(ta) * 8, q.wr[1] + Math.cos(ta) * 8, 4.5, 3.4); });
+    incise(g, () => { const m = [(sh[0] + q.el[0]) / 2, (sh[1] + q.el[1]) / 2]; g.moveTo(q.el[0] - 3, q.el[1] - 1); g.lineTo(q.el[0] + 2, q.el[1] + 3); g.moveTo(m[0] + 2, m[1] - 5); g.quadraticCurveTo(m[0] + 4.5, m[1], m[0] + 1.5, m[1] + 6); }); };
+  const drawLeg = (Lg) => { const K = toW(Lg.knee), A = toW(Lg.ankle), He = toW(Lg.heel), T = toW(Lg.toe), hip = [hx, hy];
+    const calf = [K[0] + (A[0] - K[0]) * .35 - Lg.d[1] * 3.5, K[1] + (A[1] - K[1]) * .35 + Lg.d[0] * 3.5];
+    part(g, () => { capsule(g, hip[0], hip[1], K[0], K[1], 30, 15); capsule(g, K[0], K[1], calf[0], calf[1], 14, 17.5); capsule(g, calf[0], calf[1], A[0], A[1], 17, 8); capsule(g, He[0], He[1], T[0], T[1], 10, 4.5); });
+    incise(g, () => { g.moveTo(K[0] + Lg.d[1] * 1 - 4, K[1] - 3); g.quadraticCurveTo(K[0] + 5, K[1] - 1, K[0] + 2, K[1] + 5); // knee cap
+      g.moveTo(calf[0] - Lg.d[1] * 1.5, calf[1] - 8); g.quadraticCurveTo(calf[0] + Lg.d[1] * -4, calf[1] + 4, A[0] - Lg.d[1] * 2, A[1] - 8); }); };
+  const L = G.legs, far = L.find(l => l.side === 'far'), near = L.find(l => l.side === 'near');
+  const aF = G.arms.find(a => a.side === 'far'), aN = G.arms.find(a => a.side === 'near');
+  drawArm(aF); drawLeg(far);
+  // torso + neck + head
+  const headA = lean * .4, nb = tor(3, -80), hc = [nb[0] + Math.sin(lean) * 12, nb[1] - Math.cos(lean) * 12];
+  const hd = (x, y) => { const c = Math.cos(headA), s = Math.sin(headA); return [hc[0] + x * c - y * s, hc[1] + x * s + y * c]; };
+  const TORSO = [[9, 5], [13, -16], [11, -33], [17, -48], [20, -60], [15, -73], [7, -80], [-5, -85], [-14, -79], [-17, -64], [-12, -45], [-10, -31], [-13, -17], [-20, -4], [-16, 8], [-4, 13]];
+  const HEAD = [[-8, 2], [-13, -9], [-11, -23], [-1, -31], [9, -28], [12.5, -21, .4], [13.5, -18, .3], [20, -11, 0], [15, -9.5, 0], [16.2, -7, .3], [14, -5, 0], [17.5, -2, .5], [16, 6, 0], [7, 5], [3, 3]];
+  const HAIR = [[-4, -27], [-12, -18], [-15, -4], [-16, 9], [-11, 13, 0], [-7, 3], [-5, -8]];
+  part(g, () => { path(g, TORSO.map(p => tor(p[0], p[1]))); capsule(g, tor(1, -78)[0], tor(1, -78)[1], hc[0], hc[1] + 2, 17, 15); path(g, HEAD.map(p => hd(p[0], p[1]))); path(g, HAIR.map(p => hd(p[0], p[1]))); });
+  incise(g, () => { let p = tor(6, -60), q = tor(13, -51), c = tor(15, -60); g.moveTo(p[0], p[1]); g.quadraticCurveTo(c[0], c[1], q[0], q[1]); // pectoral
+    p = tor(-3, -64); q = tor(9, -41); c = tor(-2, -46); g.moveTo(p[0], p[1]); g.quadraticCurveTo(c[0], c[1], q[0], q[1]); // ribcage
+    for (const yy of [-33, -24]) { p = tor(5, yy); q = tor(10, yy + 1); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); }
+    p = tor(-6, -16); q = tor(8, 3); c = tor(4, -12); g.moveTo(p[0], p[1]); g.quadraticCurveTo(c[0], c[1], q[0], q[1]); // groin line
+    p = tor(-12, -73); q = tor(-7, -60); c = tor(-6, -70); g.moveTo(p[0], p[1]); g.quadraticCurveTo(c[0], c[1], q[0], q[1]); // shoulder blade
+    // head: frontal almond eye (archaic convention), ear, beard strands, hair waves
+    const e = hd(6.5, -17.5); g.moveTo(e[0] - 4.5, e[1]); g.quadraticCurveTo(e[0], e[1] - 3.4, e[0] + 4.5, e[1] - .4); g.quadraticCurveTo(e[0], e[1] + 2.6, e[0] - 4.5, e[1]);
+    g.moveTo(e[0] + 1.6, e[1] - .6); g.arc(e[0] + .4, e[1] - .6, 1.2, 0, TAU);
+    const ea = hd(-3, -16); g.moveTo(ea[0] + 1, ea[1] - 4); g.quadraticCurveTo(ea[0] - 3, ea[1], ea[0] + 1, ea[1] + 3);
+    for (const k of [0, 1, 2]) { p = hd(8 + k * 2.5, -3); q = hd(9 + k * 2.4, 4); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); }
+    for (const k of [0, 1, 2]) { p = hd(-7 - k * 2.6, -12); g.moveTo(p[0], p[1]); for (let s = 1; s <= 5; s++) { const r = hd(-7 - k * 2.6 + Math.sin(s * 1.9) * 1.3, -12 + s * 4.2); g.lineTo(r[0], r[1]); } }
+  }, 1.0);
+  // added red: fillet (and beard for some runners)
+  g.save(); g.beginPath(); const f1 = hd(9.5, -26.5), f2 = hd(-11.5, -21), fc = hd(-1, -30.5); g.moveTo(f1[0], f1[1]); g.quadraticCurveTo(fc[0], fc[1], f2[0], f2[1]);
+  g.setTransform(...BASE); g.strokeStyle = RED; g.lineWidth = 2.8 * S; g.lineCap = 'round'; g.stroke(); g.restore();
+  if (opt.redBeard) { g.beginPath(); path(g, [[9, -3], [17, -2], [15.6, 5.5, 0], [8, 4.5]].map(p => hd(p[0], p[1]))); g.fillStyle = RED; g.fill(); }
+  if (opt.wreath > 0) { // olive crown in added red, leaves popping in one by one
+    for (let i = 0; i < 7; i++) { const w = clamp(opt.wreath * 7 - i), sc = w > 0 ? eBack(w) : 0; if (sc <= 0) continue;
+      const s = i / 6, p = hd(lerp(-11, 9, s), -25.5 - Math.sin(s * Math.PI) * 3.5), ang = lerp(-2.4, -0.7, s) + headA;
+      g.beginPath(); g.ellipse(p[0] + Math.cos(ang) * 4.5 * sc, p[1] + Math.sin(ang) * 4.5 * sc, 5.2 * sc, 2.1 * sc, ang, 0, TAU); g.fillStyle = RED; g.fill(); } }
+  drawLeg(near); drawArm(aN);
+}
+
+function drawHorse(g, u, phase, sgn) { // sgn -1 = faces left; local coords facing right, ground at 0
+  const Rb = 215, sx = R0 / Rb, sc = .8;
+  g.save(); g.translate(u, 809); g.scale(sgn * sx * sc, sc);
+  const phi = TAU * phase, bob = -5 * Math.max(0, Math.sin(phi + .6));
+  g.translate(0, bob); const T0 = g.getTransform();
+  // legs: [upper angle, lower angle, hoof angle] (angles from straight down, + = forward)
+  const leg = (hip, a1, a2, a3, l1, l2, w1) => { const k = [hip[0] + Math.sin(a1) * l1, hip[1] + Math.cos(a1) * l1], f = [k[0] + Math.sin(a2) * l2, k[1] + Math.cos(a2) * l2], h = [f[0] + Math.sin(a3) * 10, f[1] + Math.cos(a3) * 10];
+    capsule(g, hip[0], hip[1], k[0], k[1], w1, w1 * .55); capsule(g, k[0], k[1], f[0], f[1], w1 * .42, 4.6); capsule(g, f[0], f[1], h[0], h[1], 5, 7.5); return [k, f, h]; };
+  // a rocking gallop: forelegs reach and fold, hind legs push back
+  const fore = o => { const p = phi + o, sw = Math.sin(p); return [0.1 + 0.55 * sw, 0.1 + 0.55 * sw + 1.5 * Math.max(0, Math.sin(p + 1.3)) - .1, 0.2 + 1.1 * Math.max(0, Math.sin(p + 1.1))]; };
+  const hind = o => { const p = phi + o + 2.4, sw = Math.sin(p); return [0.05 + 0.5 * sw, -0.35 + 0.5 * sw - 0.9 * Math.max(0, Math.sin(p - 1.1)), 0.35 + 0.8 * Math.max(0, Math.sin(p - .8))]; };
+  const HF = [23, -50], HH = [-33, -56];
+  const f1 = fore(0), f2 = fore(-.6), h1 = hind(0), h2 = hind(-.6);
+  part(g, () => { leg(HF, f2[0], f2[1], f2[2], 27, 24, 14); leg(HH, h2[0], h2[1], h2[2], 27, 26, 20); });
+  const BODY = [[33, -62], [27, -46], [8, -42], [-12, -43], [-27, -47], [-36, -54], [-46, -64], [-42, -75], [-16, -71], [12, -77], [30, -72]];
+  const NECK = [[6, -77], [20, -95], [36, -110], [44, -112], [50, -106], [64, -88, .5], [66, -81, 0], [58, -79, .4], [48, -88], [40, -86], [33, -70], [32, -60]];
+  part(g, () => { path(g, BODY); path(g, NECK);
+    g.moveTo(-43, -70); g.bezierCurveTo(-62, -70, -66, -50, -70, -30); g.bezierCurveTo(-60, -44, -56, -58, -41, -62); g.closePath(); // tail
+    g.moveTo(40, -110); g.lineTo(41, -121); g.lineTo(47, -111); g.closePath(); });
+  part(g, () => { leg(HF, f1[0], f1[1], f1[2], 27, 24, 15); leg(HH, h1[0], h1[1], h1[2], 27, 26, 21); });
+  g.beginPath(); path(g, [[8, -78], [22, -97], [37, -111], [41, -107], [28, -93], [14, -74]]); g.fillStyle = RED; g.fill(); // mane in added red
+  g.beginPath(); for (let i = 0; i < 6; i++) { const s = i / 5, x = lerp(12, 36, s), y = lerp(-80, -106, s); g.moveTo(x, y); g.lineTo(x + 5, y + 7); }
+  g.moveTo(51.5, -100); g.arc(50, -100, 1.6, 0, TAU); g.moveTo(26, -66); g.quadraticCurveTo(18, -56, 23, -46); g.moveTo(-26, -68); g.quadraticCurveTo(-40, -60, -32, -48);
+  g.moveTo(56, -92); g.quadraticCurveTo(60, -86, 63, -83); g.moveTo(-50, -60); g.quadraticCurveTo(-58, -48, -62, -38);
+  g.setTransform(1, 0, 0, 1, 0, 0); g.strokeStyle = INC; g.lineWidth = 1.0 * S; g.lineCap = 'round'; g.stroke();
+  g.restore();
+}
+function drawPost(g, x) {
+  g.fillStyle = GLAZE;
+  g.beginPath(); g.moveTo(x - 12, 471); g.lineTo(x + 12, 471); g.lineTo(x + 14, 628); g.lineTo(x - 14, 628); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(x - 19, 460); g.quadraticCurveTo(x - 17, 470, x - 12, 472); g.lineTo(x + 12, 472); g.quadraticCurveTo(x + 17, 470, x + 19, 460); g.closePath(); g.fill();
+  g.fillRect(x - 24, 452, 48, 8);
+  g.beginPath(); for (const dx of [-6, 0, 6]) { g.moveTo(x + dx, 476); g.lineTo(x + dx * 1.15, 624); } g.moveTo(x - 17, 461.5); g.lineTo(x + 17, 461.5);
+  g.strokeStyle = INC; g.lineWidth = 1.1; g.stroke();
+}
+function drawOwl(g, x, y, blink, look) {
+  // body in profile (facing right), head frontal — the usual vase-painting convention
+  g.fillStyle = GLAZE; g.beginPath(); path(g, [[x - 2, y], [x + 11, y - 12], [x + 12, y - 30], [x + 4, y - 42], [x - 10, y - 40], [x - 15, y - 26], [x - 19, y - 8], [x - 26, y + 2, 0], [x - 12, y - 1]]); g.fill();
+  const hx = x + 1 + look * 2, hy = y - 49; g.beginPath(); g.ellipse(hx, hy, 14.5, 12.5, 0, 0, TAU); g.fill();
+  g.beginPath(); for (let r = 0; r < 3; r++) for (let c = 0; c < 3 - (r === 2 ? 1 : 0); c++) { const px = x - 3 + c * 5.5 + (r % 2) * 2.5, py = y - 32 + r * 7; g.moveTo(px - 2.5, py); g.quadraticCurveTo(px, py + 3.2, px + 2.5, py); }
+  g.moveTo(x - 13, y - 30); g.quadraticCurveTo(x - 7, y - 16, x - 16, y - 4); g.moveTo(x - 9, y - 34); g.quadraticCurveTo(x - 4, y - 20, x - 11, y - 6);
+  for (const dx of [-3, 2]) { g.moveTo(x + dx, y - 1); g.lineTo(x + dx - 1.5, y + 3); g.moveTo(x + dx, y - 1); g.lineTo(x + dx + 2, y + 3); }
+  g.strokeStyle = INC; g.lineWidth = 1.05; g.stroke();
+  for (const ex of [-5.8, 5.8]) { g.beginPath(); g.arc(hx + ex, hy - .5, 4.8, 0, TAU); g.fillStyle = WHITE; g.fill();
+    g.beginPath(); g.arc(hx + ex + look * 1.4, hy - .5, 2.3, 0, TAU); g.fillStyle = GLAZE; g.fill();
+    if (blink > 0) { g.beginPath(); g.rect(hx + ex - 5.2, hy - 5.5, 10.4, 10.4 * blink); g.fillStyle = GLAZE; g.fill(); } }
+  g.beginPath(); g.moveTo(hx - 1.6, hy + 3); g.lineTo(hx + 1.6, hy + 3); g.lineTo(hx, hy + 7); g.closePath(); g.fillStyle = RED; g.fill();
+  g.beginPath(); g.moveTo(hx - 12, hy - 8); g.quadraticCurveTo(hx, hy - 3, hx + 12, hy - 8); g.strokeStyle = INC; g.lineWidth = 1; g.stroke();
+}
+
+// laurel branch along the lower half of an ellipse; grows from the knot outward with staggered leaves
+function laurel(g, cx, cy, rx, ry, grow) {
+  const N = 13;
+  for (const sgn of [-1, 1]) {
+    const pt = s => { const a = Math.PI / 2 - sgn * s * Math.PI / 2 * 1.02; return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)]; };
+    const sMax = clamp(grow * 1.15); if (sMax <= 0) continue;
+    g.beginPath(); const p0 = pt(0); g.moveTo(p0[0], p0[1]); for (let s = .02; s <= sMax; s += .02) { const p = pt(s); g.lineTo(p[0], p[1]); }
+    g.strokeStyle = GLAZE; g.lineWidth = 3; g.lineCap = 'round'; g.stroke();
+    for (let i = 0; i < N; i++) { const s = (i + .6) / (N + .2), app = clamp((grow * 1.15 - s) * 7); if (app <= 0) continue; const sc = eBack(app);
+      const p = pt(s), q = pt(Math.min(1, s + .01)), dir = Math.atan2(q[1] - p[1], q[0] - p[0]), size = lerp(1.15, .62, s);
+      for (const side of [-1, 1]) { const a = dir + side * 0.62, L = 24 * size * sc;
+        const lx = p[0] + Math.cos(a) * L * .55, ly = p[1] + Math.sin(a) * L * .55;
+        g.beginPath(); g.ellipse(lx, ly, L * .55, L * .2, a, 0, TAU); g.fillStyle = GLAZE; g.fill();
+        g.beginPath(); g.moveTo(p[0] + Math.cos(a) * 3, p[1] + Math.sin(a) * 3); g.lineTo(p[0] + Math.cos(a) * L * .95, p[1] + Math.sin(a) * L * .95); g.strokeStyle = INC; g.lineWidth = .9; g.stroke(); }
+      if (i % 3 === 1 && sc > .5) { const b = dir - Math.PI / 2 * sgn; g.beginPath(); g.arc(p[0] + Math.cos(b) * 7, p[1] + Math.sin(b) * 7, 3.2 * Math.min(1, sc), 0, TAU); g.fillStyle = RED; g.fill(); }
+    }
+  }
+  const k = clamp(grow * 6); if (k > 0) { g.beginPath(); g.ellipse(cx, cy + ry, 9 * k, 6 * k, 0, 0, TAU); g.fillStyle = RED; g.fill();
+    g.beginPath(); g.moveTo(cx - 3, cy + ry + 3); g.quadraticCurveTo(cx - 14, cy + ry + 16, cx - 20 * k, cy + ry + 26 * k); g.moveTo(cx + 3, cy + ry + 3); g.quadraticCurveTo(cx + 14, cy + ry + 16, cx + 20 * k, cy + ry + 26 * k); g.strokeStyle = RED; g.lineWidth = 4; g.stroke(); }
+}
+// painted inscription: each glyph "brushed" top-down with a stagger
+function paintText(g, txt, cx, y, size, t0, stagger, dur, spacing, weight = 600) {
+  g.save(); g.font = `${weight} ${size}px Cinzel`; g.textBaseline = 'alphabetic';
+  const ws = [...txt].map(ch => g.measureText(ch).width + spacing); const total = ws.reduce((a, b) => a + b, 0) - spacing;
+  let x = cx - total / 2; const res = [];
+  [...txt].forEach((ch, i) => { const u = clamp((T - t0 - i * stagger) / dur); if (ch !== ' ') res.push(t0 + i * stagger);
+    if (u > 0 && ch !== ' ') { g.save(); g.beginPath(); g.rect(x - 4, y - size * 1.05, ws[i] + 8, size * 1.35 * eOut(u)); g.clip(); g.fillStyle = GLAZE; g.fillText(ch, x, y); g.restore(); }
+    x += ws[i]; });
+  g.restore(); return res;
+}
+
+// ── timeline ──
+let T = 0;
+function hermiteKeys(K) { return t => { if (t <= K[0][0]) return K[0][1]; if (t >= K[K.length - 1][0]) return K[K.length - 1][1];
+  const n = K.length, m = K.map((k, i) => i === 0 || i === n - 1 ? 0 : ((K[i + 1][1] - K[i - 1][1]) / (K[i + 1][0] - K[i - 1][0])));
+  let i = 0; while (t > K[i + 1][0]) i++; const h = K[i + 1][0] - K[i][0], u = (t - K[i][0]) / h, u2 = u * u, u3 = u2 * u;
+  return (2 * u3 - 3 * u2 + 1) * K[i][1] + (u3 - 2 * u2 + u) * h * m[i] + (-2 * u3 + 3 * u2) * K[i + 1][1] + (u3 - u2) * h * m[i + 1]; }; }
+const UC = hermiteKeys([[0, 250], [5.0, 660], [6.6, 1010], [8.3, 1400], [10, 1415]]);
+const T_DEC = 6.2, T_STOP = 7.2;
+const dist = t => t < T_DEC ? t : T_DEC + (Math.min(t, T_STOP) - T_DEC) - Math.pow(Math.min(t, T_STOP) - T_DEC, 2) / 2 / (T_STOP - T_DEC);
+const RUN_F = 1.7;
+const RUNNERS = [{ u0: 820, v: 48, ph: 0, redBeard: false }, { u0: 610, v: 35, ph: .37, redBeard: true }, { u0: 440, v: 39, ph: .71, redBeard: false }, { u0: 262, v: 37, ph: .18, redBeard: true }];
+const POST_U = 1000, TITLE_U = 1520;
+function state(t) {
+  const k = eInOut(seg(t, 5.0, 6.8)), zm = eInOut(seg(t, 4.9, 7.0));
+  return { uc: UC(t), k, zoom: 1 + zm, camY: lerp(480, 510, zm), handleA: 1 - sstep(seg(t, 4.95, 5.3)) };
+}
+function bandOffsets(t) { // combination-lock spin of the ornament bands, then the meander "track" runs under the runners
+  const lock = (t0, amt, dur = 1.25) => { const u = seg(t, t0, t0 + dur); return amt * (1 - eBack(u)); };
+  const track = -(sstep(seg(t, 1.9, 2.8)) * 0 + (() => { const a = 1.9, b = 7.2; if (t < a) return 0; const x = Math.min(t, b) - a; const ramp = .6; return 70 * (x < ramp ? x * x / (2 * ramp) : (ramp / 2 + (x - ramp))) - (t > 6.2 ? 70 * Math.pow(Math.min(t, 7.2) - 6.2, 2) / 2 : 0); })());
+  return { 1: lock(.15, 260), 2: lock(.35, -300), 4: lock(.55, 340) + track, 6: lock(.75, -280), 3: 0, 5: 0, 0: 0 };
+}
+
+// ── dynamic rows: frieze and horses ──
+function paintFrieze(t) {
+  const g = fz;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = CLAY; g.fillRect(0, 0, fzC.width, fzC.height);
+  for (const wrap of [-TW, 0, TW]) {
+    g.setTransform(S, 0, 0, S, wrap * S, -FZ0 * S);
+    g.fillStyle = GLAZE; g.fillRect(-10, 628, TW + 20, 12);
+    // ornament under the first handle: palmette with volute tendrils
+    const ox = 60; if (wrap !== 0 || true) {
+      spiralTendril(g, ox, 606, ox - 70, 590, 22, -1); spiralTendril(g, ox, 606, ox + 70, 590, 22, 1);
+      palmette(g, ox, 606, 150, 11, 2.5); palmette(g, ox - 92, 560, 56, 7, 2.2, -Math.PI / 2 - .5); palmette(g, ox + 92, 560, 56, 7, 2.2, -Math.PI / 2 + .5);
+      g.beginPath(); g.ellipse(ox, 614, 16, 9, 0, 0, TAU); g.fillStyle = GLAZE; g.fill();
+    }
+    drawPost(g, POST_U);
+    const blink = Math.max(0, 1 - Math.abs(t - 2.6) / .07, 1 - Math.abs(t - 4.3) / .07, 1 - Math.abs(t - 8.9) / .07);
+    const look = sstep(seg(t, 6.3, 6.9)) - 0 * sstep(seg(t, 8.0, 8.5));
+    drawOwl(g, POST_U, 452, clamp(blink), look);
+  }
+ 
+  const res = [];
+  // runners, back to front (the leader last so he overlaps the post)
+  for (let i = RUNNERS.length - 1; i >= 0; i--) { const R = RUNNERS[i];
+    const u = R.u0 + R.v * dist(t), ph = R.ph + RUN_F * dist(t);
+    const v = i === 0 ? eOut(seg(t, 6.95, 7.55)) : sstep(seg(t, 7.0, 7.7)) * .0;
+    for (const wrap of [-TW, 0, TW]) { if (Math.abs(u + wrap - TW / 2) > TW / 2 + 120) continue;
+      fz.setTransform(S, 0, 0, S, 0, -FZ0 * S);
+      drawRunner(g, u + wrap, ph, v, { redBeard: R.redBeard, wreath: i === 0 ? seg(t, 7.35, 8.0) : 0 }); }
+  }
+  g.setTransform(S, 0, 0, S, 0, -FZ0 * S);
+  // title field: laurel + painted inscription
+  laurel(g, TITLE_U, 426, 300, 160, seg(t, 7.75, 9.0));
+  res.push(...paintText(g, 'OLYMPIA · 776 BC', TITLE_U, 414, 15, 7.55, .03, .12, 5.5, 700));
+  res.push(...paintText(g, 'THE FIRST RACE', TITLE_U, 480, 44, 7.8, .065, .16, 4, 700));
+  res.push(...paintText(g, 'ONE STADION. ONE WINNER. ONE OLIVE CROWN.', TITLE_U, 518, 13, 8.3, .01, .1, 2.2, 600));
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  return res;
+}
+function paintHorses(t) {
+  const g = hs; g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = CLAY; g.fillRect(0, 0, hsC.width, hsC.height);
+ 
+  for (let i = 0; i < 5; i++) { const u = ((i * TW / 5 + 130 - 58 * t) % TW + TW) % TW, ph = i * .31 + 2.1 * t;
+    for (const wrap of [-TW, 0, TW]) { if (Math.abs(u + wrap - TW / 2) > TW / 2 + 150) continue; g.setTransform(S, 0, 0, S, 0, -HS0 * S); drawHorse(g, u + wrap, ph, -1); } }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+// ── sampler: texture → surface of revolution (blended with the flat rollout) ──
+const LN = 1024; const lutS = new Float32Array(LN + 1), lutC = new Float32Array(LN + 1), lutT = new Float32Array(LN + 1), lutX = new Float32Array(LN + 1);
+const acc = new Float32Array(W * 4);
+const LX = -0.55, LY = -0.42, LZ = 0.72, LLn = Math.hypot(LX, LY, LZ), Lx = LX / LLn, Ly = LY / LLn, Lz = LZ / LLn;
+const Hx0 = Lx, Hy0 = Ly, Hz0 = Lz + 1, HHn = Math.hypot(Hx0, Hy0, Hz0), Hx = Hx0 / HHn, Hy = Hy0 / HHn, Hz = Hz0 / HHn;
+function renderVase(st, offs) {
+  const { k, zoom: z, camY, uc } = st, thMax = Math.PI / 2 * (1 + k), wFlat = sstep(k);
+  for (let i = 0; i <= LN; i++) { const th = -thMax + 2 * thMax * i / LN; lutT[i] = th; lutS[i] = Math.sin(th); lutC[i] = Math.cos(th); }
+  const sub = z < 1.45 ? 2 : 1, offsA = sub === 2 ? [.25, .75] : [.5], wS = 1 / (sub * sub);
+  const rowOff = new Float32Array(7); for (let b = 0; b < 7; b++) rowOff[b] = (offs[b] || 0);
+  const sy0 = Math.max(0, Math.floor((0 - camY) * z + 540)), sy1 = Math.min(H, Math.ceil((VH - camY) * z + 540));
+  let hwMax = 0; for (let j = 0; j < THt; j += 4) hwMax = Math.max(hwMax, (1 - k) * Rrow[j] * Math.sin(thMax) + k * RFrow[j] * thMax, k < .5 ? Rrow[j] : 0);
+  const sx0 = Math.max(0, Math.floor(960 - hwMax * z - 2)), sx1 = Math.min(W, Math.ceil(960 + hwMax * z + 2));
+  const uScale = TW / TAU * S;
+  for (let sy = sy0; sy < sy1; sy++) {
+    acc.fill(0, sx0 * 4, sx1 * 4);
+    for (const oy of offsA) {
+      const Yv = (sy + oy - 540) / z + camY; if (Yv < 0 || Yv >= VH) continue;
+      const tr = (Yv * S) | 0, r = Rrow[tr], rp = dRrow[tr], Rf = RFrow[tr], inv = 1 / Math.sqrt(1 + rp * rp), ny = -rp * inv;
+      const uOff = (uc + rowOff[BIDrow[tr]]) * S, rowBase = tr * TWt;
+      const a1 = (1 - k) * r, a2 = k * Rf;
+      for (let i = 0; i <= LN; i++) lutX[i] = a1 * lutS[i] + a2 * lutT[i];
+      const xMin = lutX[0], xMax = lutX[LN];
+      for (const ox of offsA) {
+        let p = 0;
+        for (let sx = sx0; sx < sx1; sx++) {
+          const X = (sx + ox - 960) / z; if (X <= xMin || X >= xMax) continue;
+          while (p < LN - 1 && lutX[p + 1] < X) p++;
+          const f = (X - lutX[p]) / (lutX[p + 1] - lutX[p] || 1);
+          const th = lutT[p] + (lutT[p + 1] - lutT[p]) * f, s = lutS[p] + (lutS[p + 1] - lutS[p]) * f, c = lutC[p] + (lutC[p + 1] - lutC[p]) * f;
+          let tx = (uOff + th * uScale) % TWt; if (tx < 0) tx += TWt;
+          const px = tex32[rowBase + (tx | 0)], R = px & 255, G = (px >> 8) & 255, B = (px >> 16) & 255;
+          const nx = s * inv, nz = c * inv;
+          let sh = 1, spec = 0;
+          if (wFlat < 1) {
+            const dif = Math.max(0, nx * Lx + ny * Ly + nz * Lz), fill = Math.max(0, nx * .62 - ny * .1 + nz * .55) * .18;
+            const nh = Math.max(0, nx * Hx + ny * Hy + nz * Hz); let n8 = nh * nh; n8 *= n8; n8 *= n8; let n64 = n8 * n8; n64 *= n64; n64 *= n64;
+            const glaze = R + G + B < 150 ? 1 : 0, rim = Math.pow(Math.max(0, nz), .35);
+            const shC = (0.2 + 0.95 * dif + fill) * (0.55 + 0.45 * rim);
+            const spC = glaze ? (0.85 * n64 + 0.16 * n8) : (0.07 * n8);
+            sh = shC + (1 - shC) * wFlat; spec = spC * (1 - wFlat) * 255;
+          }
+          const q = sx * 4; acc[q] += R * sh + spec; acc[q + 1] += G * sh + spec * .93; acc[q + 2] += B * sh + spec * .82; acc[q + 3] += 1;
+        }
+      }
+    }
+    const rb = sy * W;
+    for (let sx = sx0; sx < sx1; sx++) { const q = sx * 4, n = acc[q + 3];
+      if (n === 0) { out32[rb + sx] = 0; continue; }
+      const iv = 1 / n, R = Math.min(255, acc[q] * iv), G = Math.min(255, acc[q + 1] * iv), B = Math.min(255, acc[q + 2] * iv), A = Math.min(255, n * wS * 255);
+      out32[rb + sx] = (A << 24 | B << 16 | G << 8 | R) >>> 0; }
+  }
+  vctx.clearRect(0, 0, W, H);
+  vctx.putImageData(vaseImg, 0, 0, sx0, sy0, sx1 - sx0, sy1 - sy0);
+}
+
+// handles: straps in planes through the axis, projected; drawn behind or in front of the body
+const HANDLES = [60, 60 + TW / 2];
+function handlePts(st, uh) {
+  const th = TAU * (uh - st.uc) / TW, s = Math.sin(th), c = Math.cos(th), z = st.zoom;
+  const P = [[rOf(112) - 4, 112], [rOf(112) + 70, 86], [248, 150], [rOf(292) - 6, 292]];
+  const pts = []; for (let i = 0; i <= 40; i++) { const u = i / 40, m = 1 - u;
+    const d = m * m * m * P[0][0] + 3 * m * m * u * P[1][0] + 3 * m * u * u * P[2][0] + u * u * u * P[3][0];
+    const y = m * m * m * P[0][1] + 3 * m * m * u * P[1][1] + 3 * m * u * u * P[2][1] + u * u * u * P[3][1];
+    pts.push([960 + d * s * z, (y - st.camY) * z + 540]); }
+  return { pts, s, c };
+}
+function drawHandle(st, uh, front) {
+  const { pts, s, c } = handlePts(st, uh); if ((c > 0) !== front || st.handleA <= 0) return;
+  const z = st.zoom; ctx.save(); ctx.globalAlpha = st.handleA; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const line = (w, col, dx = 0) => { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0] + dx, p[1]) : ctx.moveTo(p[0] + dx, p[1])); ctx.lineWidth = w; ctx.strokeStyle = col; ctx.stroke(); };
+  const w = (15 + 13 * Math.abs(c)) * z;
+  line(w, '#0e0a08'); line(w * .45, 'rgba(120,100,90,0.10)', -w * .18); line(w * .12, `rgba(255,236,214,${.18 + .2 * Math.max(0, -s)})`, -w * .26);
+  ctx.restore();
+}
+
+// ── background ──
+function paintBackground() {
+  const g = bg; const gr = g.createRadialGradient(960, 470, 60, 960, 520, 1150);
+  gr.addColorStop(0, '#4a3326'); gr.addColorStop(.35, '#2c1d15'); gr.addColorStop(1, '#0c0806'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  const r = rng(5), id = g.getImageData(0, 0, W, H), d = id.data;
+  for (let i = 0; i < d.length; i += 4) { const n = (r() - .5) * 7; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+  g.putImageData(id, 0, 0);
+  // plinth top
+  const pl = g.createLinearGradient(0, 1016, 0, 1080); pl.addColorStop(0, '#3a291e'); pl.addColorStop(.06, '#23170f'); pl.addColorStop(1, '#120c08');
+  g.fillStyle = pl; g.fillRect(0, 1016, W, 64);
+  for (let i = 0; i < 3; i++) { const [c, gx] = mk(W / 2, H / 2); const im = gx.createImageData(W / 2, H / 2); const rr = rng(100 + i);
+    for (let p = 0; p < im.data.length; p += 4) { const v = 128 + (rr() - .5) * 90; im.data[p] = im.data[p + 1] = im.data[p + 2] = v; im.data[p + 3] = 255; }
+    gx.putImageData(im, 0, 0); grains.push(c); }
+}
+
+// ── frame ──
+let lastText = [];
+window.draw = ({ t }) => {
+  T = t; const st = state(t), offs = bandOffsets(t);
+  lastText = paintFrieze(t); writeTex(fz.getImageData(0, 0, fzC.width, fzC.height).data, FZ0 * S, fzC.height);
+  paintHorses(t); writeTex(hs.getImageData(0, 0, hsC.width, hsC.height).data, HS0 * S, hsC.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  const z = st.zoom; ctx.save(); ctx.translate(960, 540); ctx.scale(z, z); ctx.translate(-960, -540 - (st.camY - 480)); ctx.drawImage(bgC, 0, 0); ctx.restore();
+  // contact shadow under the foot
+  { const fy = (VH - st.camY) * z + 540, a = 1 - seg(st.k, 0, .3); if (a > 0) { ctx.save(); ctx.globalAlpha = a; const sg = ctx.createRadialGradient(960, fy, 10, 960, fy, 300 * z); sg.addColorStop(0, 'rgba(0,0,0,.75)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.setTransform(1, 0, 0, .12, 0, fy * .88); ctx.fillStyle = sg; ctx.fillRect(0, fy - 400 * z, W, 800 * z); ctx.restore(); } }
+  for (const uh of HANDLES) drawHandle(st, uh, false);
+  renderVase(st, offs); ctx.drawImage(vaseC, 0, 0);
+  for (const uh of HANDLES) drawHandle(st, uh, true);
+  // grain (refreshed 12×/s), vignette, fades
+  ctx.save(); ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = .1; ctx.imageSmoothingEnabled = true; ctx.drawImage(grains[Math.floor(t * 12) % 3], 0, 0, W, H); ctx.restore();
+  const vg = ctx.createRadialGradient(960, 540, 420, 960, 540, 1180); vg.addColorStop(0, 'rgba(10,6,4,0)'); vg.addColorStop(1, `rgba(10,6,4,${lerp(.55, .42, sstep(st.k))})`); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  const fade = Math.max(1 - eOut(seg(t, 0, .9)), eInOut(seg(t, 9.3, 10)));
+  if (fade > 0) { ctx.fillStyle = `rgba(0,0,0,${fade})`; ctx.fillRect(0, 0, W, H); }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+
+window.events = () => {
+  const ev = [];
+  [.15, .35, .55, .75].forEach((t0, i) => { ev.push({ t: t0, k: 'spin', d: .7, v: 1 - i * .1 }); ev.push({ t: t0 + 1.25 * .62, k: 'lock', v: 1 - i * .12 }); });
+  for (let i = 0; i < 2; i++) { const R = RUNNERS[i]; let prev = null;
+    for (let t = 0; t < T_STOP; t += .002) { const ph = R.ph + RUN_F * dist(t), c = Math.floor(ph * 2 + .5); if (prev !== null && c !== prev) ev.push({ t, k: 'step', v: i === 0 ? 1 : .6, p: i === 0 ? .1 : -.25 }); prev = c; } }
+  for (let t = 0.4; t < 6.6; t += 1 / 2.1 / 3) ev.push({ t, k: 'hoof', v: .35 });
+  ev.push({ t: 4.95, k: 'whoosh', d: 2.0 });
+  ev.push({ t: 6.35, k: 'hoot' });
+  ev.push({ t: 7.3, k: 'wreath' });
+  ev.push({ t: 7.72, k: 'grow', d: 1.3 });
+  T = 0; // gather brush times from a layout pass
+  const saved = T; T = 99; const times = paintFrieze(9.5); T = saved;
+  for (const bt of times) ev.push({ t: bt, k: 'brush' });
+  ev.push({ t: 8.45, k: 'chord' });
+  return ev.sort((a, b) => a.t - b.t);
+};
+
+window.ready = (async () => {
+  await document.fonts.load('700 44px Cinzel'); await document.fonts.load('600 13px Cinzel'); await document.fonts.ready;
+  const [sc, sg] = mk(TWt, THt, true); paintStatic(sg);
+  tex = new Uint8ClampedArray(TWt * THt * 4); tex32 = new Uint32Array(tex.buffer);
+  buildNoise(); writeTex(sg.getImageData(0, 0, TWt, THt).data, 0, THt);
+  sc.width = 1;
+  paintBackground();
+})();
+</script>
+</body></html>
