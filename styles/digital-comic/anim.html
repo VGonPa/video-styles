@@ -273,12 +273,20 @@ function balloon(g, text, x, y, size, u, tail) {
 // ════════════════════════════ the hero ════════════════════════════
 // joints in figure units (feet on y=0, ~470 tall standing, head ≈ 62): viewer-left = "L"
 const POSE = {
-  hover: { head: [6, -448], tilt: -0.16, turn: 0.25, neck: [3, -414], sL: [-80, -390], sR: [80, -392], eL: [-122, -306], eR: [128, -468], wL: [-150, -224], wR: [134, -556],
-    hL: 'open', hR: 'fist', pel: [0, -246], hipL: [-36, -242], hipR: [36, -242], kL: [-52, -130], kR: [66, -150], aL: [-46, -24], aR: [54, -48], tL: [-40, 14], tR: [70, -20], order: ['pelvis', 'legR', 'legL', 'torso', 'armL', 'armR', 'head'] },
-  land: { head: [12, -302], tilt: 0.05, turn: 0.05, neck: [8, -266], sL: [-76, -246], sR: [86, -240], eL: [-100, -146], eR: [170, -214], wL: [-86, -44], wR: [252, -250],
-    hL: 'fist', hR: 'open', pel: [0, -152], hipL: [-38, -150], hipR: [40, -148], kL: [-124, -96], kR: [72, -42], aL: [-132, -8], aR: [104, -30], tL: [-168, 0], tR: [122, -16], order: ['pelvis', 'legR', 'legL', 'torso', 'armR', 'armL', 'head'] },
-  stand: { head: [0, -446], tilt: 0.0, turn: -0.06, neck: [0, -412], sL: [-82, -392], sR: [82, -392], eL: [-112, -294], eR: [112, -294], wL: [-126, -204], wR: [126, -204],
-    hL: 'fist', hR: 'fist', pel: [0, -246], hipL: [-38, -242], hipR: [38, -242], kL: [-50, -128], kR: [50, -128], aL: [-58, -20], aR: [58, -20], tL: [-80, 0], tR: [80, 0], order: ['pelvis', 'legR', 'legL', 'torso', 'armL', 'armR', 'head'] },
+  hover: { head: [10, -450], tilt: -0.2, turn: 0.35, t3: 0.22, neck: [6, -416], sL: [-76, -386], sR: [84, -396], eL: [-118, -302], eR: [130, -470], wL: [-132, -222], wR: [138, -556],
+    hL: 'open', hR: 'fist', pel: [2, -246], hipL: [-32, -244], hipR: [38, -240], kL: [-44, -132], kR: [74, -168], aL: [-40, -26], aR: [56, -70], tL: [-32, 10], tR: [74, -46],
+    cape: [-0.35, 1], capeL: 250, order: ['cape', 'legL', 'legR', 'pelvis', 'torso', 'armL', 'armR', 'head'] },
+  // classic three-point landing: front knee up, back knee on the ground with the shin trailing, fist planted, other arm swept back
+  land: { head: [-4, -284], tilt: 0.12, turn: 0.18, t3: 0.28, neck: [0, -252], sL: [-66, -222], sR: [88, -234], eL: [-76, -130], eR: [178, -254], wL: [-62, -40], wR: [262, -300],
+    hL: 'fist', hR: 'open', pel: [12, -128], hipL: [-22, -132], hipR: [46, -124], kL: [-104, -128], kR: [66, -16], aL: [-112, -14], aR: [158, -20], tL: [-146, 0], tR: [190, -6],
+    cape: [1, -0.15], capeL: 210, order: ['cape', 'legR', 'pelvis', 'torso', 'legL', 'armR', 'armL', 'head'] },
+  // contrapposto: weight on the viewer-left leg, hips/shoulders counter-tilted, fist raised and crackling, other hand on the hip
+  stand: { head: [12, -448], tilt: -0.1, turn: 0.55, t3: 0.35, neck: [6, -414], sL: [-76, -384], sR: [82, -400], eL: [-128, -300], eR: [150, -324], wL: [-92, -240], wR: [160, -414],
+    hL: 'fist', hR: 'fist', pel: [2, -244], hipL: [-32, -250], hipR: [40, -236], kL: [-26, -130], kR: [72, -128], aL: [-20, -20], aR: [70, -22], tL: [-48, 0], tR: [100, -4],
+    cape: [-0.55, 1], capeL: 300, order: ['cape', 'legR', 'legL', 'pelvis', 'torso', 'armL', 'armR', 'head'] },
+  idle: { head: [0, -446], tilt: -0.05, turn: 0.55, t3: 0.3, neck: [0, -412], sL: [-82, -392], sR: [82, -392], eL: [-112, -294], eR: [112, -294], wL: [-126, -204], wR: [126, -204],
+    hL: 'fist', hR: 'fist', pel: [0, -246], hipL: [-38, -242], hipR: [38, -242], kL: [-50, -128], kR: [50, -128], aL: [-58, -20], aR: [58, -20], tL: [-80, 0], tR: [80, 0],
+    cape: [-0.3, 1], capeL: 260, order: ['cape', 'legR', 'legL', 'pelvis', 'torso', 'armL', 'armR', 'head'] },
 };
 function lerpPose(A, B, u) {
   const o = {}; for (const k in A) { const a = A[k], b = B[k]; if (Array.isArray(a) && typeof a[0] === 'number') o[k] = L2(a, b, u); else if (typeof a === 'number') o[k] = lerp(a, b, u); else o[k] = u < 0.5 ? a : b; }
@@ -350,62 +358,101 @@ function helmetParts(P, S, visor) {
         g.beginPath(); for (let k = 0; k < 3; k++) { const a = R(sh - 5 + k * 5, 14), b = R(sh - 5 + k * 5, 22); g.moveTo(...a); g.lineTo(...b); } g.stroke(); } },
   ];
 }
+let FIG_T = 0;
+// tapered muscle segment: narrow at the joints, bulging belly (bias pushes the bulge to one side)
+function muscle(A, B, wa, wb, bulge, bpos = 0.4, bias = 0) {
+  const an = Math.atan2(B[1] - A[1], B[0] - A[0]); const nx = -Math.sin(an), ny = Math.cos(an);
+  const at = (u, w) => [lerp(A[0], B[0], u) + nx * w, lerp(A[1], B[1], u) + ny * w];
+  const ctrl = (u, w, s) => { const pt = at(u, s * w); const e0 = [A[0] + nx * s * wa, A[1] + ny * s * wa], e1 = [B[0] + nx * s * wb, B[1] + ny * s * wb]; return [2 * pt[0] - (e0[0] + e1[0]) / 2, 2 * pt[1] - (e0[1] + e1[1]) / 2]; };
+  const w1 = lerp(wa, wb, bpos) + bulge * (1 + bias), w2 = lerp(wa, wb, bpos + 0.12) + bulge * (1 - bias);
+  const p = new Path2D(); p.moveTo(A[0] + nx * wa, A[1] + ny * wa);
+  const c1 = ctrl(bpos, w1, 1); p.quadraticCurveTo(c1[0], c1[1], B[0] + nx * wb, B[1] + ny * wb);
+  p.arc(B[0], B[1], wb, an + Math.PI / 2, an - Math.PI / 2, true);
+  const c2 = ctrl(bpos + 0.12, w2, -1); p.quadraticCurveTo(c2[0], c2[1], A[0] - nx * wa, A[1] - ny * wa);
+  p.arc(A[0], A[1], wa, an - Math.PI / 2, an - 3 * Math.PI / 2, true); p.closePath(); return p;
+}
+function smooth(pts) { const p = new Path2D(); const n = pts.length; const m = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const s0 = m(pts[n - 1], pts[0]); p.moveTo(...s0); for (let i = 0; i < n; i++) { const q = m(pts[i], pts[(i + 1) % n]); p.quadraticCurveTo(pts[i][0], pts[i][1], q[0], q[1]); } p.closePath(); return p; }
+function plate(g, path, S, mat, cx, cy, w) { g.fillStyle = dirGrad(g, cx, cy, w, mat, S); g.fill(path); g.strokeStyle = INK; g.lineWidth = 2.2; g.stroke(path); }
 function drawFigure(g, P, o) {
-  const S = o.S; g.save(); g.translate(o.x, o.y); g.scale(o.s, o.s);
+  const S = o.S, t = FIG_T; g.save(); g.translate(o.x, o.y); g.scale(o.s, o.s);
   const ow = 3.4 / o.s;
-  const shM = L2(P.sL, P.sR, 0.5), waist = L2(P.pel, shM, 0.36);
-  const tu = [shM[0] - waist[0], shM[1] - waist[1]], tl = Math.hypot(...tu); const ux = tu[0] / tl, uy = tu[1] / tl, vx = -uy, vy = ux;   // v points to viewer-left?
+  const shM = L2(P.sL, P.sR, 0.5), waist = L2(P.pel, shM, 0.34);
+  const tu = [shM[0] - waist[0], shM[1] - waist[1]], tl = Math.hypot(...tu); const ux = tu[0] / tl, uy = tu[1] / tl, vx = -uy, vy = ux;
   const off = (p, a, b) => [p[0] + vx * a + ux * b, p[1] + vy * a + uy * b];
   const sgn = (P.sL[0] - P.sR[0]) * vx + (P.sL[1] - P.sR[1]) * vy > 0 ? 1 : -1;
+  const t3 = P.t3 || 0, kL = 1 + 0.08 * t3, kR = 1 - 0.3 * t3, cOff = -16 * t3 * sgn;   // 3/4: far (viewer-right) side foreshortened, centre line shifted
+  const W_ = (w, side) => (side === 'L' ? kL : kR) * w * (side === 'L' ? sgn : -sgn);
   const layers = {};
+  // cape: anchored behind the shoulders, flowing along P.cape with a travelling flutter
+  {
+    const D = P.cape, Lc = P.capeL, dl = Math.hypot(D[0], D[1]); const dx = D[0] / dl, dy = D[1] / dl, px = -dy, py = dx;
+    const A = off(P.sL, -6 * sgn, -4), B = off(P.sR, 6 * sgn, -4), C = off(P.neck, 0, -10);
+    const pts = [A, C, B];
+    const N = 6; const bot = [];
+    for (let i = 0; i <= N; i++) { const u = i / N; const base = L2(B, A, u); const spread = (u - 0.5) * 70;
+      const fl = Math.sin(t * 7 - u * 5) * 18 + Math.sin(t * 11.3 + u * 9) * 7; const len = Lc * (0.85 + 0.25 * Math.sin(u * 3.1 + 0.4));
+      bot.push([base[0] + dx * len + px * (spread + fl), base[1] + dy * len + py * (spread + fl)]); }
+    const cp = new Path2D(); cp.moveTo(...A); cp.quadraticCurveTo(C[0], C[1] - 12, B[0], B[1]);
+    const mB = L2(B, bot[0], 0.5); cp.quadraticCurveTo(mB[0] + px * 26, mB[1] + py * 26, bot[0][0], bot[0][1]);
+    for (let i = 1; i <= N; i++) { const a = bot[i - 1], b = bot[i]; const mid = L2(a, b, 0.5); cp.quadraticCurveTo(mid[0] + dx * (i % 2 ? 16 : -10), mid[1] + dy * (i % 2 ? 16 : -10), b[0], b[1]); }
+    const mA = L2(bot[N], A, 0.5); cp.quadraticCurveTo(mA[0] - px * 26, mA[1] - py * 26, A[0], A[1]); cp.closePath();
+    const cc = L2(L2(A, B, 0.5), L2(bot[0], bot[N], 0.5), 0.5);
+    layers.cape = [{ path: cp, fill: g => { const gr = g.createLinearGradient(A[0], A[1], cc[0] + dx * Lc * 0.6, cc[1] + dy * Lc * 0.6); gr.addColorStop(0, '#0a0f36'); gr.addColorStop(0.5, '#1b2a86'); gr.addColorStop(0.85, '#3450c8'); gr.addColorStop(1, '#7fe9ff'); return gr; },
+      detail: g => { g.strokeStyle = 'rgba(0,0,10,0.55)'; g.lineWidth = 3; for (let i = 1; i < N; i += 1.5) { const k = Math.floor(i); const top = L2(B, A, k / N); g.beginPath(); g.moveTo(...top); g.quadraticCurveTo(...L2(top, bot[k], 0.5).map((v, j) => v + (j ? py : px) * 10), bot[k][0], bot[k][1]); g.stroke(); }
+        g.save(); g.globalCompositeOperation = 'lighter'; g.strokeStyle = 'rgba(120,230,255,0.55)'; g.lineWidth = 5; g.beginPath(); bot.forEach((q, i) => i ? g.lineTo(...q) : g.moveTo(...q)); g.stroke(); g.restore(); } }];
+  }
   for (const sd of ['L', 'R']) {
-    const hip = P['hip' + sd], k = P['k' + sd], a = P['a' + sd], toe = P['t' + sd]; const bootTop = L2(k, a, 0.42);
+    const hip = P['hip' + sd], k = P['k' + sd], a = P['a' + sd], toe = P['t' + sd]; const bootTop = L2(k, a, 0.5);
+    const side = sd === 'L' ? 1 : -1;
     layers['leg' + sd] = [
-      { path: capsule(hip, k, 31, 21), fill: g => limbGrad(g, hip, k, 31, MAT.blue, S), detail: g => seam(g, L2(hip, k, 0.2), L2(hip, k, 0.85), o.glow) },
-      { path: capsule(k, bootTop, 21, 19), fill: g => limbGrad(g, k, bootTop, 21, MAT.blue, S) },
-      { path: capsule(a, toe, 15, 11), fill: g => limbGrad(g, a, toe, 15, MAT.steel, S) },
-      { path: capsule(bootTop, a, 22, 17), fill: g => limbGrad(g, bootTop, a, 22, MAT.steel, S), detail: g => { g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); const p1 = L2(bootTop, a, 0.35); const an = Math.atan2(a[1] - bootTop[1], a[0] - bootTop[0]); g.moveTo(p1[0] - Math.sin(an) * 18, p1[1] + Math.cos(an) * 18); g.lineTo(p1[0] + Math.sin(an) * 18, p1[1] - Math.cos(an) * 18); g.stroke(); } },
-      { path: (() => { const p = new Path2D(); p.ellipse(k[0], k[1], 17, 19, 0, 0, TAU); return p; })(), fill: g => dirGrad(g, k[0], k[1], 20, MAT.steel, S) },
+      { path: muscle(hip, k, 27, 17, 6, 0.35, 0.3 * side), fill: g => limbGrad(g, hip, k, 34, MAT.blue, S), detail: g => { seam(g, L2(hip, k, 0.25), L2(hip, k, 0.8), o.glow);
+          g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); const q = L2(hip, k, 0.62); const an = Math.atan2(k[1] - hip[1], k[0] - hip[0]); g.moveTo(q[0] + Math.sin(an) * 22, q[1] - Math.cos(an) * 22); g.quadraticCurveTo(...L2(q, k, 0.4), q[0] - Math.sin(an) * 10, q[1] + Math.cos(an) * 10); g.stroke(); } },
+      { path: muscle(k, a, 17, 11, 8, 0.28, -0.5 * side), fill: g => limbGrad(g, k, a, 24, MAT.blue, S) },
+      { path: muscle(bootTop, a, 17, 13, 2, 0.3), fill: g => limbGrad(g, bootTop, a, 19, MAT.steel, S), detail: g => { g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); const p1 = L2(bootTop, a, 0.4); const an = Math.atan2(a[1] - bootTop[1], a[0] - bootTop[0]); g.moveTo(p1[0] - Math.sin(an) * 18, p1[1] + Math.cos(an) * 18); g.lineTo(p1[0] + Math.sin(an) * 18, p1[1] - Math.cos(an) * 18); g.stroke(); } },
+      { path: muscle(a, toe, 13, 9, 3, 0.4), fill: g => limbGrad(g, a, toe, 15, MAT.steel, S) },
+      { path: (() => { const p = new Path2D(); const an = Math.atan2(a[1] - k[1], a[0] - k[0]); p.ellipse(k[0], k[1], 13, 17, an, 0, TAU); return p; })(), fill: g => dirGrad(g, k[0], k[1], 18, MAT.steel, S) },
     ];
   }
-  // pelvis / trunks
-  const pelv = [off(P.pel, 0, 0), P.hipL, P.hipR];
-  const trunk = poly([off(waist, 38 * sgn, 0), off(P.hipL, 22 * sgn, 6), off(P.hipL, 8 * sgn, -16), off(P.pel, 9 * sgn, -34), off(P.pel, -9 * sgn, -34), off(P.hipR, -8 * sgn, -16), off(P.hipR, -22 * sgn, 6), off(waist, -38 * sgn, 0)]);
+  // trunks: narrow waist flaring to the hips, V to the crotch
+  const trunk = poly([off(waist, 31 * kL * sgn + cOff * 0.5, 2), off(P.hipL, 16 * sgn, 4), off(P.hipL, 6 * sgn, -14), off(P.pel, 6 * sgn + cOff * 0.3, -30), off(P.pel, -6 * sgn + cOff * 0.3, -30), off(P.hipR, -6 * sgn, -14), off(P.hipR, -16 * sgn, 4), off(waist, -31 * kR * sgn + cOff * 0.5, 2)]);
   layers.pelvis = [{ path: trunk, fill: g => dirGrad(g, P.pel[0], P.pel[1], 60, MAT.blue, S), detail: g => {
-    g.strokeStyle = INK; g.lineWidth = 2.2; g.beginPath(); g.moveTo(...off(P.hipL, 22 * sgn, -2)); g.quadraticCurveTo(...off(P.pel, 0, -4), ...off(P.hipR, -22 * sgn, -2)); g.stroke();
-    const b1 = off(waist, 37 * sgn, -2), b2 = off(waist, -37 * sgn, -2), b3 = off(waist, -35 * sgn, -16), b4 = off(waist, 35 * sgn, -16);
+    const bw = 32; const b1 = off(waist, bw * kL * sgn + cOff * 0.5, 0), b2 = off(waist, -bw * kR * sgn + cOff * 0.5, 0), b3 = off(waist, -bw * kR * sgn + cOff * 0.5, -13), b4 = off(waist, bw * kL * sgn + cOff * 0.5, -13);
     const belt = poly([b1, b2, b3, b4]); g.fillStyle = dirGrad(g, waist[0], waist[1], 40, MAT.steel, S); g.fill(belt); g.strokeStyle = INK; g.lineWidth = 2.4; g.stroke(belt);
-    const bc = off(waist, 0, -9); g.fillStyle = o.glow > 0 ? `rgba(255,220,90,${0.6 + 0.4 * o.glow})` : GOLD; g.beginPath(); g.arc(bc[0], bc[1], 7, 0, TAU); g.fill(); g.stroke(); } }];
-  // torso: V-taper chest
-  const colL = off(P.neck, 18 * sgn, -6), colR = off(P.neck, -18 * sgn, -6);
-  const latL = off(L2(waist, shM, 0.58), 70 * sgn, 0), latR = off(L2(waist, shM, 0.58), -70 * sgn, 0);
-  const torso = poly([off(waist, 34 * sgn, 0), latL, off(P.sL, 10 * sgn, -8), colL, colR, off(P.sR, -10 * sgn, -8), latR, off(waist, -34 * sgn, 0)]);
-  const sternum = L2(waist, shM, 0.62);
+    const bc = off(waist, cOff * 0.5, -7); g.fillStyle = `rgba(255,220,90,${0.7 + 0.3 * o.glow})`; g.beginPath(); g.arc(bc[0], bc[1], 6.5, 0, TAU); g.fill(); g.stroke(); } }];
+  // torso: broad chest and lats tapering to a narrow waist, turned 3/4
+  const sternum = off(L2(waist, shM, 0.62), cOff, 0);
+  const torso = smooth([off(waist, 32 * kL * sgn + cOff * 0.5, 0), off(L2(waist, shM, 0.45), 56 * kL * sgn, 0), off(L2(waist, shM, 0.8), 72 * kL * sgn, 0), off(P.sL, 6 * sgn, -6), off(P.neck, 26 * sgn + cOff * 0.4, -14),
+    off(P.neck, -24 * sgn + cOff * 0.4, -14), off(P.sR, -6 * sgn, -6), off(L2(waist, shM, 0.8), -72 * kR * sgn, 0), off(L2(waist, shM, 0.45), -56 * kR * sgn, 0), off(waist, -32 * kR * sgn + cOff * 0.5, 0)]);
   layers.torso = [
-    { path: capsule(P.neck, L2(P.neck, P.head, 0.55), 14, 13), fill: g => limbGrad(g, P.neck, P.head, 14, MAT.gunm, S) },
-    { path: torso, fill: g => dirGrad(g, shM[0], lerp(shM[1], waist[1], 0.4), 90, MAT.blue, S), detail: g => {
-      g.strokeStyle = INK; g.lineWidth = 2.4; g.beginPath();
-      const pc = off(sternum, 0, 8); g.moveTo(...off(colL, -2 * sgn, 0)); g.quadraticCurveTo(...off(sternum, 30 * sgn, 26), ...pc); g.quadraticCurveTo(...off(sternum, -30 * sgn, 26), ...off(colR, 2 * sgn, 0));
-      g.moveTo(...off(sternum, 50 * sgn, -6)); g.quadraticCurveTo(...off(sternum, 26 * sgn, -18), ...off(sternum, 0, -12)); g.quadraticCurveTo(...off(sternum, -26 * sgn, -18), ...off(sternum, -50 * sgn, -6));
-      for (let k = 0; k < 3; k++) { const y = -24 - k * 16; g.moveTo(...off(sternum, 24 * sgn, y)); g.lineTo(...off(sternum, 4 * sgn, y + 2)); g.moveTo(...off(sternum, -4 * sgn, y + 2)); g.lineTo(...off(sternum, -24 * sgn, y)); }
-      g.moveTo(...off(sternum, 0, -12)); g.lineTo(...off(waist, 0, 2)); g.stroke();
-      seam(g, off(sternum, 46 * sgn, 22), off(sternum, 12 * sgn, 4), o.glow); seam(g, off(sternum, -46 * sgn, 22), off(sternum, -12 * sgn, 4), o.glow);
-      // chest core
-      const cc = off(sternum, 0, 4); const hx = []; for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3 + Math.PI / 6; hx.push([cc[0] + Math.cos(a) * 12, cc[1] + Math.sin(a) * 12]); }
-      const hp = poly(hx); g.fillStyle = INK; g.save(); g.lineWidth = 7; g.strokeStyle = INK; g.stroke(hp); g.restore();
+    { path: muscle(P.neck, L2(P.neck, P.head, 0.55), 16, 13, 1), fill: g => limbGrad(g, P.neck, P.head, 16, MAT.gunm, S) },
+    { path: torso, fill: g => dirGrad(g, shM[0], lerp(shM[1], waist[1], 0.4), 95, MAT.blue, S), detail: g => {
+      // pectoral plates, abdominal plates and serratus lines following the anatomy
+      const pec = s2 => smooth([off(sternum, 4 * s2 * sgn, 30), off(sternum, 50 * s2 * sgn * (s2 > 0 ? kL : kR), 34), off(sternum, 62 * s2 * sgn * (s2 > 0 ? kL : kR), 8), off(sternum, 38 * s2 * sgn * (s2 > 0 ? kL : kR), -12), off(sternum, 4 * s2 * sgn, -8)]);
+      for (const s2 of [1, -1]) { const pp = pec(s2); g.fillStyle = 'rgba(4,10,40,0.22)'; g.fill(pp); g.strokeStyle = INK; g.lineWidth = 2.4; g.stroke(pp); }
+      for (let k = 0; k < 3; k++) for (const s2 of [1, -1]) { const y = -22 - k * 17; const ab = smooth([off(sternum, 3 * s2 * sgn, y), off(sternum, 20 * s2 * sgn * (s2 > 0 ? kL : kR), y + 2), off(sternum, 18 * s2 * sgn * (s2 > 0 ? kL : kR), y - 13), off(sternum, 3 * s2 * sgn, y - 13)]);
+        g.fillStyle = 'rgba(4,10,40,0.18)'; g.fill(ab); g.strokeStyle = INK; g.lineWidth = 1.8; g.stroke(ab); }
+      g.strokeStyle = INK; g.lineWidth = 1.8; g.beginPath(); for (let k = 0; k < 3; k++) { const a = off(L2(waist, shM, 0.5 + k * 0.1), 50 * kL * sgn, 0); g.moveTo(...a); g.lineTo(...off(a, -12 * sgn, -6)); } g.stroke();
+      seam(g, off(sternum, 58 * kL * sgn, 40), off(sternum, 14 * sgn, 6), o.glow); seam(g, off(sternum, -58 * kR * sgn, 40), off(sternum, -14 * sgn, 6), o.glow);
+      const cc = off(sternum, 0, 8); const hx = []; for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3 + Math.PI / 6; hx.push([cc[0] + Math.cos(a) * 12, cc[1] + Math.sin(a) * 12]); }
+      const hp = poly(hx); g.save(); g.lineWidth = 7; g.strokeStyle = INK; g.stroke(hp); g.restore();
       const cg = g.createRadialGradient(cc[0], cc[1], 1, cc[0], cc[1], 13); cg.addColorStop(0, '#ffffff'); cg.addColorStop(0.45, ELEC); cg.addColorStop(1, '#1d9fe0'); g.fillStyle = cg; g.fill(hp);
       glow(g, cc[0], cc[1], 70 + 60 * o.glow, '110,240,255', 0.45 + 0.4 * o.glow);
     } },
   ];
   for (const sd of ['L', 'R']) {
     const s = P['s' + sd], e = P['e' + sd], w = P['w' + sd];
-    const an = Math.atan2(e[1] - s[1], e[0] - s[0]);
+    const an = Math.atan2(e[1] - s[1], e[0] - s[0]); const side = sd === 'L' ? 1 : -1;
+    const gt = L2(e, w, 0.38);
     layers['arm' + sd] = [
-      { path: capsule(s, e, 25, 19), fill: g => limbGrad(g, s, e, 25, MAT.blue, S) },
-      { path: capsule(e, w, 20, 17), fill: g => limbGrad(g, e, w, 20, MAT.steel, S), detail: g => { seam(g, L2(e, w, 0.2), L2(e, w, 0.78), o.glow); g.strokeStyle = INK; g.lineWidth = 2; const c = L2(e, w, 0.86); const a2 = Math.atan2(w[1] - e[1], w[0] - e[0]); g.beginPath(); g.moveTo(c[0] - Math.sin(a2) * 17, c[1] + Math.cos(a2) * 17); g.lineTo(c[0] + Math.sin(a2) * 17, c[1] - Math.cos(a2) * 17); g.stroke(); } },
+      { path: muscle(s, e, 21, 13, 7, 0.45, 0.35 * side), fill: g => limbGrad(g, s, e, 27, MAT.blue, S) },
+      { path: muscle(e, w, 15, 11, 6, 0.22), fill: g => limbGrad(g, e, w, 20, MAT.blue, S) },
+      { path: muscle(gt, w, 17, 14, 2, 0.4), fill: g => limbGrad(g, gt, w, 19, MAT.steel, S), detail: g => seam(g, L2(gt, w, 0.15), L2(gt, w, 0.8), o.glow) },
+      { path: (() => { const p = new Path2D(); p.arc(e[0], e[1], 11, 0, TAU); return p; })(), fill: g => dirGrad(g, e[0], e[1], 12, MAT.steel, S) },
       ...hand(P, sd, S),
-      { path: (() => { const p = new Path2D(); const c = [s[0] + Math.cos(an) * 6, s[1] + Math.sin(an) * 6 - 6]; p.ellipse(c[0], c[1], 33, 27, an + Math.PI / 2, 0, TAU); return p; })(), fill: g => dirGrad(g, s[0], s[1] - 6, 36, MAT.steel, S),
-        detail: g => { g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); g.ellipse(s[0] + Math.cos(an) * 12, s[1] + Math.sin(an) * 12 - 4, 22, 15, an + Math.PI / 2, Math.PI * 0.1, Math.PI * 0.9); g.stroke(); } },
+      { path: (() => { const c = [s[0] + Math.cos(an) * 4, s[1] + Math.sin(an) * 4 - 6]; return smooth([[c[0] - 30, c[1] + 8], [c[0] - 22, c[1] - 22], [c[0] + 6, c[1] - 30], [c[0] + 30, c[1] - 14], [c[0] + 28, c[1] + 16], [c[0], c[1] + 22]].map(([x, y]) => [c[0] + (x - c[0]) * Math.cos(an - Math.PI / 2) - (y - c[1]) * Math.sin(an - Math.PI / 2), c[1] + (x - c[0]) * Math.sin(an - Math.PI / 2) + (y - c[1]) * Math.cos(an - Math.PI / 2)])); })(),
+        fill: g => dirGrad(g, s[0], s[1] - 6, 36, MAT.steel, S),
+        detail: g => { g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); g.ellipse(s[0] + Math.cos(an) * 14, s[1] + Math.sin(an) * 14 - 2, 22, 13, an + Math.PI / 2, Math.PI * 0.1, Math.PI * 0.9); g.stroke(); } },
     ];
   }
   layers.head = helmetParts(P, S, o.visor);
@@ -455,7 +502,7 @@ function p2a(g, t) {
   g.save(); g.globalCompositeOperation = 'lighter'; for (let i = 0; i < 40; i++) { const a = i / 40 * TAU + 0.1; g.strokeStyle = `rgba(80,140,255,${0.05 + 0.05 * hh(i)})`; g.lineWidth = 6 + 20 * hh(i + 1); g.beginPath(); g.moveTo(380 + Math.cos(a) * 180, 250 + Math.sin(a) * 180); g.lineTo(380 + Math.cos(a) * 900, 250 + Math.sin(a) * 900); g.stroke(); } g.restore();
   const vu = t < T.visor ? 0 : clamp((t - T.visor) / 0.25) * (0.55 + 0.45 * (Math.sin((t - T.visor) * 60) > -0.3 || t > T.visor + 0.2 ? 1 : 0));
   const S = { L: [0.55, -0.83], rim: '#b8f8ff', rim2: '#3aa6e6' };
-  const P = Object.assign({}, POSE.stand, { head: [0, -446], tilt: -0.05, turn: 0.55 });
+  const P = POSE.idle;
   const push = 1 + (t - 1.5) * 0.02;
   g.save(); g.translate(300, 300); g.scale(4.2 * push, 4.2 * push); g.translate(0, 446);
   // shoulders & collar only (clip to keep it a close-up)
@@ -642,6 +689,12 @@ function heroSplash(g, t) {
   // contact shadow + glossy floor reflection glow
   const cg = g.createRadialGradient(LX, LY + 4, 10, LX, LY + 4, 260); cg.addColorStop(0, 'rgba(0,0,0,0.7)'); cg.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = cg; g.save(); g.translate(0, LY); g.scale(1, 0.18); g.fillRect(LX - 300, -300, 600, 600); g.restore();
   drawFigure(g, P, { x: LX, y: LY, s: FS, S, glow: 0.6 + 0.4 * Math.max(Math.exp(-ti * 2), lit * (0.6 + 0.4 * Math.sin(t * 6))), visor: 1 });
+  if (ru > 0.3) {   // the raised fist crackles with energy
+    const e = P.eR, w = P.wR, an = Math.atan2(w[1] - e[1], w[0] - e[0]); const fx = LX + (w[0] + Math.cos(an) * 17) * FS, fy = LY + (w[1] + Math.sin(an) * 17) * FS;
+    const k = seg(ru, 0.3, 1), fl = Math.floor(t * 20);
+    glow(g, fx, fy, 170 * k, '90,200,255', 0.55 * k); glow(g, fx, fy, 45 * k, '230,255,255', 0.9 * k);
+    for (let i = 0; i < 5; i++) { const a2 = hh(fl * 7 + i) * TAU, L = (50 + 90 * hh(fl * 3 + i)) * k; bolt(g, jag(fx, fy, fx + Math.cos(a2) * L, fy + Math.sin(a2) * L, fl * 17 + i, 0.5, 4), 0.45, 0.9 * k); }
+  }
   g.restore();
 }
 
@@ -689,6 +742,7 @@ let GL;
 
 // ════════════════════════════ frame ════════════════════════════
 window.draw = ({ t }) => {
+  FIG_T = t;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   if (t < T.splash) pageA(ctx, t);
   else if (t < T.title) splash(ctx, t);
