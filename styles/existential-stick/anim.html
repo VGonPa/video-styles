@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#f3f0e8}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── existential-stick · pen-and-pencil stick figures on white paper, frames within frames ─────────
+// Arthur, a round-headed stick figure with a briefcase, walks to a bus stop inside a small black-bordered
+// vignette. The frame splits into a grid of memory vignettes (a dog he once had, the sea, a sandwich "for
+// some reason"), each tinted with a watercolour wash. The memories overload into a surreal full-frame colour
+// burst (rotating rays, crayon rings, halftone / weave / wash collage patches, Arthur floating). Back to the
+// quiet vignette: the bus comes and goes, Arthur stays. A faint wash of colour is left in his sky; he looks
+// up, the vignette closes around him and the page fades out. Drawings boil at 12 fps (on-twos feel), film
+// grain / dust / flicker are layered on top. Everything is a pure function of t (seeded hashes only).
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eSm = u => u * u * (3 - 2 * u);
+const eOutBack = u => { const c = 1.9; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+function hash(a, b = 0, c = 0) { let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
+function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+// ── timeline ────────────────────────────────────────────────────────────────────────────────────
+const T = { frameIn: 0.15, walk0: 0.55, walk1: 2.45, split0: 3.2, split1: 3.75, mem: [3.5, 4.3, 5.1],
+  pre: 5.82, burst0: 5.95, burst1: 6.9, back: 7.05, bus0: 7.3, bus1: 7.7, bus2: 8.05, bus3: 8.45,
+  look0: 8.7, look1: 9.2, close0: 9.05, close1: 9.75, fade0: 9.45, fade1: 9.97 };
+const CAPS = [
+  { a: 0.85, b: 3.1, s: 'Every morning, Arthur walked to the bus stop.' },
+  { a: 3.55, b: 4.25, s: 'He remembered a dog he once had.' },
+  { a: 4.35, b: 5.05, s: 'He remembered the sea.' },
+  { a: 5.15, b: 5.9, s: 'He remembered a sandwich, for some reason.' },
+  { a: 7.25, b: 8.2, s: 'The bus came.' },
+  { a: 8.3, b: 9.85, s: 'He decided to take the next one.' },
+];
+const SINGLE = { x: 400, y: 150, w: 1120, h: 630 };
+const GX = 300, GY = 70, CW = 640, CH = 360, GAP = 40;
+const CELL = [0, 1, 2, 3].map(i => ({ x: GX + (i % 2) * (CW + GAP), y: GY + Math.floor(i / 2) * (CH + GAP), w: CW, h: CH }));
+const lerpR = (a, b, u) => ({ x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u), w: lerp(a.w, b.w, u), h: lerp(a.h, b.h, u) });
+
+// ── state for the current frame: boil step drives line jitter ──────────────────────────────────────
+let BOIL = 0, SID = 0, AMP = 2.0;
+const INK = '#161514';
+
+// hand-drawn polyline: subdivide, jitter per boil step, smooth with midpoint quadratics, pencil ghost pass
+function stroke(pts, o = {}) {
+  const w = o.w ?? 4.2, col = o.col ?? INK, amp = (o.amp ?? 1) * AMP, closed = !!o.closed, sid = ++SID;
+  const P = closed ? pts.concat([pts[0]]) : pts;
+  const q = [];
+  for (let i = 0; i < P.length - 1; i++) {
+    const [x0, y0] = P[i], [x1, y1] = P[i + 1], L = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.ceil(L / 16));
+    for (let k = 0; k < n; k++) q.push([lerp(x0, x1, k / n), lerp(y0, y1, k / n)]);
+  }
+  q.push(P[P.length - 1]);
+  const J = q.map(([x, y], i) => [x + (hash(sid, i, BOIL) - 0.5) * 2 * amp, y + (hash(sid, i + 999, BOIL) - 0.5) * 2 * amp]);
+  if (closed) J[J.length - 1] = J[0];
+  const trace = (dx, dy) => {
+    ctx.beginPath(); ctx.moveTo(J[0][0] + dx, J[0][1] + dy);
+    if (J.length === 2) ctx.lineTo(J[1][0] + dx, J[1][1] + dy);
+    for (let i = 1; i < J.length - 1; i++) { const mx = (J[i][0] + J[i + 1][0]) / 2, my = (J[i][1] + J[i + 1][1]) / 2; ctx.quadraticCurveTo(J[i][0] + dx, J[i][1] + dy, i === J.length - 2 ? J[i + 1][0] + dx : mx, i === J.length - 2 ? J[i + 1][1] + dy : my); }
+    ctx.stroke();
+  };
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = col;
+  if (!o.noGhost) { ctx.globalAlpha = (o.alpha ?? 1) * 0.22; ctx.lineWidth = w * 0.55; trace(1.3, -0.9); }
+  ctx.globalAlpha = o.alpha ?? 1; ctx.lineWidth = w; trace(0, 0); ctx.globalAlpha = 1;
+}
+function circ(cx, cy, r, o = {}) { const n = Math.max(12, Math.round(r / 2.5)), p = []; for (let i = 0; i < n; i++) { const a = i / n * TAU; p.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } stroke(p, { ...o, closed: true }); }
+function dot(x, y, r, col = INK) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x + (hash(++SID, 1, BOIL) - .5) * AMP, y + (hash(SID, 2, BOIL) - .5) * AMP, r, 0, TAU); ctx.fill(); }
+
+// ── precomputed textures ────────────────────────────────────────────────────────────────────────
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+let PAPER, VIGN, GRAIN = [], WASH = {}, TEX = {};
+function buildTextures() {
+  const R = rng(108);
+  // paper: warm white with fibres and soft mottling
+  PAPER = mk(W + 40, H + 40); let g = PAPER.getContext('2d');
+  g.fillStyle = '#f6f4ee'; g.fillRect(0, 0, W + 40, H + 40);
+  for (let i = 0; i < 140; i++) { const x = R() * (W + 40), y = R() * (H + 40), r = 60 + R() * 260; const gr = g.createRadialGradient(x, y, 0, x, y, r); const d = R() < 0.5; gr.addColorStop(0, d ? 'rgba(120,105,80,0.004)' : 'rgba(255,255,255,0.03)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r); }
+  g.lineWidth = 0.7;
+  for (let i = 0; i < 1400; i++) { const x = R() * (W + 40), y = R() * (H + 40), a = R() * TAU, l = 6 + R() * 22; g.strokeStyle = `rgba(110,95,70,${0.04 + R() * 0.07})`; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a + 0.6) * l * 0.5, y + Math.sin(a + 0.6) * l * 0.5, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+  // film vignette (corners burn)
+  VIGN = mk(W, H); g = VIGN.getContext('2d');
+  let gr = g.createRadialGradient(W / 2, H / 2, H * 0.62, W / 2, H / 2, H * 1.1); gr.addColorStop(0, 'rgba(40,30,20,0)'); gr.addColorStop(1, 'rgba(40,30,20,0.26)'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  // grain: 5 half-res monochrome noise tiles (refreshed at 12 fps)
+  for (let k = 0; k < 5; k++) {
+    const c = mk(960, 540), gg = c.getContext('2d'), id = gg.createImageData(960, 540), d = id.data, r = rng(500 + k);
+    for (let i = 0; i < d.length; i += 4) { const v = (r() + r() + r()) / 3; const n = (v - 0.5) * 255; d[i] = d[i + 1] = d[i + 2] = n > 0 ? 255 : 0; d[i + 3] = Math.abs(n) * 0.5; }
+    gg.putImageData(id, 0, 0); GRAIN.push(c);
+  }
+  // watercolour washes (tinted, blotchy, darker edges)
+  const wash = (key, col, seed, w = 560, h = 315) => {
+    const c = mk(w, h), gg = c.getContext('2d'), r = rng(seed);
+    for (let i = 0; i < 70; i++) { const x = r() * w, y = r() * h, rr = 30 + r() * 150; const gr = gg.createRadialGradient(x, y, rr * 0.3, x, y, rr); gr.addColorStop(0, `rgba(${col},${0.06 + r() * 0.1})`); gr.addColorStop(0.85, `rgba(${col},${0.08 + r() * 0.08})`); gr.addColorStop(1, `rgba(${col},0)`); gg.fillStyle = gr; gg.fillRect(x - rr, y - rr, 2 * rr, 2 * rr); }
+    gg.globalCompositeOperation = 'source-atop'; const e = gg.createRadialGradient(w / 2, h / 2, h * 0.2, w / 2, h / 2, w * 0.62); e.addColorStop(0, 'rgba(0,0,0,0)'); e.addColorStop(1, `rgba(${col},0.35)`); gg.fillStyle = e; gg.fillRect(0, 0, w, h);
+    WASH[key] = c;
+  };
+  const skyMask = (c) => { const gg = c.getContext('2d'); gg.globalCompositeOperation = 'destination-in'; const m = gg.createLinearGradient(0, 0, 0, c.height); m.addColorStop(0, 'rgba(0,0,0,1)'); m.addColorStop(0.55, 'rgba(0,0,0,0.75)'); m.addColorStop(1, 'rgba(0,0,0,0)'); gg.fillStyle = m; gg.fillRect(0, 0, c.width, c.height); };
+  wash('dog', '236,178,60', 11); wash('sea', '80,150,210', 12); wash('sand', '232,120,140', 13); wash('sky', '240,150,90', 14);
+  skyMask(WASH.sky); wash('burstA', '230,60,120', 15); wash('burstB', '40,170,160', 16);
+  // collage textures for the burst
+  TEX.half = mk(420, 420); g = TEX.half.getContext('2d'); g.fillStyle = '#ffe24d'; g.fillRect(0, 0, 420, 420); g.fillStyle = '#d6246e';
+  for (let y = 0; y < 420; y += 14) for (let x = 0; x < 420; x += 14) { const r = 2 + 4.5 * (0.5 + 0.5 * Math.sin(x * 0.02 + y * 0.013)); g.beginPath(); g.arc(x + (y / 14 % 2) * 7, y, r, 0, TAU); g.fill(); }
+  TEX.weave = mk(420, 420); g = TEX.weave.getContext('2d'); g.fillStyle = '#1d4fb8'; g.fillRect(0, 0, 420, 420); g.lineWidth = 5;
+  for (let i = -420; i < 840; i += 16) { g.strokeStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 420, 420); g.stroke(); g.strokeStyle = 'rgba(0,0,40,0.4)'; g.beginPath(); g.moveTo(i + 420, 0); g.lineTo(i, 420); g.stroke(); }
+  TEX.crayon = mk(420, 420); g = TEX.crayon.getContext('2d'); g.fillStyle = '#ff8a1f'; g.fillRect(0, 0, 420, 420); const r2 = rng(77);
+  for (let i = 0; i < 90; i++) { g.strokeStyle = `rgba(${r2() < 0.5 ? '120,20,10' : '255,240,160'},${0.25 + r2() * 0.35})`; g.lineWidth = 3 + r2() * 6; g.beginPath(); let x = r2() * 420, y = r2() * 420; g.moveTo(x, y); for (let k = 0; k < 6; k++) { x += (r2() - 0.5) * 160; y += (r2() - 0.5) * 60; g.lineTo(x, y); } g.stroke(); }
+  TEX.photo = mk(210, 210); g = TEX.photo.getContext('2d'); const id2 = g.createImageData(210, 210), d2 = id2.data, r3 = rng(88);
+  for (let y = 0; y < 210; y++) for (let x = 0; x < 210; x++) { const i = (y * 210 + x) * 4, v = 0.5 + 0.35 * Math.sin(x * 0.05) * Math.cos(y * 0.04) + (r3() - 0.5) * 0.5; d2[i] = 40 + v * 120; d2[i + 1] = 120 + v * 110; d2[i + 2] = 90 + v * 60; d2[i + 3] = 255; }
+  g.putImageData(id2, 0, 0);
+}
+
+// ── Arthur: round head with a nose tick (profile), neck, shoulders, torso, jointed limbs, hands, briefcase ──
+function figure(x, gy, o = {}) {
+  const dir = o.dir ?? 1, w = o.w ?? 0, p = o.p ?? 0, look = o.look ?? 0, up = o.up ?? 0, lw = o.lw ?? 4.4, col = o.col ?? INK, s = o.s ?? 1;
+  const L1 = 62 * s, L2 = 62 * s, U1 = 48 * s, U2 = 44 * s, HR = 34 * s;
+  const bob = w * 5 * s * Math.abs(Math.cos(p));
+  const hip = [x, gy - 121 * s - bob + (o.float ?? 0)];
+  const sh = [hip[0] + 5 * s * dir * w + (o.lean ?? 0) * dir * s, hip[1] - 92 * s];
+  const neckTop = [sh[0] + 1 * dir * s, sh[1] - 13 * s];
+  const head = [neckTop[0] + 2 * dir * s, neckTop[1] - HR + 1];
+  const S = { lw, col };
+  const leg = (i) => {
+    const q = p + i * Math.PI, th = 0.42 * w * Math.sin(q) + (w === 0 ? (i ? -0.05 : 0.07) : 0) + up * (i ? -0.3 : 0.3);
+    const kb = 0.08 + w * 0.65 * Math.pow(Math.max(0, Math.cos(q)), 1.5) + up * (i ? 0.55 : 0.45);
+    const kn = [hip[0] + Math.sin(th) * L1 * dir, hip[1] + Math.cos(th) * L1];
+    const an = [kn[0] + Math.sin(th - kb) * L2 * dir, kn[1] + Math.cos(th - kb) * L2];
+    const ft = [an[0] + 18 * s * dir * Math.cos(th - kb - 0.1 * w * Math.sin(q)), an[1] - 1 * s];
+    stroke([hip, kn, an, ft], { w: lw, col });
+  };
+  const arm = (i) => {
+    const q = p + i * Math.PI + Math.PI;
+    let ua = 0.36 * w * Math.sin(q) + (w === 0 ? (i ? -0.08 : 0.1) : 0), eb = 0.22 + 0.18 * w;
+    ua = lerp(ua, i ? -2.45 : 2.6, up); eb = lerp(eb, i ? 0.35 : -0.3, up);
+    if (!i && o.watch) { ua = lerp(ua, 0.75, o.watch); eb = lerp(eb, 1.75, o.watch); }
+    const el = [sh[0] + Math.sin(ua) * U1 * dir, sh[1] + Math.cos(ua) * U1];
+    const hd = [el[0] + Math.sin(ua + eb) * U2 * dir, el[1] + Math.cos(ua + eb) * U2];
+    stroke([sh, el, hd], { w: lw, col });
+    if (!i && (o.watch ?? 0) > 0.4) { const wx = lerp(el[0], hd[0], 0.72), wy = lerp(el[1], hd[1], 0.72); ctx.fillStyle = '#fbfaf6'; ctx.beginPath(); ctx.arc(wx, wy, 7 * s, 0, TAU); ctx.fill(); circ(wx, wy, 7 * s, { w: lw * 0.7, col, noGhost: true }); }
+    // hand: a small mitten loop with a thumb tick
+    const a = ua + eb, hx = hd[0] + Math.sin(a) * 5 * s * dir, hy = hd[1] + Math.cos(a) * 5 * s;
+    circ(hx, hy, 5.2 * s, { w: lw * 0.75, col, noGhost: true });
+    stroke([[hx + 3 * s * dir, hy - 3 * s], [hx + 9 * s * dir, hy - 6 * s]], { w: lw * 0.7, col, noGhost: true });
+    if (i === 1 && o.brief) { // briefcase hangs from the far hand
+      const bx = hx, by = hy + 6 * s, bw = 48 * s, bh = 34 * s;
+      stroke([[bx - 7 * s, by + 5 * s], [bx - 7 * s, by], [bx + 7 * s, by], [bx + 7 * s, by + 5 * s]], { w: lw * 0.7, col, noGhost: true });
+      stroke([[bx - bw / 2, by + 5 * s], [bx + bw / 2, by + 5 * s], [bx + bw / 2, by + 5 * s + bh], [bx - bw / 2, by + 5 * s + bh]], { w: lw * 0.85, col, closed: true });
+    }
+  };
+  leg(1); arm(1);
+  stroke([hip, sh], { w: lw, col });
+  stroke([[sh[0] - 13 * s * dir, sh[1] + 2 * s], [sh[0] + 11 * s * dir, sh[1] - 1 * s]], { w: lw, col }); // shoulder line
+  stroke([sh, neckTop], { w: lw, col });
+  leg(0); arm(0);
+  // head: profile features rotate up when he looks at the sky
+  ctx.fillStyle = o.fill ?? '#fbfaf6'; ctx.beginPath(); ctx.arc(head[0], head[1], HR, 0, TAU); ctx.fill();
+  circ(head[0], head[1], HR, { w: lw, col });
+  const tilt = -0.55 * look, rot = (dx, dy) => [head[0] + (dx * Math.cos(tilt * dir) - dy * Math.sin(tilt * dir)), head[1] + (dx * Math.sin(tilt * dir) + dy * Math.cos(tilt * dir))];
+  const blink = o.blink ? 1 : 0;
+  const e = rot(14 * s * dir, -5 * s);
+  if (blink) stroke([[e[0] - 3 * s, e[1]], [e[0] + 3 * s, e[1]]], { w: lw * 0.7, col, noGhost: true }); else dot(e[0], e[1], 3.6 * s, col);
+  stroke([rot(33 * s * dir, -1 * s), rot(41 * s * dir, 5 * s), rot(32.5 * s * dir, 9 * s)], { w: lw * 0.85, col, noGhost: true });
+  if (o.mouth) stroke([rot(17 * s * dir, 15 * s), rot(25 * s * dir, 14 * s)], { w: lw * 0.6, col, noGhost: true });
+  return { head };
+}
+
+// ── walk: position along the street and stride phase ──────────────────────────────────────────────
+const X0 = -80, X1 = 660, STRIDE = 74;
+function walkX(t) {
+  const u = seg(t, T.walk0, T.walk1);
+  // constant pace, then a gentle decelerating last step
+  const k = 0.82, v = u < k ? u / k * 0.9 : 0.9 + 0.1 * eOut((u - k) / (1 - k));
+  return lerp(X0, X1, v);
+}
+function walkPose(t) {
+  const x = walkX(t), moving = t > T.walk0 - 0.05 && t < T.walk1;
+  const w = moving ? Math.min(1, seg(t, T.walk0 - 0.05, T.walk0 + 0.15)) * (1 - seg(t, T.walk1 - 0.3, T.walk1)) : 0;
+  return { x, p: (x - X0) / STRIDE * Math.PI, w };
+}
+
+// ── scene: the bus stop (local 1120×630 space) ───────────────────────────────────────────────────
+function busStop(tq, o = {}) {
+  const gy = 520;
+  if (o.sky > 0) { ctx.globalAlpha = o.sky; ctx.drawImage(WASH.sky, 0, 0, 1120, 380); ctx.globalAlpha = 1; }
+  stroke([[-20, gy + 3], [300, gy - 2], [640, gy + 2], [1140, gy - 1]], { w: 3.6 });
+  stroke([[-20, gy + 70], [520, gy + 72], [1140, gy + 68]], { w: 2.4, alpha: 0.6 });
+  for (const [gx, gl] of [[120, 12], [138, 9], [930, 11], [948, 8], [470, 7]]) stroke([[gx, gy], [gx - 3, gy - gl]], { w: 2.2, alpha: 0.7, noGhost: true });
+  // bus stop sign
+  stroke([[770, gy + 2], [772, 196]], { w: 4.2 });
+  stroke([[704, 124], [840, 120], [842, 200], [702, 202]], { w: 4, closed: true });
+  ctx.save(); ctx.fillStyle = INK; ctx.font = '50px "Reenie Beanie"'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.translate(772 + (hash(7, 1, BOIL) - .5) * 1.5, 163); ctx.rotate(-0.03); ctx.fillText('BUS 14', 0, 0); ctx.restore();
+  // Arthur
+  const wp = o.pose ?? walkPose(tq);
+  const blink = o.blink ?? false;
+  figure(wp.x, gy, { p: wp.p, w: wp.w, brief: true, look: o.look ?? 0, blink, watch: o.watch ?? 0 });
+  if (o.after) o.after(gy);
+}
+
+// ── memory vignettes ─────────────────────────────────────────────────────────────────────────────
+function memDog(tq, age) {
+  ctx.drawImage(WASH.dog, 0, 0, 1120, 630);
+  const gy = 500; stroke([[-20, gy], [560, gy + 3], [1140, gy - 2]], { w: 3.6 });
+  const bx = 400, by = 350, wag = Math.sin(tq * 22) * 0.5, br = Math.sin(tq * 5) * 3;
+  // tail wagging (behind the body)
+  const ta = -0.9 + wag; stroke([[bx + 6, by + 6], [bx - Math.cos(ta) * 44, by + 6 + Math.sin(ta) * 44], [bx - Math.cos(ta - 0.5) * 84, by + 2 + Math.sin(ta - 0.5) * 84]], { w: 5 });
+  for (let k = 0; k < 2; k++) { const aa = ta - 0.25 + k * 0.55; stroke([[bx - Math.cos(aa) * 100, by + Math.sin(aa) * 100 - 4], [bx - Math.cos(aa) * 120, by + Math.sin(aa) * 120 - 6]], { w: 2.6, noGhost: true, alpha: 0.7 }); }
+  // legs: rear leg with knee forward and hock back, front leg with elbow and wrist; paws point forward
+  const leg = (pts, al = 1) => stroke(pts, { w: 5, alpha: al });
+  leg([[bx + 30, by + 40], [bx + 58, by + 92], [bx + 34, by + 120], [bx + 44, gy - 2], [bx + 66, gy - 2]], 0.55);
+  leg([[bx + 214, by + 44], [bx + 222, by + 100], [bx + 226, gy - 2], [bx + 248, gy - 2]], 0.55);
+  // body: a soft outlined barrel with a chest
+  ctx.fillStyle = '#fbf1d8'; ctx.beginPath(); ctx.ellipse(bx + 125, by + 30 + br * 0.3, 135, 52 + br * 0.3, 0, 0, TAU); ctx.fill();
+  { const p = []; for (let i = 0; i < 26; i++) { const aa = i / 26 * TAU; p.push([bx + 125 + Math.cos(aa) * 135, by + 30 + br * 0.3 + Math.sin(aa) * (52 + br * 0.3)]); } stroke(p, { w: 5, closed: true }); }
+  leg([[bx + 12, by + 44], [bx + 44, by + 96], [bx + 18, by + 124], [bx + 26, gy - 2], [bx + 48, gy - 2]]);
+  leg([[bx + 196, by + 52], [bx + 200, by + 104], [bx + 204, gy - 2], [bx + 226, gy - 2]]);
+  // neck and head: round skull, long snout with a nose, droopy ear, eye, tongue
+  const hx = bx + 270, hy = by - 60 + br * 0.4;
+  stroke([[bx + 222, by + 4], [hx - 16, hy + 26]], { w: 5 }); stroke([[bx + 250, by + 30], [hx + 6, hy + 36]], { w: 5 });
+  ctx.fillStyle = '#fbf1d8'; ctx.beginPath(); ctx.arc(hx, hy, 42, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(hx + 26, hy - 10); ctx.lineTo(hx + 84, hy - 2); ctx.lineTo(hx + 84, hy + 22); ctx.lineTo(hx + 26, hy + 26); ctx.fill();
+  stroke([[hx + 12, hy - 40], [hx + 40, hy - 24], [hx + 84, hy - 6], [hx + 88, hy + 10], [hx + 80, hy + 24], [hx + 34, hy + 30]], { w: 5 });
+  { const p = []; for (let i = 0; i <= 20; i++) { const aa = -1.25 - i / 20 * 3.8; p.push([hx + Math.cos(aa) * 42, hy + Math.sin(aa) * 42]); } stroke(p, { w: 5 }); }
+  dot(hx + 86, hy - 2, 8); dot(hx + 18, hy - 12, 5);
+  stroke([[hx - 12, hy - 36], [hx - 44, hy - 12 + Math.sin(tq * 9) * 3], [hx - 36, hy + 30], [hx - 18, hy + 14]], { w: 5 });
+  ctx.fillStyle = '#e0706a'; ctx.beginPath(); ctx.ellipse(hx + 60, hy + 34, 9, 14, 0.2, 0, TAU); ctx.fill(); stroke([[hx + 52, hy + 28], [hx + 56, hy + 46], [hx + 68, hy + 44], [hx + 68, hy + 28]], { w: 3, noGhost: true });
+  // the only saturated thing: a red ball
+  ctx.fillStyle = '#d83a2c'; ctx.beginPath(); ctx.arc(800, gy - 34, 32, 0, TAU); ctx.fill(); circ(800, gy - 34, 32, { w: 4 });
+}
+function memSea(tq, age) {
+  ctx.drawImage(WASH.sea, 0, 0, 1120, 630);
+  const hz = 300;
+  ctx.fillStyle = 'rgba(245,200,70,0.8)'; ctx.beginPath(); ctx.arc(780, hz - 8, 70, Math.PI, TAU); ctx.fill();
+  stroke((() => { const p = []; for (let i = 0; i <= 16; i++) { const a = Math.PI + i / 16 * Math.PI; p.push([780 + Math.cos(a) * 70, hz - 8 + Math.sin(a) * 70]); } return p; })(), { w: 4 });
+  stroke([[-20, hz], [1140, hz - 3]], { w: 3.8 });
+  for (let r = 0; r < 4; r++) {
+    const y = hz + 34 + r * 42, ph = tq * (2.4 - r * 0.3) + r * 1.7, p = [];
+    for (let x = -40; x <= 1160; x += 28) p.push([x, y + Math.sin(x * 0.028 + ph) * (5 + r * 1.5)]);
+    stroke(p, { w: 3 - r * 0.3, alpha: 0.85 - r * 0.1 });
+  }
+  const by = 520; stroke([[-20, by + 8], [300, by - 6], [700, by - 2], [1140, by + 10]], { w: 3.6 });
+  // young Arthur, smaller, looking at the water
+  figure(330, by - 2, { s: 0.85, dir: 1, lw: 4.6, look: 0.25 });
+  // two gulls
+  for (const [gx, gy2] of [[520, 150], [590, 118]]) { const f = Math.sin(tq * 10 + gx) * 6; stroke([[gx - 22, gy2 + f], [gx, gy2 + 6], [gx + 22, gy2 + f]], { w: 3, noGhost: true }); }
+}
+function memSand(tq, age) {
+  ctx.drawImage(WASH.sand, 0, 0, 1120, 630);
+  const bob = Math.sin(tq * 3.2) * 10, rot = Math.sin(tq * 2.1) * 0.05;
+  ctx.save(); ctx.translate(560, 330 + bob); ctx.rotate(rot);
+  // soft shadow on the "table"
+  ctx.fillStyle = 'rgba(80,40,40,0.12)'; ctx.beginPath(); ctx.ellipse(0, 190 - bob, 190, 20, 0, 0, TAU); ctx.fill();
+  const layer = (y, col, h) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(-210, y); ctx.lineTo(210, y); ctx.lineTo(210, y + h); ctx.lineTo(-210, y + h); ctx.fill(); };
+  // bread slice (top), fillings, bread (bottom) — a triangular wedge seen from the side
+  const tri = (y0, h, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(-230, y0 + h); ctx.lineTo(0, y0 - 150); ctx.lineTo(230, y0 + h); ctx.closePath(); ctx.fill(); stroke([[-230, y0 + h], [0, y0 - 150], [230, y0 + h]], { w: 5, closed: true }); };
+  tri(40, 0, '#f1d9a0');
+  layer(40, '#6fb24a', 18); { const p = []; for (let x = -230; x <= 230; x += 20) p.push([x, 42 + (x / 20 % 2 ? 12 : 0)]); stroke(p, { w: 3.6 }); }
+  layer(58, '#d9453a', 20); stroke([[-218, 60], [218, 60]], { w: 3 }); stroke([[-218, 78], [218, 78]], { w: 3 });
+  layer(78, '#f2c33b', 14); stroke([[-225, 92], [225, 92]], { w: 3 });
+  ctx.fillStyle = '#f1d9a0'; ctx.fillRect(-232, 92, 464, 50); stroke([[-232, 92], [232, 92], [232, 142], [-232, 142]], { w: 5, closed: true });
+  ctx.restore();
+  // deadpan sparkle ticks
+  for (let k = 0; k < 6; k++) { const a = k / 6 * TAU + 0.3, r0 = 300 + 12 * Math.sin(tq * 6 + k), r1 = r0 + 30; stroke([[560 + Math.cos(a) * r0, 300 + Math.sin(a) * r0 * 0.62], [560 + Math.cos(a) * r1, 300 + Math.sin(a) * r1 * 0.62]], { w: 3, noGhost: true, alpha: 0.8 }); }
+}
+
+// ── vignette: clip, paint content in 1120×630 local space, hand-drawn black border (traced in) ──────
+function vignette(r, content, o = {}) {
+  const k = r.w / 1120;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
+  ctx.fillStyle = o.bg ?? '#fbfaf6'; ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.globalAlpha = 1;
+  ctx.translate(r.x + (o.ox ?? 0) * k, r.y + (o.oy ?? 0) * k); ctx.scale(k * (o.zoom ?? 1), k * (o.zoom ?? 1));
+  if ((o.reveal ?? 1) > 0) { const sAMP = AMP; AMP = sAMP / Math.max(0.7, k); content(); AMP = sAMP; }
+  ctx.restore();
+  if (o.reveal !== undefined && o.reveal < 1) { ctx.save(); ctx.beginPath(); ctx.rect(r.x - 1, r.y - 1, r.w + 2, r.h + 2); ctx.clip(); ctx.globalAlpha = 1 - o.reveal; ctx.drawImage(PAPER, -20, -20); ctx.restore(); ctx.globalAlpha = 1; }
+  border(r, o.draw ?? 1, o.bw ?? 7);
+}
+function border(r, u, bw) {
+  if (u <= 0) return;
+  const ex = 7, c = [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
+  for (let i = 0; i < 4; i++) {
+    const uu = clamp(u * 4 - i); if (uu <= 0) break;
+    const a = c[i], b = c[(i + 1) % 4], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy), nx = dx / L, ny = dy / L;
+    const s0 = [a[0] - nx * ex, a[1] - ny * ex], e0 = [lerp(a[0] - nx * ex, b[0] + nx * ex, uu), lerp(a[1] - ny * ex, b[1] + ny * ex, uu)];
+    stroke([s0, e0], { w: bw, amp: 1.2 });
+  }
+}
+
+// ── captions: deadpan handwritten narration, words appear one after another ─────────────────────────
+function caption(t) {
+  for (const [ci, c] of CAPS.entries()) {
+    if (t < c.a || t > c.b) continue;
+    const words = c.s.split(' '), n = Math.min(words.length, Math.floor(seg(t, c.a, c.a + Math.min(0.55, words.length * 0.07)) * words.length + 0.999));
+    const fo = 1 - seg(t, c.b - 0.12, c.b), a = fo * (ci === CAPS.length - 1 ? 1 - seg(t, 9.55, 9.85) : 1);
+    ctx.save(); ctx.font = '78px "Reenie Beanie"'; ctx.fillStyle = INK; ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = a;
+    const full = ctx.measureText(c.s).width; let x = 960 - full / 2; const y = 945;
+    for (let i = 0; i < n; i++) { const wd = words[i] + (i < words.length - 1 ? ' ' : ''); const jx = (hash(ci, i, BOIL) - .5) * 2, jy = (hash(ci, i + 50, BOIL) - .5) * 2; ctx.fillText(wd, x + jx, y + jy); x += ctx.measureText(wd).width; }
+    ctx.restore();
+  }
+}
+
+// ── the surreal burst ────────────────────────────────────────────────────────────────────────────
+const PAL = [['#e8412f', '#f6c21c', '#2a5bd7'], ['#ff5fa8', '#1fb59a', '#ffd84a'], ['#6a2ee8', '#ff7b1a', '#12b0c9'], ['#f23a5d', '#2a2a8f', '#9ee34b'], ['#ffb400', '#e0287b', '#2d9cdb']];
+function burst(t) {
+  const u = seg(t, T.burst0, T.burst1), st = Math.floor(t * 6), R = rng(9000 + st), pal = PAL[st % PAL.length];
+  const cx = 960 + (R() - .5) * 60, cy = 520 + (R() - .5) * 40, rot = t * 0.9 + R() * 0.3;
+  ctx.fillStyle = pal[2]; ctx.fillRect(0, 0, W, H);
+  const N = 20; for (let i = 0; i < N; i++) { if (i % 2) continue; const a0 = rot + i / N * TAU, a1 = rot + (i + 1) / N * TAU; ctx.fillStyle = pal[0]; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a0) * 2400, cy + Math.sin(a0) * 2400); ctx.lineTo(cx + Math.cos(a1) * 2400, cy + Math.sin(a1) * 2400); ctx.fill(); }
+  // collage patches: halftone, weave, crayon, grainy "photo", watercolour
+  const texs = [TEX.half, TEX.weave, TEX.crayon, TEX.photo, WASH.burstA, WASH.burstB];
+  const np = 5 + Math.floor(R() * 3);
+  for (let i = 0; i < np; i++) {
+    const tx = texs[Math.floor(R() * texs.length)], pw = 260 + R() * 420, ph = 180 + R() * 320, px = R() * (W - pw * 0.4) - pw * 0.3, py = R() * (H - ph * 0.4) - ph * 0.3, a = (R() - .5) * 0.8;
+    ctx.save(); ctx.translate(px + pw / 2, py + ph / 2); ctx.rotate(a); ctx.beginPath();
+    const pts = 9; for (let k = 0; k < pts; k++) { const aa = k / pts * TAU, rr = 0.82 + R() * 0.3; ctx.lineTo(Math.cos(aa) * pw / 2 * rr, Math.sin(aa) * ph / 2 * rr); }
+    ctx.closePath(); ctx.clip(); ctx.drawImage(tx, -pw / 2, -ph / 2, pw, ph); ctx.restore();
+  }
+  // crayon rings expanding from Arthur
+  for (let k = 0; k < 7; k++) { const rr = ((k * 150 + u * 900) % 1050) + 80; ctx.globalAlpha = 0.85; SID += 3; const p = []; for (let i = 0; i < 40; i++) { const a = i / 40 * TAU; p.push([cx + Math.cos(a) * rr * (1 + (R() - .5) * 0.06), cy + Math.sin(a) * rr * 0.92]); } stroke(p, { w: 10 + k % 3 * 5, col: k % 2 ? pal[1] : '#fffdf5', closed: true, amp: 4, noGhost: true }); }
+  ctx.globalAlpha = 1;
+  // scribbled stars
+  for (let i = 0; i < 16; i++) { const sx = R() * W, sy = R() * H, sr = 14 + R() * 26; for (let k = 0; k < 3; k++) { const a = k / 3 * Math.PI + R(); stroke([[sx - Math.cos(a) * sr, sy - Math.sin(a) * sr], [sx + Math.cos(a) * sr, sy + Math.sin(a) * sr]], { w: 5, col: i % 3 ? '#fffdf5' : INK, noGhost: true }); } }
+  // Arthur floats in a white halo, arms up, head tipped back
+  const zs = 2.1 + u * 0.5;
+  ctx.fillStyle = '#fffdf5'; ctx.beginPath(); { const n = 30; for (let i = 0; i < n; i++) { const a = i / n * TAU, rr = (300 + 26 * Math.sin(i * 3.1 + st)) * zs / 2.1; ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } } ctx.closePath(); ctx.fill();
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.sin(t * 3) * 0.12); ctx.scale(zs, zs);
+  const sA = AMP; AMP = 1.0; figure(0, 175, { up: 1, look: 1, lw: 5, mouth: true, float: Math.sin(t * 5) * 4 }); AMP = sA; ctx.restore();
+  // blow-out to white at the end of the burst
+  const wb = seg(t, T.burst1 - 0.2, T.burst1); if (wb > 0) { ctx.fillStyle = `rgba(255,253,245,${eIn(wb)})`; ctx.fillRect(0, 0, W, H); }
+  const wi = 1 - seg(t, T.burst0, T.burst0 + 0.1); if (wi > 0) { ctx.fillStyle = `rgba(255,253,245,${wi})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ── film layer: gate weave, flicker, grain, dust, hairs, burned corners ────────────────────────────
+function film(t, strength = 1) {
+  const st = Math.floor(t * 12), R = rng(3000 + st);
+  ctx.globalAlpha = 0.16 * strength; ctx.drawImage(GRAIN[st % GRAIN.length], 0, 0, W, H); ctx.globalAlpha = 1;
+  ctx.drawImage(VIGN, 0, 0);
+  const fl = (R() - 0.5) * 0.06; ctx.fillStyle = fl > 0 ? `rgba(255,252,240,${fl})` : `rgba(20,15,10,${-fl})`; ctx.fillRect(0, 0, W, H);
+  const nd = 3 + Math.floor(R() * 6);
+  for (let i = 0; i < nd; i++) { const x = R() * W, y = R() * H, r = 0.8 + R() * 2.6; ctx.fillStyle = R() < 0.75 ? 'rgba(20,18,15,0.7)' : 'rgba(255,255,250,0.8)'; ctx.beginPath(); ctx.ellipse(x, y, r, r * (0.6 + R() * 0.8), R() * 3, 0, TAU); ctx.fill(); }
+  if (R() < 0.35) { const x = R() * W, y = R() * H, L = 30 + R() * 70, a = R() * TAU; ctx.strokeStyle = 'rgba(20,18,15,0.55)'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.moveTo(x, y); ctx.bezierCurveTo(x + Math.cos(a) * L * 0.5 + 20, y + Math.sin(a) * L * 0.5, x + Math.cos(a + 1) * L * 0.8, y + Math.sin(a + 1) * L * 0.8, x + Math.cos(a) * L, y + Math.sin(a) * L); ctx.stroke(); }
+  if (R() < 0.12) { const x = R() * W; ctx.fillStyle = 'rgba(30,25,20,0.12)'; ctx.fillRect(x, 0, 1.5, H); }
+}
+
+// ── frame ───────────────────────────────────────────────────────────────────────────────────────
+function scene(t) {
+  const tq = Math.floor(t * 12) / 12; BOIL = Math.floor(t * 12); SID = 0; AMP = 2.0;
+  const wx = (hash(BOIL, 7) - .5) * 2.2, wy = (hash(BOIL, 8) - .5) * 1.6;
+  ctx.save(); ctx.translate(wx, wy);
+  ctx.drawImage(PAPER, -20, -20);
+  if (t >= T.burst0 && t < T.burst1) { burst(t); ctx.restore(); film(t, 0.8); return; }
+  if (t < T.split0) {
+    const d = eOut(seg(t, T.frameIn, T.frameIn + 0.6)), rv = seg(t, T.frameIn + 0.3, T.frameIn + 0.7);
+    const blink = (t > 3.08 && t < 3.16);
+    // he checks his watch: raise, hold, lower (eased with a little overshoot)
+    const watch = eOutBack(seg(tq, 2.55, 2.75)) * (1 - eSm(seg(tq, 2.95, 3.12)));
+    vignette(SINGLE, () => busStop(tq, { blink, watch, look: -0.35 * watch }), { draw: d, reveal: rv });
+  } else if (t < T.burst0) {
+    const u = eOutBack(seg(tq, T.split0, T.split1));
+    const r0 = lerpR(SINGLE, CELL[0], u);
+    const pre = t > T.pre ? 1 : 0, R = rng(40 + BOIL), jit = () => pre * (R() - .5) * 26;
+    const jr = r => pre ? { x: r.x + jit(), y: r.y + jit(), w: r.w, h: r.h } : r;
+    const standing = { x: X1, p: 0, w: 0 };
+    const mi = CAPS.findIndex(c => t >= c.a && t <= c.b);
+    vignette(jr(r0), () => busStop(tq, { pose: standing, look: mi > 0 ? 0.15 : 0, blink: t > 4.9 && t < 4.98 }));
+    const fns = [memDog, memSea, memSand];
+    for (let i = 0; i < 3; i++) {
+      const a = T.mem[i]; if (t < a) continue;
+      const d = eOut(seg(t, a, a + 0.3)), rv = seg(t, a + 0.18, a + 0.4);
+      vignette(jr(CELL[i + 1]), () => fns[i](tq, t - a), { draw: d, reveal: rv });
+    }
+    if (pre) { ctx.fillStyle = `rgba(${PAL[BOIL % 5][0] === '#e8412f' ? '232,65,47' : '255,95,168'},0.18)`; ctx.fillRect(-20, -20, W + 40, H + 40); }
+  } else {
+    // quiet again: the single vignette, a faint colour left in the sky
+    const cl = eSm(seg(t, T.close0, T.close1));
+    const look = eSm(seg(tq, T.look0, T.look1));
+    const sky = 0.25 + 0.55 * look;
+    // bus: enters from the right, stops, leaves to the left
+    const bx = t < T.bus0 ? 1400 : t < T.bus1 ? lerp(1400, 300, eOut(seg(tq, T.bus0, T.bus1))) : t < T.bus2 ? 300 : lerp(300, -1100, eIn(seg(tq, T.bus2, T.bus3)));
+    const moving = (t > T.bus0 && t < T.bus1 - 0.05) || (t > T.bus2 + 0.05 && t < T.bus3);
+    const after = gy => { if (bx < 1300 && bx > -1000) bus(bx, gy + 78, moving, tq); };
+    // closing: the frame shrinks around Arthur (content stays put)
+    const target = { x: SINGLE.x + (X1 - 180) , y: SINGLE.y + 150, w: 360, h: 380 };
+    const r = lerpR(SINGLE, target, cl);
+    const fr = { x: r.x, y: r.y, w: r.w, h: r.h };
+    ctx.save(); ctx.beginPath(); ctx.rect(fr.x, fr.y, fr.w, fr.h); ctx.clip();
+    ctx.fillStyle = '#fbfaf6'; ctx.fillRect(SINGLE.x, SINGLE.y, SINGLE.w, SINGLE.h);
+    ctx.translate(SINGLE.x, SINGLE.y);
+    busStop(tq, { pose: { x: X1, p: 0, w: 0 }, look, sky, after, blink: t > 8.55 && t < 8.63 });
+    ctx.restore();
+    border(fr, 1, 7);
+    const wf = 1 - seg(t, T.back, T.back + 0.2); if (wf > 0) { ctx.fillStyle = `rgba(255,253,245,${wf})`; ctx.fillRect(-20, -20, W + 40, H + 40); }
+  }
+  caption(t);
+  const fo = eSm(seg(t, T.fade0, T.fade1)); if (fo > 0) { ctx.globalAlpha = fo; ctx.drawImage(PAPER, -20, -20); ctx.globalAlpha = 1; }
+  ctx.restore();
+  film(t, 1);
+  const fi = 1 - seg(t, 0, 0.25); if (fi > 0) { ctx.fillStyle = `rgba(16,14,12,${fi})`; ctx.fillRect(0, 0, W, H); }
+}
+function bus(x, gy, moving, tq) {
+  const w = 640, h = 250, top = gy - h - 22;
+  ctx.fillStyle = '#fbfaf6'; ctx.fillRect(x, top, w, h);
+  stroke([[x, top + 30], [x + 20, top], [x + w - 10, top + 2], [x + w, top + 24], [x + w, top + h], [x, top + h]], { w: 4.6, closed: true });
+  // windows with passengers (round heads)
+  for (let i = 0; i < 5; i++) {
+    const wx = x + 90 + i * 104; stroke([[wx, top + 34], [wx + 84, top + 34], [wx + 84, top + 110], [wx, top + 110]], { w: 3.4, closed: true });
+    if (i % 2 === 0 || i === 3) { circ(wx + 42, top + 84, 17, { w: 3, noGhost: true }); dot(wx + 36, top + 82, 2.4); }
+  }
+  stroke([[x + 16, top + 40], [x + 64, top + 40], [x + 64, top + h - 8], [x + 16, top + h - 8]], { w: 3.4, closed: true }); // door
+  ctx.save(); ctx.font = '40px "Reenie Beanie"'; ctx.fillStyle = INK; ctx.fillText('14', x + 24, top + 28); ctx.restore();
+  stroke([[x, top + 150], [x + w, top + 150]], { w: 2.4, alpha: 0.7 });
+  for (const wx of [x + 130, x + w - 130]) { ctx.fillStyle = '#fbfaf6'; ctx.beginPath(); ctx.arc(wx, gy - 22, 34, 0, TAU); ctx.fill(); circ(wx, gy - 22, 34, { w: 4.4 }); dot(wx, gy - 22, 5); }
+  if (moving) for (let k = 0; k < 4; k++) { const y = top + 50 + k * 50, L = 120 + hash(k, BOIL) * 120; stroke([[x + w + 30, y], [x + w + 30 + L, y]], { w: 3, alpha: 0.7, noGhost: true }); }
+}
+
+window.ready = (async () => { await document.fonts.load('78px "Reenie Beanie"'); await document.fonts.ready; buildTextures(); })();
+window.draw = ({ t }) => { scene(Math.min(t, DUR - 1e-4)); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => {
+  const ev = [];
+  ev.push({ k: 'pen', t: T.frameIn, d: 0.6 });
+  // footsteps: foot strikes when the stride phase passes (k + ½)·π
+  let last = -1; for (let t = T.walk0; t < T.walk1; t += 1 / 120) { const wp = walkPose(t), k = Math.floor(wp.p / Math.PI + 0.5); if (k !== last && wp.w > 0.2) { if (last >= 0) ev.push({ k: 'step', t, v: wp.w }); last = k; } }
+  ev.push({ k: 'settle', t: T.walk1 - 0.05 });
+  ev.push({ k: 'whoosh', t: T.split0 });
+  T.mem.forEach((a, i) => { ev.push({ k: 'pen', t: a, d: 0.3 }); ev.push({ k: 'mem', t: a + 0.2, m: [69, 76, 72][i] }); });
+  ev.push({ k: 'wag', t: T.mem[0] + 0.3 });
+  ev.push({ k: 'sea', t: T.mem[1] + 0.2 });
+  ev.push({ k: 'rattle', t: T.pre });
+  ev.push({ k: 'burst', t: T.burst0, d: T.burst1 - T.burst0 });
+  ev.push({ k: 'bus', t: T.bus0, a: T.bus1, b: T.bus2, c: T.bus3 });
+  ev.push({ k: 'chord', t: T.look0 - 0.1 });
+  CAPS.forEach(c => ev.push({ k: 'scribble', t: c.a, d: Math.min(0.55, c.s.split(' ').length * 0.07) }));
+  return ev;
+};
+</script>
+</body></html>
