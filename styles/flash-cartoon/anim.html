@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── flash-cartoon · mid-2000s web Flash toon ───────────────────────────────────────────
+// Preloader (bar fills in lurching chunks, the hero symbol spins as a loading icon) → PRESS PLAY button pops
+// with overshoot, the arrow cursor clicks it → the button's circle grows into a sunburst stage → GLOOP the blob drops in
+// and does a tween-built dance (hops, lean, wiggle, 360° symbol spin, ta-da pose) while a crowd of the SAME library
+// symbol, only re-tinted, bobs in sync → punchline bubble → cartoon iris-out → REPLAY? end screen → fade.
+// Everything is a "symbol": flat fills + glossy gradients, constant-width strokes (drawn in screen space), keyframed
+// tracks with Flash-style easing presets. Faces swap drawings on low frame counts (limited frame-by-frame).
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const TITAN = '"Titan One"', PIX = '"Silkscreen"';
+const INK = '#1d1030', LW = 7;
+
+// ── Flash-style easing presets + keyframe tracks (ease belongs to the starting key, like a motion tween) ──
+const EASE = {
+  none: u => u,
+  in: u => u * u * u,
+  out: u => 1 - Math.pow(1 - u, 3),
+  io: u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2,
+  back: u => { const c = 2.2; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); },
+  elastic: u => u === 0 || u === 1 ? u : Math.pow(2, -9 * u) * Math.sin((u * 10 - .75) * TAU / 3) + 1,
+  hold: u => 0,
+};
+// keys: [[time, value, ease], ...]
+const track = keys => t => {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const [ta, va, e = 'io'] = keys[i], [tb, vb] = keys[i + 1];
+    if (t < tb) return lerp(va, vb, EASE[e]((t - ta) / (tb - ta)));
+  }
+  return keys[keys.length - 1][1];
+};
+
+// ── timing ──
+const T = {
+  loadA: .25, full: 1.95, loadOut: 2.05, playIn: 2.12, click: 2.78, reveal: 2.92, revealEnd: 3.35,
+  drop: 3.2, land: 3.55, beat: .5, pose: 6.55, bubble: 7.12, bubbleOut: 8.25, irisA: 8.2, irisB: 8.78,
+  endIn: 8.86, hover: 9.52, fadeA: 9.62, fadeB: 10.0,
+};
+const BEAT = k => T.land + k * T.beat;
+
+// ── gradient helpers ──
+function radial(x, cx, cy, r0, r1, stops) { const g = x.createRadialGradient(cx, cy, r0, cx, cy, r1); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
+function linear(x, x0, y0, x1, y1, stops) { const g = x.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
+// stroke in screen space so every outline keeps the same width at any symbol scale (uniform Flash hairline-style strokes)
+function strokeUniform(x, w = LW, col = INK) { x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.lineWidth = w; x.strokeStyle = col; x.lineJoin = 'round'; x.lineCap = 'round'; x.stroke(); x.restore(); }
+function rrect(x, X, Y, w, h, r) { x.beginPath(); x.moveTo(X + r, Y); x.arcTo(X + w, Y, X + w, Y + h, r); x.arcTo(X + w, Y + h, X, Y + h, r); x.arcTo(X, Y + h, X, Y, r); x.arcTo(X, Y, X + w, Y, r); x.closePath(); }
+
+// ── colour "tint" effect (the library symbol is reused with a different tint, as in Flash) ──
+const TINTS = {
+  lime:   { hi: '#d8ff7a', mid: '#8fe32f', lo: '#3f9d16', foot: '#2f7a10' },
+  pink:   { hi: '#ffc2e6', mid: '#ff6fb8', lo: '#c42b7c', foot: '#8f1d5a' },
+  cyan:   { hi: '#bdf6ff', mid: '#39c9ef', lo: '#1377b4', foot: '#0e5687' },
+  grape:  { hi: '#e2c8ff', mid: '#a56cf2', lo: '#5d2cb0', foot: '#43207f' },
+  tang:   { hi: '#ffe0a6', mid: '#ffa53a', lo: '#d2600e', foot: '#9a430a' },
+};
+
+// ── the hero symbol: GLOOP ── origin = bottom centre, body 250 × 290 in symbol units
+// p: {x, y, sx, sy, rot (about feet), spin (about body centre), armL, armR, mouth, eyes, look, s(scale), tint}
+const BW = 250, BH = 290;
+function bodyPath(x, wob) {
+  const w = BW / 2, h = BH;
+  x.beginPath();
+  x.moveTo(-w, -18);
+  x.bezierCurveTo(-w - 8, -h * .55, -w * .72 + wob, -h, 0 + wob * .5, -h);
+  x.bezierCurveTo(w * .72 + wob, -h, w + 8, -h * .55, w, -18);
+  x.bezierCurveTo(w + 2, 4, -w - 2, 4, -w, -18);
+  x.closePath();
+}
+function arm(x, sxSide, ang, tint) {
+  // capsule arm rotating around the shoulder pivot (a nested symbol with its own tween)
+  x.save(); x.translate(sxSide * (BW / 2 - 14), -BH * .42); x.rotate(-ang * sxSide);
+  const L = 112, R = 24;
+  x.beginPath(); x.moveTo(0, -R); x.lineTo(sxSide * L, -R * .8); x.arc(sxSide * L, 0, R * .8, -Math.PI / 2, Math.PI / 2, sxSide < 0); x.lineTo(0, R); x.closePath();
+  x.fillStyle = tint.mid; x.fill(); strokeUniform(x);
+  // mitten nub
+  x.beginPath(); x.arc(sxSide * (L + 4), 0, R * 1.05, 0, TAU); x.fillStyle = tint.hi; x.fill(); strokeUniform(x);
+  x.restore();
+}
+function foot(x, side, tint, lift) {
+  x.save(); x.translate(side * 62, -4 - lift);
+  x.beginPath(); x.ellipse(side * 10, 0, 58, 26, 0, 0, TAU); x.fillStyle = tint.foot; x.fill(); strokeUniform(x);
+  x.restore();
+}
+function eye(x, ex, st, look) {
+  const ey = -BH * .66;
+  if (st === 'shut') {
+    x.beginPath(); x.moveTo(ex - 30, ey + 4); x.quadraticCurveTo(ex, ey + 22, ex + 30, ey + 4); strokeUniform(x, 8); return;
+  }
+  if (st === 'happy') {
+    x.beginPath(); x.moveTo(ex - 30, ey + 12); x.quadraticCurveTo(ex, ey - 22, ex + 30, ey + 12); strokeUniform(x, 8); return;
+  }
+  const ry = st === 'wide' ? 46 : 40;
+  x.beginPath(); x.ellipse(ex, ey, 31, ry, 0, 0, TAU); x.fillStyle = '#fff'; x.fill(); strokeUniform(x, 6);
+  const px = ex + look[0] * 11, py = ey + 6 + look[1] * 12;
+  x.beginPath(); x.ellipse(px, py, 16, 21, 0, 0, TAU); x.fillStyle = INK; x.fill();
+  x.beginPath(); x.arc(px - 6, py - 9, 6, 0, TAU); x.fillStyle = '#fff'; x.fill();
+}
+function mouth(x, m) {
+  const my = -BH * .36;
+  x.save();
+  if (m === 'smile') {
+    x.beginPath(); x.moveTo(-44, my - 6); x.quadraticCurveTo(0, my + 34, 44, my - 6); strokeUniform(x, 8);
+  } else if (m === 'open' || m === 'grin') {
+    const d = m === 'open' ? 56 : 40;
+    x.beginPath(); x.moveTo(-54, my - 10); x.quadraticCurveTo(0, my - 2, 54, my - 10); x.quadraticCurveTo(46, my + d, 0, my + d); x.quadraticCurveTo(-46, my + d, -54, my - 10); x.closePath();
+    x.fillStyle = '#5a0f2a'; x.fill();
+    x.save(); x.clip(); x.beginPath(); x.ellipse(0, my + d + 6, 34, 24, 0, 0, TAU); x.fillStyle = '#ff6f8e'; x.fill();
+    x.fillStyle = '#fff'; x.fillRect(-40, my - 16, 80, 16); x.restore();
+    x.beginPath(); x.moveTo(-54, my - 10); x.quadraticCurveTo(0, my - 2, 54, my - 10); x.quadraticCurveTo(46, my + d, 0, my + d); x.quadraticCurveTo(-46, my + d, -54, my - 10); x.closePath();
+    strokeUniform(x, 7);
+  } else if (m === 'o') {
+    x.beginPath(); x.ellipse(0, my + 8, 18, 22, 0, 0, TAU); x.fillStyle = '#5a0f2a'; x.fill(); strokeUniform(x, 7);
+  } else if (m === 'talk') {
+    x.beginPath(); x.ellipse(0, my + 6, 32, 16, 0, 0, TAU); x.fillStyle = '#5a0f2a'; x.fill(); strokeUniform(x, 7);
+  }
+  x.restore();
+}
+function gloop(x, p) {
+  const tint = TINTS[p.tint || 'lime'];
+  x.save();
+  x.translate(p.x, p.y); x.scale(p.s, p.s);
+  x.rotate(p.rot || 0);
+  if (p.spin) { x.translate(0, -BH * .5); x.rotate(p.spin); x.translate(0, BH * .5); }
+  x.scale(p.sx, p.sy);
+  foot(x, -1, tint, p.liftL || 0); foot(x, 1, tint, p.liftR || 0);
+  if (p.armsBehind) { arm(x, -1, p.armL, tint); arm(x, 1, p.armR, tint); }
+  bodyPath(x, p.wob || 0);
+  x.fillStyle = radial(x, -40, -BH * .7, 10, BH * 1.05, [[0, tint.hi], [.42, tint.mid], [1, tint.lo]]); x.fill();
+  strokeUniform(x);
+  // classic glossy highlight shape
+  x.beginPath(); x.ellipse(-58, -BH * .8, 34, 18, -.6, 0, TAU); x.fillStyle = 'rgba(255,255,255,.75)'; x.fill();
+  x.beginPath(); x.arc(-22, -BH * .9, 8, 0, TAU); x.fill();
+  // cheeks
+  x.fillStyle = '#ffa0bd';
+  x.beginPath(); x.ellipse(-78, -BH * .42, 20, 12, 0, 0, TAU); x.fill(); x.beginPath(); x.ellipse(78, -BH * .42, 20, 12, 0, 0, TAU); x.fill();
+  eye(x, -44, p.eyes || 'open', p.look || [0, 0]); eye(x, 44, p.wink ? 'happy' : p.eyes || 'open', p.look || [0, 0]);
+  mouth(x, p.mouth || 'smile');
+  if (!p.armsBehind) { arm(x, -1, p.armL, tint); arm(x, 1, p.armR, tint); }
+  x.restore();
+}
+</script>
+<script src="scene.js"></script>
+</body></html>
