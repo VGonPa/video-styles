@@ -4,9 +4,9 @@ Visual family · Lines that appear as if drawn live.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (32) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (8) · [Product & Launches](../../categories/use-cases/product.md) (18) · [Social & Short-Form](../../categories/use-cases/social.md) (49) · [Storytelling & Brand](../../categories/use-cases/story.md) (56) · [Data & Results](../../categories/use-cases/data.md) (8) · [News & Current Affairs](../../categories/use-cases/news.md) (7) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (30)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (32) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (8) · [Product & Launches](../../categories/use-cases/product.md) (18) · [Social & Short-Form](../../categories/use-cases/social.md) (49) · [Storytelling & Brand](../../categories/use-cases/story.md) (57) · [Data & Results](../../categories/use-cases/data.md) (8) · [News & Current Affairs](../../categories/use-cases/news.md) (7) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (30)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (7) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (8) · [Texture & Craft](../../categories/families/texture-craft.md) (15) · [Nostalgia](../../categories/families/nostalgia.md) (9) · [Technical](../../categories/families/technical.md) (8) · [Experimental](../../categories/families/experimental.md) (8) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (8) · [Comics & Cartoons](../../categories/families/comics.md) (17) · [Games](../../categories/families/games.md) (8) · [World & History](../../categories/families/world-history.md) (14)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (7) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (9) · [Texture & Craft](../../categories/families/texture-craft.md) (15) · [Nostalgia](../../categories/families/nostalgia.md) (9) · [Technical](../../categories/families/technical.md) (8) · [Experimental](../../categories/families/experimental.md) (8) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (8) · [Comics & Cartoons](../../categories/families/comics.md) (17) · [Games](../../categories/families/games.md) (8) · [World & History](../../categories/families/world-history.md) (14)
 
 <table>
 <tr>
@@ -21,6 +21,9 @@ Visual family · Lines that appear as if drawn live.
 <td width="25%" align="center"><a href="../../styles/storytime/storytime.mp4"><img src="../../styles/storytime/preview.gif" alt="Storytime Animation" width="100%"></a><br><b>76 · Storytime Animation</b><br><a href="../../styles/storytime/storytime.mp4">video</a> · <a href="../../styles/storytime">source</a></td>
 <td width="25%" align="center"><a href="../../styles/stick-action/stick-action.mp4"><img src="../../styles/stick-action/preview.gif" alt="Stick-Figure Action" width="100%"></a><br><b>81 · Stick-Figure Action</b><br><a href="../../styles/stick-action/stick-action.mp4">video</a> · <a href="../../styles/stick-action">source</a></td>
 </tr>
+<tr>
+<td width="25%" align="center"><a href="../../styles/existential-stick/existential-stick.mp4"><img src="../../styles/existential-stick/preview.gif" alt="Existential Stick Figures" width="100%"></a><br><b>108 · Existential Stick Figures</b><br><a href="../../styles/existential-stick/existential-stick.mp4">video</a> · <a href="../../styles/existential-stick">source</a></td>
+</tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
@@ -33,3 +36,4 @@ Visual family · Lines that appear as if drawn live.
 | 44 | [Ink & Watercolor](../../styles/ink-wash/) | Sumi-e brush and blooming washes | Quiet, poetic stories and graceful title openers | [Hand Drawn](../../categories/families/hand-drawn.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
 | 76 | [Storytime Animation](../../styles/storytime/) | Expressive self-insert, deadpan inner thoughts | Personal anecdotes, embarrassing mishaps, and relatable confessions | [Hand Drawn](../../categories/families/hand-drawn.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md) |
 | 81 | [Stick-Figure Action](../../styles/stick-action/) | Snappy stick-figure fights on paper | Punchy social clips, rivalries, and playful action beats | [Hand Drawn](../../categories/families/hand-drawn.md) | [Social & Short-Form](../../categories/use-cases/social.md) |
+| 108 | [Existential Stick Figures](../../styles/existential-stick/) | Deadpan pencil lives, sudden colour | Quiet, funny stories about memory and ordinary days | [Hand Drawn](../../categories/families/hand-drawn.md) | [Storytelling & Brand](../../categories/use-cases/story.md) |
