@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#f8f2ea}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── relatable-webcomic · "making plans: a love story" ─────────────────────────────────────────────
+// A soft pastel four-panel webcomic about an original messy-bun self-insert ("me"):
+//  2:00 PM a text asks "Drinks tonight?" → "YES!! I love people!" (hearts) · 6:45 PM slumped, eyes drift to the
+//  clock: "why did I say yes" · 6:52 PM the phone buzzes: "so sorry!! rain check?" → sparkly gasp ·
+//  6:53 PM tea, blanket, hearts: "Best plans I've ever had." The camera pushes into the last panel, a sip,
+//  and a heart iris closes the strip. Loose wobbly line boils at 8 fps; everything is deterministic from t.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eSm = u => u * u * (3 - 2 * u);
+const eOutBack = u => { const c = 1.9; return u >= 1 ? 1 : 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+const lp = (a, b, u) => [lerp(a[0], b[0], u), lerp(a[1], b[1], u)];
+const hash = (a, b = 0) => { let h = Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const FH = 'Gaegu';
+const INK = '#3d3142', LW = 4.2;
+const C = {
+  paper: '#f8f2ea', p1: '#fde3d2', p2: '#dfdaf0', p3: '#fbefc0', p4: '#f9d7e2',
+  skin: '#fdeadf', blush: '#f5a3b6', hair: '#5d4157', sweater: '#c8b8ee', sweaterD: '#ab98dc', pants: '#8e98cc', shoe: '#fffaf4',
+  couch: '#9fd5cd', couchD: '#86c3ba', heart: '#f48aae', spark: '#ffd46a', phone: '#6f6a8e', glow: '#fff7c9', msg: '#c3def8',
+  white: '#fffdf9', mug: '#f6a97f', blanket: '#fbe9a8', blanketD: '#f2d27a', gloom: '#bdb8d2', mouth: '#6e3a4c', tongue: '#f58ea4',
+  wood: '#e7c39d', iris: '#f4b8c9'
+};
+let BOIL = 0;   // hand-drawn line "boil" step (8 fps)
+
+// ── timeline ──
+const T = { title: .12, p1: .42, msg1: .95, jump: 1.32, yes: 1.5, hearts1: 1.58,
+  p2: 2.55, look0: 3.05, sigh: 3.2, why: 3.35, look1: 3.75, blink2: 4.05,
+  p3: 4.55, buzz: 4.92, msg3: 5.08, gasp: 5.5, bang: 5.58,
+  p4: 6.35, bub4: 6.85, zoom0: 7.55, zoom1: 8.35, sip0: 8.45, sip1: 9.0, iris0: 9.1, iris1: 9.62, end: 9.66 };
+const P = [{ x: 66, y: 104 }, { x: 974, y: 104 }, { x: 66, y: 580 }, { x: 974, y: 580 }].map(p => ({ ...p, w: 880, h: 448 }));
+const PT = [T.p1, T.p2, T.p3, T.p4], PBG = [C.p1, C.p2, C.p3, C.p4];
+
+// ── wobbly-line primitives ──
+function sn(id, x, K) { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); const a = K ? ((i % K) + K) % K : i, b = K ? (((i + 1) % K) + K) % K : i + 1;
+  return lerp(hash(id * 7919 + a, BOIL * 31 + 7), hash(id * 7919 + b, BOIL * 31 + 7), u) * 2 - 1; }
+function jitter(pts, id, closed, amp = 1.3) {
+  let per = 0; for (let i = 1; i < pts.length; i++) per += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  const K = Math.max(3, Math.round(per / 55)), n = pts.length;
+  return pts.map((p, i) => { const u = closed ? i / n * K : i / Math.max(1, n - 1) * K; return [p[0] + sn(id * 2, u, closed ? K : 0) * amp, p[1] + sn(id * 2 + 1, u, closed ? K : 0) * amp]; });
+}
+function poly(pts, closed) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); if (closed) ctx.closePath(); }
+function shape(pts, id, fill, lw = LW, col = INK, closed = true, amp = 1.3) {
+  const q = jitter(pts, id, closed, amp); poly(q, closed); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (lw) { ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.stroke(); }
+}
+const line = (pts, id, lw = LW, col = INK, amp = 1.2) => shape(pts, id, null, lw, col, false, amp);
+function ellP(cx, cy, rx, ry, n = 28, rot = 0, a0 = 0, a1 = TAU) { const o = []; const cl = a1 - a0 >= TAU - 1e-6;
+  for (let i = 0; i < (cl ? n : n + 1); i++) { const a = a0 + (a1 - a0) * i / n, x = Math.cos(a) * rx, y = Math.sin(a) * ry; o.push([cx + x * Math.cos(rot) - y * Math.sin(rot), cy + x * Math.sin(rot) + y * Math.cos(rot)]); } return o; }
+function rrP(x, y, w, h, r, per = 9) { const o = [], cs = [[x + w - r, y + r, -Math.PI / 2], [x + w - r, y + h - r, 0], [x + r, y + h - r, Math.PI / 2], [x + r, y + r, Math.PI]];
+  for (const [cx, cy, a0] of cs) for (let i = 0; i <= per; i++) { const a = a0 + Math.PI / 2 * i / per; o.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } return o; }
+function quadP(a, c, b, n = 14) { const o = []; for (let i = 0; i <= n; i++) { const u = i / n, v = 1 - u; o.push([v * v * a[0] + 2 * v * u * c[0] + u * u * b[0], v * v * a[1] + 2 * v * u * c[1] + u * u * b[1]]); } return o; }
+function chaikin(p, it = 2) { for (let k = 0; k < it; k++) { const o = []; for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; o.push(lp(a, b, .25), lp(a, b, .75)); } p = o; } return p; }
+function densify(pts, step = 14) { const o = []; for (let i = 0; i < pts.length - 1; i++) { const a = pts[i], b = pts[i + 1], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step));
+  for (let k = 0; k < n; k++) o.push(lp(a, b, k / n)); } o.push(pts[pts.length - 1]); return o; }
+// tube: outlined limb through joints (visible elbow/knee bend)
+function tube(pts, w, col, id) { const q = jitter(densify(pts, 10), id, false, 1.0); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  poly(q, false); ctx.strokeStyle = INK; ctx.lineWidth = w + LW * 2; ctx.stroke(); poly(q, false); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); }
+function heartP(cx, cy, s, n = 40) { const o = []; for (let i = 0; i < n; i++) { const a = i / n * TAU, x = 16 * Math.pow(Math.sin(a), 3), y = -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a)); o.push([cx + x * s / 16, cy + y * s / 16]); } return o; }
+function starP(cx, cy, r, rot = 0) { const o = []; for (let i = 0; i < 8; i++) { const a = rot + i / 8 * TAU - Math.PI / 2, rr = i % 2 ? r * .32 : r; o.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]); } return o; }
+function heart(cx, cy, s, id, k = 1, rot = 0) { if (k <= 0) return; ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(k, k); shape(heartP(0, 0, s), id, C.heart, 3.4); ctx.restore(); }
+function sparkle(cx, cy, r, id, k = 1, rot = 0) { if (k <= 0) return; ctx.save(); ctx.translate(cx, cy); ctx.scale(k, k); shape(starP(0, 0, r, rot), id, C.spark, 3.2, INK, true, .8); ctx.restore(); }
+function text(s, x, y, size, col = INK, align = 'center', wt = 700) { ctx.font = `${wt} ${size}px ${FH}`; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(s, x, y); }
+
+// speech bubble (rounded box with a sharp tail merged into one outline), pops from its centre with overshoot
+function bubble(bx, by, bw, bh, lines, size, tail, k, id, fill = C.white, typed = 1) {
+  if (k <= 0) return;
+  let mw = 0; lines.forEach((ln, i) => { ctx.font = `700 ${Array.isArray(size) ? size[i] : size}px ${FH}`; mw = Math.max(mw, ctx.measureText(ln).width); });
+  if (mw + 64 > bw) { const nw = mw + 64; bx = clamp(bx - (nw - bw) / 2, 14, 866 - nw); bw = nw; }
+  const cx = bx + bw / 2, cy = by + bh / 2, s = lerp(.4, 1, eOutBack(clamp(k))), a = clamp(k * 3);
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(cx, cy); ctx.scale(s, s); ctx.translate(-cx, -cy);
+  let pts = densify([...rrP(bx, by, bw, bh, Math.min(bh / 2, 46), 10), rrP(bx, by, bw, bh, Math.min(bh / 2, 46), 10)[0]], 12).slice(0, -1);
+  if (tail) { let bi = 0, bd = 1e9; pts.forEach((p, i) => { const d = Math.hypot(p[0] - tail[0], p[1] - tail[1]); if (d < bd) { bd = d; bi = i; } });
+    const n = pts.length, sh = (bi + Math.floor(n / 2)) % n, rp = [...pts.slice(sh), ...pts.slice(0, sh)], m = (bi - sh + n) % n;
+    pts = [...rp.slice(0, m - 1), ...densify([rp[m - 2], tail, rp[m + 2]], 12).slice(1, -1), ...rp.slice(m + 2)]; }
+  shape(pts, id, fill, LW);
+  const all = lines.join('\n'), shown = Math.floor(all.length * typed + 1e-6); let used = 0;
+  lines.forEach((ln, i) => { const vis = ln.slice(0, clamp(shown - used, 0, ln.length)); used += ln.length + 1;
+    const fs = Array.isArray(size) ? size[i] : size, ly = cy + (i - (lines.length - 1) / 2) * (Array.isArray(size) ? (size[0] + size[1]) / 2 * .98 : size * 1.02) + 2;
+    ctx.font = `700 ${fs}px ${FH}`; const full = ctx.measureText(ln).width; text(vis, cx - full / 2, ly, fs, INK, 'left'); });
+  ctx.restore();
+}
+function captionBox(s, x, y, k, id) { if (k <= 0) return; ctx.save(); ctx.globalAlpha *= clamp(k * 3); const dy = (1 - eOutBack(k)) * -18;
+  ctx.font = `700 34px ${FH}`; const w = ctx.measureText(s).width + 30; shape(rrP(x, y + dy, w, 50, 6, 3), id, C.white, 3.4); text(s, x + w / 2, y + dy + 27, 34); ctx.restore(); }
+
+// ═══════════════════════ THE SELF-INSERT ("me") ═══════════════════════
+// Drawn front-on in panel coords. o: hip centre (hx,hy), shoulder y (sy), shoulder centre x (sx), head [x,y], r, tilt,
+// expr ('calm'|'joy'|'dread'|'gasp'|'bliss'), look [dx,dy], blink, arms {L:[s,e,h], R:[s,e,h]}, legs, mess (hair).
+function drawLegs(o, id) {
+  const { hx, hy } = o;
+  for (const sd of [-1, 1]) { const hip = [hx + sd * 24, hy - 4], knee = [hx + sd * 40, hy + 28], foot = [hx + sd * 36, hy + 80];
+    tube([hip, knee, foot], 38, C.pants, id + sd * 3);
+    shape(ellP(foot[0] + sd * 6, foot[1] + 8, 27, 14, 20), id + 10 + sd, C.shoe, LW); }
+}
+function drawTorso(o, id) {
+  const { hx, hy, sy } = o, sx = o.sx ?? hx;
+  // neck
+  shape([[sx - 13, sy - 34], [sx + 13, sy - 34], [sx + 14, sy + 4], [sx - 14, sy + 4]], id + 1, C.skin, LW);
+  const pts = [...quadP([sx - 70, sy + 14], [sx - 64, sy - 12], [sx - 22, sy - 12], 6), ...quadP([sx - 22, sy - 12], [sx, sy + 8], [sx + 22, sy - 12], 6).slice(1),
+    ...quadP([sx + 22, sy - 12], [sx + 64, sy - 12], [sx + 70, sy + 14], 6).slice(1), [lerp(sx + 72, hx + 68, .5), lerp(sy, hy, .5)], [hx + 66, hy + 2],
+    ...quadP([hx + 66, hy + 2], [hx, hy + 18], [hx - 66, hy + 2], 8).slice(1), [lerp(sx - 72, hx - 68, .5), lerp(sy, hy, .5)]];
+  shape(pts, id, C.sweater, LW);
+  // collar + hem stripe + tiny heart on the sweater
+  line(quadP([sx - 22, sy - 11], [sx, sy + 9], [sx + 22, sy - 11], 8), id + 2, 3.2);
+  line(quadP([hx - 60, hy - 16], [hx, hy - 4], [hx + 60, hy - 16], 10), id + 3, 3, C.sweaterD);
+  shape(heartP(lerp(sx, hx, .45) + 30, lerp(sy, hy, .45), 10, 24), id + 4, C.heart, 2.6);
+}
+function hand(h, dir, id, thumb = 1) {
+  const a = Math.atan2(dir[1], dir[0]);
+  shape(ellP(h[0], h[1], 16, 14.5, 18, a), id, C.skin, LW);
+  if (thumb) { const ta = a + thumb * 1.35; shape(ellP(h[0] + Math.cos(ta) * 12, h[1] + Math.sin(ta) * 12, 6, 4.5, 12, ta), id + 1, C.skin, 3.2); }
+}
+function arm(A, id, thumb = 1) {
+  const [s, e, h] = A, wr = lp(e, h, .86);
+  tube([s, e, wr], 30, C.sweater, id);
+  hand(h, [h[0] - e[0], h[1] - e[1]], id + 5, thumb);
+  // cuff
+  const d = Math.atan2(h[1] - e[1], h[0] - e[0]) + Math.PI / 2, c = lp(e, h, .74);
+  line([[c[0] + Math.cos(d) * 17, c[1] + Math.sin(d) * 17], [c[0] - Math.cos(d) * 17, c[1] - Math.sin(d) * 17]], id + 9, 3, C.sweaterD, .6);
+}
+function drawHead(o, t, id) {
+  const [x, y] = o.head, r = o.r, mess = o.mess ?? 1;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(o.tilt || 0); if (o.hs) ctx.scale(o.hs, o.hs);
+  // back hair (to the jaw) + bun
+  shape([...ellP(0, -2, r * 1.1, r * 1.04, 30, 0, Math.PI * .92, Math.PI * 2.08), [r * 1.06, r * .52], [r * .7, r * .6], [-r * .7, r * .6], [-r * 1.06, r * .52]], id, C.hair, LW);
+  shape(ellP(r * .12, -r * 1.12, r * .44, r * .38, 20, .2), id + 1, C.hair, LW);
+  line(quadP([-r * .02, -r * 1.2], [r * .15, -r * 1.34], [r * .3, -r * 1.14], 8), id + 2, 3, '#7c5e76');
+  // flyaway strands (sway)
+  const sw = Math.sin(t * 2.3) * .12 * mess, sw2 = Math.sin(t * 1.7 + 1) * .14 * mess;
+  const fly = [[[r * .44, -r * 1.24], [r * .66, -r * 1.46 + sw * 26], [r * .8, -r * 1.3 + sw * 20]], [[-r * .1, -r * 1.4], [-r * .2, -r * 1.64 + sw2 * 24], [-r * .38, -r * 1.56 + sw2 * 26]],
+    [[r * .94, -r * .46], [r * 1.16, -r * .58 + sw2 * 20], [r * 1.2, -r * .4 + sw2 * 16]], [[-r * .96, -r * .42], [-r * 1.16, -r * .6 + sw * 20], [-r * 1.2, -r * .38 + sw * 16]]];
+  const nf = mess > 1.3 ? 4 : 2; for (let i = 0; i < nf; i++) line(quadP(...fly[i], 10), id + 3 + i, 3.6, C.hair, .6);
+  // ears + face
+  for (const sd of [-1, 1]) shape(ellP(sd * r * .97, r * .12, r * .15, r * .2, 14), id + 8 + sd, C.skin, LW);
+  shape(ellP(0, 0, r, r * .96, 32), id + 11, C.skin, LW);
+  face(o, t, r, id + 20);
+  // front hair cap with messy fringe
+  const cap = [...ellP(0, -2, r * 1.04, r * 1.0, 26, 0, Math.PI * 1.02, Math.PI * 1.98)];
+  const fr = [[r * .98, -r * .12], [r * .62, -r * .5], [r * .42, -r * .22], [r * .12, -r * .55], [-r * .12, -r * .3], [-r * .42, -r * .6], [-r * .62, -r * .28], [-r * .98, -r * .1]];
+  shape([...cap, ...fr], id + 12, C.hair, LW);
+  line(quadP([-r * .5, -r * .88], [-r * .2, -r * .98], [r * .05, -r * .82], 8), id + 13, 3, '#7c5e76');
+  ctx.restore();
+}
+function face(o, t, r, id) {
+  const e = o.expr || 'calm', lk = o.look || [0, 0], ex = lk[0] * r * .09, ey = lk[1] * r * .07, blink = o.blink;
+  for (const sd of [-1, 1]) shape(ellP(sd * r * .55, r * .36, r * .15, r * .085, 14), id + sd, C.blush, 0);
+  const E = [[-r * .34 + ex, r * .1 + ey], [r * .34 + ex, r * .1 + ey]];
+  if (e === 'bliss') {
+    E.forEach((p, i) => line(quadP([p[0] - r * .13, p[1] + r * .04], [p[0], p[1] - r * .14], [p[0] + r * .13, p[1] + r * .04], 8), id + 4 + i, 4));
+    line(quadP([-r * .14, r * .4], [0, r * .54], [r * .14, r * .4], 8), id + 7, 3.6);
+  } else if (blink) {
+    E.forEach((p, i) => line([[p[0] - r * .1, p[1] + r * .02], [p[0] + r * .1, p[1] + r * .02]], id + 4 + i, 4));
+  } else if (e === 'gasp') {
+    E.forEach((p, i) => { shape(ellP(p[0], p[1], r * .16, r * .2, 20), id + 4 + i, INK, 0);
+      ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(p[0] + r * .05, p[1] - r * .07, r * .06, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.arc(p[0] - r * .06, p[1] + r * .07, r * .028, 0, TAU); ctx.fill(); });
+  } else {
+    const big = e === 'joy' ? 1.25 : 1;
+    E.forEach((p, i) => { shape(ellP(p[0], p[1], r * .085 * big, r * .12 * big, 16), id + 4 + i, INK, 0);
+      if (e === 'joy') { ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(p[0] + r * .03, p[1] - r * .05, r * .035, 0, TAU); ctx.fill(); }
+      if (e === 'dread') { const lid = o.lid ?? .55; ctx.save(); ctx.beginPath(); ctx.rect(p[0] - r * .2, p[1] - r * .25, r * .4, r * .25 * lid * 1.5 + r * .02); ctx.fillStyle = C.skin; ctx.fill(); ctx.restore();
+        line([[p[0] - r * .15, p[1] - r * .19 + r * .37 * lid], [p[0] + r * .15, p[1] - r * .19 + r * .37 * lid]], id + 30 + i, 3.6); } });
+  }
+  if (e === 'joy') { const m = [...quadP([-r * .24, r * .34], [0, r * .36], [r * .24, r * .34], 8), ...quadP([r * .24, r * .34], [r * .2, r * .72], [0, r * .72], 8).slice(1), ...quadP([0, r * .72], [-r * .2, r * .72], [-r * .24, r * .34], 8).slice(1)];
+    shape(m, id + 8, C.mouth, 3.6); ctx.save(); poly(m, true); ctx.clip(); shape(ellP(0, r * .7, r * .15, r * .1, 14), id + 9, C.tongue, 0); ctx.restore(); }
+  else if (e === 'gasp') shape(ellP(0, r * .5, r * .08, r * .1, 14), id + 8, C.mouth, 3.4);
+  else if (e === 'dread') line([[-r * .16, r * .5], [-r * .08, r * .46], [0, r * .5], [r * .08, r * .46], [r * .16, r * .5]], id + 8, 3.4, INK, .6);
+  else if (e === 'calm') line(quadP([-r * .12, r * .42], [0, r * .52], [r * .12, r * .42], 8), id + 8, 3.6);
+}
+function me(o, t, id, extra) {
+  if (o.legs !== false) drawLegs(o, id + 100);
+  if (o.under) o.under();
+  drawTorso(o, id + 200);
+  if (o.behindArms) o.behindArms();
+  arm(o.arms.L, id + 300, o.thumbL ?? 1); arm(o.arms.R, id + 320, o.thumbR ?? -1);
+  if (o.front) o.front();
+  drawHead(o, t, id + 400);
+  if (o.hands) o.hands();
+}
+
+// ═══════════════════════ SET PIECES ═══════════════════════
+function couch(id, lean = 0) {
+  shape(rrP(196, 238, 428, 118, 34, 6), id, C.couch, LW);
+  line([[410, 250], [410, 334]], id + 1, 3, C.couchD);
+  shape(rrP(190, 322, 440, 66, 20, 5), id + 2, C.couch, LW);
+  for (const x of [158, 588]) shape(rrP(x, 276, 74, 118, 30, 6), id + 3 + x, C.couchD, LW);
+  for (const x of [196, 610]) shape(rrP(x, 390, 16, 22, 4, 2), id + 7 + x, C.wood, 3.4);
+}
+function floorLine(id, col) { line([[0, 414], [880, 414]], id, 3.4, col, 1.5); }
+function wallArt(id) { // tiny framed doodle of a cloud + sun
+  shape(rrP(690, 96, 116, 90, 6, 2), id, C.white, LW); shape(ellP(724, 128, 13, 13, 14), id + 1, C.spark, 3);
+  shape([...ellP(760, 150, 24, 12, 16, 0, Math.PI, TAU), [784, 158], [736, 158]], id + 2, C.msg, 3);
+}
+function phoneAt(x, y, rot, id, lit = 0) { ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  if (lit > 0) { ctx.globalAlpha = .55 * lit; ctx.fillStyle = C.glow; ctx.beginPath(); ctx.arc(0, 0, 50, 0, TAU); ctx.fill(); ctx.globalAlpha = 1; }
+  shape(rrP(-19, -32, 38, 64, 8, 3), id, C.phone, 3.6); shape(rrP(-13, -25, 26, 48, 4, 2), id + 1, lit > 0 ? C.glow : '#9aa6c9', 0); ctx.restore(); }
+function clock(cx, cy, t, id) {
+  shape(ellP(cx, cy, 52, 52, 30), id, C.white, LW);
+  for (let i = 0; i < 12; i++) { const a = i / 12 * TAU; line([[cx + Math.cos(a) * 42, cy + Math.sin(a) * 42], [cx + Math.cos(a) * 47, cy + Math.sin(a) * 47]], id + 1 + i, 2.6, INK, .3); }
+  const hA = (6.75 / 12) * TAU - Math.PI / 2, mA = (45 / 60) * TAU - Math.PI / 2, sA = (Math.floor(t * 2) / 60 * 6) * TAU - Math.PI / 2;
+  line([[cx, cy], [cx + Math.cos(hA) * 25, cy + Math.sin(hA) * 25]], id + 20, 5, INK, .3);
+  line([[cx, cy], [cx + Math.cos(mA) * 36, cy + Math.sin(mA) * 36]], id + 21, 4, INK, .3);
+  line([[cx, cy], [cx + Math.cos(sA) * 40, cy + Math.sin(sA) * 40]], id + 22, 2, '#e06a8c', .2);
+}
+function gloom(cx, cy, t, id, k) { if (k <= 0) return; ctx.save(); ctx.globalAlpha *= clamp(k * 2); ctx.translate(cx, cy + Math.sin(t * 2) * 4); ctx.scale(eOutBack(k), eOutBack(k));
+  const pts = []; for (let i = 0; i < 36; i++) { const a = i / 36 * TAU; const rr = 1 + .22 * Math.abs(Math.sin(a * 3.5)); pts.push([Math.cos(a) * 52 * rr, Math.sin(a) * 24 * rr]); }
+  shape(pts, id, C.gloom, 3.4);
+  for (let i = 0; i < 3; i++) { const x = -30 + i * 30, d = ((t * 1.6 + i * .37) % 1); ctx.globalAlpha = clamp(k * 2) * (1 - d); line([[x, 38 + d * 40], [x - 3, 50 + d * 40]], id + 1 + i, 3.4, '#7f86b8', .3); }
+  ctx.restore(); }
+function steam(x, y, t, id, a = 1) { ctx.save(); ctx.globalAlpha *= a; for (let i = 0; i < 2; i++) { const ph = t * 1.4 + i * .5, d = ph % 1; ctx.globalAlpha = a * Math.sin(d * Math.PI) * .9;
+  const pts = []; for (let k = 0; k <= 10; k++) { const u = k / 10; pts.push([x - 8 + i * 16 + Math.sin(u * 5 + t * 3 + i) * 6, y - u * 30 - d * 14]); } line(pts, id + i, 3.2, '#b99aa6', .3); } ctx.restore(); }
+
+// ═══════════════════════ PANELS ═══════════════════════
+// poses (panel coords)
+const ARM = {
+  phone: [[350, 250], [308, 322], [322, 272]], lap: [[470, 250], [496, 318], [446, 338]], up: [[472, 246], [526, 204], [534, 140]],
+  hangL: [[343, 262], [318, 330], [368, 352]], hangR: [[477, 262], [502, 330], [452, 352]],
+  lapL3: [[330, 252], [302, 320], [352, 338]], lapR3: [[440, 252], [470, 318], [424, 340]],
+  cheekL3: [[330, 250], [286, 300], [312, 206]], cheekR3: [[440, 250], [486, 296], [452, 204]],
+  mugL: [[345, 250], [318, 318], [382, 294]], mugR: [[475, 250], [502, 318], [438, 294]]
+};
+function armMix(a, b, u) { return a.map((p, i) => lp(p, b[i], u)); }
+
+function panel1(t, id) {
+  const lt = t;
+  floorLine(id, '#efc7ae'); wallArt(id + 10); couch(id + 20);
+  const aj = seg(t, T.jump, T.jump + .1), up = eOutBack(seg(t, T.jump + .08, T.jump + .4)), joy = t >= T.jump + .08;
+  const dip = Math.sin(aj * Math.PI) * (1 - seg(t, T.jump + .08, T.jump + .12)) * 7, bob = joy ? -Math.sin(seg(t, T.jump + .08, T.jump + .45) * Math.PI) * 10 : 0;
+  const buzz = t > T.msg1 - .05 && t < T.msg1 + .3 ? Math.sin(t * 90) * 3 : 0;
+  const armR = joy ? armMix(ARM.lap, ARM.up, up) : armMix(ARM.lap, [[470, 252], [498, 324], [452, 344]], aj);
+  const hy = 345 + dip * .3, sy = 250 + dip + bob * .4;
+  me({ hx: 410, hy, sy, head: [410, 172 + dip * 1.2 + bob], r: 72, tilt: joy ? -.06 * up : .04, expr: joy ? 'joy' : 'calm', look: joy ? [0, 0] : [-.8, .6],
+    blink: !joy && t > .75 && t < .83, mess: joy ? 1.6 : 1,
+    arms: { L: ARM.phone.map(p => [p[0], p[1] + dip]), R: armR.map((p, i) => i === 0 ? [p[0], p[1] + dip] : p) }, thumbR: -1,
+    hands: () => phoneAt(322 + buzz, 246 + dip, -.18, id + 60, t > T.msg1 ? (1 - seg(t, T.msg1 + .5, T.msg1 + 1.0)) * .8 : 0) }, t, id + 100);
+  bubble(40, 84, 270, 76, ['Drinks tonight?'], 42, [300, 214], seg(t, T.msg1, T.msg1 + .35), id + 70, C.msg);
+  bubble(600, 40, 250, 148, ['YES!!', 'I love people!'], [62, 38], [480, 190], seg(t, T.yes, T.yes + .35), id + 80);
+  const hk = [[505, 64, 18, -.3, 0], [562, 262, 18, .3, .06], [228, 226, 17, -.2, .12], [668, 256, 26, .2, .03], [150, 300, 15, .1, .09]];
+  hk.forEach(([x, y, s, r, d], i) => { const k = eOutBack(seg(t, T.hearts1 + d, T.hearts1 + d + .3)); const fl = Math.max(0, t - T.hearts1 - d);
+    heart(lerp(410, x, eOut(clamp(fl * 3))), lerp(170, y, eOut(clamp(fl * 3))) - fl * 6 + Math.sin(t * 3 + i) * 3, s, id + 90 + i, k, r); });
+  sparkle(724, 330, 16, id + 97, eOutBack(seg(t, T.hearts1 + .1, T.hearts1 + .4)), t * .5);
+  captionBox('2:00 PM', 16, 14, seg(t, PT[0] + .15, PT[0] + .45), id + 5);
+}
+function panel2(t, id) {
+  floorLine(id, '#c3bddb'); clock(752, 128, t, id + 10); couch(id + 30);
+  phoneAt(560, 336, 1.35, id + 60, 0);
+  const lookU = eInOut(seg(t, T.look0, T.look0 + .25)) - eInOut(seg(t, T.look1, T.look1 + .3)), sigh = eInOut(seg(t, T.sigh, T.sigh + .5)) * 8;
+  const look = lp([-.2, .7], [1.1, -.9], lookU);
+  me({ hx: 410, hy: 352, sy: 262 + sigh, head: [404, 188 + sigh * 1.2], r: 72, tilt: .09 + sigh * .004, expr: 'dread', lid: lerp(.5, .38, lookU) + sigh * .02, look, mess: 1.8,
+    blink: t > T.blink2 && t < T.blink2 + .1,
+    arms: { L: ARM.hangL.map((p, i) => [p[0], p[1] + (i < 2 ? sigh : sigh * .3)]), R: ARM.hangR.map((p, i) => [p[0], p[1] + (i < 2 ? sigh : sigh * .3)]) } }, t, id + 100);
+  gloom(530, 66, t, id + 80, seg(t, T.sigh, T.sigh + .35));
+  bubble(38, 84, 270, 118, ['why did I', 'say yes'], 40, [330, 190], seg(t, T.why, T.why + .3), id + 70, C.white, seg(t, T.why + .1, T.why + .75));
+  captionBox('6:45 PM', 16, 14, seg(t, PT[1] + .15, PT[1] + .45), id + 5);
+}
+function panel3(t, id) {
+  floorLine(id, '#ead79a'); wallArt(id + 10); couch(id + 20);
+  const bz = t > T.buzz && t < T.buzz + .55 ? Math.sin(t * 95) * 4 * (1 - seg(t, T.buzz, T.buzz + .55)) : 0;
+  const lit = seg(t, T.buzz, T.buzz + .08);
+  // phone on the couch arm + buzz marks
+  phoneAt(195 + bz, 250, -.12, id + 60, lit);
+  if (t > T.buzz && t < T.buzz + .6) for (const sd of [-1, 1]) for (let j = 0; j < 2; j++) line(quadP([195 + sd * (34 + j * 12), 226], [195 + sd * (40 + j * 12), 250], [195 + sd * (34 + j * 12), 274], 8), id + 64 + j + sd * 3, 3, INK, .4);
+  const gk = eOutBack(seg(t, T.gasp, T.gasp + .3)), gasp = t >= T.gasp, pre = seg(t, T.gasp - .12, T.gasp);
+  const turn = eInOut(seg(t, T.buzz + .1, T.buzz + .4));
+  ctx.save(); ctx.translate(34, 0);
+  me({ hx: 400, hy: 346, sy: 252 - gk * 6 + pre * 5, sx: lerp(395, 385, turn), head: [lerp(398, 380, turn), 170 - gk * 10 + pre * 6], r: 72, tilt: lerp(0, -.1, turn), hs: gasp ? lerp(1.12, 1, seg(t, T.gasp, T.gasp + .35)) : 1,
+    expr: gasp ? 'gasp' : 'dread', lid: .45, look: lp([.2, .6], [-1.1, .5], turn), mess: 1.6, blink: t > 4.8 && t < 4.88,
+    arms: { L: gasp ? armMix(ARM.lapL3, ARM.cheekL3, gk) : ARM.lapL3, R: gasp ? armMix(ARM.lapR3, ARM.cheekR3, gk) : ARM.lapR3 }, thumbL: -1, thumbR: 1 }, t, id + 100);
+  ctx.restore();
+  bubble(28, 70, 286, 112, ['so sorry!!', 'rain check?'], 38, [190, 214], seg(t, T.msg3, T.msg3 + .35), id + 70, C.msg);
+  const bk = eOutBack(seg(t, T.bang, T.bang + .3));
+  if (bk > 0) { ctx.save(); ctx.translate(566, 92); ctx.rotate(.12); ctx.scale(bk, bk); text('!!', 0, 0, 96, INK); ctx.restore(); }
+  sparkle(650, 128, 18, id + 90, eOutBack(seg(t, T.bang + .05, T.bang + .35)), t * .8);
+  sparkle(514, 150, 13, id + 91, eOutBack(seg(t, T.bang + .12, T.bang + .42)), -t * .8);
+  sparkle(620, 180, 10, id + 92, eOutBack(seg(t, T.bang + .18, T.bang + .48)), t);
+  captionBox('6:52 PM', 16, 14, seg(t, PT[2] + .15, PT[2] + .45), id + 5);
+}
+function panel4(t, id) {
+  floorLine(id, '#eeb6c8'); couch(id + 20);
+  // floor lamp (cozy light)
+  const la = .35 + .05 * Math.sin(t * 2);
+  ctx.save(); ctx.globalAlpha = la; ctx.fillStyle = '#fff4c6'; ctx.beginPath(); ctx.arc(752, 150, 120, 0, TAU); ctx.fill(); ctx.restore();
+  line([[752, 150], [752, 410]], id + 10, 4); shape(ellP(752, 412, 36, 8, 16), id + 11, C.wood, 3.4);
+  shape([[716, 164], [788, 164], [772, 110], [732, 110]], id + 12, C.spark, LW);
+  const sp = eInOut(seg(t, T.sip0, T.sip0 + .25)) - eInOut(seg(t, T.sip1 - .25, T.sip1)), mY = -sp * 52, hy = 346;
+  const mugP = [410, 280 + mY];
+  const blanket = () => { const pts = [[248, 330], [300, 318], [360, 328], [410, 322], [470, 330], [520, 318], [572, 332], [600, 380], [612, 424], [560, 432], [470, 426], [400, 436], [320, 428], [236, 432], [214, 420], [226, 372]];
+    shape(chaikin(pts, 3), id + 40, C.blanket, LW); line([[300, 356], [322, 424]], id + 41, 3, C.blanketD); line([[470, 356], [462, 424]], id + 42, 3, C.blanketD);
+    for (const [x, y] of [[270, 380], [360, 372], [420, 400], [520, 372], [566, 404], [330, 410]]) shape(heartP(x, y, 9, 20), id + 50 + x, C.heart, 2.4); };
+  me({ hx: 410, hy, sy: 252, head: [412, 172], r: 72, tilt: .07 - sp * .06, expr: 'bliss', mess: 1.4, legs: false,
+    under: () => {}, front: () => {},
+    arms: { L: [ARM.mugL[0], lp(ARM.mugL[1], [326, 292], sp), [mugP[0] - 28, mugP[1] + 14]], R: [ARM.mugR[0], lp(ARM.mugR[1], [494, 292], sp), [mugP[0] + 28, mugP[1] + 14]] }, thumbL: -1, thumbR: 1,
+    behindArms: blanket,
+    hands: () => { // mug over the hands, with steam
+      if (sp < .5) steam(mugP[0], mugP[1] - 34, t, id + 70);
+      shape(rrP(mugP[0] - 26, mugP[1] - 28, 52, 58, 10, 3), id + 60, C.mug, LW);
+      shape(ellP(mugP[0] + 32, mugP[1], 12, 14, 14, 0, -Math.PI / 2, Math.PI / 2), id + 61, null, LW);
+      shape(heartP(mugP[0], mugP[1] + 2, 10, 20), id + 62, C.white, 2.6);
+      for (const sd of [-1, 1]) shape(ellP(mugP[0] + sd * 28, mugP[1] + 14, 13, 12, 16), id + 63 + sd, C.skin, 3.6);
+    } }, t, id + 100);
+  if (t > T.sip0 + .2 && t < T.sip1 + .3) { const a = seg(t, T.sip0 + .2, T.sip0 + .35) * (1 - seg(t, T.sip1, T.sip1 + .3)); ctx.save(); ctx.globalAlpha *= a; text('*sip*', 262, 250, 38, INK, 'center', 700); ctx.restore(); }
+  // rising hearts + sparkles (continuous)
+  for (let i = 0; i < 7; i++) { const st = T.p4 + .35 + i * .28; if (t < st) continue; const ph = (t - st) * .32 % 1, bx = [240, 582, 286, 646, 196, 120, 690][i];
+    heart(bx + Math.sin(t * 2 + i) * 10, 250 - ph * 230, [16, 20, 13, 18, 14, 22, 12][i], id + 80 + i, eOutBack(seg(t, st, st + .3)) * (ph > .85 ? (1 - ph) / .15 : 1), Math.sin(t + i) * .2); }
+  sparkle(560, 70, 15, id + 95, eOutBack(seg(t, T.p4 + .5, T.p4 + .8)), t * .6);
+  sparkle(250, 150, 11, id + 96, eOutBack(seg(t, T.p4 + .6, T.p4 + .9)), -t * .6);
+  bubble(596, 196, 262, 120, ['Best plans', "I've ever had."], 40, [508, 196], seg(t, T.bub4, T.bub4 + .35), id + 75);
+  captionBox('6:53 PM', 16, 14, seg(t, PT[3] + .15, PT[3] + .45), id + 5);
+}
+const PANELS = [panel1, panel2, panel3, panel4];
+
+function drawPanel(i, t) {
+  const p = P[i], k = seg(t, PT[i], PT[i] + .42);
+  // pencil placeholder of the empty panel (sketched in at the start, replaced as the panel pops)
+  const pk = seg(t, .05 + i * .07, .35 + i * .07) * (1 - seg(t, PT[i], PT[i] + .2));
+  if (pk > 0) { ctx.save(); ctx.globalAlpha = pk; ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.fillRect(p.x, p.y, p.w, p.h); ctx.setLineDash([14, 12]);
+    shape(densify([[p.x, p.y], [p.x + p.w, p.y], [p.x + p.w, p.y + p.h], [p.x, p.y + p.h]], 40), 950 + i, null, 3, 'rgba(61,49,66,.28)'); ctx.setLineDash([]);
+    text(String(i + 1), p.x + p.w / 2, p.y + p.h / 2, 64, 'rgba(61,49,66,.16)'); ctx.restore(); }
+  if (k <= 0) return;
+  const s = lerp(.8, 1, eOutBack(k)), rot = (1 - eOut(k)) * (i % 2 ? .035 : -.035);
+  ctx.save(); ctx.globalAlpha = clamp(k * 4);
+  ctx.translate(p.x + p.w / 2, p.y + p.h / 2); ctx.rotate(rot); ctx.scale(s, s); ctx.translate(-p.w / 2, -p.h / 2);
+  // soft drop shadow, fill, content (clipped), hand-drawn border with overshooting corners
+  ctx.fillStyle = 'rgba(92,70,96,.10)'; ctx.fillRect(8, 10, p.w, p.h);
+  const box = jitter(densify([[0, 0], [p.w, 0], [p.w, p.h], [0, p.h], [0, 0]], 40), 900 + i, false, 1.2);
+  poly(box, true); ctx.fillStyle = PBG[i]; ctx.fill();
+  ctx.save(); poly(box, true); ctx.clip(); PANELS[i](t, 1000 * (i + 1)); ctx.restore();
+  const o = 9; line([[-o, 0], [p.w + o * .6, 0]], 910 + i, 4.6); line([[p.w, -o * .6], [p.w, p.h + o]], 914 + i, 4.6);
+  line([[p.w + o * .4, p.h], [-o, p.h]], 918 + i, 4.6); line([[0, p.h + o * .5], [0, -o]], 922 + i, 4.6);
+  ctx.restore();
+}
+
+// ── static paper grain (precomputed once) ──
+let GRAIN;
+function makeGrain() { const g = document.createElement('canvas'); g.width = W; g.height = H; const gx = g.getContext('2d'), id = gx.createImageData(W, H), r = rng(92);
+  for (let i = 0; i < W * H; i++) { const v = r(); const o = i * 4; if (v < .5) { id.data[o] = 60; id.data[o + 1] = 40; id.data[o + 2] = 60; id.data[o + 3] = Math.floor(r() * 16); } else { id.data[o] = 255; id.data[o + 1] = 250; id.data[o + 2] = 240; id.data[o + 3] = Math.floor(r() * 14); } }
+  gx.putImageData(id, 0, 0);
+  // a few soft paper fibres
+  gx.strokeStyle = 'rgba(120,90,110,.05)'; gx.lineWidth = 1.2; for (let i = 0; i < 260; i++) { const x = r() * W, y = r() * H, a = r() * TAU, l = 8 + r() * 30; gx.beginPath(); gx.moveTo(x, y); gx.quadraticCurveTo(x + Math.cos(a + .5) * l * .5, y + Math.sin(a + .5) * l * .5, x + Math.cos(a) * l, y + Math.sin(a) * l); gx.stroke(); }
+  GRAIN = g; }
+
+// heart iris (closes on the sipping face) + final little heart
+function iris(t, cam) {
+  if (t < T.iris0) return;
+  const c = [960, 440], k = eIn(seg(t, T.iris0, T.iris1)), s = lerp(1500, 0, k);
+  ctx.save();
+  if (s > .5) { ctx.beginPath(); ctx.rect(0, 0, W, H); const hp = heartP(c[0], c[1], s, 60); ctx.moveTo(hp[0][0], hp[0][1]); for (let i = hp.length - 1; i >= 0; i--) ctx.lineTo(hp[i][0], hp[i][1]); ctx.closePath();
+    ctx.fillStyle = C.iris; ctx.fill(); shape(hp, 777, null, 9); }
+  else { ctx.fillStyle = C.iris; ctx.fillRect(0, 0, W, H); }
+  const fk = seg(t, T.end, T.end + .3);
+  if (fk > 0) { const pulse = 1 + .06 * Math.sin(seg(t, T.end + .3, 10) * Math.PI * 1.2); heart(960, 520, 64, 778, eOutBack(fk) * pulse, 0);
+    sparkle(870, 440, 16, 779, eOutBack(seg(t, T.end + .1, T.end + .4)), t * .8); sparkle(1052, 470, 12, 780, eOutBack(seg(t, T.end + .16, T.end + .46)), -t * .8);
+    ctx.save(); ctx.globalAlpha = seg(t, T.end + .08, T.end + .24); text('the end', 960, 640, 46, INK); ctx.restore(); }
+  ctx.restore();
+}
+
+// ═══════════════════════ FRAME ═══════════════════════
+function render(t) {
+  BOIL = Math.floor(t * 8);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  ctx.fillStyle = C.paper; ctx.fillRect(0, 0, W, H);
+  const z = eInOut(seg(t, T.zoom0, T.zoom1)), zs = lerp(1, 2.18, z), c4 = [P[3].x + P[3].w / 2, P[3].y + P[3].h / 2], vc = lp([960, 540], c4, z);
+  ctx.setTransform(zs, 0, 0, zs, 960 - vc[0] * zs, 540 - vc[1] * zs);
+  // title (hand-lettered, written left→right)
+  const tk = seg(t, T.title, T.title + .55);
+  if (tk > 0) { ctx.save(); ctx.font = `700 54px ${FH}`; const ttl = 'making plans: a love story', tw = ctx.measureText(ttl).width;
+    ctx.beginPath(); ctx.rect(960 - tw / 2 - 10, 20, (tw + 20) * eOut(tk), 80); ctx.clip(); text(ttl, 960, 58, 54);
+    ctx.restore(); line(quadP([960 - tw / 2 * .6, 88], [960, 94], [960 + tw / 2 * .6, 86], 12).slice(0, 1 + Math.floor(12 * seg(t, T.title + .4, T.title + .8))), 60, 3.4, C.heart);
+    heart(960 + tw / 2 + 34, 56, 18, 61, eOutBack(seg(t, T.title + .5, T.title + .8)), .2); }
+  for (let i = 0; i < 4; i++) drawPanel(i, t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  iris(t);
+  ctx.globalAlpha = 1; ctx.drawImage(GRAIN, 0, 0);
+}
+
+window.ready = (async () => {
+  await document.fonts.load(`700 60px ${FH}`, "making plans: a love story 2:00 6:45 6:52 6:53 PM Drinks tonight? YES!! I love people! why did I say yes so sorry!! rain check? Best plans I've ever had. the end");
+  await document.fonts.load(`400 30px ${FH}`, '*sip*'); await document.fonts.ready;
+  makeGrain(); render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => [
+  { t: T.title, k: 'scribble', d: .55 }, ...PT.map(x => ({ t: x, k: 'panel' })), ...PT.map(x => ({ t: x + .17, k: 'tick' })),
+  { t: T.msg1 - .03, k: 'buzz', d: .3 }, { t: T.msg1, k: 'ding' }, { t: T.jump, k: 'squish' }, { t: T.yes, k: 'pop' }, { t: T.hearts1, k: 'hearts' },
+  { t: T.sigh, k: 'sigh', d: .7 }, { t: T.why, k: 'pop', v: .6 }, ...[0, 1, 2, 3].map(i => ({ t: T.p2 + .5 + i * .5, k: 'clock' })),
+  { t: T.buzz, k: 'buzz', d: .55 }, { t: T.msg3, k: 'ding' }, { t: T.gasp, k: 'gasp' }, { t: T.bang, k: 'hearts' },
+  { t: T.p4 + .35, k: 'hearts' }, { t: T.bub4, k: 'pop' }, { t: T.zoom0, k: 'swoosh', d: T.zoom1 - T.zoom0 }, { t: T.sip0 + .15, k: 'sip', d: .45 },
+  { t: T.iris0, k: 'iris', d: T.iris1 - T.iris0 }, { t: T.end, k: 'end' }
+].sort((a, b) => a.t - b.t);
+</script>
+</body></html>
