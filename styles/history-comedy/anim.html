@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── History Comedy · "The Isle of Nubb" ───────────────────────────────────────────────────
+// Flat cartoon history explainer: big-headed kings with tiny bodies in exaggerated royal costume,
+// flat colours multiplied onto aged parchment, a map with army blobs and arrows, modern-slang
+// speech bubbles, subtitle captions, quick comedic cuts. Everything is procedural; all names,
+// places and people are invented. This file: helpers, textures, map, characters. scene.js: timeline.
+const W = 1920, H = 1080, DUR = 10;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, f) => a + (b - a) * f;
+const eio = x => x < 0.5 ? 2 * x * x : 1 - 2 * (1 - x) * (1 - x);
+const eout = x => 1 - Math.pow(1 - x, 3);
+const ein = x => x * x * x;
+const eob = (x, c = 2.2) => x <= 0 ? 0 : x >= 1 ? 1 : 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2);
+const PI = Math.PI, TAU = 2 * PI, F = Math.floor;
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash = (x, y, s = 0) => { let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(s | 0, 2147483647); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; };
+const sm = x => x * x * (3 - 2 * x);
+function vn(x, y, s = 0) { const xi = F(x), yi = F(y), fx = sm(x - xi), fy = sm(y - yi);
+  return lerp(lerp(hash(xi, yi, s), hash(xi + 1, yi, s), fx), lerp(hash(xi, yi + 1, s), hash(xi + 1, yi + 1, s), fx), fy); }
+const fbm = (x, y, s, o = 4) => { let a = 0, w = 0.5, n = 0; for (let i = 0; i < o; i++) { a += w * vn(x, y, s + i * 17); n += w; x *= 2.03; y *= 2.03; w *= 0.5; } return a / n; };
+
+const INK = '#35251b';
+const COL = {
+  skin: '#f4c9a0', skinSh: '#e3aa80', blush: '#ee9a84',
+  red: '#c3392f', redDk: '#8e2520', redLand: '#ea8f72',
+  pur: '#6b4a9e', purDk: '#46306e', purLand: '#a898d6',
+  gold: '#f2b632', goldDk: '#c98a16', ermine: '#fbf6ea',
+  sea: '#a4cfe0', seaDk: '#6f9fa6', sand: '#e6cf92', grass: '#9cbc62', grassDk: '#6f9444',
+};
+
+// ── parchment: low-res fbm stains + burnt edges, upscaled smooth, plus speckles and fibres ──
+function parchment(w, h, seed, burn = 1) {
+  const c = mk(w, h), g = c.getContext('2d');
+  g.fillStyle = '#efdcb2'; g.fillRect(0, 0, w, h);
+  const lw = Math.ceil(w / 6), lh = Math.ceil(h / 6), n = mk(lw, lh), ng = n.getContext('2d'), id = ng.createImageData(lw, lh);
+  const k = 1920 / w;
+  for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
+    const X = x * 6 * k, Y = y * 6 * k, v = fbm(X / 260, Y / 260, seed, 5), st = fbm(X / 120 + 9, Y / 120, seed + 3, 3);
+    const nx = x / lw * 2 - 1, ny = y / lh * 2 - 1, e = Math.pow(Math.max(Math.abs(nx) * 0.96, Math.abs(ny) * 0.93), 7);
+    let a = 0.02 + (v - 0.5) * 0.3 + Math.max(0, st - 0.64) * 0.7 + e * 0.5 * burn; a = clamp(a, 0, 0.6);
+    const i = (y * lw + x) * 4; id.data[i] = 128; id.data[i + 1] = 78; id.data[i + 2] = 34; id.data[i + 3] = a * 255;
+  }
+  ng.putImageData(id, 0, 0); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(n, 0, 0, w, h);
+  const r = rng(seed * 7 + 1), s = w / 1920;
+  for (let i = 0; i < 9000 * s * s; i++) { const x = r() * w, y = r() * h, d = r() < 0.7;
+    g.fillStyle = d ? `rgba(90,55,25,${0.05 + r() * 0.12})` : `rgba(255,248,225,${0.1 + r() * 0.2})`; g.fillRect(x, y, (1 + r() * 2) * s, (1 + r() * 2) * s); }
+  g.lineCap = 'round';
+  for (let i = 0; i < 700 * s; i++) { const x = r() * w, y = r() * h, a = r() * TAU, l = (8 + r() * 26) * s;
+    g.strokeStyle = r() < 0.6 ? `rgba(110,70,30,${0.05 + r() * 0.07})` : `rgba(255,250,230,${0.12 + r() * 0.12})`; g.lineWidth = (0.6 + r() * 1.2) * s;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a + 0.4) * l * 0.5, y + Math.sin(a + 0.4) * l * 0.5, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+  return c;
+}
+// fine static grain + vignette (screen space)
+function grainLayer() {
+  const c = mk(W, H), g = c.getContext('2d'), id = g.createImageData(W, H), r = rng(99);
+  for (let i = 0; i < W * H; i++) { const v = r(); const j = i * 4; if (v < 0.5) { id.data[j] = 60; id.data[j + 1] = 35; id.data[j + 2] = 15; id.data[j + 3] = (0.5 - v) * 46; } else { id.data[j] = 255; id.data[j + 1] = 250; id.data[j + 2] = 235; id.data[j + 3] = (v - 0.5) * 30; } }
+  g.putImageData(id, 0, 0);
+  const vg = g.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, H * 1.05);
+  vg.addColorStop(0, 'rgba(70,40,15,0)'); vg.addColorStop(1, 'rgba(70,40,15,0.32)'); g.fillStyle = vg; g.fillRect(0, 0, W, H);
+  return c;
+}
+
+// ── map geometry (world = 1920×1080; map canvas is drawn at 2× for the zoom) ──
+const ISLE = { x: 960, y: 560, r: 50 };
+const coastL = y => 700 + 38 * Math.sin(y / 97 + 1) + 22 * Math.sin(y / 41 + 2) + 70 * Math.exp(-Math.pow((y - 640) / 95, 2)) + 14 * (vn(y / 22, 0, 5) - 0.5);
+const coastR = y => 1225 - 62 * Math.exp(-Math.pow((y - 470) / 85, 2)) + 34 * Math.sin(y / 83 + 4) + 18 * Math.sin(y / 37) + 14 * (vn(y / 22, 3, 6) - 0.5);
+const isleR = a => ISLE.r * (1 + 0.1 * Math.sin(3 * a + 1) + 0.06 * Math.sin(5 * a + 2) + 0.05 * (vn(a * 2.5, 1, 8) - 0.5));
+function pathCoast(g, fx, side, d = 0) { // side -1 = land on left, +1 = land on right; d = offset into sea
+  g.beginPath(); for (let y = -40; y <= 1120; y += 6) { const x = fx(y) - side * d; y === -40 ? g.moveTo(x, y) : g.lineTo(x, y); } }
+function pathIsle(g, d = 0) { g.beginPath(); for (let i = 0; i <= 120; i++) { const a = i / 120 * TAU, rr = isleR(a) + d; const x = ISLE.x + Math.cos(a) * rr, y = ISLE.y + Math.sin(a) * rr * 0.86; i ? g.lineTo(x, y) : g.moveTo(x, y); } g.closePath(); }
+function castle(g, x, y, s, c, cd, flag) {
+  g.save(); g.translate(x, y); g.scale(s, s); g.lineJoin = 'round'; g.lineWidth = 3; g.strokeStyle = INK;
+  const body = () => { g.beginPath(); g.moveTo(-40, 0); g.lineTo(-40, -44); g.lineTo(-52, -44); g.lineTo(-52, -78);
+    for (let i = 0; i < 3; i++) { g.lineTo(-52 + i * 8, -86); g.lineTo(-48 + i * 8, -86); g.lineTo(-48 + i * 8, -78); g.lineTo(-44 + i * 8, -78); }
+    g.lineTo(-28, -78); g.lineTo(-28, -50); g.lineTo(28, -50); g.lineTo(28, -78);
+    for (let i = 0; i < 3; i++) { g.lineTo(28 + i * 8, -86); g.lineTo(32 + i * 8, -86); g.lineTo(32 + i * 8, -78); g.lineTo(36 + i * 8, -78); }
+    g.lineTo(52, -78); g.lineTo(52, -44); g.lineTo(40, -44); g.lineTo(40, 0); g.closePath(); };
+  body(); g.fillStyle = c; g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(-12, 0); g.lineTo(-12, -20); g.arc(0, -20, 12, PI, 0); g.lineTo(12, 0); g.fillStyle = cd; g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(0, -50); g.lineTo(0, -104); g.stroke();
+  g.beginPath(); g.moveTo(0, -104); g.lineTo(30, -97); g.lineTo(0, -88); g.closePath(); g.fillStyle = flag; g.fill(); g.stroke();
+  g.restore();
+}
+function compass(g, x, y, s) {
+  g.save(); g.translate(x, y); g.scale(s, s); g.strokeStyle = INK; g.lineWidth = 2.5; g.lineJoin = 'round';
+  g.beginPath(); g.arc(0, 0, 44, 0, TAU); g.globalAlpha = 0.5; g.stroke(); g.globalAlpha = 1;
+  for (let i = 0; i < 4; i++) { g.save(); g.rotate(i * PI / 2); g.beginPath(); g.moveTo(0, -62); g.lineTo(11, 0); g.lineTo(-11, 0); g.closePath();
+    g.fillStyle = i === 0 ? COL.red : '#f7ecd0'; g.fill(); g.stroke(); g.restore(); }
+  g.font = '34px "IM Fell English SC"'; g.fillStyle = INK; g.textAlign = 'center'; g.fillText('N', 0, -70); g.restore();
+}
+function buildMap() {
+  const S = 2, c = parchment(W * S, H * S, 11), g = c.getContext('2d');
+  g.scale(S, S); g.lineJoin = 'round'; g.lineCap = 'round';
+  g.globalCompositeOperation = 'multiply';
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 0.72; g.fillStyle = COL.sea; g.fillRect(0, 0, W, H); g.globalAlpha = 1; g.globalCompositeOperation = 'multiply';
+  // old-map ripple lines following the coasts
+  for (const [d, a] of [[14, 0.55], [30, 0.36], [50, 0.22], [74, 0.12]]) {
+    g.strokeStyle = `rgba(60,110,120,${a})`; g.lineWidth = 2.2;
+    pathCoast(g, coastL, -1, -d); g.stroke(); pathCoast(g, coastR, 1, -d); g.stroke(); pathIsle(g, d * 0.55); g.stroke(); }
+  // waves
+  const r = rng(5);
+  g.strokeStyle = 'rgba(60,105,115,0.45)'; g.lineWidth = 2.4;
+  for (let i = 0; i < 26; i++) { const x = 790 + r() * 360, y = 60 + r() * 960; if (Math.hypot(x - ISLE.x, y - ISLE.y) < 120 || x > coastR(y) - 40 || x < coastL(y) + 40) continue;
+    g.beginPath(); g.moveTo(x - 14, y); g.quadraticCurveTo(x - 7, y - 8, x, y); g.quadraticCurveTo(x + 7, y - 8, x + 14, y); g.stroke(); }
+  // lands
+  const land = (fx, side, fill) => { pathCoast(g, fx, side); side < 0 ? (g.lineTo(-40, 1120), g.lineTo(-40, -40)) : (g.lineTo(1960, 1120), g.lineTo(1960, -40)); g.closePath();
+    g.fillStyle = fill; g.fill(); };
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 0.8;
+  land(coastL, -1, COL.redLand); land(coastR, 1, COL.purLand);
+  pathIsle(g); g.fillStyle = COL.sand; g.fill(); g.globalAlpha = 0.9;
+  g.beginPath(); g.ellipse(ISLE.x - 6, ISLE.y - 8, ISLE.r * 0.62, ISLE.r * 0.44, -0.1, 0, TAU); g.fillStyle = COL.grass; g.fill(); g.globalAlpha = 1;
+  // inner lighter band along coast (flat highlight) + ink coast
+  g.strokeStyle = 'rgba(255,245,220,0.35)'; g.lineWidth = 10;
+  pathCoast(g, coastL, -1, 7); g.stroke(); pathCoast(g, coastR, 1, 7); g.stroke();
+  g.strokeStyle = INK; g.lineWidth = 3.4;
+  pathCoast(g, coastL, -1); g.stroke(); pathCoast(g, coastR, 1); g.stroke(); pathIsle(g); g.stroke();
+  // hills
+  g.lineWidth = 2.6;
+  for (const [x, y, s] of [[180, 700, 1], [260, 760, 0.8], [520, 250, 0.9], [1620, 780, 1], [1720, 700, 0.8], [1400, 250, 0.9], [120, 980, 0.9], [1820, 990, 0.9]]) {
+    g.beginPath(); g.moveTo(x - 34 * s, y); g.quadraticCurveTo(x, y - 60 * s, x + 34 * s, y); g.strokeStyle = 'rgba(53,37,27,0.55)'; g.stroke(); }
+  castle(g, 150, 440, 1.0, '#f0cdb6', COL.redDk, COL.red);
+  castle(g, 1770, 440, 1.0, '#d9d0ea', COL.purDk, COL.pur);
+  compass(g, 960, 150, 1);
+  // labels
+  g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  const label = (s, x, y, sz, col, sp) => { g.font = `${sz}px "IM Fell English SC"`; g.letterSpacing = sp + 'px'; g.fillStyle = col; g.fillText(s, x, y); g.letterSpacing = '0px'; };
+  label('Grelland', 330, 175, 80, COL.redDk, 10); label('Vossmark', 1590, 175, 80, COL.purDk, 10);
+  g.font = 'italic 40px "IM Fell English"'; g.fillStyle = INK; g.fillText('The Isle of Nubb', ISLE.x, ISLE.y - 88);
+  g.font = 'italic 34px "IM Fell English"'; g.fillStyle = 'rgba(40,80,90,0.85)'; g.fillText('The Middling Sea', ISLE.x, 905);
+  g.strokeStyle = INK; g.lineWidth = 2; g.setLineDash([2, 7]); g.beginPath(); g.moveTo(ISLE.x, ISLE.y - 78); g.lineTo(ISLE.x, ISLE.y - 58); g.stroke(); g.setLineDash([]);
+  return c;
+}
+
+// ── characters ────────────────────────────────────────────────────────────────────────────
+// King: big round head (R 88) on a tiny body, drawn facing right in local units, feet at (0,0).
+// Pose: arms are shoulder + elbow angles (0 = hanging down, positive = swinging forward/up).
+const KINGS = {
+  humbert: { robe: COL.red, robeDk: COL.redDk, legs: '#f3ede0', hair: '#7a4a26', crown: 'tall' },
+  osric:   { robe: COL.pur, robeDk: COL.purDk, legs: '#3a3050', hair: '#2a2230', crown: 'wide' },
+};
+function stroke2(g, pts, w, c) { g.lineCap = 'round'; g.lineJoin = 'round';
+  g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.strokeStyle = INK; g.lineWidth = w + 7; g.stroke(); g.strokeStyle = c; g.lineWidth = w; g.stroke(); }
+function limb(sx, sy, a1, a2, l1, l2) { const ex = sx + Math.sin(a1) * l1, ey = sy + Math.cos(a1) * l1, b = a1 + a2; return [[sx, sy], [ex, ey], [ex + Math.sin(b) * l2, ey + Math.cos(b) * l2], b]; }
+function hand(g, x, y, a, s = 1) { g.save(); g.translate(x, y); g.rotate(-a); g.lineWidth = 3.5; g.strokeStyle = INK; g.fillStyle = COL.skin;
+  g.beginPath(); g.ellipse(9 * s, 1 * s, 6 * s, 8.5 * s, -0.5, 0, TAU); g.fill(); g.stroke();
+  g.beginPath(); g.arc(0, 7 * s, 13.5 * s, 0, TAU); g.fill(); g.stroke();
+  g.lineWidth = 2.5; g.beginPath(); g.moveTo(-6 * s, 16 * s); g.lineTo(-4 * s, 8 * s); g.moveTo(1 * s, 19 * s); g.lineTo(2 * s, 10 * s); g.stroke(); g.restore(); }
+function crown(g, type, cx, cy, s, tilt) {
+  g.save(); g.translate(cx, cy); g.rotate(tilt); g.lineJoin = 'round'; g.lineWidth = 4; g.strokeStyle = INK;
+  g.beginPath();
+  if (type === 'tall') { g.moveTo(-46, 0); g.lineTo(-52, -62); g.lineTo(-24, -30); g.lineTo(0, -84); g.lineTo(24, -30); g.lineTo(52, -62); g.lineTo(46, 0); }
+  else { g.moveTo(-60, 0); for (let i = 0; i <= 4; i++) { const x = -60 + i * 30; g.lineTo(x - (i ? 0 : 0), -38); if (i < 4) g.lineTo(x + 15, -20); } g.lineTo(60, 0); }
+  g.closePath(); g.fillStyle = COL.gold; g.fill(); g.stroke();
+  g.beginPath(); g.rect(type === 'tall' ? -47 : -61, -14, type === 'tall' ? 94 : 122, 16); g.fillStyle = COL.goldDk; g.fill(); g.stroke();
+  const gems = type === 'tall' ? [[-26, -6, COL.red], [0, -6, '#3b7fc4'], [26, -6, COL.red]] : [[-36, -6, '#3b8f5a'], [0, -6, COL.red], [36, -6, '#3b8f5a']];
+  for (const [x, y, c] of gems) { g.beginPath(); g.arc(x, y, 6, 0, TAU); g.fillStyle = c; g.fill(); g.lineWidth = 2.5; g.stroke(); }
+  if (type === 'tall') { g.beginPath(); g.arc(0, -86, 7, 0, TAU); g.fillStyle = COL.gold; g.fill(); g.stroke(); }
+  g.restore();
+}
+// head at (0,0) centre, radius R. e = expression {mouth: 0..1 open, smile, brow, shock, sleepy, blink}
+function head(g, who, R, e = {}) {
+  const K = KINGS[who], old = !!e.old, hair = old ? '#f4f1ea' : K.hair, s = R / 88;
+  g.save(); g.scale(s, s); g.lineJoin = 'round'; g.lineCap = 'round'; g.lineWidth = 5; g.strokeStyle = INK;
+  // back hair / ear
+  if (who === 'humbert') { g.beginPath(); g.ellipse(-62, 10, 30, 40, 0.3, 0, TAU); g.fillStyle = hair; g.fill(); g.stroke(); }
+  else { g.beginPath(); g.moveTo(-90, 30); g.quadraticCurveTo(-104, -70, -20, -88); g.quadraticCurveTo(50, -96, 84, -40); g.lineTo(-40, -40); g.quadraticCurveTo(-54, 10, -70, 52); g.closePath(); g.fillStyle = hair; g.fill(); g.stroke(); }
+  // skull
+  g.beginPath(); g.arc(0, 0, 88, 0, TAU); g.fillStyle = COL.skin; g.fill(); g.stroke();
+  g.save(); g.beginPath(); g.arc(0, 0, 85, 0, TAU); g.clip(); g.beginPath(); g.arc(-30, 22, 84, 0, TAU); g.arc(0, 0, 140, 0, TAU, true); g.fillStyle = 'rgba(214,150,105,0.25)'; g.fill('evenodd'); g.restore();
+  // front hair (osric fringe)
+  if (who === 'osric') { g.beginPath(); g.moveTo(-60, -62); g.quadraticCurveTo(0, -104, 70, -58); g.quadraticCurveTo(40, -48, 20, -54); g.quadraticCurveTo(-20, -40, -60, -62); g.fillStyle = hair; g.fill(); g.stroke(); }
+  // ear
+  g.beginPath(); g.ellipse(-26, 8, 13, 17, 0, 0, TAU); g.fillStyle = COL.skin; g.fill(); g.stroke();
+  g.beginPath(); g.arc(-26, 8, 6, -1, 1.6); g.lineWidth = 3; g.stroke(); g.lineWidth = 5;
+  // blush
+  g.fillStyle = 'rgba(238,140,120,0.45)'; g.beginPath(); g.ellipse(52, 26, 15, 9, 0, 0, TAU); g.fill();
+  // eyes
+  const ex = [22, 58], ey = -12;
+  if (e.shock) {
+    const k = e.shock;
+    for (const x of ex) { g.beginPath(); g.ellipse(x + 2, ey - 6, 17 + 5 * k, 20 + 7 * k, 0, 0, TAU); g.fillStyle = '#fffdf6'; g.fill(); g.lineWidth = 4; g.stroke();
+      g.beginPath(); g.arc(x + 4, ey - 6, 6.5 - 2.5 * k, 0, TAU); g.fillStyle = INK; g.fill(); }
+  } else if (e.blink) { for (const x of ex) { g.beginPath(); g.moveTo(x - 8, ey); g.quadraticCurveTo(x, ey + 5, x + 8, ey); g.lineWidth = 4; g.stroke(); } }
+  else { for (const x of ex) { g.beginPath(); g.ellipse(x, ey, 6.5, 8.5, 0, 0, TAU); g.fillStyle = INK; g.fill();
+      g.beginPath(); g.arc(x + 2, ey - 3, 2.2, 0, TAU); g.fillStyle = '#fff'; g.fill();
+      if (e.sleepy) { g.beginPath(); g.moveTo(x - 10, ey - 5); g.lineTo(x + 10, ey - 4); g.lineWidth = 4.5; g.strokeStyle = INK; g.stroke(); g.beginPath(); g.rect(x - 11, ey - 16, 22, 11); g.fillStyle = COL.skin; g.fill(); } } }
+  // brows (brow: -1 angry … +1 raised)
+  const b = e.brow || 0; g.lineWidth = old ? 8 : 7; g.strokeStyle = old ? '#e8e2d6' : INK;
+  for (const [i, x] of ex.entries()) { const lift = e.shock ? -22 * e.shock : 0, yo = ey - 26 + lift - b * 4, yi = ey - 26 + lift - b * 10;
+    g.beginPath(); g.moveTo(x - 12, i === 0 ? yo : yi); g.lineTo(x + 12, i === 0 ? yi : yo); g.stroke(); }
+  if (old) { g.lineWidth = 5; g.strokeStyle = INK; for (const x of ex) { g.beginPath(); g.moveTo(x - 9, ey - 38); g.lineTo(x + 9, ey - 40); g.globalAlpha = 0.35; g.stroke(); g.globalAlpha = 1; } }
+  g.strokeStyle = INK; g.lineWidth = 5;
+  // mouth
+  const mo = e.mouth || 0, mx = 44, my = who === 'humbert' && !old ? 52 : 40;
+  if (e.shock) { g.beginPath(); g.ellipse(mx, my + 4, 9 + 5 * e.shock, 12 + 10 * e.shock, 0, 0, TAU); g.fillStyle = '#5a1f1c'; g.fill(); g.lineWidth = 4; g.stroke(); }
+  else if (mo > 0.05) { g.beginPath(); g.moveTo(mx - 17, my - 2); g.quadraticCurveTo(mx, my + 2, mx + 15, my - 3); g.quadraticCurveTo(mx + 2, my + 6 + 20 * mo, mx - 17, my - 2); g.fillStyle = '#5a1f1c'; g.fill(); g.lineWidth = 4; g.stroke(); }
+  else { g.beginPath(); const sm2 = e.smile ?? 0.5; g.moveTo(mx - 15, my - 2); g.quadraticCurveTo(mx, my + 10 * sm2 - 2, mx + 14, my - 4); g.lineWidth = 4.5; g.stroke(); }
+  // nose (profile bump beyond the skull outline)
+  g.beginPath(); g.ellipse(86, 8, 16, 18, -0.2, -2.3, 2.1); g.fillStyle = COL.skin; g.fill(); g.lineWidth = 5; g.stroke();
+  // facial hair
+  if (who === 'humbert' && !old) { // handlebar moustache
+    g.beginPath(); g.moveTo(44, 26); g.bezierCurveTo(30, 14, 12, 26, 8, 40); g.bezierCurveTo(4, 32, 14, 16, 30, 18); g.bezierCurveTo(40, 16, 56, 16, 64, 22);
+    g.bezierCurveTo(78, 16, 98, 22, 104, 40); g.bezierCurveTo(96, 30, 80, 28, 64, 32); g.closePath(); g.fillStyle = hair; g.fill(); g.lineWidth = 4; g.stroke(); }
+  if (who === 'osric' && !old) { g.beginPath(); g.moveTo(24, 62); g.quadraticCurveTo(46, 72, 62, 58); g.lineTo(52, 118); g.closePath(); g.fillStyle = hair; g.fill(); g.lineWidth = 4; g.stroke();
+    // monocle
+    g.beginPath(); g.arc(60, -12, 18, 0, TAU); g.lineWidth = 4.5; g.strokeStyle = COL.goldDk; g.stroke(); g.beginPath(); g.moveTo(66, 5); g.quadraticCurveTo(76, 40, 60, 70); g.lineWidth = 2; g.stroke(); g.strokeStyle = INK; }
+  g.restore();
+}
+// long white beard for the old kings (drawn over the body)
+function oldBeard(g, who) {
+  g.lineJoin = 'round'; g.strokeStyle = INK; g.lineWidth = 5;
+  g.beginPath();
+  if (who === 'humbert') { g.moveTo(-2, -226); g.bezierCurveTo(30, -236, 90, -238, 104, -222); g.bezierCurveTo(118, -140, 96, -60, 60, -20); g.bezierCurveTo(46, -38, 36, -40, 26, -24); g.bezierCurveTo(10, -70, -10, -150, -2, -226); }
+  else { g.moveTo(18, -214); g.quadraticCurveTo(52, -200, 86, -222); g.bezierCurveTo(96, -140, 100, -40, 124, 6); g.bezierCurveTo(90, -10, 60, -80, 18, -214); }
+  g.fillStyle = '#f7f4ee'; g.fill(); g.stroke();
+  g.lineWidth = 2.5; g.globalAlpha = 0.35; for (let i = 0; i < 4; i++) { g.beginPath(); const x = who === 'humbert' ? 30 + i * 18 : 50 + i * 12; g.moveTo(x, -200); g.quadraticCurveTo(x + 6, -130, x - 2 + (who === 'osric' ? 20 : 0), -60 + i * 6); g.stroke(); } g.globalAlpha = 1;
+  if (who === 'humbert') { g.beginPath(); g.moveTo(40, -242); g.bezierCurveTo(20, -252, 4, -240, 0, -224); g.bezierCurveTo(14, -232, 30, -236, 54, -234); g.bezierCurveTo(78, -238, 98, -236, 114, -220); g.bezierCurveTo(108, -248, 80, -252, 60, -244); g.closePath(); g.fillStyle = '#fbf9f4'; g.fill(); g.lineWidth = 4; g.stroke(); }
+}
+// full king. p: {x, y, s, f(facing), armF:[a1,a2], armB:[a1,a2], lean, mouth, smile, brow, blink, shock, old, sleepy, crownTilt, cane, bob}
+function king(g, who, p) {
+  const K = KINGS[who], s = p.s || 1, f = p.f || 1, old = !!p.old;
+  g.save(); g.translate(p.x, p.y); g.scale(f * s, s * (p.sy || 1)); g.lineJoin = 'round'; g.lineCap = 'round';
+  const lean = p.lean || 0, bob = p.bob || 0;
+  // legs (hips → knees → feet), bent more when old
+  const kb = old ? 22 : 13;
+  for (const [hx, off] of [[-18, -1], [20, 1]]) {
+    const hip = [hx, -78], knee = [hx + kb, -40], foot = [hx + 2, 0];
+    stroke2(g, [hip, knee, foot], 17, K.legs);
+    g.beginPath(); g.ellipse(foot[0] + 12, -7, 22, 12, 0, 0, TAU); g.fillStyle = '#4a2c1c'; g.fill(); g.lineWidth = 4.5; g.strokeStyle = INK; g.stroke(); }
+  g.translate(0, -78); g.rotate(lean); g.translate(0, 78 + bob);
+  // back arm
+  const shB = [-40, -162], shF = [40, -160];
+  const aB = p.armB || [0.25, -0.3], aF = p.armF || [0.15, 0.3];
+  const lb = limb(shB[0], shB[1], aB[0], aB[1], 46, 42);
+  stroke2(g, lb.slice(0, 3), 20, K.robeDk); hand(g, lb[2][0], lb[2][1], lb[3]);
+  // cape
+  g.beginPath(); g.moveTo(-46, -176); g.quadraticCurveTo(-88, -90, -92, -58); g.quadraticCurveTo(-30, -48, 30, -60); g.lineTo(40, -170); g.closePath(); g.fillStyle = K.robeDk; g.fill(); g.lineWidth = 5; g.strokeStyle = INK; g.stroke();
+  // cape ermine hem
+  g.beginPath(); g.moveTo(-92, -58); g.quadraticCurveTo(-30, -48, 30, -60); g.lineTo(30, -70); g.quadraticCurveTo(-30, -60, -89, -71); g.closePath(); g.fillStyle = COL.ermine; g.fill(); g.stroke();
+  // robe / torso (belly bulges forward)
+  g.beginPath(); g.moveTo(-40, -172); g.lineTo(38, -172); g.bezierCurveTo(70, -140, 74, -96, 58, -70); g.lineTo(-54, -70); g.bezierCurveTo(-60, -110, -52, -150, -40, -172); g.closePath();
+  g.fillStyle = K.robe; g.fill(); g.stroke();
+  g.save(); g.clip(); g.fillStyle = 'rgba(255,255,255,0.13)'; g.beginPath(); g.ellipse(34, -120, 26, 42, 0.2, 0, TAU); g.fill(); g.restore();
+  // belt
+  g.beginPath(); g.moveTo(-54, -108); g.quadraticCurveTo(10, -100, 70, -112); g.lineTo(70, -98); g.quadraticCurveTo(10, -86, -56, -94); g.closePath(); g.fillStyle = COL.gold; g.fill(); g.lineWidth = 4; g.stroke();
+  g.beginPath(); g.rect(8, -104, 20, 18); g.fillStyle = COL.goldDk; g.fill(); g.stroke();
+  // neck
+  g.beginPath(); g.rect(-12, -212, 30, 40); g.fillStyle = COL.skinSh; g.fill(); g.lineWidth = 4.5; g.stroke();
+  // ermine collar
+  g.beginPath(); g.moveTo(-58, -160); g.quadraticCurveTo(-56, -180, -20, -180); g.lineTo(28, -180); g.quadraticCurveTo(64, -180, 62, -158); g.quadraticCurveTo(0, -150, -58, -164); g.closePath();
+  g.fillStyle = COL.ermine; g.fill(); g.lineWidth = 5; g.stroke();
+  g.fillStyle = INK; for (const [x, y] of [[-40, -170], [-14, -166], [14, -168], [40, -172], [-26, -178], [28, -179]]) { g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 3, y + 3); g.lineTo(x - 3, y + 3); g.closePath(); g.fill(); }
+  // head
+  const hx = 6, hy = -292;
+  g.save(); g.translate(hx, hy); g.rotate(p.headTilt || 0); head(g, who, 88, p); g.restore();
+  crown(g, K.crown, hx + 4 + (p.crownDx || 0), hy - 70, 1, p.crownTilt || 0);
+  if (old) { g.save(); g.translate(0, -24 + (p.mouth || 0) * 7); oldBeard(g, who); g.restore(); }
+  // front arm (+ cane)
+  const lf = limb(shF[0], shF[1], aF[0], aF[1], 46, 42);
+  if (p.cane) { const [cx, cy] = lf[2]; g.lineCap = 'round'; g.strokeStyle = INK; g.lineWidth = 13; g.beginPath(); g.moveTo(cx + 6, cy - 14); g.lineTo(cx + 14, p.caneY ?? 4 - bob); g.stroke();
+    g.strokeStyle = '#8a5a30'; g.lineWidth = 7; g.stroke(); g.beginPath(); g.arc(cx - 4, cy - 14, 10, 0, PI, true); g.strokeStyle = INK; g.lineWidth = 13; g.stroke(); g.strokeStyle = '#8a5a30'; g.lineWidth = 7; g.stroke(); }
+  stroke2(g, lf.slice(0, 3), 20, K.robe);
+  g.beginPath(); g.arc(lf[1][0], lf[1][1], 0.1, 0, TAU);
+  // cuff
+  hand(g, lf[2][0], lf[2][1], lf[3]);
+  g.restore();
+}
+// goat (facing right), feet at (0,0), ~70 units tall
+function goat(g, x, y, s, f = 1, e = {}) {
+  g.save(); g.translate(x, y); g.scale(s * f, s); g.lineJoin = 'round'; g.lineCap = 'round'; g.strokeStyle = INK;
+  const legs = [[-24, -1], [-12, 1], [14, -1], [26, 1]];
+  for (const [lx, ph] of legs) { g.lineWidth = 11; g.beginPath(); g.moveTo(lx, -30); g.lineTo(lx + (e.hop ? ph * 4 : 0), 0); g.stroke(); g.strokeStyle = '#eee6d6'; g.lineWidth = 5; g.stroke(); g.strokeStyle = INK;
+    g.fillStyle = INK; g.fillRect(lx - 4, -4, 8, 5); }
+  g.beginPath(); g.ellipse(0, -42, 38, 22, 0, 0, TAU); g.fillStyle = '#fbf6ec'; g.fill(); g.lineWidth = 4.5; g.stroke();
+  g.beginPath(); g.moveTo(-36, -50); g.quadraticCurveTo(-48, -62, -44, -50); g.lineWidth = 5; g.stroke();
+  // neck + head (lowered when grazing)
+  const gz = e.graze || 0, hx = 44, hy = -68 + gz * 42;
+  g.beginPath(); g.moveTo(24, -54); g.lineTo(hx - 6, hy + 6); g.lineWidth = 22; g.stroke(); g.strokeStyle = '#fbf6ec'; g.lineWidth = 14; g.stroke(); g.strokeStyle = INK;
+  g.save(); g.translate(hx, hy); g.rotate(gz * 0.9);
+  for (const o of [0, 7]) { g.beginPath(); g.moveTo(-2 + o, -8); g.quadraticCurveTo(-4 + o, -26, -20 + o, -24); g.lineWidth = 10; g.strokeStyle = INK; g.stroke(); g.strokeStyle = '#b8a888'; g.lineWidth = 4.5; g.stroke(); } g.strokeStyle = INK;
+  g.beginPath(); g.ellipse(-12, -4, 12, 6, -0.5, 0, TAU); g.fillStyle = '#efe6d4'; g.fill(); g.lineWidth = 3.5; g.stroke();
+  g.beginPath(); g.ellipse(6, 2, 17, 13, 0.35, 0, TAU); g.fillStyle = '#fbf6ec'; g.fill(); g.lineWidth = 4.5; g.stroke();
+  g.beginPath(); g.moveTo(10, 14); g.lineTo(14, 26); g.lineTo(6, 16); g.fillStyle = '#d8ccb6'; g.fill(); g.lineWidth = 3; g.stroke();
+  if (e.blink) { g.beginPath(); g.moveTo(3, -3); g.lineTo(11, -3); g.lineWidth = 3; g.stroke(); }
+  else { g.beginPath(); g.ellipse(8, -3, 3.4, 4, 0, 0, TAU); g.fillStyle = INK; g.fill(); }
+  g.restore();
+  g.restore();
+}
+</script>
+<script src="scene.js"></script>
+</body></html>
