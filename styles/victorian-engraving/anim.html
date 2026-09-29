@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── victorian-engraving · "The Very Serious Committee for Good Ideas" ───────────────────────────────
+// Cut-out animation built from procedurally engraved Victorian imagery: every part is painted as a grey
+// tone map, then converted into steel-engraving line work (hatching, cross-hatching, stipple) on cream
+// stock, hand-tinted with a misregistered watercolour wash and cut out with a paper rim + drop shadow.
+// Story: a title card on ropes is yanked away → the Chairman's head hinges open, winged ideas flutter out →
+// the Good Idea is "examined" by a giant booted foot (SQUASH) → a crane refers it to the Resolution Engine
+// → the engine fires a banner: RESOLVED: TO FORM A SUB-COMMITTEE → iris-out on the one slow idea that survived.
+// Motion is stiff pivot-point cut-out animation stepped at 15 fps.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), x = cv.getContext('2d');
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eBack = u => { const c = 2.2; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const deg = d => d * Math.PI / 180;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const STEP = 15;
+const stp = t => Math.floor(t * STEP + 1e-4) / STEP;
+const stepIx = t => Math.floor(t * STEP + 1e-4);
+
+const SERIF = '"IM Fell English"', SC = '"IM Fell English SC"', FAT = '"Abril Fatface"';
+const INK = '#2a1b11', PAP = [243, 232, 207], INKC = [42, 28, 18];
+const WW = 2920, SKW = 2520, CAMX = 1000;
+
+// ═══════════════════════════ engraving engine ═══════════════════════════
+function newPart(x0, y0, x1, y1, o = {}) {
+  const w = Math.ceil(x1 - x0), h = Math.ceil(y1 - y0);
+  const P = { w, h, ox: -x0, oy: -y0, c: mk(w, h), t: mk(w, h), s: mk(w, h), o: mk(w, h), seed: o.seed || 1, sp: o.s || 6 };
+  P.g = P.c.getContext('2d'); P.tg = P.t.getContext('2d'); P.sg = P.s.getContext('2d', { willReadFrequently: true }); P.og = P.o.getContext('2d');
+  return P;
+}
+const gray = d => { const v = Math.round(255 * (1 - clamp(d))); return `rgb(${v},${v},${v})`; };
+function fillOf(g, tone) {
+  if (typeof tone === 'number') return gray(tone);
+  const gr = tone.lin ? g.createLinearGradient(...tone.lin) : g.createRadialGradient(...tone.rad);
+  for (const [p, d] of tone.s) gr.addColorStop(p, gray(d));
+  return gr;
+}
+const loc = (g, P) => g.setTransform(1, 0, 0, 1, P.ox, P.oy);
+const lineInk = (p, cov, s) => {
+  if (cov <= 0) return 0;
+  const f = p - Math.floor(p), dpx = Math.abs(f - .5) * s, wpx = cov * s;
+  return wpx < 1 ? wpx * clamp(1 - dpx) : clamp(wpx / 2 - dpx + .5);
+};
+// paint(g) draws a greyscale "darkness" map in local coords; it is converted to engraved line work.
+function engrave(P, paint, o = {}) {
+  const { w, h } = P, sg = P.sg;
+  sg.setTransform(1, 0, 0, 1, 0, 0); sg.clearRect(0, 0, w, h); loc(sg, P);
+  sg.save(); if (o.clip) sg.clip(o.clip); paint(sg); sg.restore();
+  const src = sg.getImageData(0, 0, w, h).data, out = P.og.createImageData(w, h), dd = out.data;
+  const s = o.s || P.sp, a = deg(o.a ?? 35), c1 = Math.cos(a), s1 = Math.sin(a);
+  const a2 = a + deg(o.x ?? 64), c2 = Math.cos(a2), s2 = Math.sin(a2), a3 = a - deg(48), c3 = Math.cos(a3), s3 = Math.sin(a3);
+  const wob = o.wob ?? .16, sd = (P.seed * 13.7 + (o.seed || 0) * 5.3) % 97, lk = o.lk ?? 1, st = o.st || 0, xk = o.xk ?? 1;
+  const pr = o.paper || PAP, ik = o.ink || INKC, ring = o.ring, ray = o.ray, gs = s * .95;
+  for (let y = 0; y < h; y++) {
+    const ly = y - P.oy;
+    for (let xx = 0; xx < w; xx++) {
+      const i = (y * w + xx) * 4, al = src[i + 3]; if (!al) continue;
+      const dk = 1 - src[i] / 255, lx = xx - P.ox;
+      let p1, u1, sl = s;
+      if (ring) { const dx = lx - ring[0], dy = ly - ring[1]; p1 = Math.sqrt(dx * dx + dy * dy) / s; u1 = Math.atan2(dy, dx) * 90; }
+      else if (ray) { const dx = lx - ray[0], dy = ly - ray[1]; u1 = Math.sqrt(dx * dx + dy * dy); p1 = Math.atan2(dy, dx) / TAU * ray[2]; sl = Math.max(1.5, u1 * TAU / ray[2]); }
+      else { p1 = (lx * c1 + ly * s1) / s; u1 = -lx * s1 + ly * c1; }
+      p1 += wob * Math.sin(u1 * .019 + sd) + wob * .45 * Math.sin(u1 * .051 + sd * 1.7);
+      let ink = lineInk(p1, dk < .035 ? 0 : Math.min(.8, dk * 1.12) * lk, sl);
+      if (dk > .42 && xk) { const p2 = (lx * c2 + ly * s2) / s + wob * Math.sin((-lx * s2 + ly * c2) * .023 + sd); ink = Math.max(ink, lineInk(p2, Math.min(.66, (dk - .42) * 1.25) * xk, s)); }
+      if (dk > .74 && xk) { const p3 = (lx * c3 + ly * s3) / s; ink = Math.max(ink, lineInk(p3, Math.min(.6, (dk - .74) * 1.7) * xk, s)); }
+      if (st) {
+        const u = (lx + ly) * .7071 / gs, v = (lx - ly) * .7071 / gs, ru = Math.round(u), rv = Math.round(v);
+        const jh = Math.sin(ru * 127.1 + rv * 311.7) * 43758.5, jx = (jh - Math.floor(jh) - .5) * .35;
+        const du = (u - ru - jx) * gs, dv = (v - rv) * gs, r = Math.sqrt(dk) * .5 * gs * st;
+        ink = Math.max(ink, clamp(r - Math.sqrt(du * du + dv * dv) + .5));
+      }
+      ink = Math.min(1, ink);
+      dd[i] = pr[0] + (ik[0] - pr[0]) * ink; dd[i + 1] = pr[1] + (ik[1] - pr[1]) * ink; dd[i + 2] = pr[2] + (ik[2] - pr[2]) * ink; dd[i + 3] = al;
+    }
+  }
+  P.og.putImageData(out, 0, 0);
+  P.g.setTransform(1, 0, 0, 1, 0, 0); P.g.drawImage(P.o, 0, 0);
+}
+const pth = d => typeof d === 'string' ? new Path2D(d) : d;
+function tintFill(P, path, col, clip, rule) { const g = P.tg; g.save(); loc(g, P); if (clip) g.clip(clip); g.fillStyle = typeof col === 'function' ? col(g) : col; g.fill(path, rule || 'nonzero'); g.restore(); }
+function inkStroke(P, d, lw = 2.6, clip, col = INK) { const g = P.g; g.save(); loc(g, P); if (clip) g.clip(clip); g.lineWidth = lw; g.lineJoin = g.lineCap = 'round'; g.strokeStyle = col; g.stroke(pth(d)); g.restore(); }
+function inkFill(P, d, col = INK, clip) { const g = P.g; g.save(); loc(g, P); if (clip) g.clip(clip); g.fillStyle = col; g.fill(pth(d)); g.restore(); }
+function region(P, d, tone, o = {}) {
+  const path = pth(d);
+  if (o.pre) inkStroke(P, o.pre, o.prew || 5, o.clip);
+  engrave(P, g => { g.fillStyle = fillOf(g, tone); g.fill(path, o.rule || 'nonzero'); }, o);
+  if (o.tint) tintFill(P, path, o.tint, o.clip, o.rule);
+  if (o.lw !== 0) inkStroke(P, path, o.lw ?? 2.6, o.clip);
+  return path;
+}
+function inkText(P, txt, px, py, font, o = {}) {
+  const g = P.g; g.save(); loc(g, P); g.font = font; g.textAlign = o.align || 'center'; g.textBaseline = 'alphabetic';
+  if (o.ls) g.letterSpacing = o.ls + 'px';
+  g.fillStyle = o.col || INK; g.fillText(txt, px, py); g.restore();
+}
+function engText(P, txt, px, py, font, o = {}) {           // hatched display letters with a solid drop shadow
+  const set = g => { g.font = font; g.textAlign = 'center'; g.textBaseline = 'alphabetic'; if (o.ls) g.letterSpacing = o.ls + 'px'; };
+  const g = P.g; g.save(); loc(g, P); set(g); g.fillStyle = INK; g.fillText(txt, px + (o.sh ?? 7), py + (o.sh ?? 7)); g.restore();
+  engrave(P, g => { set(g); const gr = g.createLinearGradient(0, py - (o.fs || 100), 0, py); gr.addColorStop(0, gray(o.d0 ?? .5)); gr.addColorStop(1, gray(o.d1 ?? .95)); g.fillStyle = gr; g.fillText(txt, px, py); }, { a: 90, s: o.s || 5, wob: .05, xk: 0, paper: o.paper });
+  if (o.tint) { const tg = P.tg; tg.save(); loc(tg, P); set(tg); tg.fillStyle = o.tint; tg.fillText(txt, px, py); tg.restore(); }
+  g.save(); loc(g, P); set(g); g.lineWidth = o.lw ?? 2.2; g.strokeStyle = INK; g.strokeText(txt, px, py); g.restore();
+}
+function recolor(src, col) { const c = mk(src.width, src.height), g = c.getContext('2d'); g.drawImage(src, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = col; g.fillRect(0, 0, c.width, c.height); return c; }
+// tint multiply (misregistered) → cut-out: dark cut edge + cream paper rim + blurred drop shadow
+function finish(P, o = {}) {
+  const tm = mk(P.w, P.h), tg = tm.getContext('2d'); tg.drawImage(P.t, o.tx ?? 2.5, o.ty ?? 1.5);
+  tg.globalCompositeOperation = 'destination-in'; tg.drawImage(P.c, 0, 0);
+  const g = P.g; g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'multiply'; g.globalAlpha = o.ta ?? .92; g.drawImage(tm, 0, 0);
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+  if (o.bare) return { img: P.c, ox: P.ox, oy: P.oy };
+  const R = o.rim ?? 4, M = R + 18, W2 = P.w + 2 * M, H2 = P.h + 2 * M;
+  const sil = mk(W2, H2), sg = sil.getContext('2d'); sg.drawImage(P.c, M, M); sg.globalCompositeOperation = 'source-in'; sg.fillStyle = '#000'; sg.fillRect(0, 0, W2, H2);
+  const img = mk(W2, H2), ig = img.getContext('2d'), r = rng(P.seed * 7 + 3);
+  const stamp = (rr, col) => { const tmp = recolor(sil, col); for (let k = 0; k < 20; k++) { const a = k / 20 * TAU, q = rr * (.8 + .4 * r()); ig.drawImage(tmp, Math.cos(a) * q, Math.sin(a) * q); } };
+  stamp(R + 1.4, '#6a5741'); stamp(R, '#f7efdc');
+  ig.drawImage(P.c, M, M);
+  const sh = mk(W2, H2), shg = sh.getContext('2d'); shg.filter = 'blur(7px)'; shg.drawImage(sil, 0, 0);
+  return { img, sh, ox: P.ox + M, oy: P.oy + M };
+}
+// draw a finished cut-out; (px,py) is the part's local origin (its pivot)
+function put(F, px, py, r = 0, sx = 1, sy = 1, sha = 1) {
+  if (F.sh && sha > 0) { x.save(); x.translate(px + 9, py + 11); x.rotate(r); x.scale(sx, sy); x.globalAlpha = .34 * sha; x.drawImage(F.sh, -F.ox, -F.oy); x.restore(); }
+  x.save(); x.translate(px, py); x.rotate(r); x.scale(sx, sy); x.drawImage(F.img, -F.ox, -F.oy); x.restore();
+}
+const circ = (cx, cy, r) => { const p = new Path2D(); p.arc(cx, cy, r, 0, TAU); return p; };
+const ell = (cx, cy, rx, ry, rot = 0) => { const p = new Path2D(); p.ellipse(cx, cy, rx, ry, rot, 0, TAU); return p; };
+const rect = (x0, y0, w, h) => { const p = new Path2D(); p.rect(x0, y0, w, h); return p; };
+const poly = pts => { const p = new Path2D(); pts.forEach(([a, b], i) => i ? p.lineTo(a, b) : p.moveTo(a, b)); p.closePath(); return p; };
+const lin = (x0, y0, x1, y1, s) => ({ lin: [x0, y0, x1, y1], s });
+const rad = (cx, cy, r0, r1, s, fx = cx, fy = cy) => ({ rad: [fx, fy, r0, cx, cy, r1], s });
+</script>
+<script src="build.js"></script>
+<script src="build2.js"></script>
+<script src="scene.js"></script>
+</body></html>
