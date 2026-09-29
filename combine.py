@@ -83,8 +83,9 @@ def main():
     run("ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i",
         str(list_file), "-c", "copy", str(master))
     run("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(master),
-        "-vf", "scale=1280:720,format=yuv420p", "-c:v", "libx264", "-crf", "27",
-        "-preset", "medium", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+        # CRF 33 / slow keeps the 116-style reel (~22 min) under GitHub's 100 MB file limit.
+        "-vf", "scale=1280:720,format=yuv420p", "-c:v", "libx264", "-crf", "33",
+        "-preset", "slow", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
         str(OUTPUT))
     print(f"Created {OUTPUT} ({OUTPUT.stat().st_size / 1024 / 1024:.1f} MiB)")
 

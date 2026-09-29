@@ -2,7 +2,7 @@
 
 Short HTML canvas films demonstrate different animation styles. Each example is a self-contained clip of roughly 9–10 seconds. Choose a style before commissioning a new animation: “Explain this topic in the `blueprint` style.”
 
-Watch the [complete English catalog](catalog/catalog.mp4), or browse by use case or visual family, or open a style below to see its translated video, animated preview, and HTML source.
+Watch the [complete catalog reel](catalog/catalog.mp4) (116 styles, ~22 min), or browse by use case or visual family, or open a style below to see its translated video, animated preview, and HTML source.
 
 This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The examples retain references to irticalen where they are part of the original scene. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
 
