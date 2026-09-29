@@ -1,6 +1,6 @@
-# Polished & Premium
+# World & History
 
-Visual family · Glossy materials, glass, and light.
+Visual family · Art traditions from cultures and eras around the world.
 
 [← All styles](../../README.md)
 
@@ -10,12 +10,10 @@ Visual family · Glossy materials, glass, and light.
 
 <table>
 <tr>
-<td width="25%" align="center"><a href="../../styles/liquid-glass/liquid-glass.mp4"><img src="../../styles/liquid-glass/preview.gif" alt="Liquid Glass" width="100%"></a><br><b>22 · Liquid Glass</b><br><a href="../../styles/liquid-glass/liquid-glass.mp4">video</a> · <a href="../../styles/liquid-glass">source</a></td>
-<td width="25%" align="center"><a href="../../styles/liquid-motion/liquid-motion.mp4"><img src="../../styles/liquid-motion/preview.gif" alt="Liquid Motion" width="100%"></a><br><b>31 · Liquid Motion</b><br><a href="../../styles/liquid-motion/liquid-motion.mp4">video</a> · <a href="../../styles/liquid-motion">source</a></td>
+<td width="25%" align="center"><a href="../../styles/egyptian-papyrus/egyptian-papyrus.mp4"><img src="../../styles/egyptian-papyrus/preview.gif" alt="Egyptian Papyrus" width="100%"></a><br><b>95 · Egyptian Papyrus</b><br><a href="../../styles/egyptian-papyrus/egyptian-papyrus.mp4">video</a> · <a href="../../styles/egyptian-papyrus">source</a></td>
 </tr>
 </table>
 
 | # | Style | Feel | Best for | Family | Use cases |
 |---|---|---|---|---|---|
-| 22 | [Liquid Glass](../../styles/liquid-glass/) | Refractive glass morphing over a glowing aurora | Premium product reveals, feature launches, and polished title cards | [Polished & Premium](../../categories/families/polished.md) | [Product & Launches](../../categories/use-cases/product.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
-| 31 | [Liquid Motion](../../styles/liquid-motion/) | Gooey blobs in warm flowing gradients | Wellness brands, calm title cards, and soft product intros | [Polished & Premium](../../categories/families/polished.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Product & Launches](../../categories/use-cases/product.md) |
+| 95 | [Egyptian Papyrus](../../styles/egyptian-papyrus/) | Registers, mineral pigments, cartouche titles | Ancient processes, step-by-step history, and seasonal cycles | [World & History](../../categories/families/world-history.md) | [Explainers](../../categories/use-cases/explainer.md), [Storytelling & Brand](../../categories/use-cases/story.md) |
