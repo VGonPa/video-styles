@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── underground-comix · late-60s underground comix ─────────────────────────────────────────
+// "Take It Easy, Man": Mel, a lanky, bulbous-nosed dreamer in bell-bottoms and a floppy hat,
+// struts down the street of a tiny round city on the hottest day of the year. Everything is black
+// ink on newsprint: dense boiling cross-hatching, rubbery shapes, a fish-eye planet street that
+// rolls under his feet. The buildings sag, drip and wobble while he stays cool. The melting sun
+// bursts into a flat-colour psychedelic kaleidoscope, the title swirls in and melts, and the camera
+// pulls back to reveal the last panel of an invented comic book, SLOW MELT COMIX No. 1.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), MAIN = cv.getContext('2d'); let ctx = MAIN;
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const sm = u => u * u * (3 - 2 * u);
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const backOut = (u, c = 1.9) => u >= 1 ? 1 : 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ── palette: black ink on newsprint, plus flat day-glo for the trip ──
+const INK = '#141112', PAPER = '#f4ecd6', PAGE_C = '#ecdfbd';
+const PSY = ['#ff3d8b', '#ff8a1c', '#ffe01f', '#2fd27c', '#8b4dff', '#f4ecd6'];
+const HAND = '"Gochi Hand"', DISPLAY = '"Shrikhand"';
+
+// ── timeline (120 bpm, beats every 0.5 s from 0.25) ──
+const T0 = 0.25, BEAT = 0.5;
+const T_BURST = 4.25, T_PULL = 8.25, T_PULL_END = 9.15;
+const SUN = { x: 1480, y: 250, r: 92 };
+const RG = 2600, CX = 700, CY = 860 + RG;           // the little round city (planet street)
+const FSC = 1.22;                                   // figure scale
+const OMEGA = 345 * FSC / RG;                             // ground speed matches the stance foot
+
+// ── boil + jitter: every line re-inked 8 times a second ──
+let boil = 0, JA = 1.3, SCENE = new DOMMatrix();
+function jit(x, y) { return [x + JA * Math.sin(x * 0.13 + y * 0.071 + boil * 2.1), y + JA * Math.sin(y * 0.11 - x * 0.053 + boil * 1.7)]; }
+function cr(pts, closed = true) {                     // smooth Catmull-Rom through jittered points
+  const p = new Path2D(), n = pts.length; if (n < 2) return p;
+  const J = pts.map(q => jit(q[0], q[1]));
+  const g = i => closed ? J[(i + n) % n] : J[Math.max(0, Math.min(n - 1, i))];
+  p.moveTo(J[0][0], J[0][1]);
+  const segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) { const p0 = g(i - 1), p1 = g(i), p2 = g(i + 1), p3 = g(i + 2);
+    p.bezierCurveTo(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6, p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6, p2[0], p2[1]); }
+  if (closed) p.closePath(); return p;
+}
+function sub(pts, closed, step) {                     // subdivide so warps bend straight edges
+  const out = [], n = pts.length, m = closed ? n : n - 1;
+  for (let i = 0; i < m; i++) { const a = pts[i], b = pts[(i + 1) % n]; const k = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step));
+    for (let j = 0; j < k; j++) out.push([lerp(a[0], b[0], j / k), lerp(a[1], b[1], j / k)]); }
+  if (!closed) out.push(pts[n - 1]); return out;
+}
+function ell(cx, cy, rx, ry, n = 18, rot = 0) { const o = []; for (let i = 0; i < n; i++) { const a = i / n * TAU; const x = Math.cos(a) * rx, y = Math.sin(a) * ry; o.push([cx + x * Math.cos(rot) - y * Math.sin(rot), cy + x * Math.sin(rot) + y * Math.cos(rot)]); } return o; }
+function ink(p, lw = 4) { ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke(p); }
+function fillc(p, c) { ctx.fillStyle = c; ctx.fill(p); }
+function hfill(p, tone) { const pt = PAT[tone][boil]; pt.setTransform(ctx.getTransform().invertSelf().multiply(SCENE)); ctx.fillStyle = pt; ctx.fill(p); }
+function shade(p, dx, dy, tone = 1) {                 // hatched crescent on the side away from the sun
+  ctx.save(); ctx.clip(p); hfill(p, tone); const q = new Path2D(); q.addPath(p, new DOMMatrix([1, 0, 0, 1, dx, dy])); fillc(q, PAPER); ctx.restore();
+}
+function form(pts, lw = 4.5, tone = 1, dx = 12, dy = -10, closed = true) { const p = cr(pts, closed); fillc(p, PAPER); if (tone >= 0) shade(p, dx, dy, tone); ink(p, lw); return p; }
+function line(pts, lw = 3) { ink(cr(pts, false), lw); }
+
+// ── hatch tones (scene space, 3 boil variants each) ──
+let PAT = [];
+function hatchLayer(r, ang, sp, lw, len0, len1) {
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  g.strokeStyle = INK; g.lineCap = 'round';
+  const ca = Math.cos(ang), sa = Math.sin(ang), D = Math.hypot(W, H);
+  for (let d = -D / 2; d < D / 2; d += sp) {
+    let s = -D / 2 - r() * 80;
+    while (s < D / 2) {
+      const L = len0 + r() * (len1 - len0), gap = 3 + r() * 10, off = d + (r() - .5) * sp * 0.35;
+      g.lineWidth = lw * (0.7 + r() * 0.6); g.beginPath();
+      const steps = Math.max(2, Math.round(L / 30)), bow = (r() - .5) * 3;
+      for (let k = 0; k <= steps; k++) { const u = s + L * k / steps, o = off + bow * Math.sin(Math.PI * k / steps);
+        const x = W / 2 + u * ca - o * sa, y = H / 2 + u * sa + o * ca; k ? g.lineTo(x, y) : g.moveTo(x, y); }
+      g.stroke(); s += L + gap;
+    }
+  }
+  return c;
+}
+function buildHatch() {
+  const tones = [[], [], [], []];
+  for (let v = 0; v < 3; v++) {
+    const r = rng(101 + v * 17);
+    const S = hatchLayer(r, -Math.PI / 4, 12, 1.6, 40, 140);
+    const A = hatchLayer(r, -Math.PI / 4 + 0.05, 7.5, 1.7, 60, 220);
+    const B = hatchLayer(r, Math.PI / 4 - 0.04, 7.5, 1.6, 60, 220);
+    const C = hatchLayer(r, 0.03, 6.5, 1.8, 50, 200);
+    const mk = layers => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); layers.forEach(l => g.drawImage(l, 0, 0)); return c; };
+    tones[0].push(S); tones[1].push(A); tones[2].push(mk([A, B])); tones[3].push(mk([A, B, C]));
+  }
+  PAT = tones.map(tt => tt.map(c => ctx.createPattern(c, 'repeat')));
+}
+
+// ── newsprint grain ──
+let GRAIN;
+function buildGrain() {
+  GRAIN = document.createElement('canvas'); GRAIN.width = W; GRAIN.height = H; const g = GRAIN.getContext('2d');
+  const id = g.createImageData(W, H), d = id.data, r = rng(7);
+  for (let i = 0; i < W * H; i++) { const n = 243 + (r() - .5) * 6 - (r() < 0.004 ? 70 : 0); d[i * 4] = n; d[i * 4 + 1] = n - 2; d[i * 4 + 2] = n - 8; d[i * 4 + 3] = 255; }
+  g.putImageData(id, 0, 0);
+  g.globalAlpha = 0.08; g.strokeStyle = '#6b5a3a'; g.lineWidth = 1;
+  for (let i = 0; i < 1400; i++) { const x = r() * W, y = r() * H, a = r() * TAU, l = 4 + r() * 16; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a + 1) * l / 2, y + Math.sin(a + 1) * l / 2, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+}
+
+// ── kaleidoscope (flat day-glo bands, inked, mirrored in 10 wedges around the sun) ──
+let KC, KX, KID, K32, KR, KT, PSY32;
+function buildKaleido() {
+  KC = document.createElement('canvas'); KC.width = W; KC.height = H; KX = KC.getContext('2d');
+  KID = KX.createImageData(W, H); K32 = new Uint32Array(KID.data.buffer);
+  KR = new Float32Array(W * H); KT = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x, dx = x - SUN.x, dy = y - SUN.y; KR[i] = Math.hypot(dx, dy); KT[i] = Math.atan2(dy, dx); }
+  const hex = h => { const n = parseInt(h.slice(1), 16); return 0xff000000 | ((n & 255) << 16) | (n & 0xff00) | (n >> 16); };
+  PSY32 = PSY.map(hex); PSY32.ink = hex(INK);
+}
+function kaleido(t, lim) {
+  const segA = TAU / 10, rot = t * 0.22, inkC = PSY32.ink, n = W * H;
+  for (let i = 0; i < n; i++) {
+    const r = KR[i]; if (r > lim) { K32[i] = 0; continue; }
+    let a = KT[i] + rot; a -= Math.floor(a / segA) * segA; a = Math.abs(a - segA / 2);
+    const v = r * 0.0072 - t * 1.25 + 0.95 * Math.sin(a * 15 + r * 0.004 - t * 0.9) + 0.22 * Math.sin(r * 0.028 - t * 3.1 + a * 6);
+    const fl = Math.floor(v), fr = v - fl;
+    K32[i] = (fr < 0.075 || fr > 0.975) ? inkC : PSY32[((fl % 6) + 6) % 6];
+  }
+  KX.putImageData(KID, 0, 0);
+}
+
+// ── the round city ──
+const NEAR = [], FAR = [], LAMPS = [];
+const SIGNS = ['EATS', 'RECORDS', 'LAUNDRY', 'HOTEL', 'BAGELS', 'PAWN', 'MALTS & SODA', 'GROOVY TOYS', 'SHOES'];
+function buildCity() {
+  const r = rng(62); let a = -0.72, k = 0;
+  while (a < 2.02) {
+    const w = 230 + r() * 150, h = 330 + r() * 300, aw = w / RG;
+    const b = { a: a + aw / 2, w, h, s: r() * 10, fe: r() < 0.45, wt: r() < 0.4, wtx: (r() - .5) * w * 0.4, awn: r() < 0.55,
+      sign: SIGNS[k % SIGNS.length], blade: r() < 0.35, win: [], drips: [], wdrips: [] };
+    const cols = Math.max(2, Math.floor((w - 40) / 60)), rows = Math.max(3, Math.floor((h - 150) / 72));
+    for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) b.win.push({ i, j, dark: r() < 0.6, g: r() });
+    b.cols = cols; b.rows = rows;
+    const nd = 3 + Math.floor(r() * 4); for (let i = 0; i < nd; i++) b.drips.push({ x: (r() - .5) * (w - 30), L: 30 + r() * 110, w: 7 + r() * 7, d: r() * 0.4, ph: r() * 6 });
+    for (let i = 0; i < 3; i++) b.wdrips.push({ n: Math.floor(r() * rows * cols), L: 20 + r() * 60, d: 0.2 + r() * 0.5 });
+    NEAR.push(b); k++;
+    const gap = 16 + r() * 70; if (gap > 50) LAMPS.push({ a: a + aw + gap / 2 / RG, hyd: r() < 0.5, s: r() * 6 });
+    a += aw + gap / RG;
+  }
+  const r2 = rng(33); a = -0.9;
+  while (a < 1.4) { const w = 150 + r2() * 130, h = 520 + r2() * 300, aw = w / RG; FAR.push({ a: a + aw / 2, w, h, s: r2() * 10, win: Math.floor(r2() * 5) }); a += aw + (6 + r2() * 30) / RG; }
+}
+function beatPulse(t) { if (t < T0) return 0; const u = ((t - T0) % BEAT); return Math.exp(-u * 9); }
+function melt(t) { return 0.85 * sm(seg(t, 0.6, 4.1)) + 0.15 * sm(seg(t, 4.1, 5.4)); }
+
+function place(ang) { ctx.translate(CX, CY); ctx.rotate(ang); ctx.translate(0, -RG + 4); }
+function building(b, t, m, jel) {
+  const hw = b.w / 2, h = b.h;
+  const Wp = (x, y) => { const hf = Math.min(1.35, Math.max(0, -y / h));
+    const sag = m * h * 0.26 * hf * hf * (0.62 + 0.38 * Math.sin(x * 0.021 + b.s));
+    const sway = m * (26 * hf * hf * Math.sin(TAU * 0.5 * (t - T0) + b.s) * jel + 0.13 * x * Math.sin(Math.PI * Math.min(1, hf)));
+    return [x + sway, y + sag - (jel - 1) * 0.05 * y * hf]; };
+  const poly = (pts, closed = true, step = 16) => cr(sub(pts, closed, step).map(q => Wp(q[0], q[1])), closed);
+  // side wall in shadow (dizzy perspective)
+  const side = poly([[-hw, 12], [-hw, -h], [-hw - 30, -h + 18], [-hw - 30, 12]]); fillc(side, PAPER); hfill(side, 2); ink(side, 3.5);
+  const front = poly([[-hw, 12], [hw, 12], [hw, -h], [-hw, -h]]); fillc(front, PAPER); shade(front, 26, -60, 0); ink(front, 4);
+  // windows
+  const cw = 30, chh = 44, x0 = -((b.cols - 1) * 60) / 2;
+  b.win.forEach((wd, n) => {
+    const x = x0 + wd.j * 60, y = -h + 50 + wd.i * 72;
+    const wp = poly([[x - cw / 2, y], [x + cw / 2, y], [x + cw / 2, y + chh], [x - cw / 2, y + chh]], true, 10);
+    if (wd.dark) { fillc(wp, INK); line([Wp(x + 6, y + 8), Wp(x + 10, y + 16)], 2.2); ctx.strokeStyle = PAPER; ctx.lineWidth = 2.4; ctx.stroke(cr([Wp(x + 5, y + 7), Wp(x + 9, y + 15)], false)); }
+    else { fillc(wp, PAPER); shade(wp, 10, -16, 2); ink(wp, 3); line([Wp(x, y + 2), Wp(x, y + chh - 2)], 2); line([Wp(x - cw / 2, y + chh * .5), Wp(x + cw / 2, y + chh * .5)], 2); }
+    line([Wp(x - cw / 2 - 5, y + chh + 4), Wp(x + cw / 2 + 5, y + chh + 4)], 3.5);           // sill
+  });
+  // ink running out of windows
+  b.wdrips.forEach(d => { const wd = b.win[d.n % b.win.length]; if (!wd) return; const L = d.L * sm(seg(m, d.d, d.d + 0.4)); if (L < 2) return;
+    const x = x0 + wd.j * 60 + 4, y = -h + 50 + wd.i * 72 + chh; const A = Wp(x, y);
+    const p = cr([[A[0] - 5, A[1] - 2], [A[0] - 3, A[1] + L * .7], [A[0] - 6, A[1] + L], [A[0], A[1] + L + 8], [A[0] + 6, A[1] + L], [A[0] + 3, A[1] + L * .7], [A[0] + 5, A[1] - 2]]); fillc(p, INK); });
+  // fire escape
+  if (b.fe) { const fx0 = -hw + 12, fx1 = -hw + 12 + b.w * 0.42;
+    for (let i = 0; i < b.rows; i++) { const y = -h + 50 + i * 72 + chh + 6;
+      line(sub([[fx0, y], [fx1, y]], false, 16).map(q => Wp(q[0], q[1])), 4);
+      line(sub([[fx0, y - 26], [fx1, y - 26]], false, 16).map(q => Wp(q[0], q[1])), 2.2);
+      for (let k = 0; k <= 5; k++) { const xx = lerp(fx0, fx1, k / 5); line([Wp(xx, y), Wp(xx, y - 26)], 1.8); }
+      if (i < b.rows - 1) { const xa = i % 2 ? fx0 + 10 : fx1 - 10, xb = i % 2 ? fx1 - 10 : fx0 + 10; line(sub([[xa, y], [xb, y + 72]], false, 14).map(q => Wp(q[0], q[1])), 2.6); } } }
+  // shop front
+  const sy = -118, sx0 = -hw + 18, sx1 = hw - 18;
+  const shop = poly([[sx0 + 50, sy + 34], [sx1, sy + 34], [sx1, 4], [sx0 + 50, 4]], true, 14); fillc(shop, PAPER); hfill(shop, 0); ink(shop, 3.5);
+  for (let k = 0; k < 3; k++) { const xx = lerp(sx0 + 70, sx1 - 30, k / 2); line([Wp(xx, sy + 50), Wp(xx + 22, sy + 80)], 2.4); }
+  const door = poly([[sx0, sy + 22], [sx0 + 40, sy + 22], [sx0 + 40, 4], [sx0, 4]], true, 12); fillc(door, INK);
+  if (b.awn) { const ay = sy + 30, n = 7; const aw = (sx1 - sx0 + 20) / n;
+    for (let k = 0; k < n; k++) { const xa = sx0 - 10 + k * aw; const p = poly([[xa, ay - 24], [xa + aw, ay - 24], [xa + aw, ay + 8], [xa + aw / 2, ay + 18], [xa, ay + 8]], true, 10); fillc(p, k % 2 ? PAPER : INK); ink(p, 2.6); } }
+  else { const sb = poly([[sx0, sy - 6], [sx1, sy - 6], [sx1, sy + 20], [sx0, sy + 20]], true, 14); fillc(sb, PAPER); ink(sb, 3); signText(b.sign, Wp((sx0 + sx1) / 2, sy + 8), Wp((sx0 + sx1) / 2 + 10, sy + 8), 30); }
+  if (b.blade) { const bx = hw - 4, by = -h + 60; const p = poly([[bx, by], [bx + 46, by], [bx + 46, by + 190], [bx, by + 190]], true, 14); fillc(p, INK); ink(p, 3);
+    const w0 = b.sign.split(' ')[0], word = w0.length <= 5 ? w0 : 'OPEN'; for (let k = 0; k < word.length; k++) signText(word[k], Wp(bx + 23, by + 24 + k * 36), Wp(bx + 33, by + 24 + k * 36), 32, PAPER); }
+  // cornice
+  const cor = poly([[-hw - 12, -h + 14], [hw + 12, -h + 14], [hw + 12, -h - 14], [-hw - 12, -h - 14]], true, 14); fillc(cor, PAPER); shade(cor, 0, -12, 2); ink(cor, 3.5);
+  // water tower
+  if (b.wt) { const x = b.wtx, y = -h - 14;
+    [[-26, 0, -18, -44], [26, 0, 18, -44], [0, 0, 0, -44]].forEach(l => line([Wp(x + l[0], y + l[1]), Wp(x + l[2], y + l[3])], 3));
+    line([Wp(x - 22, y - 20), Wp(x + 22, y - 20)], 2.4);
+    const tank = poly([[x - 36, y - 44], [x + 36, y - 44], [x + 36, y - 124], [x - 36, y - 124]], true, 12); fillc(tank, PAPER); shade(tank, 18, 0, 2); ink(tank, 3.5);
+    [-68, -96].forEach(yy => line(sub([[x - 36, y + yy], [x + 36, y + yy]], false, 12).map(q => Wp(q[0], q[1])), 2.4));
+    const roof = poly([[x - 42, y - 122], [x + 42, y - 122], [x, y - 158]], true, 10); fillc(roof, PAPER); hfill(roof, 1); ink(roof, 3.5); }
+  // cornice drips
+  b.drips.forEach((d, i) => { const L = d.L * sm(seg(m, d.d, d.d + 0.5)) * (1 + 0.12 * Math.sin(t * 2.3 + d.ph)); if (L < 3) return;
+    const A = Wp(d.x, -h + 12), w = d.w;
+    const p = cr([[A[0] - w, A[1] - 6], [A[0] - w * .55, A[1] + L * .65], [A[0] - w * 1.25, A[1] + L + w * .3], [A[0], A[1] + L + w * 1.5], [A[0] + w * 1.25, A[1] + L + w * .3], [A[0] + w * .55, A[1] + L * .65], [A[0] + w, A[1] - 6]]);
+    fillc(p, PAPER); shade(p, 5, -6, 2); ink(p, 3); });
+}
+function signText(s, A, B, size, col = INK) {
+  ctx.save(); ctx.translate(A[0], A[1]); ctx.rotate(Math.atan2(B[1] - A[1], B[0] - A[0]));
+  ctx.font = `${size}px ${HAND}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(s, 0, 2); ctx.restore();
+}
+function farBuilding(b, t, m) {
+  const hw = b.w / 2, h = b.h;
+  const Wp = (x, y) => { const hf = Math.max(0, -y / h); return [x + m * 30 * hf * hf * Math.sin(TAU * 0.25 * t + b.s), y + m * h * 0.2 * hf * hf * (0.7 + 0.3 * Math.sin(x * 0.03 + b.s))]; };
+  const p = cr(sub([[-hw, 12], [hw, 12], [hw, -h], [-hw, -h]], true, 18).map(q => Wp(q[0], q[1]))); fillc(p, PAPER); hfill(p, 0); ink(p, 3);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) if ((i * 2 + j + b.win) % 3) {
+    const x = -hw * 0.5 + j * hw, y = -h + 60 + i * 90; const q = cr(sub([[x - 12, y], [x + 12, y], [x + 12, y + 34], [x - 12, y + 34]], true, 10).map(z => Wp(z[0], z[1]))); fillc(q, PAPER); ink(q, 2.2); }
+}
+function lamp(l, t, m) {
+  if (l.hyd) { const p = cr([[-22, 8], [-20, -40], [-30, -44], [-30, -56], [-18, -58], [-14, -76], [0, -84], [14, -76], [18, -58], [30, -56], [30, -44], [20, -40], [22, 8]]);
+    ctx.save(); ctx.scale(1 + 0.12 * m, 1 - 0.18 * m); fillc(p, PAPER); shade(p, 10, -8, 2); ink(p, 3.5); line([[-16, -64], [16, -64]], 3); ctx.restore(); return; }
+  const droop = m * (0.8 + 0.2 * Math.sin(t * 1.7 + l.s));
+  const tipx = 30 + 70 * droop, tipy = -330 + 150 * droop;
+  const pole = cr([[0, 8], [2, -150], [8 + 20 * droop, -270 + 40 * droop], [tipx, tipy]], false);
+  ctx.lineCap = 'round'; ctx.lineWidth = 17; ctx.strokeStyle = INK; ctx.stroke(pole); ctx.lineWidth = 8; ctx.strokeStyle = PAPER; ctx.stroke(pole);
+  ctx.save(); ctx.translate(tipx, tipy); ctx.rotate(-0.2 + 1.3 * droop);
+  const head = cr([[-6, -8], [34, -12], [52, 10], [46, 18], [4, 18], [-10, 10]]); fillc(head, PAPER); shade(head, 0, -10, 3); ink(head, 3.5);
+  const bulb = cr(ell(26, 24, 12, 9, 12)); fillc(bulb, PAPER); ink(bulb, 2.6); ctx.restore();
+  const base = cr([[-18, 10], [-14, -16], [14, -16], [18, 10]]); fillc(base, PAPER); hfill(base, 2); ink(base, 3);
+}
+
+function ringPts(r, a0, a1, step = 0.006) { const o = []; for (let a = a0; a <= a1 + 1e-9; a += step) o.push([CX + r * Math.sin(a), CY - r * Math.cos(a)]); return o; }
+function ground(t) {
+  const A = 0.62, rot = -OMEGA * t;
+  const disc = cr([...ringPts(RG, -A, A), [CX + 1400, CY], [CX - 1400, CY]]); fillc(disc, PAPER); hfill(disc, 0);
+  const walk = cr([...ringPts(RG, -A, A), ...ringPts(RG - 30, -A, A).reverse()]); fillc(walk, PAPER); ink(walk, 4);
+  const curb = cr([...ringPts(RG - 30, -A, A), ...ringPts(RG - 64, -A, A).reverse()]); fillc(curb, PAPER); hfill(curb, 3); ink(curb, 3.5);
+  const js = 0.03; let a = Math.ceil((-A - rot) / js) * js + rot;
+  for (; a < A; a += js) line([[CX + RG * Math.sin(a), CY - RG * Math.cos(a)], [CX + (RG - 30) * Math.sin(a), CY - (RG - 30) * Math.cos(a)]], 2.6);
+  const ds = 0.07; a = Math.ceil((-A - rot) / ds) * ds + rot;          // road centre dashes
+  for (; a < A; a += ds) { const q = cr([...ringPts(RG - 150, a, a + 0.03, 0.01), ...ringPts(RG - 162, a, a + 0.03, 0.01).reverse()]); fillc(q, PAPER); ink(q, 2.4); }
+}
+
+// ── sky: hatched sunburst rays, melting sun ──
+function rays(t) {
+  const n = 16, spin = 0.05 * t + 1.1 * eIn(seg(t, 3.6, T_BURST));
+  for (let k = 0; k < n; k += 2) {
+    const th = k / n * TAU + spin, hw = TAU / n / 2; const L = [], R = [];
+    for (let r = 120; r <= 2400; r += 60) { const w = 0.07 * Math.sin(r * 0.004 - t * 2.4 + k); L.push([SUN.x + r * Math.cos(th - hw * .5 + w), SUN.y + r * Math.sin(th - hw * .5 + w)]); R.push([SUN.x + r * Math.cos(th + hw * .5 + w), SUN.y + r * Math.sin(th + hw * .5 + w)]); }
+    const p = cr([...L, ...R.reverse()]); hfill(p, k % 4 ? 1 : 2); ink(p, 3.5);
+  }
+}
+function sun(t, m) {
+  const squash = 1 - 0.16 * eInOut(seg(t, 3.75, 4.2)) + 0.03 * beatPulse(t);
+  ctx.save(); ctx.translate(SUN.x, SUN.y); ctx.scale(1 + (1 - squash) * 0.4, squash);
+  const r = SUN.r;
+  const halo = cr(ell(0, 0, r + 22, r + 22, 30)); fillc(halo, PAPER); ink(halo, 3);
+  // drips hanging off the sun, some drops falling
+  const dr = [[-50, 60, 11], [-14, 95, 14], [24, 45, 10], [56, 75, 12]];
+  dr.forEach((d, i) => { const L = d[1] * sm(seg(m, 0.05 + i * 0.08, 0.5 + i * 0.08)) * (1 + 0.1 * Math.sin(t * 3 + i)); if (L < 2) return;
+    const x = d[0], y0 = Math.sqrt(r * r - x * x) - 8, w = d[2];
+    const p = cr([[x - w, y0 - 6], [x - w * .5, y0 + L * .7], [x - w * 1.2, y0 + L + w * .3], [x, y0 + L + w * 1.5], [x + w * 1.2, y0 + L + w * .3], [x + w * .5, y0 + L * .7], [x + w, y0 - 6]]);
+    fillc(p, PAPER); shade(p, 5, -6, 2); ink(p, 3.5);
+    const P = 1.3 + i * 0.21, c = ((t + i * 0.37) % P) / P; if (m > 0.35 && c > 0.3) { const fy = y0 + L + 26 + 900 * Math.pow((c - 0.3), 2); const q = cr(ell(x, fy, w * .7, w * 1.1, 12)); fillc(q, PAPER); ink(q, 3); } });
+  const disc = cr(ell(0, 0, r, r * (1 + 0.04 * m), 30)); fillc(disc, PAPER); shade(disc, 22, -22, 2); ink(disc, 5.5);
+  line(ell(-4, -6, r * 0.62, r * 0.62, 20).slice(10, 16), 2.4);
+  ctx.restore();
+}
+
+// ── Mel ──
+const L1 = 118, L2 = 112, STR = 88, DUTY = 0.56, LIFT = 104;
+const SHOE = [[-30, -10], [-32, 14], [-25, 29], [20, 31], [76, 31], [95, 22], [100, 4], [91, -13], [70, -22], [46, -18], [22, -14], [4, -22], [-16, -22]];
+const SOLE = [[-32, 14], [-25, 29], [20, 31], [76, 31], [95, 22], [99, 12], [60, 19], [10, 19], [-31, 17]];
+const HEEL = [-24, 30], TOE = [88, 30], MID = [30, 30];
+const rotp = (p, a) => [p[0] * Math.cos(a) - p[1] * Math.sin(a), p[0] * Math.sin(a) + p[1] * Math.cos(a)];
+function stanceFoot(s) {
+  const g = STR - 2 * STR * s; let pitch = 0, piv = MID;
+  if (s < 0.14) { pitch = -0.36 * Math.pow(1 - s / 0.14, 2); piv = HEEL; }
+  else if (s > 0.7) { pitch = 0.5 * Math.pow((s - 0.7) / 0.3, 1.5); piv = TOE; }
+  const rp = rotp(piv, pitch); return { ax: g + piv[0] - MID[0] - rp[0], ay: -rp[1], pitch };
+}
+function footAt(q) {
+  if (q < DUTY) return stanceFoot(q / DUTY);
+  const s = (q - DUTY) / (1 - DUTY), A = stanceFoot(1), B = stanceFoot(0), e = sm(s);
+  return { ax: lerp(A.ax, B.ax, e), ay: lerp(A.ay, B.ay, e) - LIFT * Math.sin(Math.PI * Math.pow(s, 0.8)), pitch: lerp(A.pitch, B.pitch, sm(s)) - 0.25 * Math.sin(Math.PI * s) };
+}
+function ik(H, A, l1, l2) {
+  let dx = A[0] - H[0], dy = A[1] - H[1], d = Math.hypot(dx, dy); const dm = l1 + l2 - 0.5;
+  if (d > dm) { A = [H[0] + dx / d * dm, H[1] + dy / d * dm]; d = dm; }
+  const a0 = Math.atan2(dy, dx), al = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+  return { K: [H[0] + l1 * Math.cos(a0 - al), H[1] + l1 * Math.sin(a0 - al)], A };
+}
+const nrm = v => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
+function limbOutline(P, ws) {                         // chain of points with half-widths → closed outline
+  const n = P.length, Lf = [], Rt = [];
+  for (let i = 0; i < n; i++) { const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)]; const d = nrm([b[0] - a[0], b[1] - a[1]]); const nn = [-d[1], d[0]];
+    Lf.push([P[i][0] + nn[0] * ws[i], P[i][1] + nn[1] * ws[i]]); Rt.push([P[i][0] - nn[0] * ws[i], P[i][1] - nn[1] * ws[i]]); }
+  return [...Lf, ...Rt.reverse()];
+}
+function shoe(f, far) {
+  ctx.save(); ctx.translate(f.ax, f.ay); ctx.rotate(f.pitch);
+  const p = cr(SHOE); fillc(p, PAPER); if (far) hfill(p, 1); else shade(p, 14, -12, 1);
+  fillc(cr(SOLE), INK); ink(p, 4.5);
+  line([[48, -16], [60, -8]], 2.6); line([[40, -12], [52, -4]], 2.6); line([[70, -20], [84, 4]], 2.2);
+  ctx.restore();
+}
+function leg(Hp, f, far) {
+  const { K, A } = ik(Hp, [f.ax, f.ay], L1, L2);
+  shoe({ ax: A[0], ay: A[1], pitch: f.pitch }, far);
+  const d2 = nrm([A[0] - K[0], A[1] - K[1]]);
+  const mid = [K[0] + d2[0] * L2 * 0.5, K[1] + d2[1] * L2 * 0.5], E = [A[0] + d2[0] * 10, A[1] + d2[1] * 10];
+  const pts = limbOutline([Hp, [lerp(Hp[0], K[0], .5), lerp(Hp[1], K[1], .5)], K, mid, E], [27, 25, 21, 26, 42]);
+  const p = cr(pts); fillc(p, PAPER); if (far) hfill(p, 2); else shade(p, 16, -6, 1); ink(p, 4.5);
+  // hem and knee crease
+  const nE = [-d2[1], d2[0]]; line([[E[0] + nE[0] * 40, E[1] + nE[1] * 40], [E[0] + d2[0] * 6, E[1] + d2[1] * 6], [E[0] - nE[0] * 40, E[1] - nE[1] * 40]], 3);
+  line([[K[0] - 10, K[1] - 4], [K[0] + 4, K[1] + 6]], 2.4);
+  return { K, A };
+}
+function hand(W0, dir, far, open) {
+  ctx.save(); ctx.translate(W0[0], W0[1]); ctx.rotate(Math.atan2(dir[1], dir[0]));
+  const parts = [ell(16, 0, 18, 15, 14)];
+  const fans = open ? [-0.55, -0.18, 0.18, 0.5] : [-0.3, -0.1, 0.1, 0.28];
+  fans.forEach((a, i) => { const L = open ? 26 - Math.abs(i - 1.5) * 3 : 18; const c = [16 + 12 * Math.cos(a), 12 * Math.sin(a)]; const tip = [c[0] + L * Math.cos(a * 1.3), c[1] + L * Math.sin(a * 1.3)];
+    parts.push(limbOutline([c, [lerp(c[0], tip[0], .5), lerp(c[1], tip[1], .5)], tip], [6, 6, 5.5])); });
+  parts.push(limbOutline([[12, -10], [18, -22], [26, -30]], [6.5, 6, 5.5]));       // thumb
+  const ps = parts.map(q => cr(q));
+  ps.forEach(p => { ctx.lineWidth = 9; ctx.strokeStyle = INK; ctx.stroke(p); });
+  ps.forEach(p => { fillc(p, PAPER); if (far) hfill(p, 1); });
+  ctx.restore();
+}
+function arm(S, a, bend, far, sleeve) {
+  const E = [S[0] + 88 * Math.sin(a), S[1] + 88 * Math.cos(a)], fa = a + bend, Wr = [E[0] + 82 * Math.sin(fa), E[1] + 82 * Math.cos(fa)];
+  const p = cr(limbOutline([S, [lerp(S[0], E[0], .5), lerp(S[1], E[1], .5)], E, [lerp(E[0], Wr[0], .5), lerp(E[1], Wr[1], .5)], Wr], [16, 14, 13, 12, 11]));
+  fillc(p, PAPER); if (far) hfill(p, 1); else shade(p, 8, -8, 1); ink(p, 4);
+  line([[E[0] - 6 * Math.cos(a), E[1] + 6 * Math.sin(a)], [E[0] + 4 * Math.sin(a) - 7 * Math.cos(a), E[1] + 4 * Math.cos(a)]], 2.2);   // elbow crease
+  hand(Wr, [Wr[0] - E[0], Wr[1] - E[1]], far, bend > 0.8);
+  if (sleeve) { const s1 = [lerp(S[0], E[0], 0.42), lerp(S[1], E[1], 0.42)];
+    const sp = cr(limbOutline([[S[0] - 6 * Math.sin(a), S[1] - 6 * Math.cos(a)], s1], [25, 23])); fillc(sp, PAPER); shade(sp, 8, -10, 2); ink(sp, 4); }
+}
+function head(Hd, rot, t) {
+  ctx.save(); ctx.translate(Hd[0], Hd[1]); ctx.rotate(rot);
+  const hair = cr([[-8, -50], [-50, -38], [-64, -4], [-68, 36], [-62, 72], [-46, 92], [-36, 72], [-24, 90], [-12, 66], [2, 36], [6, -10]]);
+  fillc(hair, INK); ink(hair, 4);
+  ctx.strokeStyle = PAPER; ctx.lineWidth = 2.2; [[-54, 0, -58, 60], [-44, 10, -40, 70], [-34, 20, -26, 60]].forEach(s => ctx.stroke(cr([[s[0], s[1]], [s[0] - 3, (s[1] + s[3]) / 2], [s[2], s[3]]], false)));
+  const face = [[-40, -32], [-20, -50], [15, -52], [42, -36], [54, -12], [58, 6], [54, 30], [44, 48], [22, 60], [0, 58], [-22, 46], [-36, 24], [-44, 0]];
+  form(face, 4.5, 1, 16, -12);
+  const ear = cr(ell(-12, 6, 11, 16, 12)); fillc(ear, PAPER); ink(ear, 3.5); line([[-14, 0], [-8, 6], [-13, 14]], 2.2);
+  const beard = cr([[-24, 20], [-8, 36], [20, 42], [48, 36], [60, 46], [52, 66], [30, 82], [6, 84], [-14, 70], [-26, 46]]);
+  fillc(beard, PAPER); hfill(beard, 2); ink(beard, 4);
+  const stache = cr([[28, 30], [50, 24], [70, 30], [72, 44], [58, 40], [44, 44], [30, 42]]); fillc(stache, INK); ink(stache, 3);
+  const nose = cr(ell(66, 8, 27, 22, 16, 0.2)); fillc(nose, PAPER); shade(nose, 10, -9, 1); ink(nose, 4.5);
+  line([[60, 20], [66, 24], [72, 20]], 2.4);
+  const lens = cr(ell(34, -12, 16, 15, 14)); fillc(lens, INK); ink(lens, 3.5);
+  ctx.strokeStyle = PAPER; ctx.lineWidth = 3; ctx.stroke(cr([[27, -18], [32, -22]], false));
+  line([[18, -14], [-8, -8]], 3.5);
+  // floppy hat with a daisy on the band
+  const crown = form([[-46, -46], [-40, -84], [-22, -106], [8, -112], [34, -100], [48, -70], [48, -44]], 4.5, 2, 18, -14);
+  const band = cr([[-45, -50], [48, -48], [48, -64], [-43, -66]]); fillc(band, INK);
+  const flop = 6 * Math.sin(TAU * (t - T0) + 1.2);
+  form([[-96, -30 + flop * .5], [-60, -52], [0, -58], [60, -56], [100, -42], [108, -26 + flop], [94, -22 + flop], [40, -34], [-20, -36], [-80, -18 + flop * .5]], 4.5, 2, 10, -10);
+  for (let k = 0; k < 6; k++) { const a = k / 6 * TAU + 0.3; const p = cr(ell(-22 + 10 * Math.cos(a), -58 + 10 * Math.sin(a), 8, 4.5, 10, a)); fillc(p, PAPER); ink(p, 2.4); }
+  fillc(cr(ell(-22, -58, 5, 5, 8)), INK);
+  ctx.restore();
+}
+function mel(t) {
+  const q = ((t - T0) / 1.0 % 1 + 1) % 1, qb = (q + 0.5) % 1;
+  const b = 0.5 + 0.5 * Math.cos(4 * Math.PI * (q - 0.28));
+  const hy = -(244 + 12 * b), lean = -0.17 - 0.03 * b + 0.02 * Math.sin(TAU * q);
+  ctx.save(); ctx.translate(CX, 860); ctx.scale(FSC, FSC);
+  // cast shadow on the sidewalk
+  const sh = cr(ell(0, 6, 150, 14, 20)); hfill(sh, 2);
+  const Hc = [4, hy], U = [Math.sin(lean), -Math.cos(lean)], F = [Math.cos(lean), Math.sin(lean)];
+  const T = (al, fw) => [Hc[0] + U[0] * al + F[0] * fw, Hc[1] + U[1] * al + F[1] * fw];
+  const SHf = T(126, -20), SHn = T(124, 4);
+  // far limbs (in shadow)
+  const armA = TAU * q, aFar = 0.85 * Math.cos(armA), aNear = -0.85 * Math.cos(armA);
+  const bendF = 0.35 + 0.9 * clamp(aFar / 0.85), bendN = 0.35 + 1.0 * clamp(aNear / 0.85);
+  arm(SHf, aFar > 0 ? aFar * 1.25 : aFar, bendF, true, false);
+  const fB = footAt(qb); leg([Hc[0] - 10, Hc[1] - 4], { ax: fB.ax - 10, ay: fB.ay, pitch: fB.pitch }, true);
+  const fA = footAt(q); leg([Hc[0] + 2, Hc[1]], fA, false);
+  // torso: striped shirt, chest out
+  const tor = [[-8, -42], [40, -50], [90, -52], [130, -46], [152, -30], [162, -8], [160, 16], [142, 44], [112, 64], [78, 66], [48, 56], [18, 46], [-8, 42], [-18, 0]].map(p => T(p[0], p[1]));
+  const tp = cr(tor); fillc(tp, PAPER); shade(tp, 20 * F[0], -16, 1);
+  ctx.save(); ctx.clip(tp);
+  [[18, 34], [58, 74], [98, 114], [138, 152]].forEach(s => { const band = cr(sub([T(s[0], -90), T(s[0], 90), T(s[1], 90), T(s[1], -90)], true, 30)); fillc(band, INK); });
+  ctx.restore(); ink(tp, 4.5);
+  line([T(-6, -36), T(-2, 0), T(-6, 36)], 3);                                         // shirt tail edge
+  // neck + head (bobbing to the beat)
+  const nb = T(150, 10), nod = 0.06 * Math.sin(4 * Math.PI * (q - 0.1)), hr = lean * 0.5 + nod;
+  const Hd = T(236 + 4 * b, 30);
+  const nk = cr(limbOutline([nb, [lerp(nb[0], Hd[0], .6), lerp(nb[1], Hd[1], .6)]], [15, 13])); fillc(nk, PAPER); shade(nk, 6, 0, 1); ink(nk, 4);
+  head(Hd, hr, t);
+  arm(SHn, aNear > 0 ? aNear * 1.25 : aNear, bendN, false, true);
+  ctx.restore();
+  return { mouth: [CX + FSC * (Hd[0] + 58), 860 + FSC * (Hd[1] + 36)] };
+}
+
+let FC, FX, HC, HX; const FB = [300, 40, 960, 880];
+function figureWithHalo(t) {
+  if (!FC) { FC = document.createElement('canvas'); FC.width = W; FC.height = H; FX = FC.getContext('2d'); HC = document.createElement('canvas'); HC.width = W; HC.height = H; HX = HC.getContext('2d'); }
+  const [bx, by, bw, bh] = FB;
+  FX.setTransform(1, 0, 0, 1, 0, 0); FX.clearRect(bx, by, bw, bh);
+  const keepS = SCENE, keepC = ctx; ctx = FX; SCENE = new DOMMatrix(); const me = mel(t); ctx = keepC; SCENE = keepS;
+  HX.globalCompositeOperation = 'copy'; HX.drawImage(FC, bx, by, bw, bh, bx, by, bw, bh);
+  HX.globalCompositeOperation = 'source-in'; HX.fillStyle = PAPER; HX.fillRect(bx, by, bw, bh); HX.globalCompositeOperation = 'source-over';
+  for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; ctx.drawImage(HC, bx, by, bw, bh, bx + 10 * Math.cos(a), by + 10 * Math.sin(a), bw, bh); }
+  ctx.drawImage(FC, bx, by, bw, bh, bx, by, bw, bh);
+  return me;
+}
+
+// ── lettering ──
+function balloonText(lines, x, y, size) { ctx.font = `${size}px ${HAND}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = INK; lines.forEach((s, i) => ctx.fillText(s, x, y + (i - (lines.length - 1) / 2) * size * 1.02)); }
+function caption(t) {
+  const a = backOut(seg(t, 0.35, 0.75)) * (1 - eIn(seg(t, 3.95, 4.15))); if (a <= 0.01) return;
+  ctx.save(); ctx.translate(60, 44); ctx.scale(a, a);
+  const p = cr(sub([[0, 0], [760, 0], [760, 96], [0, 96]], true, 60)); fillc(p, PAPER); ctx.save(); ctx.translate(8, 8); ctx.restore(); ink(p, 4.5);
+  balloonText(['THE DAY THE CITY LOST ITS COOL...'], 380, 50, 54); ctx.restore();
+}
+function balloon(t, mouth) {
+  const a = backOut(seg(t, 1.7, 2.05)) * (1 - eIn(seg(t, 3.9, 4.12))); if (a <= 0.01) return;
+  const bx = 1040, by = 255;
+  ctx.save(); ctx.translate(bx, by); ctx.scale(a, a);
+  const body = ell(0, 0, 200, 72, 30), mx = mouth[0] - bx, my = mouth[1] - by;
+  const tip = [mx + 18, my - 14];
+  const tail = cr([[-150, 30], [lerp(-150, tip[0], .55) + 8, lerp(30, tip[1], .55)], tip, [lerp(-95, tip[0], .5) + 14, lerp(58, tip[1], .5) - 4], [-95, 58]]);
+  const bp = cr(body); ctx.lineWidth = 9; ctx.strokeStyle = INK; ctx.stroke(bp); ctx.stroke(tail);
+  fillc(bp, PAPER); fillc(tail, PAPER);
+  balloonText(['NOT ME, MAN.'], 0, 2, 64); ctx.restore();
+}
+const LET = [];                                         // swirling, melting title letters
+function mkGlyph(s, size, fillCol) {
+  ctx.font = `${size}px ${DISPLAY}`; const w = ctx.measureText(s).width;
+  const pad = 46, cw = Math.ceil(w + pad * 2 + 20), ch = Math.ceil(size * 1.55 + pad);
+  const c = document.createElement('canvas'); c.width = cw; c.height = ch; const g = c.getContext('2d');
+  const ax = pad, ay = Math.round(size * 1.08 + pad * 0.5);
+  g.font = `${size}px ${DISPLAY}`; g.textBaseline = 'alphabetic'; g.lineJoin = 'round';
+  for (let i = 12; i >= 1; i--) { g.fillStyle = INK; g.strokeStyle = INK; g.lineWidth = 20; g.strokeText(s, ax + i * 0.7, ay + i * 1.0); g.fillText(s, ax + i * 0.7, ay + i * 1.0); }
+  g.lineWidth = 20; g.strokeStyle = INK; g.strokeText(s, ax, ay);
+  const f = document.createElement('canvas'); f.width = cw; f.height = ch; const fg = f.getContext('2d');
+  fg.font = g.font; fg.fillStyle = fillCol; fg.fillText(s, ax, ay);
+  fg.globalCompositeOperation = 'source-atop'; fg.strokeStyle = INK; fg.lineCap = 'round';
+  const r = rng(s.charCodeAt(0) * 7 + size);
+  for (let y = ay - size * 0.2; y < ay + 30; y += 11) { fg.lineWidth = 1.2 + r() * 0.6; fg.beginPath(); fg.moveTo(0, y + 30); fg.lineTo(cw, y - cw * 0.5 + 30); fg.stroke(); }
+  fg.lineWidth = 4; fg.strokeStyle = PAPER; fg.beginPath(); fg.moveTo(ax + 10, ay - size * 0.6); fg.lineTo(ax + 22, ay - size * 0.72); fg.stroke();
+  g.drawImage(f, 0, 0);
+  const drip = new Float32Array(Math.ceil(cw / 4) + 1), nb = 2 + Math.floor(r() * 3);
+  for (let k = 0; k < nb; k++) { const cx = pad + r() * w, wd = 6 + r() * 10, hgt = 30 + r() * 80; for (let i = 0; i < drip.length; i++) { const x = i * 4 - cx; drip[i] += hgt * Math.exp(-x * x / (2 * wd * wd)); } }
+  return { c, ax, ay, w, drip };
+}
+function buildLetters() {
+  const lines = [['TAKE', ' ', 'IT'], ['EASY', ',', ' ', 'MAN']], size = 158, cxs = 1370, ys = [205, 385];
+  let idx = 0;
+  lines.forEach((ln, li) => {
+    const glyphs = []; ln.forEach(word => { if (word === ' ') { glyphs.push({ sp: size * 0.32 }); return; } for (const ch of word) glyphs.push(mkGlyph(ch, size, PAPER)); });
+    const tot = glyphs.reduce((s, g) => s + (g.sp !== undefined ? g.sp : g.w - 4), 0); let x = cxs - tot / 2;
+    glyphs.forEach(g => { if (g.sp !== undefined) { x += g.sp; return; } const gx = x + g.w / 2;
+      LET.push({ g, x: gx, y: ys[li] + 10 * Math.sin((gx - cxs) * 0.004) + (li ? 0 : -0.00006 * (gx - cxs) ** 2), i: idx++, rot0: (li ? 0.04 : -0.03) }); x += g.w - 4; });
+  });
+}
+function meltGlyph(G, x, y, s, rot, mlt, t, seed) {
+  const img = G.c, cw = img.width, ch = img.height, split = Math.round(G.ay - 8), sw = 4;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s); ctx.translate(-G.ax - G.w / 2, -G.ay);
+  for (let sx = 0, i = 0; sx < cw; sx += sw, i++) {
+    const wob = 7 * Math.sin(sx * 0.02 + t * 3.1 + seed), dl = mlt * G.drip[i];
+    ctx.drawImage(img, sx, 0, sw, split, sx, wob, sw + 0.7, split);
+    ctx.drawImage(img, sx, split, sw, ch - split, sx, wob + split - 0.3, sw + 0.7, ch - split + dl);
+  }
+  ctx.restore();
+}
+function title(t) {
+  if (t < 4.7) return;
+  const mlt = sm(seg(t, 5.9, 8.0)) * (1 + 0.08 * Math.sin(t * 2.6));
+  LET.forEach(L => {
+    const st = 4.75 + L.i * 0.07, u = seg(t, st, st + 0.62); if (u <= 0) return;
+    const e = eOut(u), sp = (1 - e) * 2.6;
+    const vx = L.x - SUN.x, vy = L.y - SUN.y, c = Math.cos(sp), s = Math.sin(sp);
+    const x = SUN.x + (vx * c - vy * s) * e, y = SUN.y + (vx * s + vy * c) * e;
+    const bob = u >= 1 ? 9 * Math.sin(TAU * 0.5 * (t - T0) - L.i * 0.55) : 0;
+    const sc = backOut(u, 2.2) * (1 + 0.035 * beatPulse(t));
+    meltGlyph(L.g, x, y + bob, Math.max(0.01, sc), L.rot0 + (1 - e) * -6.0 + 0.05 * Math.sin(t * 2 + L.i), mlt, t, L.i);
+  });
+}
+
+// ── the comic page for the ending ──
+let MAST, THEEND = [];
+function buildPage() {
+  MAST = 'SLOW MELT COMIX'.split('').map(ch => ch === ' ' ? null : mkGlyph(ch, 104, PSY[1]));
+  'THE END'.split('').forEach(ch => THEEND.push(ch === ' ' ? null : mkGlyph(ch, 64, PSY[2])));
+}
+function pageBack(t) {
+  ctx.fillStyle = PAGE_C; ctx.fillRect(0, 0, W, H);
+  // masthead
+  let tot = 0; MAST.forEach(g => tot += g ? g.w - 2 : 34); let x = 960 - tot / 2;
+  MAST.forEach((g, i) => { if (!g) { x += 34; return; } meltGlyph(g, x + g.w / 2, 96 + 6 * Math.sin(i * 0.7 + t * 2), 1, 0.02 * Math.sin(i * 1.3), 0.25, t, i); x += g.w - 2; });
+  ctx.save(); ctx.translate(150, 104); const c1 = cr(ell(0, 0, 70, 70, 24)); fillc(c1, PAPER); ink(c1, 5); balloonText(['ISSUE', 'ONE'], 0, 2, 40); ctx.restore();
+  ctx.save(); ctx.translate(1770, 104); const c2 = cr(sub([[-72, -62], [72, -62], [72, 62], [-72, 62]], true, 40)); fillc(c2, PAPER); ink(c2, 5); balloonText(['ONLY', '50¢'], 0, 2, 46); ctx.restore();
+  // THE END, dropping in and melting
+  tot = 0; THEEND.forEach(g => tot += g ? g.w - 2 : 30); x = 960 - tot / 2;
+  THEEND.forEach((g, i) => { if (!g) { x += 30; return; } const u = seg(t, 8.95 + i * 0.05, 9.35 + i * 0.05); if (u > 0) meltGlyph(g, x + g.w / 2, 1024 - 70 * (1 - backOut(u)), 1, 0, 0.6 * sm(seg(t, 9.3, 9.9)), t, i); x += g.w - 2; });
+  ctx.font = `44px ${HAND}`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = INK;
+  ctx.globalAlpha = seg(t, 9.15, 9.4); ctx.fillText('STAY COOL, FOLKS!', 1800, 1024); ctx.globalAlpha = 1;
+}
+
+// ── camera for the pull-back ──
+function camera(t) { const e = eInOut(seg(t, T_PULL, T_PULL_END)); const s = 1 - 0.3 * e; return new DOMMatrix().translate(960, 540 + 46 * e).scale(s).translate(-960, -540); }
+
+function scene(t) {
+  const m = melt(t), jel = 1 + (t > T_BURST ? 1.4 * beatPulse(t) * sm(seg(t, T_BURST, 5)) : 0);
+  ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+  const wr = 2350 * eOut(seg(t, T_BURST, 5.45));
+  if (wr < 2300) { rays(t); sun(t, m); }
+  if (wr > 0) {
+    kaleido(t, wr + 4);
+    ctx.save(); const cp = cr(ell(SUN.x, SUN.y, wr, wr, 60)); ctx.clip(cp); ctx.drawImage(KC, 0, 0); ctx.restore();
+    if (wr < 2300) { ink(cr(ell(SUN.x, SUN.y, wr, wr, 60)), 16); ink(cr(ell(SUN.x, SUN.y, wr + 26, wr + 26, 60)), 5); ink(cr(ell(SUN.x, SUN.y, wr + 44, wr + 44, 60)), 2.5); }
+  }
+  const rot = -OMEGA * t;
+  FAR.forEach(b => { const a = b.a + rot * 0.55; if (Math.abs(a) > 0.6) return; ctx.save(); place(a); farBuilding(b, t, m); ctx.restore(); });
+  NEAR.forEach(b => { const a = b.a + rot; if (a < -0.58 || a > 0.62) return; ctx.save(); place(a); building(b, t, m, jel); ctx.restore(); });
+  LAMPS.forEach(l => { const a = l.a + rot; if (Math.abs(a) > 0.55) return; ctx.save(); place(a); lamp(l, t, m); ctx.restore(); });
+  ground(t);
+  const me = figureWithHalo(t);
+  caption(t); balloon(t, me.mouth);
+  title(t);
+}
+
+window.draw = ({ t }) => {
+  boil = Math.floor(t * 8) % 3;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  const pulling = t > T_PULL;
+  if (pulling) pageBack(t);
+  SCENE = pulling ? camera(t) : new DOMMatrix();
+  ctx.save(); ctx.setTransform(SCENE); ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+  scene(t);
+  ctx.restore();
+  if (pulling) { ctx.save(); ctx.setTransform(SCENE); JA = 2.5; ink(cr(sub([[0, 0], [W, 0], [W, H], [0, H]], true, 90)), 14 / SCENE.a); JA = 1.3; ctx.restore(); }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(GRAIN, 0, 0); ctx.globalCompositeOperation = 'source-over';
+  const fade = Math.max(1 - seg(t, 0, 0.4), seg(t, 9.62, 10.0));
+  if (fade > 0) { ctx.globalAlpha = fade; ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+window.events = () => {
+  const ev = [];
+  for (let tb = T0; tb < 8.3; tb += BEAT) ev.push({ k: 'step', t: +tb.toFixed(3) });
+  ev.push({ k: 'pop', t: 0.4 }, { k: 'pop', t: 1.75, v: 1.1 }, { k: 'squish', t: 3.75 }, { k: 'burst', t: T_BURST },
+    { k: 'pull', t: T_PULL }, { k: 'thud', t: 9.1 });
+  LET.forEach(L => ev.push({ k: 'tick', t: +(4.75 + L.i * 0.07 + 0.45).toFixed(3), v: L.i }));
+  for (const d of [1.3, 2.1, 2.7, 3.3, 3.6, 5.6, 6.4, 7.1, 7.7]) ev.push({ k: 'drip', t: d });
+  return ev;
+};
+window.ready = (async () => {
+  await document.fonts.load(`60px ${HAND}`); await document.fonts.load(`120px ${DISPLAY}`); await document.fonts.ready;
+  buildHatch(); buildGrain(); buildKaleido(); buildCity(); buildLetters(); buildPage();
+})();
+</script>
+</body></html>
