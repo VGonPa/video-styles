@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="glyphs.js"></script>
+<script>
+// ── neon-sign · real bent-glass neon on a wet night street ─────────────────────────────────────
+// Dark brick wall, unlit glass tubes with electrodes, clips and painted-out jumps → the script "Good Ideas" draws on
+// like a pen stroke (close-up, camera tracks the hot tip) → pull back while the block letters SERVED HERE strike up one
+// by one (the R is faulty and stutters) → an amber arrow powers on and chases toward a door → OPEN LATE flickers on in
+// the door glass → power cut: everything dies with an afterglow, the faulty R gets one last blink → fade to black.
+// Light: tubes drawn once into a half-res light buffer → 3 blurred bloom levels; the wide levels are multiplied by the
+// brick albedo (light spill with texture); the lit frame is mirrored into the wet pavement with ripples and vertical smear.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2, BS = 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+const HORIZON = 850, REFL_K = 3.2;
+const COL = {
+  pink:  { body: '255,45,150',  glow: '255,40,140', core: '255,226,242' },
+  cyan:  { body: '30,215,255',  glow: '0,190,255',  core: '226,253,255' },
+  amber: { body: '255,160,30',  glow: '255,135,10', core: '255,242,210' },
+  red:   { body: '255,40,30',   glow: '255,25,15',  core: '255,222,214' },
+};
+
+// ── geometry: Hershey centerlines → smoothed, resampled tube paths ─────────────────────────────
+function chaikin(p, it) {
+  for (let k = 0; k < it; k++) { if (p.length < 3) break; const q = [p[0]];
+    for (let i = 0; i < p.length - 1; i++) { const [a, b] = [p[i], p[i + 1]];
+      q.push([a[0] * .75 + b[0] * .25, a[1] * .75 + b[1] * .25], [a[0] * .25 + b[0] * .75, a[1] * .25 + b[1] * .75]); }
+    q.push(p[p.length - 1]); p = q; }
+  return p;
+}
+function resample(p, step = 3) {
+  const out = [p[0]]; let acc = 0;
+  for (let i = 1; i < p.length; i++) { const [ax, ay] = p[i - 1], [bx, by] = p[i]; const d = Math.hypot(bx - ax, by - ay);
+    let s = step - acc; while (s <= d) { out.push([ax + (bx - ax) * s / d, ay + (by - ay) * s / d]); s += step; } acc = (acc + d) % step; }
+  const l = p[p.length - 1], o = out[out.length - 1]; if (Math.hypot(l[0] - o[0], l[1] - o[1]) > .5) out.push(l);
+  const cum = [0]; for (let i = 1; i < out.length; i++) cum.push(cum[i - 1] + Math.hypot(out[i][0] - out[i - 1][0], out[i][1] - out[i - 1][1]));
+  return { pts: out, cum, len: cum[cum.length - 1] };
+}
+function bbox(g) { let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+  for (const s of g) for (const [x, y] of s.p) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  return { x0, x1, y0, y1 }; }
+// place a glyph set: centre x, top y, scale → tubes
+function place(key, cx, top, sc, color, w, group, smooth) {
+  const g = GLYPHS[key], b = bbox(g), ox = cx - (b.x0 + b.x1) / 2 * sc, oy = top - b.y0 * sc;
+  return g.map(s => { const p = chaikin(s.p.map(([x, y]) => [ox + x * sc, oy + y * sc]), smooth);
+    return { ...resample(p), color, w, group, c: s.c }; });
+}
+const tubes = [];
+const GOOD = place('good', 780, 180, 7.3, 'pink', 10, 'good', 3);
+const SERVED = place('served', 780, 430, 4.3, 'cyan', 8.5, 'served', 2);
+const OPEN = place('open', 1680, 402, 2.55, 'red', 6, 'open', 2);
+const LATE = place('late', 1680, 492, 2.55, 'amber', 6, 'late', 2);
+// door-sign border: rounded rectangle tube
+function rrect(x0, y0, x1, y1, r) { const p = [];
+  const arc = (cx, cy, a0) => { for (let i = 0; i <= 8; i++) { const a = a0 + i / 8 * Math.PI / 2; p.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } };
+  p.push([x0 + r + 6, y0]); arc(x1 - r, y0 + r, -Math.PI / 2); arc(x1 - r, y1 - r, 0); arc(x0 + r, y1 - r, Math.PI / 2); arc(x0 + r, y0 + r, Math.PI); p.push([x0 + r - 6, y0]);
+  return p; }
+const BORDER = [{ ...resample(chaikin(rrect(1573, 380, 1787, 572, 22), 1)), color: 'red', w: 6, group: 'border', c: 0 }];
+// chasing arrow: a curved shaft cut into dashes + an arrow head
+const ARROW = [];
+{ const P = t => { const a = [1195, 596], b = [1370, 590], c = [1405, 712], d = [1512, 712]; const u = 1 - t;
+    return [u * u * u * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t * t * t * d[0], u * u * u * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t * t * t * d[1]]; };
+  const N = 8;
+  for (let i = 0; i < N; i++) { const p = []; for (let k = 0; k <= 6; k++) p.push(P((i + k / 6 * .62) / N * .93)); ARROW.push({ ...resample(p), color: 'amber', w: 10, group: 'arrow', c: i }); }
+  const tip = P(1), bk = P(.9), dx = tip[0] - bk[0], dy = tip[1] - bk[1], L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+  const hs = 40, a1 = [tip[0] - ux * hs - uy * hs * .75, tip[1] - uy * hs + ux * hs * .75], a2 = [tip[0] - ux * hs + uy * hs * .75, tip[1] - uy * hs - ux * hs * .75];
+  ARROW.push({ ...resample(chaikin([a1, [tip[0] + ux * 3, tip[1] + uy * 3], a2], 1)), color: 'amber', w: 10, group: 'arrow', c: N }); }
+tubes.push(...GOOD, ...SERVED, ...ARROW, ...BORDER, ...OPEN, ...LATE);
+const GOOD_LEN = GOOD.reduce((a, s) => a + s.len, 0);
+const GB = { x0: Math.min(...GOOD.flatMap(s => s.pts.map(p => p[0]))), x1: Math.max(...GOOD.flatMap(s => s.pts.map(p => p[0]))) };
+const SB = { x0: Math.min(...SERVED.flatMap(s => s.pts.map(p => p[0]))), x1: Math.max(...SERVED.flatMap(s => s.pts.map(p => p[0]))) };
+
+// ── timing / brightness model ──────────────────────────────────────────────────────────────────
+const T_PEN0 = 0.85, T_PEN1 = 3.35, T_SERVED = 3.8, T_ARROW = 5.15, T_DOOR = 5.9, T_CUT = 8.2;
+// neon strike: a stuttering ignition (on, drop, on, drop), then a warm ramp with a small overshoot
+function strike(t, t0, seed) {
+  if (t < t0) return 0; const u = (t - t0) / (0.85 + hash(seed) * .4);
+  if (u < .035) return .85; if (u < .085) return .06; if (u < .115) return .6; if (u < .2) return .12; if (u < .23) return .45; if (u < .27) return .15;
+  const r = seg(u, .27, .5); return .55 + .45 * eOut(r) + .12 * Math.sin(r * Math.PI);
+}
+// the faulty R: dropouts with buzzy sub-flicker
+const FAULT_IX = 2;   // index of the R in "SERVED HERE"
+const FAULTS = [[4.85, 5.1], [5.72, 5.8], [6.55, 6.95], [7.55, 7.66]];
+function faulty(t) { for (const [a, b] of FAULTS) if (t >= a && t < b) { const n = Math.floor(t * 60); return hash(n * 3.1) < .55 ? .05 + hash(n) * .15 : .8; } return 1; }
+// power cut: brief surge, cascade off, afterglow
+function cut(t, delay) { const tc = T_CUT + delay; if (t < tc) return 1; const u = t - tc;
+  if (u < .04) return 1.25; if (u < .07) return .1; if (u < .1) return .7; return .5 * Math.exp(-(u - .1) / .09); }
+const chaseStep = t => Math.floor((t - T_ARROW - .45) * 9);
+function tubeState(tb, t) {           // → [brightness, drawn fraction]
+  const shimmer = 1 + .025 * Math.sin(t * 23 + tb.c * 1.7) + .02 * (hash(Math.floor(t * 30) + tb.c * 17) - .5);
+  let b = 0, frac = 1;
+  if (tb.group === 'good') {
+    const L = seg(t, T_PEN0, T_PEN1), d = eInOut(L) * .15 + L * .85;
+    let before = 0; for (const s of GOOD) { if (s === tb) break; before += s.len; }
+    frac = L >= 1 ? 1 : clamp((d * GOOD_LEN - before) / tb.len); b = frac > 0 ? 1 : 0;
+    b *= cut(t, .06);
+  } else if (tb.group === 'served') {
+    b = strike(t, T_SERVED + tb.c * .1 + (tb.c === FAULT_IX ? .45 : 0), tb.c + 5);
+    if (tb.c === FAULT_IX) b *= faulty(t);
+    b *= cut(t, 0);
+    // the faulty R gets the last word: one weak stutter after the cut
+    if (tb.c === FAULT_IX && t > T_CUT + .5 && t < T_CUT + .78) b = Math.max(b, (Math.floor(t * 40) % 3 ? .6 : .15) * (1 - .6 * seg(t, T_CUT + .5, T_CUT + .78)));
+  } else if (tb.group === 'arrow') {
+    if (t >= T_ARROW) { const u = t - T_ARROW;
+      if (u < .45) b = strike(t, T_ARROW, 40) * (u < .3 ? 1 : .0);            // power-on test flash of the whole arrow
+      else { const k = chaseStep(t), m = ((k % 12) + 12) % 12;
+        b = m === 11 ? 0 : tb.c < 8 ? (m >= tb.c ? 1 : 0) : (m >= 8 ? 1 : 0); } }   // fill dash by dash, head, hold, blank
+    b *= cut(t, .02);
+  } else if (tb.group === 'border') b = strike(t, T_DOOR, 51) * cut(t, .12);
+  else if (tb.group === 'open') b = strike(t, T_DOOR + .3 + tb.c * .06, 60 + tb.c) * cut(t, .12);
+  else if (tb.group === 'late') b = strike(t, T_DOOR + .62 + tb.c * .06, 70 + tb.c) * cut(t, .12);
+  return [b * shimmer, frac];
+}
+
+// ── textures ──────────────────────────────────────────────────────────────────────────────────
+const TW = W * BS, TH = H * BS;
+const albedo = mk(TW, TH), bg = mk(TW, TH), puddle = mk(W / 2, H / 2), grain = [];
+function wpath(c, pts, n) { c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < n; i++) c.lineTo(pts[i][0], pts[i][1]); }
+function buildTextures() {
+  const r = rng(7), a = albedo.getContext('2d'); a.setTransform(BS, 0, 0, BS, 0, 0);
+  // mortar + bricks (running bond)
+  a.fillStyle = '#5c554e'; a.fillRect(0, 0, W, HORIZON);
+  for (let k = 0; k < 30000; k++) { const v = r() < .5 ? '30,28,26' : '150,145,135'; a.fillStyle = `rgba(${v},${.2 + r() * .3})`; a.fillRect(r() * W, r() * HORIZON, .6 + r(), .6 + r()); }
+  const bw = 88, bh = 31, m = 5;
+  for (let row = 0, y = -8; y < HORIZON; row++, y += bh + m) {
+    for (let x = (row % 2 ? -bw / 2 : 0) - 10; x < W; x += bw + m) {
+      const h = 6 + r() * 12, s = 30 + r() * 22, l = 22 + r() * 13 - (r() < .08 ? 8 : 0);
+      a.fillStyle = `hsl(${h},${s}%,${l}%)`;
+      const jx = (r() - .5) * 1.5, jy = (r() - .5) * 1.5;
+      a.beginPath(); a.roundRect(x + jx, y + jy, bw, bh, 3); a.fill();
+      // face texture: soft blotches, pits, a darker lower edge
+      for (let k = 0; k < 6; k++) { a.fillStyle = `rgba(${r() < .5 ? '0,0,0' : '255,230,210'},${.03 + r() * .05})`; a.beginPath(); a.ellipse(x + r() * bw, y + r() * bh, 6 + r() * 20, 2 + r() * 6, (r() - .5) * .3, 0, TAU); a.fill(); }
+      for (let k = 0; k < 70; k++) { const dk = r() < .7; a.fillStyle = dk ? `rgba(20,10,8,${.15 + r() * .35})` : `rgba(255,220,190,${.06 + r() * .1})`; a.fillRect(x + r() * bw, y + r() * bh, .4 + r() * 1.3, .4 + r() * 1.1); }
+      const g = a.createLinearGradient(0, y, 0, y + bh); g.addColorStop(0, 'rgba(255,220,200,.10)'); g.addColorStop(.25, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.22)');
+      a.fillStyle = g; a.fillRect(x + jx, y + jy, bw, bh);
+      if (r() < .1) { a.fillStyle = 'rgba(15,12,10,.35)'; a.beginPath(); a.arc(x + r() * bw, y + (r() < .5 ? 0 : bh), 3 + r() * 5, 0, TAU); a.fill(); } // chipped corner
+    }
+  }
+  // grime: soot blotches and rain streaks running down
+  for (let k = 0; k < 40; k++) { const x = r() * W, y = r() * HORIZON, rr = 60 + r() * 220, g = a.createRadialGradient(x, y, 0, x, y, rr);
+    g.addColorStop(0, `rgba(10,8,6,${.1 + r() * .15})`); g.addColorStop(1, 'rgba(10,8,6,0)'); a.fillStyle = g; a.fillRect(x - rr, y - rr, rr * 2, rr * 2); }
+  for (let k = 0; k < 70; k++) { const x = r() * W, y0 = r() * 300, l = 150 + r() * 500, g = a.createLinearGradient(0, y0, 0, y0 + l);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.3, `rgba(8,6,5,${.08 + r() * .1})`); g.addColorStop(1, 'rgba(0,0,0,0)'); a.fillStyle = g; a.fillRect(x, y0, 3 + r() * 10, l); }
+  // raceway behind the block letters + a conduit to the door
+  const ry = 453, rx0 = SB.x0 - 26, rx1 = SB.x1 + 26;
+  a.fillStyle = '#34363a'; a.fillRect(rx0, ry, rx1 - rx0, 30); a.fillStyle = 'rgba(255,255,255,.12)'; a.fillRect(rx0, ry, rx1 - rx0, 3);
+  a.fillStyle = 'rgba(0,0,0,.45)'; a.fillRect(rx0, ry + 30, rx1 - rx0, 5);
+  a.fillStyle = '#2c2e31'; a.fillRect(rx1 - 6, ry + 4, 64, 24); a.fillStyle = 'rgba(255,255,255,.08)'; a.fillRect(rx1 - 6, ry + 4, 64, 2);   // transformer box
+  a.strokeStyle = '#3d3f43'; a.lineWidth = 7; a.beginPath(); a.moveTo(rx1 + 58, ry + 16); a.lineTo(1470, ry + 16); a.quadraticCurveTo(1500, ry + 16, 1500, ry - 14); a.lineTo(1500, 230); a.lineTo(1680, 230); a.lineTo(1680, 290); a.stroke();
+  a.strokeStyle = 'rgba(255,255,255,.1)'; a.lineWidth = 1.5; a.stroke();
+  // door: recess, frame, painted leaf, glass panel, handle, step
+  a.fillStyle = '#141110'; a.fillRect(1528, 292, 304, HORIZON - 292);
+  a.fillStyle = '#29302c'; a.fillRect(1540, 304, 280, HORIZON - 304);
+  a.strokeStyle = '#1c2220'; a.lineWidth = 4; a.strokeRect(1556, 660, 248, 160);
+  a.fillStyle = '#0b0d10'; a.fillRect(1558, 344, 244, 262);
+  a.strokeStyle = '#3a423e'; a.lineWidth = 8; a.strokeRect(1554, 340, 252, 270);
+  a.fillStyle = '#8a8478'; a.beginPath(); a.roundRect(1782, 640, 12, 60, 5); a.fill();
+  a.fillStyle = '#4a4540'; a.fillRect(1510, HORIZON - 14, 340, 14);
+  // chains holding the door sign
+  a.strokeStyle = '#6b6860'; a.lineWidth = 2; a.setLineDash([5, 3]);
+  a.beginPath(); a.moveTo(1606, 346); a.lineTo(1606, 380); a.moveTo(1754, 346); a.lineTo(1754, 380); a.stroke(); a.setLineDash([]);
+  // pavement: asphalt aggregate + sidewalk edge + cracks
+  a.fillStyle = '#26272a'; a.fillRect(0, HORIZON, W, H - HORIZON);
+  for (let k = 0; k < 9000; k++) { const v = 20 + r() * 50; a.fillStyle = `rgba(${v},${v},${v + 4},${.3 + r() * .5})`; a.fillRect(r() * W, HORIZON + r() * (H - HORIZON), .7 + r() * 2, .7 + r() * 1.5); }
+  a.fillStyle = 'rgba(0,0,0,.5)'; a.fillRect(0, HORIZON, W, 6);
+  a.strokeStyle = 'rgba(0,0,0,.45)'; a.lineWidth = 1.5;
+  for (let k = 0; k < 6; k++) { let x = r() * W, y = HORIZON + 10 + r() * 200; a.beginPath(); a.moveTo(x, y); for (let j = 0; j < 12; j++) { x += 10 + r() * 25; y += (r() - .5) * 14; a.lineTo(x, y); } a.stroke(); }
+  // tube hardware (glass support clips + electrode housings + painted-out jumps), before the ambient multiply
+  for (const grp of [GOOD]) {
+    // blockout: jumps between consecutive strokes are painted black on the glass
+    a.lineCap = 'round'; a.lineJoin = 'round';
+    for (let i = 0; i < grp.length - 1; i++) { const e = grp[i].pts[grp[i].pts.length - 1], s = grp[i + 1].pts[0];
+      a.strokeStyle = 'rgba(14,12,14,.8)'; a.lineWidth = grp[0].w * .6; a.beginPath(); a.moveTo(e[0], e[1]); a.quadraticCurveTo((e[0] + s[0]) / 2, Math.max(e[1], s[1]) + 10, s[0], s[1]); a.stroke(); }
+    const first = grp[0].pts[0], last = grp[grp.length - 1].pts[grp[grp.length - 1].pts.length - 1];
+    for (const [x, y] of [first, last]) { a.fillStyle = '#1b1a1b'; a.beginPath(); a.roundRect(x - grp[0].w * .9, y - 3, grp[0].w * 1.8, 22, 4); a.fill();
+      a.strokeStyle = '#111'; a.lineWidth = 2; a.beginPath(); a.moveTo(x, y + 18); a.lineTo(x + 6, y + 40); a.stroke(); }
+  }
+  for (const tb of tubes) { if (tb.group === 'border') continue;
+    for (let d = 40; d < tb.len - 20; d += 150) { const i = tb.cum.findIndex(c => c >= d), [x, y] = tb.pts[i];
+      a.fillStyle = 'rgba(0,0,0,.4)'; a.beginPath(); a.arc(x + 3, y + 5, tb.w * .75, 0, TAU); a.fill();
+      a.fillStyle = '#77736d'; a.beginPath(); a.arc(x, y, tb.w * .6, 0, TAU); a.fill(); } }
+  // tube shadows on the wall (the glass sits ~2 cm proud)
+  for (const tb of tubes) { if (tb.group === 'border' || tb.group === 'open' || tb.group === 'late') continue;
+    a.strokeStyle = 'rgba(0,0,0,.35)'; a.lineWidth = tb.w; wpath(a, tb.pts.map(([x, y]) => [x + 4, y + 7]), tb.pts.length); a.stroke(); }
+  // pixel grain baked once
+  const id = a.getImageData(0, 0, TW, TH), dd = id.data; let s = 99;
+  for (let i = 0; i < dd.length; i += 4) { s = (s * 1664525 + 1013904223) >>> 0; const n = ((s >>> 24) - 128) * .13; dd[i] += n; dd[i + 1] += n; dd[i + 2] += n; }
+  a.putImageData(id, 0, 0);
+
+  // bg = albedo × ambient (a cold streetlamp from the upper left, falling off to the right and down)
+  const b = bg.getContext('2d'); b.drawImage(albedo, 0, 0);
+  const amb = mk(TW, TH), m2 = amb.getContext('2d'); m2.setTransform(BS, 0, 0, BS, 0, 0);
+  const g = m2.createRadialGradient(150, -250, 100, 350, 100, 1900); g.addColorStop(0, 'rgb(150,160,190)'); g.addColorStop(.45, 'rgb(66,70,90)'); g.addColorStop(1, 'rgb(30,31,42)');
+  m2.fillStyle = g; m2.fillRect(0, 0, W, H);
+  const g2 = m2.createLinearGradient(0, HORIZON, 0, H); g2.addColorStop(0, 'rgba(0,0,0,.25)'); g2.addColorStop(1, 'rgba(0,0,0,.55)'); m2.fillStyle = g2; m2.fillRect(0, HORIZON, W, H - HORIZON);
+  b.globalCompositeOperation = 'multiply'; b.drawImage(amb, 0, 0); b.globalCompositeOperation = 'source-over';
+  // unlit glass: pale phosphor-coated tubes with a specular line
+  b.setTransform(BS, 0, 0, BS, 0, 0); b.lineCap = 'round'; b.lineJoin = 'round';
+  for (const tb of tubes) {
+    b.strokeStyle = 'rgba(175,168,180,.22)'; b.lineWidth = tb.w; wpath(b, tb.pts, tb.pts.length); b.stroke();
+    b.strokeStyle = 'rgba(230,235,255,.18)'; b.lineWidth = Math.max(1.2, tb.w * .18); wpath(b, tb.pts.map(([x, y]) => [x - tb.w * .15, y - tb.w * .22]), tb.pts.length); b.stroke();
+  }
+  // door glass sheen
+  const gs = b.createLinearGradient(1558, 344, 1802, 606); gs.addColorStop(0, 'rgba(120,140,170,.10)'); gs.addColorStop(.5, 'rgba(0,0,0,0)'); gs.addColorStop(.62, 'rgba(120,140,170,.07)'); gs.addColorStop(1, 'rgba(0,0,0,0)');
+  b.fillStyle = gs; b.fillRect(1558, 344, 244, 262);
+
+  // puddle mask (half-res world): wide flat blobs on the pavement
+  const p = puddle.getContext('2d'); p.setTransform(.5, 0, 0, .5, 0, 0); p.filter = 'blur(3px)';
+  for (let k = 0; k < 11; k++) { const x = r() * W, y = HORIZON + 30 + r() * (H - HORIZON - 30), rx = 120 + r() * 320, ry = 14 + r() * 40;
+    p.fillStyle = '#fff'; p.beginPath(); for (let i = 0; i <= 40; i++) { const an = i / 40 * TAU, q = 1 + .18 * Math.sin(an * 3 + k) + .1 * Math.sin(an * 7 + k * 2);
+      p.lineTo(x + Math.cos(an) * rx * q, y + Math.sin(an) * ry * q * (1 + (y - HORIZON) / 300)); } p.fill(); }
+  // grain tiles (static set, cycled at 12 fps)
+  for (let k = 0; k < 4; k++) { const c = mk(W / 2, H / 2), x = c.getContext('2d'), im = x.createImageData(W / 2, H / 2), q = im.data; let s2 = 1234 + k * 999;
+    for (let i = 0; i < q.length; i += 4) { s2 = (s2 * 1664525 + 1013904223) >>> 0; const v = s2 >>> 24; q[i] = q[i + 1] = q[i + 2] = v; q[i + 3] = 255; }
+    x.putImageData(im, 0, 0); grain.push(c); }
+}
+
+// ── camera ────────────────────────────────────────────────────────────────────────────────────
+function penX(t) {                     // x of the script's hot tip at time t
+  const L = seg(t, T_PEN0, T_PEN1), d = (eInOut(L) * .15 + L * .85) * GOOD_LEN; let acc = 0;
+  for (const s of GOOD) { if (acc + s.len >= d) { const i = Math.max(0, s.cum.findIndex(c => c >= d - acc)); return s.pts[i][0]; } acc += s.len; }
+  return GB.x1;
+}
+function camera(t) {
+  let px = 0; for (let i = 0; i < 8; i++) px += penX(t - .5 + i * .06); px /= 8;          // smoothed follow of the pen tip
+  const close = { s: 2.2, cx: px + 90, cy: 290 };
+  const wide = { s: lerp(1.0, 1.06, eInOut(seg(t, 5.0, 9.8))), cx: lerp(960, 985, eInOut(seg(t, 5.0, 9.8))), cy: lerp(540, 548, seg(t, 5, 9.8)) };
+  const u = eInOut(seg(t, 3.1, 4.7));
+  const s = 1 / lerp(1 / close.s, 1 / wide.s, u);         // interpolate in 1/scale so the pull-back feels linear
+  let cx = lerp(close.cx, wide.cx, u), cy = lerp(close.cy, wide.cy, u);
+  cx = clamp(cx, 960 / s, W - 960 / s); cy = clamp(cy, 540 / s, H - 540 / s);
+  return { s, cx, cy };
+}
+
+// ── per-frame canvases ────────────────────────────────────────────────────────────────────────
+const LB = mk(960, 540), GA = mk(480, 270), GB2 = mk(240, 135), GC = mk(120, 68), SP = mk(W, H), RF = mk(960, 270), RF2 = mk(960, 270), RS = mk(960, 45), PM = mk(960, 270);
+const lb = LB.getContext('2d'), ga = GA.getContext('2d'), gb = GB2.getContext('2d'), gc = GC.getContext('2d'), sp = SP.getContext('2d'),
+  rf = RF.getContext('2d'), rf2 = RF2.getContext('2d'), rs = RS.getContext('2d'), pm = PM.getContext('2d');
+
+function strokeTube(c, tb, frac, width, style) {
+  let n = tb.pts.length; if (frac < 1) { const L = frac * tb.len; n = tb.cum.findIndex(v => v > L); if (n < 0) n = tb.pts.length; }
+  if (n < 2) return null; c.strokeStyle = style; c.lineWidth = width; wpath(c, tb.pts, n);
+  if (frac < 1) { const L = frac * tb.len, i = n - 1, d = tb.cum[i] - tb.cum[i - 1] || 1, u = clamp((L - tb.cum[i - 1]) / d); c.lineTo(lerp(tb.pts[i - 1][0], tb.pts[i][0], u), lerp(tb.pts[i - 1][1], tb.pts[i][1], u)); }
+  c.stroke(); return frac < 1 ? tb.pts[n - 1] : null;
+}
+
+function render(t) {
+  const cam = camera(t), S = cam.s, tx = 960 - cam.cx * S, ty = 540 - cam.cy * S;
+  const states = tubes.map(tb => tubeState(tb, t));
+  let tip = null;
+  // 1 · base wall
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.filter = 'none';
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(S / BS, 0, 0, S / BS, tx, ty); ctx.drawImage(bg, 0, 0);
+  // 2 · light buffer (half res)
+  lb.setTransform(1, 0, 0, 1, 0, 0); lb.fillStyle = '#000'; lb.fillRect(0, 0, 960, 540);
+  lb.setTransform(S / 2, 0, 0, S / 2, tx / 2, ty / 2); lb.lineCap = 'round'; lb.lineJoin = 'round'; lb.globalCompositeOperation = 'lighter';
+  tubes.forEach((tb, i) => { const [b, f] = states[i]; if (b <= .01 || f <= 0) return;
+    const p = strokeTube(lb, tb, f, tb.w * 1.9, `rgba(${COL[tb.color].glow},${clamp(b * .9)})`); if (p && t < T_PEN1) tip = p; });
+  if (tip) { lb.fillStyle = 'rgba(255,200,235,.9)'; lb.beginPath(); lb.arc(tip[0], tip[1], 14, 0, TAU); lb.fill(); }
+  lb.globalCompositeOperation = 'source-over';
+  // 3 · bloom pyramid
+  ga.filter = 'blur(3px)'; ga.drawImage(LB, 0, 0, 480, 270); ga.filter = 'none';
+  gb.filter = 'blur(5px)'; gb.drawImage(LB, 0, 0, 240, 135); gb.filter = 'none';
+  gc.filter = 'blur(7px)'; gc.drawImage(GB2, 0, 0, 120, 68); gc.filter = 'none';
+  // 4 · spill on the brick: wide glow × albedo
+  sp.setTransform(1, 0, 0, 1, 0, 0); sp.globalCompositeOperation = 'source-over'; sp.fillStyle = '#000'; sp.fillRect(0, 0, W, H);
+  sp.globalCompositeOperation = 'lighter'; sp.globalAlpha = 1; sp.drawImage(GC, 0, 0, W, H); sp.drawImage(GC, 0, 0, W, H); sp.drawImage(GC, 0, 0, W, H);
+  sp.globalAlpha = .9; sp.drawImage(GB2, 0, 0, W, H); sp.globalAlpha = 1;
+  sp.globalCompositeOperation = 'multiply'; sp.setTransform(S / BS, 0, 0, S / BS, tx, ty); sp.drawImage(albedo, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(SP, 0, 0); ctx.drawImage(SP, 0, 0);
+  // 5 · bloom over everything
+  ctx.globalAlpha = .55; ctx.drawImage(GB2, 0, 0, W, H); ctx.globalAlpha = .85; ctx.drawImage(GA, 0, 0, W, H); ctx.globalAlpha = 1;
+  // 6 · lit glass at full res: coloured body, then a hot pale core
+  ctx.globalCompositeOperation = 'source-over'; ctx.setTransform(S, 0, 0, S, tx, ty); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  tubes.forEach((tb, i) => { const [b, f] = states[i]; if (b <= .01 || f <= 0) return;
+    strokeTube(ctx, tb, f, tb.w * 1.05, `rgba(${COL[tb.color].body},${clamp(b * .95)})`); });
+  ctx.globalCompositeOperation = 'lighter';
+  tubes.forEach((tb, i) => { const [b, f] = states[i]; if (b <= .01 || f <= 0) return;
+    strokeTube(ctx, tb, f, tb.w * .3, `rgba(${COL[tb.color].core},${clamp(b * .7)})`);
+    if (b > 1) strokeTube(ctx, tb, f, tb.w * .9, `rgba(255,255,255,${clamp((b - 1) * 1.5)})`); });
+  if (tip) { const g = ctx.createRadialGradient(tip[0], tip[1], 0, tip[0], tip[1], 26); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.25, 'rgba(255,190,230,.8)'); g.addColorStop(1, 'rgba(255,60,160,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(tip[0], tip[1], 26, 0, TAU); ctx.fill(); }
+  // 7 · wet pavement reflection (mirror about the wall base)
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over';
+  const yh = HORIZON * S + ty, hR = H - yh;
+  if (hR > 2) {
+    const h2 = Math.ceil(hR / 2);
+    rf.setTransform(1, 0, 0, 1, 0, 0); rf.clearRect(0, 0, 960, 270);
+    const k = REFL_K, src = Math.min(yh, hR * k);         // the mirror is compressed (a low camera over wet asphalt foreshortens it)
+    rf.setTransform(.5, 0, 0, -.5, 0, 0); rf.drawImage(cv, 0, yh - src, W, src, 0, -src / k, W, src / k);   // flipped copy of the lit wall above
+    rf2.setTransform(1, 0, 0, 1, 0, 0); rf2.clearRect(0, 0, 960, 270);
+    for (let y = 0; y < h2; y += 2) { const dx = Math.sin(y * .31 + t * 5.1) * (1.5 + y * .06) + Math.sin(y * .083 - t * 2.3) * (1 + y * .05) + Math.sin(y * 1.7 + t * 9) * .8;
+      rf2.drawImage(RF, 0, y, 960, 2, dx, y, 960, 2); }
+    // puddle mask in screen space
+    pm.setTransform(1, 0, 0, 1, 0, 0); pm.clearRect(0, 0, 960, 270); pm.setTransform(S, 0, 0, S, tx / 2, (ty - yh) / 2); pm.drawImage(puddle, 0, 0);
+    // rough asphalt: vertical smear (squash then stretch) and soft blur
+    rs.setTransform(1, 0, 0, 1, 0, 0); rs.clearRect(0, 0, 960, 45); rs.filter = 'blur(2.5px)'; rs.drawImage(RF2, 0, 0, 960, h2, 0, 0, 960, Math.max(4, h2 / 8)); rs.filter = 'none';
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = .9; ctx.drawImage(RS, 0, 0, 960, Math.max(4, h2 / 8), 0, yh, W, hR);
+    // puddles: sharper mirror
+    rf.setTransform(1, 0, 0, 1, 0, 0); rf.clearRect(0, 0, 960, 270); rf.filter = 'blur(1.2px)'; rf.drawImage(RF2, 0, 0); rf.filter = 'none';
+    rf.globalCompositeOperation = 'destination-in'; rf.drawImage(PM, 0, 0); rf.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = .85; ctx.drawImage(RF, 0, 0, 960, h2, 0, yh, W, h2 * 2);
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    // darken with distance from the wall (fresnel-ish)
+    const g = ctx.createLinearGradient(0, yh, 0, H); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.35)'); ctx.fillStyle = g; ctx.fillRect(0, yh, W, hR);
+  }
+  // 8 · drizzle lit by the signs, rings on the puddles
+  let lit = 0, tot = 0; tubes.forEach((tb, i) => { lit += states[i][0] * states[i][1] * tb.len; tot += tb.len; }); lit = clamp(lit / tot * 1.4);
+  const rainA = .06 + .16 * lit;
+  ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round'; ctx.lineWidth = 1.3;
+  for (let i = 0; i < 260; i++) { const sp2 = 1500 + hash(i * 3.7) * 700, ln = 26 + hash(i * 5.1) * 40, x0 = hash(i * 1.3) * (W + 200) - 100;
+    const y = ((hash(i * 2.9) * (H + 200) + t * sp2) % (H + 200)) - 100, x = x0 - (y + 100) * .08, a = rainA * (.4 + .6 * hash(i * 7.7));
+    const warm = x < 1450 ? '255,150,215' : '255,170,120';
+    ctx.strokeStyle = `rgba(${y < 650 && x > 150 && x < 1550 ? warm : '170,190,230'},${a})`;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - ln * .08, y + ln); ctx.stroke(); }
+  if (hR > 2) for (let i = 0; i < 14; i++) { const per = .9 + hash(i * 9.1) * .8, ph = ((t + hash(i * 4.4) * per) % per) / per, age = ph;
+    const wx = 100 + hash(i * 6.6 + Math.floor((t + hash(i * 4.4) * per) / per) * 1.7) * 1720, wy = HORIZON + 40 + hash(i * 8.2 + Math.floor((t + hash(i * 4.4) * per) / per)) * 180;
+    const X = wx * S + tx, Y = wy * S + ty; if (Y < yh + 4 || Y > H) continue;
+    ctx.strokeStyle = `rgba(200,190,230,${(1 - age) * .14 * (.3 + lit)})`; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.ellipse(X, Y, 4 + age * 38 * S, (1.2 + age * 7) * S, 0, 0, TAU); ctx.stroke(); }
+  ctx.globalCompositeOperation = 'source-over';
+  // 9 · lens: vignette, grain, fades
+  const v = ctx.createRadialGradient(960, 520, 350, 960, 540, 1250); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.6)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = .045; ctx.globalCompositeOperation = 'overlay'; ctx.drawImage(grain[Math.floor(t * 12) % 4], 0, 0, W, H); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  const fade = Math.max(1 - seg(t, 0, .7), seg(t, 9.0, 9.8));
+  if (fade > 0) { ctx.fillStyle = `rgba(0,0,0,${fade})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// events for the sound design: strikes, the pen hiss, chase ticks, faulty crackles, cut, last blink, hum level
+window.events = () => {
+  const ev = [];
+  ev.push({ k: 'pen', t: T_PEN0, d: T_PEN1 - T_PEN0 });
+  for (let c = 0; c < 11; c++) if (c !== 4) ev.push({ k: 'strike', t: T_SERVED + c * .1 + (c === FAULT_IX ? .45 : 0), v: .8 });
+  ev.push({ k: 'strike', t: T_ARROW, v: 1 });
+  for (let k = 0; ; k++) { const t = T_ARROW + .45 + k / 9; if (t >= T_CUT) break; ev.push({ k: 'tick', t, v: ((k % 12) >= 8) ? 1 : .6 }); }
+  ev.push({ k: 'strike', t: T_DOOR, v: .9 }); for (let c = 0; c < 4; c++) ev.push({ k: 'strike', t: T_DOOR + .3 + c * .06, v: .5 }), ev.push({ k: 'strike', t: T_DOOR + .62 + c * .06, v: .5 });
+  for (const [a, b] of FAULTS) ev.push({ k: 'crackle', t: a, d: b - a });
+  ev.push({ k: 'cut', t: T_CUT }); ev.push({ k: 'crackle', t: T_CUT + .5, d: .28 });
+  const hum = []; for (let i = 0; i < 300; i++) { const t = i / 30; let s = 0; tubes.forEach(tb => { const [b, f] = tubeState(tb, t); s += b * f * tb.len; }); hum.push(+(s / 6000).toFixed(3)); }
+  return { ev, hum };
+};
+window.ready = (async () => { buildTextures(); })();
+</script></body></html>
