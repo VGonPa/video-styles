@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── stick-action · stick-figure action short on plain paper ──────────────────────────────────
+// Two original stick figures (orange "near", blue "far") drop onto a hand-drawn ground line, spot a falling star
+// and race for it: orange flings a ramp line across the gap and sprints up it, blue draws a high bar in mid-air,
+// giant-swings and back-flips onto the ledge. They tug the star until it squirts away, draw swords out of thin air
+// and duel (block → impact frame, low sweep / tuck jump, slash / back-flip, charge → big impact, swords shatter).
+// The star drifts back down between them; they lift it together and toss it up where it lights a sky of little
+// stars, fist-bump, caption, fade to paper.
+// Rig: forward-kinematic torso + 2-bone IK limbs; poses are keyframed tracks (tweens + procedural run / jump / swing
+// segments) so every frame depends only on t. Smears = limb trails, sword arcs and ghost multiples sampled from the
+// same tracks at earlier times; impact frames invert the picture; camera shake decays after hits.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eIn2 = u => u * u;
+const eSm = u => u * u * (3 - 2 * u);
+const eOutBack = u => { const c = 1.9; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+const eOutExpo = u => u >= 1 ? 1 : 1 - Math.pow(2, -10 * u);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const FONT = '"Caveat Brush"';
+const PAPER = '#f6f2e9', INK = '#1d1b19', GOLD = '#ffc52b', GOLD_D = '#df8f10';
+const COL = { O: { c: '#f25a28', d: '#c9441a' }, B: { c: '#2d7fe6', d: '#1e5fb6' } };
+
+// ── world geometry ──
+const G0 = 800, LY = 560, EDGE = 1250, LEDGE = 2050;
+const RA = [EDGE, G0], RB = [LEDGE, LY];                 // ramp flung by orange
+const rampY = x => G0 + (x - EDGE) * (LY - G0) / (LEDGE - EDGE);
+const gFlat0 = () => G0, gLedge = () => LY;
+const gO = x => x < EDGE ? G0 : x < LEDGE ? rampY(x) : LY;
+const T = { rampA: 1.86, rampB: 2.0, barA: 1.82, barB: 1.96, grab: 1.98, rel: 2.30, C1: 4.70, C2: 5.80, bump: 8.28, cap: 8.62, fade: 9.35 };
+function groundAt(x, t) {
+  if (x <= EDGE + 4) return G0;
+  if (x >= LEDGE - 4) return LY;
+  if (t >= T.rampB) return rampY(x);
+  return null;
+}
+
+// ── pose system ──
+const KEYS = ['x', 'y', 'lean', 'spin', 'hx', 'hy', 'lhx', 'lhy', 'rhx', 'rhy', 'lfx', 'lfy', 'rfx', 'rfy', 'sw', 'sL'];
+const BASE = { x: 0, y: 0, lean: .04, spin: 0, hx: 0, hy: 0, lhx: -10, lhy: 86, rhx: 10, rhy: 86, lfx: -15, lfy: 102, rfx: 15, rfy: 102, sw: -.7, sL: 0, f: 1 };
+function norm(o) { const r = {}; for (const k in o) { const v = o[k]; if (Array.isArray(v)) { r[k + 'x'] = v[0]; r[k + 'y'] = v[1]; } else r[k] = v; } return r; }
+const full = o => Object.assign({}, BASE, norm(o));
+function apply(from, o) { const r = Object.assign({}, from); for (const k in o) { if (k === 'dx') r.x += o.dx; else if (k === 'dy') r.y += o.dy; else r[k] = o[k]; } return r; }
+function mix(a, b, u) { const r = {}; for (const k of KEYS) r[k] = a[k] + (b[k] - a[k]) * u; r.f = u < .5 ? a.f : b.f; return r; }
+class Track {
+  constructor(p) { this.it = [{ t: -1e9, k: 'set', p: full(p) }]; this.cache = []; }
+  set(t, p) { this.it.push({ t, k: 'set', p: full(p) }); return this; }
+  mod(t, o) { this.it.push({ t, k: 'mod', o: norm(o) }); return this; }
+  tw(t, d, o, e = eInOut) { this.it.push({ t, k: 'tw', d, o: typeof o === 'function' ? o : norm(o), e }); return this; }
+  fn(t, f, bl = 0) { this.it.push({ t, k: 'fn', f, bl }); return this; }
+  start(i) { if (!this.cache[i]) this.cache[i] = this.value(i - 1, this.it[i].t); return this.cache[i]; }
+  value(i, t) {
+    const it = this.it[i];
+    if (it.k === 'set') return it.p;
+    const s = this.start(i);
+    if (it.k === 'mod') return apply(s, it.o);
+    if (it.k === 'tw') { const to = apply(s, typeof it.o === 'function' ? norm(it.o(s)) : it.o); return mix(s, to, it.e(clamp((t - it.t) / it.d))); }
+    let v = it.f(t, s); if (it.bl) v = mix(s, v, eSm(clamp((t - it.t) / it.bl))); return v;
+  }
+  at(t) { let i = 0; while (i + 1 < this.it.length && this.it[i + 1].t <= t) i++; return this.value(i, t); }
+}
+function shoulderOf(p) { return [p.x + 70 * Math.sin(p.lean) * p.f, p.y - 70 * Math.cos(p.lean)]; }
+function reachTo(p, limb, pt) { const S = shoulderOf(p); p[limb + 'x'] = (pt[0] - S[0]) * p.f; p[limb + 'y'] = pt[1] - S[1]; return p; }
+function ik(r, t, L1, L2, bend) {
+  const dx = t[0] - r[0], dy = t[1] - r[1]; const a = Math.atan2(dy, dx);
+  const d = clamp(Math.hypot(dx, dy), Math.abs(L1 - L2) + 1, L1 + L2 - .5);
+  const al = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+  return [[r[0] + L1 * Math.cos(a + bend * al), r[1] + L1 * Math.sin(a + bend * al)], [r[0] + d * Math.cos(a), r[1] + d * Math.sin(a)]];
+}
+const PTS = ['H', 'N', 'S', 'C', 'le', 'lh', 're', 'rh', 'lk', 'lf', 'rk', 'rf', 'tip', 'pom'];
+const SWL = 178;
+function geom(p) {
+  const f = p.f, d = [Math.sin(p.lean) * f, -Math.cos(p.lean)];
+  const Hp = [p.x, p.y], N = [p.x + 80 * d[0], p.y + 80 * d[1]], S = [p.x + 70 * d[0], p.y + 70 * d[1]];
+  const C = [N[0] + 31 * d[0] + p.hx * f, N[1] + 31 * d[1] + p.hy];
+  const [le, lh] = ik(S, [S[0] + p.lhx * f, S[1] + p.lhy], 46, 44, f);
+  const [re, rh] = ik(S, [S[0] + p.rhx * f, S[1] + p.rhy], 46, 44, f);
+  const [lk, lf] = ik(Hp, [p.x + p.lfx * f, p.y + p.lfy], 54, 54, -f);
+  const [rk, rf] = ik(Hp, [p.x + p.rfx * f, p.y + p.rfy], 54, 54, -f);
+  let sv = [Math.cos(p.sw) * f, Math.sin(p.sw)];
+  const g = { H: Hp, N, S, C, le, lh, re, rh, lk, lf, rk, rf, tip: [rh[0] + sv[0] * SWL * p.sL, rh[1] + sv[1] * SWL * p.sL], pom: [rh[0] - sv[0] * 16, rh[1] - sv[1] * 16], sL: p.sL, f };
+  if (p.spin) {
+    const a = p.spin * f, ca = Math.cos(a), sa = Math.sin(a), pv = [p.x + 40 * d[0], p.y + 40 * d[1]];
+    for (const k of PTS) { const q = g[k], x = q[0] - pv[0], y = q[1] - pv[1]; g[k] = [pv[0] + x * ca - y * sa, pv[1] + x * sa + y * ca]; }
+    sv = [sv[0] * ca - sv[1] * sa, sv[0] * sa + sv[1] * ca];
+  }
+  g.sv = sv; return g;
+}
+function anchorShift(p, limb, pt) { const g = geom(p); p.x += pt[0] - g[limb][0]; p.y += pt[1] - g[limb][1]; return p; }
+
+// procedural run / walk (forward-local offsets; feet planted on ground function g)
+function runPose(x, f, ph, g, lean, o = {}) {
+  const amp = o.amp ?? 1, liftK = o.lift ?? 1, hipH = o.hipH ?? 86;
+  const s = ph * TAU, slope = -(g(x + 20 * f) - g(x - 20 * f)) / 40;
+  const hipY = g(x) - hipH - 4 * Math.abs(Math.cos(s));
+  const leg = a => { const fx = 50 * amp * Math.cos(a) + 8 * amp; const lift = 58 * liftK * Math.max(0, -Math.sin(a)); return [fx, g(x + fx * f) - hipY - lift]; };
+  const [rfx, rfy] = leg(s), [lfx, lfy] = leg(s + Math.PI);
+  return { x, y: hipY, lean: lean + .45 * slope, rfx, rfy, lfx, lfy, rhx: -50 * amp * Math.cos(s) + 14, rhy: 44 + 16 * amp * Math.cos(s), lhx: 50 * amp * Math.cos(s) + 14, lhy: 44 - 16 * amp * Math.cos(s), hx: 2, hy: 0, spin: 0 };
+}
+function runner(t0, xf, g, o = {}) {
+  const stride = o.stride || 300, lean = o.lean ?? .4, ph0 = o.ph0 || 0;
+  return (t, s) => { const x = xf(Math.max(0, t - t0)); return Object.assign({}, s, runPose(x, s.f, ph0 + (x - xf(0)) / stride, g, lean, o), o.extra || {}); };
+}
+function jumper(t0, t1, p0, p1, h, poseF) {
+  return (t, s) => {
+    const u = clamp((t - t0) / (t1 - t0)), a = p0 || [s.x, s.y];
+    const q = poseF ? norm(poseF(u, s)) : {};
+    return Object.assign({}, s, q, { x: lerp(a[0], p1[0], u), y: lerp(a[1], p1[1], u) - 4 * h * u * (1 - u) });
+  };
+}
+const mixL = (a, b, u) => { a = norm(a); b = norm(b); const r = {}; for (const k in a) r[k] = lerp(a[k], b[k] ?? a[k], u); return r; };
+
+// ── the star ──
+const SR = 40;
+function starAt(t) {
+  if (t < .45) return null;
+  if (t < .8) { const u = seg(t, .45, .72); return { x: 1400, y: 235, s: eOutBack(u), sx: 1, sy: 1, rot: .6 * (1 - eOut(u)) + .05 * Math.sin(t * 9), glow: u }; }
+  if (t < 2.9) { const u = (t - .8) / 2.1; return { x: 1400 + 1300 * u + 36 * Math.sin(u * TAU * 1.25) * (1 - u), y: 235 + 291 * Math.pow(u, 1.7), s: 1, sx: 1, sy: 1, rot: .05 * Math.sin(.8 * 9) + u * 4.4, glow: 1 }; }
+  const rest = 526;
+  if (t < 3.44) {
+    const k = t - 2.9; let y = rest, sq = 0;
+    if (k < .24) { const u = k / .24; y = rest - 50 * 4 * u * (1 - u); } else if (k < .38) { const u = (k - .24) / .14; y = rest - 13 * 4 * u * (1 - u); }
+    sq = .22 * Math.exp(-k / .035) + .1 * Math.exp(-Math.max(0, k - .24) / .03) * (k > .24 ? 1 : 0);
+    return { x: 2700, y, s: 1, sx: 1 + sq, sy: 1 - sq, rot: 4.4 + .5 * eOut(clamp(k / .38)), glow: 1 };
+  }
+  if (t < 3.78) {
+    const u = eOut(seg(t, 3.44, 3.54)), pull = seg(t, 3.5, 3.78);
+    return { x: 2700 + 7 * Math.sin(t * 64) * pull, y: lerp(rest, 455, u), s: 1, sx: 1 + .38 * eSm(pull), sy: 1 - .17 * eSm(pull), rot: 4.9 + .03 * Math.sin(t * 50) * pull, glow: 1 };
+  }
+  if (t < 4.35) { const k = t - 3.78; const w = Math.exp(-k / .07) * Math.cos(k * 55);
+    return { x: 2700 + 60 * k, y: 455 - 2900 * k + 900 * k * k, s: 1, sx: 1 + .38 * w, sy: 1 - .25 * w, rot: 4.9 + 22 * k, glow: 1 }; }
+  if (t < 6.0) return null;
+  const hover = u => 2865;
+  if (t < 7.2) {
+    const u = seg(t, 6.0, 6.8);
+    const y = lerp(-300, 380, eOut(u)) + (t > 6.8 ? 7 * Math.sin((t - 6.8) * 5.5) : 0);
+    return { x: hover() + 46 * Math.sin(u * TAU) * (1 - u), y, s: 1, sx: 1, sy: 1, rot: 1.6 * (1 - eOut(u)) + .06 * Math.sin(t * 3), glow: 1 };
+  }
+  const yb = 380 + 7 * Math.sin((7.2 - 6.8) * 5.5);
+  if (t < 7.55) { const u = eInOut(seg(t, 7.2, 7.55)); return { x: 2865, y: lerp(yb, 292, u), s: 1 + .06 * u, sx: 1, sy: 1, rot: .06 * Math.sin(t * 3), glow: 1 + .3 * u }; }
+  const u = eOut(seg(t, 7.55, 8.05));
+  const pulse = 1 + .05 * Math.sin((t - 7.55) * 7);
+  return { x: 2865, y: lerp(292, 96, u), s: lerp(1.06, 1.3, u) * pulse, sx: 1, sy: 1, rot: .06 * Math.sin(t * 3) + .5 * u, glow: 1.3 + .7 * u };
+}
+const starTip = (st, side) => [st.x + side * SR * st.s * st.sx * .9, st.y];
+
+// ── choreography ──
+const STANDL = { lean: .04, hx: 0, hy: 0, lh: [-10, 86], rh: [10, 86], lf: [-15, 102], rf: [15, 102] };
+const SQUASH = { lean: .32, lh: [-45, 55], rh: [-35, 60], lf: [-20, 74], rf: [24, 74] };
+const CROUCH = { lean: .6, lh: [-70, 25], rh: [-60, 35], lf: [-30, 69], rf: [35, 69] };
+const LOOKUP = { lean: -.2, hx: 4, hy: -4, lh: [-35, 72], rh: [30, 66] };
+const READY = { lean: .14, hx: 0, hy: 0, lh: [-35, 58], rh: [40, 40], lf: [-42, 86], rf: [42, 86], sw: -.7 };
+const TUCK = { lh: [40, 20], rh: [50, 10], lf: [30, 50], rf: [45, 40] };
+const LUNGE = { rh: [80, -15], sw: -.6, lean: .5, y: 482, lf: [-80, 62], rf: [55, 75] };
+const ARMSUP = { lh: [-30, -70], rh: [35, -72] };
+const Y0 = G0 - 102, YL = LY - 86;
+
+// sword drawing: the hand sweeps an arc (fn), its trail then straightens into a sword
+function swordDraw(t0, t1) {
+  return (t, s) => { const u = eInOut(seg(t, t0, t1)); const th = lerp(2.25, -.62, u);
+    return Object.assign({}, s, { rhx: 84 * Math.cos(th), rhy: 84 * Math.sin(th), sw: th, sL: 0, lean: .14 + .12 * Math.sin(u * Math.PI) }); };
+}
+function tugPose(side) { // side -1 = orange (left of star), +1 = blue
+  return (t, s) => {
+    const st = starAt(t), pull = seg(t, 3.5, 3.78);
+    const p = Object.assign({}, s, { x: st.x + side * (92 + 14 * pull), y: 480 + 4 * Math.sin(t * 40) * pull, lean: -.18 - .17 * pull + .03 * Math.sin(t * 64 + side), lfx: 58, lfy: 80, rfx: 84, rfy: 62, hx: 0, hy: 0, spin: 0 });
+    const tip = starTip(st, side);
+    reachTo(p, 'lh', [tip[0], tip[1] - 9]); reachTo(p, 'rh', [tip[0] - side * 4, tip[1] + 9]); return p;
+  };
+}
+function holdStar(side, both) {
+  return (t, s) => {
+    const st = starAt(t), p = Object.assign({}, s); if (!st) return p;
+    const tip = starTip(st, side); const up = clamp((380 - st.y) / 90);
+    p.y = YL - 12 * up; p.lean = .06 - .1 * up;
+    reachTo(p, 'rh', [tip[0], tip[1] + 6]);
+    if (both) reachTo(p, 'lh', [tip[0] - side * 2, tip[1] - 10]); return p;
+  };
+}
+
+const O = new Track({ ...STANDL, x: 560, y: -190, lh: [-40, -60], rh: [42, -66], lf: [-4, 80], rf: [22, 72], f: 1 });
+O.tw(.08, .22, { y: Y0, lf: [-15, 102], rf: [15, 102] }, eIn2)
+ .tw(.30, .07, { ...SQUASH, y: G0 - 74 }, eOut)
+ .tw(.37, .22, { ...STANDL, y: Y0 }, eOutBack)
+ .tw(.62, .18, LOOKUP, eOutBack)
+ .tw(.88, .12, { lean: -.04, hx: 0, hy: 0 })
+ .tw(1.0, .15, { ...CROUCH, y: G0 - 69 }, eOut)
+ .fn(1.15, runner(1.15, k => 560 + 1400 * k * k / (k + .12), gFlat0, { lean: .42 }), .06)
+ .tw(1.632, .2, { x: 1195, y: 745, lean: 1.0, hx: 0, lh: [-45, 45], rh: [-6, 90], lf: [-38, 55], rf: [48, 55] }, eOut)
+ .tw(1.84, .1, { x: 1212, y: 694, lean: .12, lh: [-50, 40], rh: [70, -62], lf: [-15, 103], rf: [22, 101] }, eOutBack)
+ .fn(1.97, runner(1.97, k => 1212 + 1350 * k * k / (k + .08), gO, { lean: .45, ph0: .25 }), .07)
+ .tw(2.95, .25, { x: 2585, y: 474, lean: -.3, hx: 0, lh: [-60, 20], rh: [30, 40], lf: [45, 86], rf: [70, 72] }, eOut)
+ .tw(3.2, .12, s => { const p = apply(s, { x: 2612, y: 500, lean: .7, lf: [-40, 58], rf: [30, 60] }); reachTo(p, 'lh', [2664, 520]); reachTo(p, 'rh', [2667, 534]); return p; }, eOut)
+ .fn(3.34, (t, s) => { const st = starAt(t); const p = Object.assign({}, s); const tip = starTip(st, -1); reachTo(p, 'lh', [tip[0], tip[1] - 8]); reachTo(p, 'rh', [tip[0] + 3, tip[1] + 8]); return p; })
+ .fn(3.46, tugPose(-1), .06)
+ .tw(3.78, .2, { dx: -72, y: 470, lean: -.55, lh: [-20, -80], rh: [15, -84], lf: [60, 82], rf: [22, 96] }, eOut)
+ .tw(3.98, .16, { ...READY, x: 2540, y: YL }, eOutBack)
+ .fn(4.1, swordDraw(4.1, 4.3))
+ .mod(4.42, { sL: 1 })
+ .tw(4.5, .12, { rh: [-58, -62], sw: -2.35, lean: -.14, y: 464, lf: [-30, 96], rf: [45, 90] }, eOut)
+ .tw(4.62, .08, { x: 2650, rh: [80, -10], sw: .38, lean: .45, y: 490, lf: [-80, 68], rf: [60, 70] }, eIn)
+ .tw(4.72, .18, { ...READY, x: 2580, y: YL, sw: -.9 }, eOut)
+ .tw(4.9, .06, { y: 502, lean: .3, lf: [-32, 58], rf: [36, 58], rh: [30, 30] }, eOut)
+ .fn(4.96, jumper(4.96, 5.22, [2580, 502], [2600, 500], 205, u => mixL({ lf: [-32, 58], rf: [36, 58], lh: [-40, 20], rh: [30, 10], lean: .3, sw: -.9 },
+      { lf: [20, 48], rf: [40, 40], lh: [-50, -30], rh: [35, -40], lean: .2, sw: -1.3 }, Math.sin(Math.PI * u))))
+ .tw(5.22, .06, { y: 504, lf: [-38, 56], rf: [40, 56], lean: .3 }, eOut)
+ .tw(5.26, .06, { rh: [-58, 8], sw: 3.1, lean: -.1, y: 494 })
+ .tw(5.32, .1, { x: 2690, rh: [86, -18], sw: -.2, lean: .5, y: 486, lf: [-78, 70], rf: [55, 74] }, eIn)
+ .tw(5.44, .18, { ...READY, x: 2520, y: YL, sw: -.6 }, eOut)
+ .tw(5.66, .14, { x: 2700, ...LUNGE }, eIn)
+ .tw(5.8, .3, { x: 2600, y: 516, lean: .85, lh: [-8, 90], rh: [30, 55], lf: [-66, 44], rf: [40, 44], sL: 0 }, eOut)
+ .tw(6.28, .24, { y: YL - 2, lean: -.2, hx: 4, hy: -4, lh: [-32, 74], rh: [26, 70], lf: [-30, 94], rf: [25, 96] }, eOutBack)
+ .tw(6.6, .14, { lean: .03, hx: 0, hy: 0 })
+ .fn(6.8, runner(6.8, k => lerp(2600, 2782, eInOut(clamp(k / .34))), gLedge, { lean: .08, amp: .55, lift: .45, hipH: 94, stride: 170, extra: { sL: 0 } }), .05)
+ .fn(7.12, holdStar(-1, false), .1)
+ .fn(7.24, holdStar(-1, true), .1)
+ .tw(7.55, .16, { ...ARMSUP, lean: -.12, y: YL - 12 }, eOut)
+ .tw(7.95, .2, { lh: [-20, 78], rh: [20, 72], lean: .05, y: LY - 101, hx: 0, lf: [-16, 100], rf: [16, 100] })
+ .tw(8.15, .13, { rh: [74, -6], lean: .12 }, eOutBack)
+ .tw(8.36, .16, { rh: [40, 40] }, eOut)
+ .tw(8.52, .3, { lean: -.14, hx: 3, hy: -4, rh: [18, 72], lh: [-18, 76] })
+ .fn(8.82, (t, s) => apply(s, { y: s.y + 2.5 * Math.sin((t - 8.82) * 4) }));
+
+// blue: running jump off the edge, right hand drawing the high bar on the way up, then grabbing it
+const barJump = jumper(1.80, 1.98, null, [1366, 660], 60, u => ({ lean: .1, lh: [lerp(14, -4, u), lerp(44, -88, u)], lf: [lerp(-20, -18, u), lerp(96, 100, u)], rf: [lerp(40, -10, u), lerp(70, 98, u)] }));
+function barDrawJump(t, s) {
+  const q = barJump(t, s);
+  if (t < T.barA) { const u = seg(t, 1.8, T.barA); q.rhx = lerp(14, 62, u); q.rhy = lerp(44, -62, u); return q; }
+  if (t <= T.barB) return reachTo(q, 'rh', [lerp(1318, 1446, seg(t, T.barA, T.barB)), 512]);
+  return reachTo(q, 'rh', [lerp(1446, 1420, seg(t, T.barB, T.grab)), 512]);
+}
+const B = new Track({ ...STANDL, x: 400, y: -230, lh: [-44, -58], rh: [38, -70], lf: [-8, 78], rf: [18, 76], f: 1 });
+B.tw(.18, .22, { y: Y0, lf: [-15, 102], rf: [15, 102] }, eIn2)
+ .tw(.40, .07, { ...SQUASH, y: G0 - 74 }, eOut)
+ .tw(.47, .22, { ...STANDL, y: Y0 }, eOutBack)
+ .tw(.7, .18, LOOKUP, eOutBack)
+ .tw(.9, .12, { lean: -.04, hx: 0, hy: 0 })
+ .tw(1.0, .15, { ...CROUCH, y: G0 - 69 }, eOut)
+ .fn(1.15, runner(1.15, k => 400 + 1500 * k * k / (k + .12), gFlat0, { lean: .42, ph0: .5 }), .06)
+ .fn(1.80, barDrawJump, .03)
+ .fn(T.grab, (t, s) => { const u = seg(t, T.grab, T.rel); const th = .35 - 2.25 * (eSm(u) * .5 + u * .5);
+      const p = Object.assign({}, s, { lean: 0, spin: th, hx: 0, hy: 0, lhx: -4, lhy: -88, rhx: 4, rhy: -88, lfx: lerp(-18, 34, u), lfy: 100, rfx: lerp(-10, 44, u), rfy: 97 });
+      return anchorShift(p, 'rh', barGrip(t)); }, .03)
+ .fn(T.rel, jumper(T.rel, 2.70, null, [2150, 457], 110, (u, s) => Object.assign({ spin: lerp(-1.9, -TAU, eSm(u)) },
+      mixL(u < .5 ? { lh: [-4, -88], rh: [4, -88], lf: [34, 100], rf: [44, 97] } : TUCK, u < .5 ? TUCK : { lh: [-40, 40], rh: [50, 30], lf: [-18, 100], rf: [22, 100] }, eSm(u < .5 ? u * 2 : u * 2 - 1)))))
+ .mod(2.70, { spin: 0 })
+ .tw(2.70, .06, { ...SQUASH, y: LY - 74 }, eOut)
+ .fn(2.74, runner(2.74, k => 2150 + 1500 * k, gLedge, { lean: .42 }), .05)
+ .fn(2.95, jumper(2.95, 3.30, null, [2830, LY - 74], 200, u => Object.assign({ spin: TAU * eInOut(u), lean: .2 }, mixL(TUCK, SQUASH, seg(u, .6, 1)))), .03)
+ .mod(3.30, { spin: 0 })
+ .tw(3.30, .06, { ...SQUASH, y: LY - 74 }, eOut)
+ .mod(3.36, { f: -1 })
+ .tw(3.36, .08, s => { const p = apply(s, { x: 2790, y: 500, lean: .7, lf: [-40, 58], rf: [30, 60] }); reachTo(p, 'lh', [2736, 520]); reachTo(p, 'rh', [2733, 534]); return p; }, eOut)
+ .fn(3.46, tugPose(1), .06)
+ .tw(3.78, .2, { dx: 72, y: 470, lean: -.55, lh: [-20, -80], rh: [15, -84], lf: [60, 82], rf: [22, 96] }, eOut)
+ .tw(3.98, .16, { ...READY, x: 2860, y: YL }, eOutBack)
+ .fn(4.16, swordDraw(4.16, 4.36))
+ .mod(4.48, { sL: 1 })
+ .tw(4.55, .11, { rh: [40, -30], sw: -1.25, lean: -.06, y: 476 }, eOut)
+ .tw(4.72, .18, { ...READY, x: 2900, y: YL, sw: -.9 }, eOut)
+ .tw(4.88, .1, { y: 512, lean: .45, rh: [-55, 40], sw: 2.9, lf: [-60, 48], rf: [55, 48] }, eOut)
+ .tw(4.98, .12, { x: 2860, rh: [86, 42], sw: .12, lean: .55 }, eIn)
+ .tw(5.14, .12, { y: 505, lean: .15, rh: [30, 30], sw: -.9, lf: [-35, 55], rf: [40, 55] })
+ .fn(5.28, jumper(5.28, 5.6, null, [3160, LY - 74], 225, u => Object.assign({ spin: -TAU * eInOut(u) }, mixL({ lh: [-40, 30], rh: [30, 30], lf: [-35, 55], rf: [40, 55] }, TUCK, Math.sin(Math.PI * u)))), .02)
+ .mod(5.6, { spin: 0 })
+ .tw(5.6, .06, { ...SQUASH, y: LY - 74, sw: -.8 }, eOut)
+ .tw(5.66, .14, { x: 3030, ...LUNGE }, eIn)
+ .tw(5.8, .3, { x: 3110, y: 516, lean: .85, lh: [-8, 90], rh: [30, 55], lf: [-66, 44], rf: [40, 44], sL: 0 }, eOut)
+ .tw(6.32, .24, { y: YL - 2, lean: -.2, hx: 4, hy: -4, lh: [-32, 74], rh: [26, 70], lf: [-30, 94], rf: [25, 96] }, eOutBack)
+ .tw(6.62, .14, { lean: .03, hx: 0, hy: 0 })
+ .fn(6.8, runner(6.8, k => lerp(3110, 2948, eInOut(clamp(k / .34))), gLedge, { lean: .08, amp: .55, lift: .45, hipH: 94, stride: 170, ph0: .5, extra: { sL: 0 } }), .05)
+ .fn(7.12, holdStar(1, false), .1)
+ .fn(7.24, holdStar(1, true), .1)
+ .tw(7.55, .16, { ...ARMSUP, lean: -.12, y: YL - 12 }, eOut)
+ .tw(7.95, .2, { lh: [-20, 78], rh: [20, 72], lean: .05, y: LY - 101, hx: 0, lf: [-16, 100], rf: [16, 100] })
+ .tw(8.15, .13, { rh: [74, -6], lean: .12 }, eOutBack)
+ .tw(8.36, .16, { rh: [40, 40] }, eOut)
+ .tw(8.56, .3, { lean: -.14, hx: 3, hy: -4, rh: [18, 72], lh: [-18, 76] })
+ .fn(8.86, (t, s) => apply(s, { y: s.y + 2.5 * Math.sin((t - 8.86) * 4 + 1) }));
+const FIGS = [{ id: 'B', tr: B, col: COL.B }, { id: 'O', tr: O, col: COL.O }];
+
+// bar: blue's hand path, straightened, sagging under the swing
+function barSag(t) { if (t < T.grab) return 0; if (t < T.rel) return 18 * Math.sin(Math.PI * .5 * seg(t, T.grab, T.grab + .08)) * (1 - .3 * seg(t, T.grab, T.rel)) ; const k = t - T.rel; return 12.6 * Math.exp(-k / .12) * Math.cos(k * 38); }
+function barGrip(t) { return [1420, 512 + barSag(t)]; }
+
+// ── camera ──
+const CAMK = [[0, 900, 540, 1.3, 1], [1.15, 900, 540, 1.3, 1], [1.8, 1450, 510, 1.1], [2.7, 2250, 440, 1.15], [3.3, 2700, 410, 1.32], [4.2, 2720, 395, 1.4], [5.2, 2800, 390, 1.38],
+  [5.8, 2865, 395, 1.46], [6.3, 2865, 385, 1.36], [7.4, 2870, 350, 1.3], [10, 2870, 330, 1.14, 1]];
+function camBase(t) {
+  let k = 0; while (k + 2 < CAMK.length && CAMK[k + 1][0] <= t) k++;
+  const a = CAMK[k], b = CAMK[k + 1], dt = b[0] - a[0], u = clamp((t - a[0]) / dt);
+  const tan = i => { const q = CAMK[i]; if (q[4] || i === 0 || i === CAMK.length - 1) return [0, 0, 0]; const p = CAMK[i - 1], n = CAMK[i + 1]; return [1, 2, 3].map(j => (n[j] - p[j]) / (n[0] - p[0])); };
+  const ma = tan(k), mb = tan(k + 1), u2 = u * u, u3 = u2 * u;
+  const h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u, h01 = -2 * u3 + 3 * u2, h11 = u3 - u2;
+  return [1, 2, 3].map((j, i) => h00 * a[j] + h10 * dt * ma[i] + h01 * b[j] + h11 * dt * mb[i]);
+}
+const SHAKES = [[T.C1, 22, .12], [T.C2, 36, .17], [2.70, 6, .06], [3.30, 5, .06], [5.6, 5, .06], [3.78, 7, .08], [7.58, 6, .1], [T.bump, 6, .05], [.30, 4, .05], [.40, 4, .05], [1.9, 5, .07]];
+function cam(t) {
+  let [x, y, z] = camBase(t); let sx = 0, sy = 0;
+  for (const [t0, a, d] of SHAKES) if (t >= t0 && t < t0 + d * 8) { const k = t - t0, e = a * Math.exp(-k / d); sx += e * Math.sin(k * 97 + t0 * 13); sy += e * Math.cos(k * 83 + t0 * 7); }
+  for (const tc of [T.C1, T.C2]) if (t >= tc) z *= 1 + (tc === T.C2 ? .06 : .035) * Math.exp(-(t - tc) / .1);
+  return { x, y, z, sx, sy };
+}
+
+// ── precomputed layers ──
+let BG, BURST, GLOW, VIGN;
+function buildBG() {
+  const c = mk(W, H), g = c.getContext('2d');
+  g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
+  const r = rng(7), id = g.getImageData(0, 0, W, H), d = id.data;
+  for (let i = 0; i < d.length; i += 4) { const n = (r() - .5) * 7; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+  g.putImageData(id, 0, 0);
+  // faint paper fibres
+  g.strokeStyle = 'rgba(120,100,70,.035)'; g.lineWidth = 1;
+  for (let i = 0; i < 420; i++) { const x = r() * W, y = r() * H, a = r() * TAU, l = 6 + r() * 22; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a) * l * .5 + (r() - .5) * 6, y + Math.sin(a) * l * .5 + (r() - .5) * 6, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+  return c;
+}
+function buildVignette() {
+  const c = mk(W, H), g = c.getContext('2d');
+  const gr = g.createRadialGradient(W / 2, H * .48, H * .35, W / 2, H / 2, H * 1.05);
+  gr.addColorStop(0, 'rgba(90,70,40,0)'); gr.addColorStop(1, 'rgba(90,70,40,.13)'); g.fillStyle = gr; g.fillRect(0, 0, W, H); return c;
+}
+function buildGlow() {
+  const c = mk(512, 512), g = c.getContext('2d'); const gr = g.createRadialGradient(256, 256, 0, 256, 256, 256);
+  gr.addColorStop(0, 'rgba(255,214,90,.55)'); gr.addColorStop(.25, 'rgba(255,205,80,.28)'); gr.addColorStop(.6, 'rgba(255,200,90,.08)'); gr.addColorStop(1, 'rgba(255,200,90,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 512); return c;
+}
+function burstPath(r, n, seed, inner = .45) {
+  const R = rng(seed), p = new Path2D();
+  for (let i = 0; i < n * 2; i++) { const a = i / (n * 2) * TAU + (R() - .5) * .12; const rr = i % 2 ? r * (inner + R() * .12) : r * (.75 + R() * .35); const x = Math.cos(a) * rr, y = Math.sin(a) * rr; i ? p.lineTo(x, y) : p.moveTo(x, y); }
+  p.closePath(); return p;
+}
+
+// ── drawing helpers ──
+function poly(pts, close) { ctx.beginPath(); pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); if (close) ctx.closePath(); }
+function starPath(R, r) { const p = new Path2D(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r : R; const x = Math.cos(a) * rr, y = Math.sin(a) * rr; i ? p.lineTo(x, y) : p.moveTo(x, y); } p.closePath(); return p; }
+const STARP = starPath(SR, SR * .46);
+function drawStar(st, alpha = 1) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(st.x, st.y); ctx.scale(st.sx, st.sy); ctx.rotate(st.rot); ctx.scale(st.s, st.s);
+  ctx.lineJoin = 'round'; ctx.fillStyle = GOLD; ctx.fill(STARP); ctx.lineWidth = 5; ctx.strokeStyle = GOLD_D; ctx.stroke(STARP);
+  ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.beginPath(); ctx.ellipse(-9, -12, 7, 4, -.6, 0, TAU); ctx.fill(); ctx.restore();
+}
+function sparkle(x, y, r, rot = 0, col = INK, w = 4) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.moveTo(0, -r); ctx.lineTo(0, r); ctx.stroke(); ctx.restore();
+}
+function inkLine(pts, w = 7, col = INK) { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; poly(pts); ctx.stroke(); }
+function wobblePts(a, b, step, seed, amp = 1.3) { const R = rng(seed), n = Math.max(2, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / step)), out = [];
+  for (let i = 0; i <= n; i++) { const u = i / n; out.push([lerp(a[0], b[0], u) + (i && i < n ? (R() - .5) * amp : 0), lerp(a[1], b[1], u) + (i && i < n ? (R() - .5) * amp * 2 : 0)]); } return out; }
+const GROUND = [...wobblePts([-1400, G0], [EDGE, G0], 60, 3), ...wobblePts([EDGE, G0], [EDGE - 6, 1700], 60, 4).slice(1)];
+const LEDGEP = [...wobblePts([LEDGE + 5, 1700], [LEDGE, LY], 60, 5), ...wobblePts([LEDGE, LY], [4400, LY], 60, 6).slice(1)];
+function partial(pts, u) { // first fraction u of a polyline by length
+  if (u >= 1) return pts; const L = []; let tot = 0; for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); L.push(l); tot += l; }
+  let rem = tot * u; const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) { if (rem >= L[i - 1]) { out.push(pts[i]); rem -= L[i - 1]; } else { const k = rem / L[i - 1]; out.push([lerp(pts[i - 1][0], pts[i][0], k), lerp(pts[i - 1][1], pts[i][1], k)]); break; } }
+  return out;
+}
+
+// cached poses per time
+const PC = new Map();
+function G(fig, t) { const k = fig.id + (Math.round(t * 1e4)); let g = PC.get(k); if (!g) { g = geom(fig.tr.at(t)); PC.set(k, g); } return g; }
+
+function drawFigure(g, col, alpha = 1, flat) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 11;
+  const dark = flat || col.d, main = flat || col.c;
+  ctx.strokeStyle = dark; poly([g.S, g.le, g.lh]); ctx.stroke(); poly([g.H, g.lk, g.lf]); ctx.stroke();
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(g.lh[0], g.lh[1], 7.5, 0, TAU); ctx.fill();
+  ctx.strokeStyle = main; poly([g.H, g.N]); ctx.stroke(); poly([g.H, g.rk, g.rf]); ctx.stroke();
+  if (g.sL > .01 && !flat) drawSword(g);
+  ctx.strokeStyle = main; poly([g.S, g.re, g.rh]); ctx.stroke();
+  ctx.fillStyle = main; ctx.beginPath(); ctx.arc(g.rh[0], g.rh[1], 7.5, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(g.C[0], g.C[1], 26, 0, TAU); ctx.fill();
+  if (!flat) { ctx.fillStyle = 'rgba(255,255,255,.22)'; ctx.beginPath(); ctx.arc(g.C[0] - 8 * g.f, g.C[1] - 9, 8, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+function drawSword(g) {
+  const sv = g.sv, n = [-sv[1], sv[0]], h = g.rh, gd = [h[0] + sv[0] * 13, h[1] + sv[1] * 13];
+  ctx.lineCap = 'round'; ctx.strokeStyle = INK; ctx.lineWidth = 7; poly([g.pom, g.tip]); ctx.stroke();
+  ctx.lineWidth = 7; poly([[gd[0] + n[0] * 17, gd[1] + n[1] * 17], [gd[0] - n[0] * 17, gd[1] - n[1] * 17]]); ctx.stroke();
+}
+function trail(pts, col, w, a) { // tapered, fading ribbon from old → new
+  ctx.lineCap = 'round'; for (let i = 1; i < pts.length; i++) { const k = i / (pts.length - 1); ctx.globalAlpha = a * k; ctx.strokeStyle = col; ctx.lineWidth = w * (.25 + .75 * k); poly([pts[i - 1], pts[i]]); ctx.stroke(); } ctx.globalAlpha = 1;
+}
+function drawSmears(fig, t) {
+  const col = fig.col.c, n = 7, span = .055, S = [];
+  for (let i = n; i >= 0; i--) S.push(G(fig, t - span * i / n));
+  for (const k of ['rh', 'lh', 'rf', 'lf', 'C']) {
+    const pts = S.map(g => g[k]); let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (L > 75) trail(pts, k === 'C' ? col : col, k === 'C' ? 30 : 11, clamp((L - 75) / 90) * (k === 'C' ? .22 : .42));
+  }
+  // sword arc smear
+  const g0 = S[S.length - 1];
+  if (g0.sL > .5) {
+    const m = 9, A = [];
+    for (let i = m; i >= 0; i--) A.push(G(fig, t - .085 * i / m));
+    let L = 0; for (let i = 1; i < A.length; i++) L += Math.hypot(A[i].tip[0] - A[i - 1].tip[0], A[i].tip[1] - A[i - 1].tip[1]);
+    if (L > 110) {
+      const a = clamp((L - 110) / 160);
+      ctx.save(); if (t > 2.7) { ctx.beginPath(); ctx.rect(-1e4, -1e4, 3e4, 1e4 + LY - 3); ctx.clip(); }
+      ctx.fillStyle = fig.col.c; ctx.globalAlpha = .2 * a; poly([...A.map(g => g.tip), ...A.map(g => g.rh).reverse()], true); ctx.fill();
+      ctx.globalAlpha = 1; trail(A.map(g => g.tip), INK, 6, .55 * a); ctx.restore();
+    }
+  }
+}
+function drawGhosts(fig, t) {
+  const g = G(fig, t), g1 = G(fig, t - 1 / 30), v = Math.hypot(g.C[0] - g1.C[0], g.C[1] - g1.C[1]);
+  if (v > 48) { const a = clamp((v - 48) / 40); drawFigure(G(fig, t - 2 / 30), fig.col, .1 * a, fig.col.c); drawFigure(g1, fig.col, .2 * a, fig.col.c); }
+}
+function drawShadow(g, t) {
+  const x = (g.lf[0] + g.rf[0]) / 2, gy = groundAt(x, t); if (gy == null) return;
+  const h = gy - Math.max(g.lf[1], g.rf[1], g.H[1] + 30); if (h < -20) return;
+  const k = clamp(1 - Math.max(0, h) / 420); if (k <= 0) return;
+  ctx.fillStyle = `rgba(40,30,20,${.13 * k})`; ctx.beginPath(); ctx.ellipse(x, gy + 3, 46 * (.5 + .5 * k), 7 * (.5 + .5 * k), 0, 0, TAU); ctx.fill();
+}
+function speedLines(fig, t) {
+  const g = G(fig, t), g1 = G(fig, t - 1 / 30), vx = (g.H[0] - g1.H[0]) * 30; if (Math.abs(vx) < 1000) return;
+  const R = rng(Math.floor(t * 15) * 31 + (fig.id === 'O' ? 1 : 2)), a = clamp((Math.abs(vx) - 1000) / 450), dir = Math.sign(vx);
+  ctx.strokeStyle = INK; ctx.lineCap = 'round';
+  for (let i = 0; i < 4; i++) { const y = g.H[1] - 150 + R() * 230, x0 = g.H[0] - dir * (70 + R() * 60), l = 90 + R() * 170;
+    ctx.globalAlpha = .28 * a; ctx.lineWidth = 3; poly([[x0, y], [x0 - dir * l, y]]); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+}
+
+// ── effects data ──
+const DUST = [[.30, 560, G0, 1], [.40, 400, G0, 1], [2.70, 2150, LY, 1], [3.30, 2830, LY, 1], [5.22, 2600, LY, .8], [5.6, 3160, LY, 1], [1.64, 1120, G0, .7], [2.97, 2450, LY, .7], [5.82, 2650, LY, 1], [5.82, 3060, LY, 1]];
+function drawDust(t) {
+  for (const [t0, x, y, k] of DUST) { const u = (t - t0) / .45; if (u < 0 || u > 1) continue; const R = rng(Math.round(t0 * 100 + x));
+    for (let i = 0; i < 7; i++) { const s = i < 3.5 ? -1 : 1, dx = s * (20 + 90 * eOut(u) * (.5 + R())), dy = -14 * eOut(u) * (.4 + R()), r = (8 + 14 * R()) * k * (.4 + .8 * eOut(u));
+      ctx.globalAlpha = .55 * (1 - u); ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x + dx, y - 6 + dy, r, 0, TAU); ctx.stroke(); }
+  } ctx.globalAlpha = 1;
+}
+// sword clash points, computed from the rig at the clash times
+function segX(a, b, c, d) { const r = [b[0] - a[0], b[1] - a[1]], s = [d[0] - c[0], d[1] - c[1]], den = r[0] * s[1] - r[1] * s[0];
+  if (Math.abs(den) > 1e-6) { const u = ((c[0] - a[0]) * s[1] - (c[1] - a[1]) * s[0]) / den, v = ((c[0] - a[0]) * r[1] - (c[1] - a[1]) * r[0]) / den; if (u >= 0 && u <= 1 && v >= 0 && v <= 1) return [a[0] + r[0] * u, a[1] + r[1] * u]; }
+  return [(b[0] + d[0]) / 2, (b[1] + d[1]) / 2]; }
+let CLASH = {};
+function clashPt(tc) { if (!CLASH[tc]) { const go = geom(O.at(tc - .001)), gb = geom(B.at(tc - .001)); CLASH[tc] = segX(go.rh, go.tip, gb.rh, gb.tip); } return CLASH[tc]; }
+let FRAGS = [];
+function buildFrags() {
+  const R = rng(99), cp = clashPt(T.C2);
+  for (const fig of [O, B]) { const g = geom(fig.at(T.C2 - .001));
+    for (let i = 0; i < 5; i++) { const u0 = i / 5, u1 = (i + .8) / 5, a = [lerp(g.rh[0], g.tip[0], u0), lerp(g.rh[1], g.tip[1], u0)], b = [lerp(g.rh[0], g.tip[0], u1), lerp(g.rh[1], g.tip[1], u1)];
+      const c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; let dx = c[0] - cp[0], dy = c[1] - cp[1]; const l = Math.hypot(dx, dy) + 1; dx /= l; dy /= l;
+      FRAGS.push({ c, half: Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, ang: Math.atan2(b[1] - a[1], b[0] - a[0]), vx: dx * (420 + 520 * R()) + (R() - .5) * 200, vy: dy * 300 - 620 - 380 * R(), w: (R() - .5) * 26 }); } }
+}
+function drawFrags(t) {
+  const k = t - T.C2; if (k < 0 || k > 1.1) return;
+  for (const f of FRAGS) { let x = f.c[0] + f.vx * k, y = f.c[1] + f.vy * k + 1300 * k * k, a = f.ang + f.w * k;
+    const tl = (-f.vy - Math.sqrt(Math.max(0, f.vy * f.vy + 4 * 1300 * (LY - 6 - f.c[1])))) / (-2 * 1300); // time to hit ledge
+    if (k > tl && tl > 0) { x = f.c[0] + f.vx * tl + f.vx * .08 * (1 - Math.exp(-(k - tl) / .08)); y = LY - 6; a = Math.round((f.ang + f.w * tl) / Math.PI) * Math.PI + (f.w * tl % .3); }
+    ctx.globalAlpha = 1 - seg(t, 6.35, 6.8); ctx.strokeStyle = INK; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    poly([[x - Math.cos(a) * f.half, y - Math.sin(a) * f.half], [x + Math.cos(a) * f.half, y + Math.sin(a) * f.half]]); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+}
+function drawSparks(t, tc, big) {
+  const k = t - tc; if (k < 0 || k > .45) return; const p = clashPt(tc), R = rng(Math.round(tc * 100));
+  ctx.lineCap = 'round';
+  for (let i = 0; i < (big ? 22 : 13); i++) { const a = R() * TAU, v = (big ? 900 : 650) * (.5 + R()), d = v * (1 - Math.exp(-k / .12)) * .12 * 8, l = 18 + 30 * R();
+    const x = p[0] + Math.cos(a) * d, y = p[1] + Math.sin(a) * d + 500 * k * k; ctx.globalAlpha = 1 - k / .45; ctx.strokeStyle = i % 3 ? INK : GOLD_D; ctx.lineWidth = 4;
+    poly([[x, y], [x - Math.cos(a) * l * (1 - k / .45), y - Math.sin(a) * l * (1 - k / .45)]]); ctx.stroke(); }
+  const u = k / (big ? .35 : .25); if (u < 1) { ctx.globalAlpha = 1 - u; ctx.strokeStyle = INK; ctx.lineWidth = (big ? 10 : 7) * (1 - u); ctx.beginPath(); ctx.arc(p[0], p[1], (big ? 330 : 210) * eOut(u), 0, TAU); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+}
+// sword-draw trails: the hand's path, then straightened into the blade
+const SDRAW = [{ fig: 'O', t0: 4.1, t1: 4.3, m1: 4.42 }, { fig: 'B', t0: 4.16, t1: 4.36, m1: 4.48 }];
+function drawSwordTrails(t) {
+  for (const s of SDRAW) { if (t < s.t0 || t >= s.m1) continue; const fig = FIGS.find(f => f.id === s.fig), N = 26, te = Math.min(t, s.t1);
+    let pts = []; for (let i = 0; i <= N; i++) pts.push(G(fig, lerp(s.t0, te, i / N)).rh.slice());
+    if (t > s.t1) { const g = G(fig, t), tip = [g.rh[0] + g.sv[0] * SWL, g.rh[1] + g.sv[1] * SWL], u = eOutBack(seg(t, s.t1, s.m1));
+      pts = pts.map((q, i) => { const k = i / N, tg = [lerp(tip[0], g.pom[0], k), lerp(tip[1], g.pom[1], k)]; return [lerp(q[0], tg[0], u), lerp(q[1], tg[1], u)]; }); }
+    inkLine(pts, 7); if (t < s.t1) sparkle(pts[N][0], pts[N][1], 14, t * 20, GOLD_D, 4);
+  }
+  for (const s of SDRAW) { const k = t - s.m1; if (k < 0 || k > .22) continue; const g = G(FIGS.find(f => f.id === s.fig), t);
+    sparkle(g.tip[0], g.tip[1], 26 * Math.sin(Math.PI * k / .22), .4, GOLD_D, 5); }
+}
+function rampPts(t) {
+  const u = eOut(seg(t, T.rampA, T.rampB)); if (u <= 0) return null;
+  const N = 44, dx = RB[0] - RA[0], dy = RB[1] - RA[1], L = Math.hypot(dx, dy), nx = -dy / L, ny = dx / L, pts = [];
+  const amp = 30 * Math.exp(-Math.max(0, t - T.rampB) / .05) * (t < T.rampA ? 0 : 1);
+  for (let i = 0; i <= N; i++) { const s = i / N * u, w = amp * Math.sin(Math.PI * s / Math.max(u, .01)) * Math.sin(s * 15 - t * 55);
+    pts.push([RA[0] + dx * s + nx * w, RA[1] + dy * s + ny * w]); }
+  return pts;
+}
+function barPts(t) {
+  if (t < T.barA) return null; const fig = FIGS[0], te = Math.min(t, T.barB), N = 16, raw = [];
+  for (let i = 0; i <= N; i++) raw.push(G(fig, lerp(T.barA, te, i / N)).rh.slice());
+  if (t <= T.barB) return raw;
+  const u = eOut(seg(t, T.barB, T.barB + .06)), a = [1318, 512], b = [1446, 512], sag = barSag(t), gx = 1420;
+  return raw.map((q, i) => { const x = lerp(a[0], b[0], i / N), y = 512 + sag * (x < gx ? (x - a[0]) / (gx - a[0]) : (b[0] - x) / (b[0] - gx)); return [lerp(q[0], x, u), lerp(q[1], y, u)]; });
+}
+// sky stars that burst out of the tossed star
+const SKY = []; { const R = rng(21); let i = 0; while (SKY.length < 30 && i < 400) { i++; const x = 2870 + (R() - .5) * 2300, y = -330 + R() * 560;
+  if (Math.hypot(x - 2865, y - 96) < 190 || (Math.abs(x - 2865) < 260 && y > 150)) continue; SKY.push({ x, y, r: 7 + R() * 10, d: SKY.length * .022 + R() * .05, ph: R() * TAU, gold: R() < .45 }); } }
+function drawSky(t) {
+  const t0 = 7.62; if (t < t0) return; const src = starAt(t0);
+  for (const s of SKY) { const u = seg(t, t0 + s.d, t0 + s.d + .55); if (u <= 0) continue; const e = eOutExpo(u), x = lerp(src.x, s.x, e), y = lerp(src.y, s.y, e);
+    if (u < 1) { ctx.globalAlpha = .35 * (1 - u); ctx.strokeStyle = GOLD_D; ctx.lineWidth = 3; poly([[lerp(src.x, s.x, eOutExpo(Math.max(0, u - .12))), lerp(src.y, s.y, eOutExpo(Math.max(0, u - .12)))], [x, y]]); ctx.stroke(); ctx.globalAlpha = 1; }
+    const tw = .75 + .25 * Math.sin(t * 6 + s.ph), r = s.r * Math.min(1, u * 3) * tw;
+    if (s.gold) { ctx.save(); ctx.translate(x, y); ctx.rotate(s.ph + t * .5); ctx.scale(r / SR * 1.25, r / SR * 1.25); ctx.fillStyle = GOLD; ctx.fill(STARP); ctx.lineWidth = 6; ctx.strokeStyle = GOLD_D; ctx.stroke(STARP); ctx.restore(); }
+    else sparkle(x, y, r, s.ph * .2, INK, 3.5);
+  }
+}
+function drawExclaim(t) {
+  for (const [id, t0] of [['O', .62], ['B', .7]]) { const k = t - t0; if (k < 0 || k > .5) continue; const g = G(FIGS.find(f => f.id === id), t0 + .12);
+    const s = eOutBack(clamp(k / .14)), a = 1 - seg(k, .36, .5); ctx.save(); ctx.globalAlpha = a; ctx.translate(g.C[0] + 4, g.C[1] - 78); ctx.rotate(.12); ctx.scale(s, s);
+    ctx.font = `90px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = INK; ctx.fillText('!', 0, 30); ctx.restore(); }
+}
+function drawBump(t) {
+  const k = t - T.bump; if (k < 0 || k > .35) return; const go = G(FIGS[1], T.bump), gb = G(FIGS[0], T.bump), x = (go.rh[0] + gb.rh[0]) / 2, y = (go.rh[1] + gb.rh[1]) / 2;
+  ctx.save(); ctx.globalAlpha = 1 - k / .35; ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  for (let i = 0; i < 8; i++) { const a = i / 8 * TAU + .2, r0 = 18 + 60 * eOut(k / .35), r1 = r0 + 22 * (1 - k / .35); poly([[x + Math.cos(a) * r0, y + Math.sin(a) * r0], [x + Math.cos(a) * r1, y + Math.sin(a) * r1]]); ctx.stroke(); }
+  ctx.restore();
+}
+function drawFlare(t) { const k = t - 7.58; if (k < 0 || k > .6) return; const st = starAt(t); const u = k / .6;
+  ctx.save(); ctx.globalAlpha = 1 - u; ctx.strokeStyle = GOLD_D; ctx.lineWidth = 8 * (1 - u); ctx.beginPath(); ctx.arc(st.x, st.y, 60 + 380 * eOut(u), 0, TAU); ctx.stroke();
+  ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.lineCap = 'round'; for (let i = 0; i < 12; i++) { const a = i / 12 * TAU, r0 = 70 + 200 * eOut(u), r1 = r0 + 50 * (1 - u); poly([[st.x + Math.cos(a) * r0, st.y + Math.sin(a) * r0], [st.x + Math.cos(a) * r1, st.y + Math.sin(a) * r1]]); ctx.stroke(); }
+  ctx.restore(); }
+
+// ── caption ──
+const CAP = 'SHARE THE SPARK';
+function drawCaption(t) {
+  if (t < T.cap) return; ctx.save(); ctx.font = `150px ${FONT}`; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  const R = rng(5), total = ctx.measureText(CAP).width, x0 = W / 2 - total / 2, y = 985; let x = x0;
+  for (let i = 0; i < CAP.length; i++) { const ch = CAP[i], w = ctx.measureText(ch).width, rj = (R() - .5) * .12; if (ch === ' ') { x += w; continue; }
+    const u = seg(t, T.cap + i * .03, T.cap + i * .03 + .24); if (u <= 0) { x += w; continue; }
+    ctx.save(); ctx.translate(x + w / 2, y - 40); ctx.rotate(rj * (2 - eOut(u))); const s = eOutBack(u); ctx.scale(s, s); ctx.fillStyle = i >= 10 ? '#1d1b19' : INK; ctx.fillText(ch, -w / 2, 40); ctx.restore(); x += w; }
+  // two-colour underline strokes, one per figure
+  const uo = eOut(seg(t, T.cap + .45, T.cap + .7)), ub = eOut(seg(t, T.cap + .55, T.cap + .8));
+  if (uo > 0) inkLine(partial(wobblePts([x0 + 10, y + 24], [x0 + total * .52, y + 18], 30, 8, 1), uo), 9, COL.O.c);
+  if (ub > 0) inkLine(partial(wobblePts([x0 + total * .47, y + 22], [x0 + total - 6, y + 14], 30, 9, 1), ub), 9, COL.B.c);
+  ctx.restore();
+}
+
+// ── frame ──
+function impactOverlay(t) {
+  for (const [tc, big] of [[T.C1, 0], [T.C2, 1]]) {
+    const k = t - tc; if (k < 0 || k >= (big ? 3 : 2) / 30) continue; const f = Math.floor(k * 30 + 1e-6), p = clashPt(tc), c = cam(t);
+    const sx = (p[0] - c.x) * c.z + W / 2 + c.sx, sy = (p[1] - c.y) * c.z + H / 2 + c.sy;
+    if (f === 0) { ctx.globalCompositeOperation = 'difference'; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over';
+      ctx.save(); ctx.translate(sx, sy); ctx.fillStyle = '#fff'; ctx.fill(burstPath(big ? 520 : 340, 14, 3 + big)); ctx.restore(); }
+    else { ctx.save(); ctx.translate(sx, sy); ctx.rotate(.13 * f); ctx.fillStyle = f === 2 ? INK : '#fff'; ctx.strokeStyle = INK; ctx.lineWidth = 8; const bp = burstPath(big ? 400 : 250, 12, 9 + f);
+      ctx.fill(bp); ctx.stroke(bp); ctx.restore();
+      ctx.save(); ctx.strokeStyle = INK; ctx.lineCap = 'round'; const R = rng(40 + f);
+      for (let i = 0; i < 26; i++) { const a = R() * TAU, r0 = (big ? 430 : 290) + R() * 80, r1 = r0 + 200 + R() * 400; ctx.lineWidth = 3 + R() * 6; poly([[sx + Math.cos(a) * r0, sy + Math.sin(a) * r0], [sx + Math.cos(a) * r1, sy + Math.sin(a) * r1]]); ctx.stroke(); }
+      ctx.restore(); }
+  }
+}
+function render(t) {
+  if (PC.size > 4000) PC.clear();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(BG, 0, 0);
+  const c = cam(t);
+  ctx.setTransform(c.z, 0, 0, c.z, W / 2 + c.sx - c.x * c.z, H / 2 + c.sy - c.y * c.z);
+  // lines
+  inkLine(partial(GROUND, eInOut(seg(t, 0, .34)) * .62 + (t > .34 ? .38 * seg(t, .34, .5) : 0) + (t > .5 ? 1 : 0)), 7);
+  if (t < .34) { const p = partial(GROUND, eInOut(seg(t, 0, .34)) * .62); const q = p[p.length - 1]; sparkle(q[0], q[1], 12, t * 30, INK, 3); }
+  inkLine(LEDGEP, 7);
+  const rp = rampPts(t); if (rp) { inkLine(rp, 7); if (t < T.rampB + .02) { const q = rp[rp.length - 1]; sparkle(q[0], q[1], 18, t * 25, GOLD_D, 5); } }
+  const bp = barPts(t); if (bp) { inkLine(bp, 7); if (t < T.barB) sparkle(bp[bp.length - 1][0], bp[bp.length - 1][1], 14, t * 25, GOLD_D, 4); }
+  // star glow (under figures)
+  const st = starAt(t);
+  if (st) { const gs = 300 * st.s * (st.glow || 1); ctx.globalAlpha = clamp(st.glow || 1, 0, 1) * (.8 + .2 * Math.sin(t * 7)); ctx.drawImage(GLOW, st.x - gs / 2, st.y - gs / 2, gs, gs); ctx.globalAlpha = 1; }
+  drawSky(t);
+  for (const f of FIGS) drawShadow(G(f, t), t);
+  drawDust(t);
+  for (const f of FIGS) { speedLines(f, t); drawGhosts(f, t); }
+  for (const f of FIGS) { drawSmears(f, t); drawFigure(G(f, t), f.col); }
+  drawSwordTrails(t);
+  if (st) { drawStar(st); if (t > 3.2 && t < 3.8 || t > 7.1 && t < 7.56) for (const f of FIGS) { const g = G(f, t); ctx.fillStyle = f.col.c; for (const k of ['lh', 'rh']) { ctx.beginPath(); ctx.arc(g[k][0], g[k][1], 7.5, 0, TAU); ctx.fill(); } } }
+  if (st && t < 1.2) { const k = t - .45; if (k > 0 && k < .5) { ctx.globalAlpha = 1 - k / .5; for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; const r0 = 50 + 80 * eOut(k / .5); ctx.strokeStyle = GOLD_D; ctx.lineWidth = 5; ctx.lineCap = 'round'; poly([[st.x + Math.cos(a) * r0, st.y + Math.sin(a) * r0], [st.x + Math.cos(a) * (r0 + 26), st.y + Math.sin(a) * (r0 + 26)]]); ctx.stroke(); } ctx.globalAlpha = 1; } }
+  drawFrags(t); drawSparks(t, T.C1, 0); drawSparks(t, T.C2, 1); drawBump(t); drawFlare(t);
+  drawExclaim(t);
+  // screen space
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  impactOverlay(t);
+  ctx.drawImage(VIGN, 0, 0);
+  drawCaption(t);
+  const fo = eInOut(seg(t, T.fade, DUR)); if (fo > 0) { ctx.globalAlpha = fo; ctx.drawImage(BG, 0, 0); ctx.globalAlpha = 1; }
+}
+
+window.ready = (async () => {
+  await document.fonts.load(`128px ${FONT}`, 'SHARE THE SPARK!'); await document.fonts.ready;
+  BG = buildBG(); VIGN = buildVignette(); GLOW = buildGlow(); buildFrags();
+  render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [{ t: 0, k: 'pen', d: .34 }, { t: .45, k: 'twinkle' }, { t: .62, k: 'blip', v: 1 }, { t: .7, k: 'blip', v: .8 },
+    { t: 1.15, k: 'whoosh', d: .3 }, { t: 1.64, k: 'skid', d: .2 }, { t: T.rampA, k: 'zip', d: T.rampB - T.rampA + .05 }, { t: T.rampB, k: 'boing' },
+    { t: T.barA, k: 'pen', d: T.barB - T.barA }, { t: 1.8, k: 'whoosh', d: .25 }, { t: T.grab, k: 'creak' }, { t: T.rel - .05, k: 'whoosh', d: .4 }, { t: T.rel, k: 'boing', v: .6 },
+    { t: 2.9, k: 'tink' }, { t: 3.14, k: 'tink', v: .5 }, { t: 2.95, k: 'whoosh', d: .35 }, { t: 2.97, k: 'skid', d: .22 },
+    { t: 3.5, k: 'stretch', d: .28 }, { t: 3.78, k: 'pop' }, { t: 3.8, k: 'whoosh', d: .3 },
+    { t: 4.1, k: 'pen', d: .2 }, { t: 4.16, k: 'pen', d: .2 }, { t: 4.42, k: 'ting' }, { t: 4.48, k: 'ting', v: .8 },
+    { t: 4.6, k: 'swish' }, { t: T.C1, k: 'clang' }, { t: 4.97, k: 'swish' }, { t: 4.96, k: 'whoosh', d: .25 }, { t: 5.3, k: 'swish' }, { t: 5.28, k: 'whoosh', d: .3 },
+    { t: 5.64, k: 'whoosh', d: .2 }, { t: T.C2, k: 'clang', v: 1.6 }, { t: T.C2 + .02, k: 'shatter' }, { t: T.C2 + .02, k: 'skid', d: .28 },
+    { t: 6.0, k: 'descend', d: .8 }, { t: 7.2, k: 'rise', d: .4 }, { t: 7.58, k: 'flare' }, { t: T.bump, k: 'tap' }, { t: T.cap, k: 'chord' }];
+  for (const s of SKY) ev.push({ t: 7.62 + s.d + .05, k: 'sparkle', v: .5 });
+  // footsteps + landings from the rig: a foot touching the ground line
+  for (const f of FIGS) { const prev = { lf: 1e9, rf: 1e9 };
+    for (let n = 0; n < DUR * 120; n++) { const t = n / 120, g = geom(f.tr.at(t));
+      for (const k of ['lf', 'rf']) { const gy = groundAt(g[k][0], t); const h = gy == null ? 1e9 : gy - g[k][1];
+        if (h < 5 && prev[k] >= 5 && prev[k] < 400) { const g0 = geom(f.tr.at(t - 1 / 30)); const vy = (g[k][1] - g0[k][1]) * 30; ev.push({ t, k: vy > 900 ? 'thud' : 'step', v: clamp(vy / 1500, .3, 1) }); }
+        prev[k] = h; } } }
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
