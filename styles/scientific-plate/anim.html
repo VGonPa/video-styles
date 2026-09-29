@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── scientific-plate · a vintage natural-history plate of imaginary fungi ───────────────────────
+// Aged paper with a printed border and plate-mark → five specimens engrave themselves (outline, then contour
+// hatching), a watercolour tint washes in over each, numbered italic labels and leader lines are inked →
+// a reading glass slides in; under the lens the closed Fig. 3 (an invented earthstar) unfolds its rays and
+// puffs its spores → the glass slides away, the leaf turns to PLATE XV → hold, fade.
+const W = 1920, H = 1080, TAU = Math.PI * 2, DEG = Math.PI / 180;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eSine = u => .5 - .5 * Math.cos(Math.PI * u);
+const eBack = (u, s = 1.9) => { const c3 = s + 1; return 1 + c3 * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function hash2(i, j, s) { let h = (i * 374761393 + j * 668265263 + s * 1442695041) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
+function vnoise(x, y, s) { const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j; const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const a = hash2(i, j, s), b = hash2(i + 1, j, s), c = hash2(i, j + 1, s), d = hash2(i + 1, j + 1, s); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; }
+function fbm(x, y, s, o = 4) { let v = 0, a = .5, f = 1, n = 0; for (let k = 0; k < o; k++) { v += a * vnoise(x * f, y * f, s + k * 17); n += a; f *= 2; a *= .5; } return v / n; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const HC = mk(4, 4).getContext('2d');                     // scratch context for isPointInPath
+const polyPath = (pts, close = true) => { const p = new Path2D(); pts.forEach(([x, y], i) => i ? p.lineTo(x, y) : p.moveTo(x, y)); if (close) p.closePath(); return p; };
+const plen = pts => { let l = 0; for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return l; };
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+const SC = '"IM Fell English SC"', IT = '"IM Fell English"', GAR = '"EB Garamond"';
+const INK = '#2a2017', INKC = [42, 32, 23], PAPERC = [236, 223, 192];
+const B = 790;                                             // ground line of plate XIV
+
+// ── timeline (s) ──
+const T = {
+  fadeIn: [0, .55], head: .25,
+  lens: [3.5, 4.35], unfold: 4.5, puff: 5.35, lensOut: [5.85, 6.6],
+  cam: [3.45, 4.4], camOut: [5.85, 6.75],
+  turn: [6.8, 8.15], fadeOut: [9.3, 10],
+};
+
+// ── specimen container: engraved strokes (drawn progressively) + watercolour regions ──
+class Spec {
+  constructor(seed) { this.strokes = []; this.regions = []; this.seed = seed; this.total = 0; }
+  line(pts, w = 1.5, a = 1, wt = 1) { if (pts.length < 2) return; const len = plen(pts); this.strokes.push({ pts, w, a, len, tl: len * wt }); this.total += len * wt; }
+  region(pts, col, o = {}) { this.regions.push({ pts, col, ...o }); }
+}
+// hatch family: fn(k, s) → [x,y] for k = 0..K-1, s in [0,1]; kept where inside region & shade > level(k)
+const LV = [.12, .5, .3, .66, .2, .58, .38, .74];
+function hatchFam(S, region, K, fn, shade, o = {}) {
+  const P = region ? polyPath(region) : null, n = o.n || 60, w = o.w || .85, a = o.a || .92, minL = o.minL || 4, off = o.lv || 0;
+  for (let k = 0; k < K; k++) {
+    const thr = (o.thr ? o.thr(k) : LV[(k + off) % LV.length]); let run = [];
+    const flush = () => { if (run.length >= 2 && plen(run) >= minL) S.line(run, w, a, o.wt || .55); run = []; };
+    for (let i = 0; i <= n; i++) {
+      const [x, y] = fn(k, i / n);
+      const inside = (!P || HC.isPointInPath(P, x, y)) && shade(x, y, k) > thr + (vnoise(x * .05, y * .05, S.seed + k) - .5) * .12;
+      if (inside) run.push([x, y]); else flush();
+    }
+    flush();
+  }
+}
+const upperLeftShade = (cx, cy, rx, ry, bias = .3) => (x, y) => bias + .55 * (x - cx) / rx + .35 * (y - cy) / ry;
+
+// ── Fig. 1 — Parasolia: tall parasol with scaly cap, gills and a ragged ring ──
+function parasol(X, Bl, sc, seed) {
+  const S = new Spec(seed), r = rng(seed); S.cx = X; S.base = Bl;
+  const Hs = 330 * sc, R = 122 * sc, Hc = 70 * sc;
+  const cx = v => X + 8 * sc * v + 5 * sc * Math.sin(v * Math.PI * 1.3);
+  const hw = v => (10 - 2.6 * v) * sc + 12 * sc * Math.exp(-Math.pow(v / .07, 2)) + 4 * sc * Math.exp(-Math.pow((v - .04) / .05, 2));
+  const Lp = [], Rp = [], N = 44, vTop = (Hs - 14 * sc) / Hs;
+  for (let i = 0; i <= N; i++) { const v = i / N * vTop, y = Bl - v * Hs; Lp.push([cx(v) - hw(v), y]); Rp.push([cx(v) + hw(v), y]); }
+  const stipe = [...Lp, ...Rp.slice().reverse()];
+  const kx = cx(1), y0 = Bl - Hs - 6 * sc;
+  const upper = x => { const u = (x - kx) / R; return y0 + 6 * sc * Math.pow(u, 8) - Hc * Math.pow(Math.max(0, 1 - u * u), .55) - 8 * sc * Math.exp(-Math.pow((x - kx) / (19 * sc), 2)); };
+  const under = x => { const u = (x - kx) / R; return y0 + 6 * sc * Math.pow(u, 8) + 15 * sc * Math.pow(Math.max(0, 1 - u * u), .8); };
+  const gillLo = x => { const u = (x - kx) / R; return under(x) + 11 * sc * Math.pow(Math.max(0, 1 - u * u), .6); };
+  const up = [], dn = [], gl = [];
+  for (let i = 0; i <= 80; i++) { const x = kx - R + 2 * R * i / 80; up.push([x, upper(x)]); dn.push([x, under(x)]); gl.push([x, gillLo(x)]); }
+  const cap = [...up, ...dn.slice().reverse()];
+  const gills = [...dn, ...gl.slice().reverse()];
+  const vr = .8, yr = Bl - vr * Hs, rl = cx(vr) - hw(vr), rr = cx(vr) + hw(vr);
+  const ring = [[rl - 2 * sc, yr - 4 * sc], [rr + 2 * sc, yr - 4 * sc], [rr + 9 * sc, yr + 10 * sc], [rr + 17 * sc, yr + 27 * sc]];
+  for (let i = 1; i < 14; i++) { const u = i / 14; ring.push([lerp(rr + 17 * sc, rl - 17 * sc, u), yr + 27 * sc + 3.5 * sc * Math.sin(u * 19 + seed) + 5 * sc * Math.sin(Math.PI * u)]); }
+  ring.push([rl - 17 * sc, yr + 26 * sc], [rl - 9 * sc, yr + 10 * sc]);
+  // watercolour
+  S.region(stipe, [224, 205, 164], { seed: 1 });
+  S.region(gills, [214, 180, 132], { seed: 2 });
+  S.region(cap, [170, 104, 62], { seed: 3, blot: [120, 66, 38] });
+  S.region(ring, [230, 214, 176], { seed: 4 });
+  // engraving: outlines first
+  S.line(Lp, 1.5 * Math.min(1.2, sc), 1, 2.4); S.line(Rp, 1.7 * Math.min(1.2, sc), 1, 2.4);
+  S.line(up, 1.8, 1, 2.4); S.line(dn, 1.4, 1, 2.2); S.line(gl, 1.1, 1, 1.6);
+  S.line([...ring, ring[0]], 1.2, 1, 1.6);
+  for (let i = 1; i < 7; i++) { const u = i / 7; S.line([[lerp(rl, rr, u), yr - 2 * sc], [lerp(rl - 15 * sc, rr + 15 * sc, u), yr + 27 * sc + 5 * sc * Math.sin(Math.PI * u) - 2]], .7, .9, .4); }
+  // gills
+  for (let x = kx - R + 6; x < kx + R - 4; x += 5.5 * Math.min(1.2, sc)) S.line([[x, under(x) + .5], [kx + (x - kx) * .9, gillLo(x) - .5]], .7, .9, .5);
+  // cap contour hatching (follows the dome)
+  hatchFam(S, cap, Math.round(Hc / 3.6), (k, s) => { const x = kx - R + 2 * R * s; return [x, upper(x) + 3 + k * 3.6]; }, upperLeftShade(kx - R * .25, y0 - Hc, R, Hc, .32), { n: 120 });
+  hatchFam(S, cap, 34, (k, s) => { const x = kx - R * .1 + k * 6.5 * sc - 40 * sc * s; return [x, lerp(y0 - Hc * 1.1, y0 + 18 * sc, s)]; }, upperLeftShade(kx - R * .25, y0 - Hc, R, Hc, -.05), { n: 40, w: .65, lv: 3 });
+  // scales
+  for (let row = 0; row < 6; row++) { const f = .12 + row * .15, cnt = 3 + row * 2;
+    for (let i = 0; i < cnt; i++) { const uu = (i + .5) / cnt * 2 - 1 + (r() - .5) * .12; const x = kx + uu * R * (.25 + f * .72); const y = lerp(upper(x), under(x), .12 + f * .55) + (r() - .5) * 3; const s2 = (2.5 + row * .9) * sc;
+      S.line([[x - s2, y - s2 * .45], [x, y + s2 * .35], [x + s2, y - s2 * .45]], .95, .95, .7); } }
+  // stipe hatching: shallow arcs on the right side
+  hatchFam(S, stipe, Math.round(Hs / 4.2), (k, s) => { const v = k / (Hs / 4.2); const c = cx(v), w = hw(v) + 1; return [c - w + 2 * w * s, Bl - v * Hs + 2.5 * sc * Math.sin(Math.PI * s)]; }, (x, y) => { const v = (Bl - y) / Hs; return .35 + .95 * (x - cx(v)) / hw(v); }, { n: 16, w: .75 });
+  // ground shadow
+  hatchFam(S, null, 4, (k, s) => [X - 55 * sc * (1 - k * .2) + 110 * sc * (1 - k * .2) * s + 12 * sc, Bl + 3 + k * 3.4], () => 1, { n: 20, w: .7, thr: () => 0 });
+  S.bbox = [kx - R - 16, y0 - Hc - 24, kx + R + 16, Bl + 20];
+  S.wash = [kx - R * .2, y0 - Hc * .4];
+  return S;
+}
+
+// ── Fig. 2 — Tintinnabula: a cluster of bell caps on a mossy mound ──
+function bells(X, Bl, sc, seed, list) {
+  const S = new Spec(seed), r = rng(seed); S.cx = X; S.base = Bl;
+  const mound = []; for (let i = 0; i <= 40; i++) { const a = Math.PI + i / 40 * Math.PI; mound.push([X + Math.cos(a) * 82 * sc, Bl + 4 + Math.sin(a) * (24 * sc + 4 * Math.sin(i * 1.7 + seed))]); }
+  const items = list || [{ bx: -30, tx: -60, ty: -235, tilt: -.2, s: 1 }, { bx: 4, tx: 8, ty: -305, tilt: .06, s: 1.1 }, { bx: 30, tx: 64, ty: -185, tilt: .3, s: .9 }, { bx: -8, tx: -16, ty: -92, tilt: -.12, s: .45 }];
+  const capsP = [], stems = [];
+  for (const it of items) {
+    const bx = X + it.bx * sc, by = Bl - 18 * sc, tx = X + it.tx * sc, ty = Bl + it.ty * sc, s = it.s * sc;
+    const cxq = lerp(bx, tx, .5) - (tx - bx) * .6, cyq = lerp(by, ty, .55);
+    const cl = u => [(1 - u) * (1 - u) * bx + 2 * u * (1 - u) * cxq + u * u * tx, (1 - u) * (1 - u) * by + 2 * u * (1 - u) * cyq + u * u * ty];
+    const Ls = [], Rs = [];
+    for (let i = 0; i <= 24; i++) { const u = i / 24, [x, y] = cl(u), [x2, y2] = cl(Math.min(1, u + .01)), [x1, y1] = cl(Math.max(0, u - .01));
+      let nx = -(y2 - y1), ny = x2 - x1; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl; const w = (3.3 - .8 * u) * Math.max(.6, s);
+      Ls.push([x + nx * w, y + ny * w]); Rs.push([x - nx * w, y - ny * w]); }
+    const stem = [...Ls, ...Rs.slice().reverse()]; stems.push(stem);
+    S.region(stem, [216, 202, 176], { seed: 11 });
+    // bell cap
+    const h = 64 * s, w = 52 * s, ca = Math.cos(it.tilt), sa = Math.sin(it.tilt);
+    const tr = ([x, y]) => [tx + x * ca - y * sa, ty + 3 * s + x * sa + y * ca];
+    const hwv = v => w / 2 * Math.pow(Math.max(0, 1 - Math.pow(v, 1.7)), .75) + (v < .1 ? 3 * s * (1 - v / .1) : 0);
+    const left = [], right = [], rim = [];
+    for (let i = 0; i <= 30; i++) { const v = i / 30; left.push(tr([-hwv(v), -v * h])); right.push(tr([hwv(v), -v * h])); }
+    for (let i = 0; i <= 16; i++) { const u = i / 16; rim.push(tr([lerp(-hwv(0), hwv(0), u), 5 * s * Math.sin(Math.PI * u)])); }
+    const capPoly = [...rim, ...right.slice().reverse().slice(1), ...left.slice(1)];
+    S.region(capPoly, [148, 128, 168], { seed: 12, blot: [104, 84, 128] });
+    capsP.push({ left, right, rim, tr, hwv, h, s, capPoly });
+    S.line(Ls, 1.1, 1, 2); S.line(Rs, 1.2, 1, 2);
+  }
+  for (const c of capsP) { S.line([...left2(c)], 1.5, 1, 2.2); S.line(c.rim, 1.2, 1, 2); }
+  function left2(c) { return [...c.left.slice().reverse(), ...c.right.slice(1)]; }
+  // striations + shading
+  for (const c of capsP) {
+    const nL = Math.max(4, Math.round(9 * c.s));
+    for (let j = 1; j < nL; j++) { const u = -1 + 2 * j / nL, pts = []; for (let i = 0; i <= 14; i++) { const v = .06 + i / 14 * .78; pts.push(c.tr([u * c.hwv(v) * .96, -v * c.h])); } S.line(pts, .7, .85, .5); }
+    hatchFam(S, c.capPoly, 14, (k, s) => { const v = .05 + k / 14 * .85; return c.tr([lerp(-c.hwv(v), c.hwv(v), s), -v * c.h + 2 * Math.sin(Math.PI * s)]); }, (x, y) => { const q = c.tr([0, 0]); return .1 + .9 * (x - q[0]) / (c.hwv(0) + 1); }, { n: 26, w: .7 });
+  }
+  for (const st of stems) { const xs = st.map(p => p[0]), cxs = (Math.min(...xs) + Math.max(...xs)) / 2; hatchFam(S, st, 40, (k, s) => { const y = Math.min(...st.map(p => p[1])) + k * 5; return [Math.min(...xs) - 2 + s * (Math.max(...xs) - Math.min(...xs) + 4), y]; }, (x) => x > cxs + .5 ? 1 : 0, { n: 12, w: .6, thr: () => .5, minL: 1 }); }
+  // mound: outline + moss tufts + stipple
+  S.region(mound, [118, 132, 84], { seed: 13, blot: [88, 104, 62] });
+  S.line(mound, 1.4, 1, 2);
+  const MP = polyPath(mound);
+  for (let i = 0; i < 90 * sc; i++) { const x = X + (r() * 2 - 1) * 78 * sc, y = Bl + 2 - r() * 26 * sc; if (!HC.isPointInPath(MP, x, y + 2)) continue;
+    const a = -Math.PI / 2 + (r() - .5) * 1.2, l = 3 + r() * 5; S.line([[x, y], [x + Math.cos(a) * l, y + Math.sin(a) * l]], .7, .9, .3); }
+  hatchFam(S, null, 4, (k, s) => [X - 90 * sc * (1 - k * .15) + 180 * sc * (1 - k * .15) * s, Bl + 7 + k * 3.4], () => 1, { n: 20, w: .7, thr: () => 0 });
+  S.bbox = [X - 150 * sc, Bl - 330 * sc - 40, X + 150 * sc, Bl + 24];
+  S.wash = [X, Bl - 200 * sc];
+  return S;
+}
+
+// ── Fig. 4 — Tabulella: banded shelf brackets on a stump of bark ──
+function bracket(X, Bl, seed) {
+  const S = new Spec(seed), r = rng(seed); S.cx = X; S.base = Bl;
+  const bark = [], x0 = X - 96, x1 = X - 36, top = Bl - 400;
+  for (let i = 0; i <= 30; i++) { const v = i / 30; bark.push([x0 + 3 * Math.sin(v * 13 + 1), Bl - v * 400]); }
+  const jag = [[x0 + 12, top - 14], [x0 + 24, top + 4], [x0 + 38, top - 22], [x0 + 50, top - 2]];
+  bark.push(...jag);
+  for (let i = 30; i >= 0; i--) { const v = i / 30; bark.push([x1 + 3 * Math.sin(v * 11 + 4), Bl - v * 400]); }
+  bark.push([x1 + 16, Bl + 4], [x0 - 16, Bl + 4]);
+  S.region(bark, [134, 118, 96], { seed: 21, blot: [96, 82, 64] });
+  S.line(bark, 1.6, 1, 2);
+  hatchFam(S, bark, 15, (k, s) => [x0 - 6 + k * 5 + 2.2 * Math.sin(s * 14 + k * 1.3), Bl + 6 - s * 430], (x) => .3 + .8 * (x - x0) / 60, { n: 70, w: .8, lv: 1 });
+  for (let i = 0; i < 7; i++) { const x = x0 + 8 + r() * 44, y = Bl - 20 - r() * 360, l = 20 + r() * 50; S.line([[x, y], [x + 2, y - l * .5], [x - 1, y - l]], 1.0, 1, .8); }
+  const shelves = [{ y: Bl - 332, r: 128 }, { y: Bl - 230, r: 166 }, { y: Bl - 128, r: 140 }];
+  const zc = [[150, 78, 52], [198, 150, 86], [102, 116, 134], [222, 202, 164], [132, 90, 66], [186, 128, 72], [92, 104, 124], [232, 216, 180]];
+  const xA = x1 - 2;
+  for (const [si, sh] of shelves.entries()) {
+    const ry = sh.r * .27, th = 9, NZ = 7;
+    const rad = a => sh.r * (1 + .05 * Math.sin(a * 7 + si * 2) + .018 * Math.sin(a * 13 + si));
+    const P = (f, a, dy = 0) => [xA + f * rad(a) * Math.cos(a), sh.y + f * ry * (1 + .04 * Math.sin(a * 7 + si * 2)) * Math.sin(a) + dy];
+    const arc = (f, a0, a1, n = 48, dy = 0) => { const p = []; for (let i = 0; i <= n; i++) p.push(P(f, lerp(a0, a1, i / n), dy)); return p; };
+    const band = [...arc(1, 0, Math.PI / 2), ...arc(1, Math.PI / 2, 0, 48, th)];
+    S.region(band, [110, 74, 52], { seed: 22 + si });
+    for (let z = NZ; z >= 1; z--) { const f = z / NZ; const reg = [[xA, sh.y - f * ry], ...arc(f, -Math.PI / 2, Math.PI / 2), [xA, sh.y + f * ry]]; S.region(reg, zc[(z + si) % zc.length], { seed: 30 + z + si * 7 }); }
+    S.line(arc(1, -Math.PI / 2, Math.PI / 2, 60), 1.6, 1, 2.2); S.line(arc(1, 0, Math.PI / 2, 40, th), 1.3, 1, 1.8);
+    S.line([P(1, 0), P(1, 0, th)], 1.1, 1, .5);
+    for (let z = 1; z < NZ; z++) S.line(arc(z / NZ, -Math.PI / 2 * .98, Math.PI / 2 * .98, 44), .8, .9, .7);
+    // band hatching (vertical, dark underside)
+    hatchFam(S, band, 60, (k, s) => { const a = k / 60 * Math.PI / 2; const p = P(1, a); return [p[0], p[1] - 1 + s * (th + 3)]; }, () => .9, { n: 6, w: .7, thr: k => (k % 2 ? .5 : .2), minL: 2 });
+    // fine radial hairs on the top face, shaded toward the front
+    hatchFam(S, [[xA, sh.y - ry], ...arc(1, -Math.PI / 2, Math.PI / 2), [xA, sh.y + ry]], 46, (k, s) => { const a = -Math.PI / 2 + (k + .5) / 46 * Math.PI; return P(.12 + s * .86, a); }, (x, y) => .2 + .9 * (y - sh.y + ry) / (2 * ry), { n: 26, w: .55, lv: 2 });
+  }
+  hatchFam(S, null, 4, (k, s) => [X - 150 * (1 - k * .15) + 240 * (1 - k * .15) * s, Bl + 8 + k * 3.4], () => 1, { n: 24, w: .7, thr: () => 0 });
+  S.bbox = [x0 - 30, top - 40, X + 170, Bl + 24];
+  S.wash = [X - 20, Bl - 240];
+  return S;
+}
+
+// ── Fig. 5 — Favomyces: honeycombed cone on a thick stalk ──
+function morel(X, Bl, sc, seed) {
+  const S = new Spec(seed), r = rng(seed); S.cx = X; S.base = Bl;
+  const Hs = 176 * sc, Hc = 250 * sc, Rc = 64 * sc;
+  const shw = v => (25 - 4 * v) * sc + 9 * sc * Math.exp(-Math.pow(v / .12, 2)) + 1.5 * Math.sin(v * 17);
+  const Ls = [], Rs = []; for (let i = 0; i <= 30; i++) { const v = i / 30, y = Bl - v * Hs; Ls.push([X - shw(v), y]); Rs.push([X + shw(v), y]); }
+  const stipe = [...Ls, ...Rs.slice().reverse()];
+  const yc = Bl - Hs + 16 * sc;
+  const chw = v => Rc * Math.pow(Math.max(0, 1 - Math.pow(v, 2.4)), .55) * (1 - .08 * v) + (v < .06 ? 4 * sc : 0);
+  const cL = [], cR = []; for (let i = 0; i <= 40; i++) { const v = i / 40, y = yc - v * Hc; cL.push([X - chw(v), y]); cR.push([X + chw(v), y]); }
+  const cap = [...cL, ...cR.slice().reverse()];
+  S.region(stipe, [232, 218, 188], { seed: 41 });
+  S.region(cap, [204, 162, 104], { seed: 42 });
+  const M = 9, mer = (j, v) => { const u = -1 + 2 * j / (M - 1); return [X + chw(v) * Math.sin(Math.PI / 2 * u + .08 * Math.sin(v * 11 + j * 2.3)), yc - v * Hc]; };
+  // cells between meridians
+  const cells = [], cross = [];
+  for (let j = 0; j < M - 1; j++) {
+    const cuts = [.03]; let v = .03 + r() * .1; while (v < .9) { cuts.push(v); v += .1 + r() * .08; } cuts.push(.96);
+    for (let c = 0; c < cuts.length - 1; c++) { const va = cuts[c], vb = cuts[c + 1], pts = [];
+      for (let i = 0; i <= 8; i++) pts.push(mer(j, lerp(va, vb, i / 8)));
+      for (let i = 8; i >= 0; i--) pts.push(mer(j + 1, lerp(va, vb, i / 8)));
+      const cxm = pts.reduce((s, p) => s + p[0], 0) / pts.length, cym = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+      const inset = pts.map(([x, y]) => [cxm + (x - cxm) * .72, cym + (y - cym) * .8]);
+      cells.push({ pts, inset, cxm, cym, j });
+      if (c > 0) cross.push([mer(j, va), [lerp(mer(j, va)[0], mer(j + 1, va)[0], .5), mer(j, va)[1] + 3 * sc * (r() - .5)], mer(j + 1, va)]); } }
+  for (const c of cells) { const edge = Math.abs(c.j - (M - 2) / 2) / ((M - 2) / 2); if (edge > .99) continue; S.region(c.inset, [104, 70, 42], { seed: 50 + c.j, a: .9 }); }
+  S.line(Ls, 1.4, 1, 2.2); S.line(Rs, 1.6, 1, 2.2); S.line([...cL.slice().reverse(), ...cR.slice(1)], 1.8, 1, 2.4);
+  S.line([[X - chw(0), yc], [X, yc + 5 * sc], [X + chw(0), yc]], 1.2, 1, 1.2);
+  for (let j = 1; j < M - 1; j++) { const p = []; for (let i = 0; i <= 30; i++) p.push(mer(j, .02 + i / 30 * .94)); S.line(p, 1.15, 1, 1); }
+  for (const p of cross) S.line(p, 1.1, 1, .9);
+  for (const c of cells) { S.line([...c.inset, c.inset[0]], .6, .85, .4);
+    hatchFam(S, c.inset, 6, (k, s) => { const y = c.cym - 10 * sc + k * 4 * sc; return [c.cxm - 18 * sc + 36 * sc * s, y]; }, (x, y) => .45 + (x - X) / Rc * .6 + (x - c.cxm) / 12, { n: 10, w: .6, minL: 2 }); }
+  hatchFam(S, stipe, 16, (k, s) => { const u = -1 + k * .13, v = s; return [X + u * shw(v) + 1.6 * Math.sin(v * 22 + k), Bl - v * Hs]; }, (x, y) => .2 + .9 * (x - X) / 25, { n: 30, w: .7 });
+  hatchFam(S, null, 4, (k, s) => [X - 60 * sc * (1 - k * .15) + 120 * sc * (1 - k * .15) * s + 6, Bl + 4 + k * 3.4], () => 1, { n: 20, w: .7, thr: () => 0 });
+  S.bbox = [X - Rc - 26, yc - Hc - 24, X + Rc + 26, Bl + 20];
+  S.wash = [X - 10, yc - Hc * .55];
+  return S;
+}
+
+// ── Fig. 3 — Astrocalyx: the hero earthstar, drawn live so it can unfold ──
+const HX = 960, HB = B + 4, HA = 66, NR = 8, PITCH = 17 * DEG;
+const LG = (() => { const v = [-.55, .7, .45], l = Math.hypot(...v); return v.map(x => x / l); })();
+function rayGeom(u) {
+  const a = HA, rho = 1.08 * a, al0 = -60 * DEG;
+  const tau0 = lerp(30 * DEG, 4 * DEG, u), k = lerp(1 / rho, -1 / (1.4 * a), u), L = lerp(rho * 140 * DEG, 2.6 * a, u);
+  const bx = rho * Math.cos(al0), by = rho * Math.sin(al0);
+  const cl = s => { const th = tau0 + k * s; if (Math.abs(k) < 1e-6) return [bx + s * Math.cos(tau0), by + s * Math.sin(tau0), th];
+    return [bx + (Math.sin(th) - Math.sin(tau0)) / k, by - (Math.cos(th) - Math.cos(tau0)) / k, th]; };
+  return { cl, L };
+}
+const rayW = f => HA * .46 * (1 - Math.pow(f, 2.2)) * (.6 + .4 * Math.sin(Math.PI * f * .9));
+const SAC_DOTS = (() => { const r = rng(77), d = []; for (let i = 0; i < 900; i++) { const a = r() * TAU, q = Math.sqrt(r()); d.push([Math.cos(a) * q, Math.sin(a) * q, r()]); } return d; })();
+const SPORES = (() => { const r = rng(91), d = []; for (let i = 0; i < 130; i++) d.push({ vx: (r() * 2 - 1) * (50 + r() * 110), vy: -(40 + r() * 170), s: .45 + r() * 1.0, dl: r() * .45, ph: r() * TAU }); return d; })();
+function heroState(t) {
+  const us = [];
+  for (let i = 0; i < NR; i++) { const t0 = T.unfold + i * .035;
+    const pre = -.07 * Math.sin(Math.PI * seg(t, T.unfold - .3, t0));                // anticipation: squeeze shut
+    const op = seg(t, t0, t0 + .95); us.push(op > 0 ? eBack(op, 1.6) : pre); }
+  return us;
+}
+function proj(X3, Y3, Z3) { return [HX + X3, HB - Y3 * Math.cos(PITCH) + Z3 * Math.sin(PITCH), Z3 * Math.cos(PITCH) + Y3 * Math.sin(PITCH)]; }
+function heroBuild(t) {
+  const us = heroState(t); let lift = HA;
+  const rays = [];
+  for (let i = 0; i < NR; i++) {
+    const phi = i / NR * TAU + .35, dx = Math.cos(phi), dz = Math.sin(phi), g = rayGeom(us[i]); const J = 22, pts = [];
+    for (let j = 0; j <= J; j++) { const f = j / J, s = f * g.L, [rr, yy, th] = g.cl(s); pts.push({ f, rr, yy, th }); lift = Math.max(lift, -yy + 2); }
+    rays.push({ phi, dx, dz, pts });
+  }
+  for (const R of rays) {
+    R.L = []; R.R = []; R.C = []; R.face = []; R.shade = []; let dsum = 0;
+    for (const p of R.pts) { const w = rayW(p.f), X3 = p.rr * R.dx, Z3 = p.rr * R.dz, Y3 = p.yy + lift;
+      const ex = -R.dz, ez = R.dx;
+      R.L.push(proj(X3 - ex * w, Y3, Z3 - ez * w)); R.R.push(proj(X3 + ex * w, Y3, Z3 + ez * w)); const c = proj(X3, Y3, Z3); R.C.push(c); dsum += c[2];
+      const n = [Math.sin(p.th) * R.dx, -Math.cos(p.th), Math.sin(p.th) * R.dz], V = [0, Math.sin(PITCH), Math.cos(PITCH)];
+      const outer = n[0] * V[0] + n[1] * V[1] + n[2] * V[2] > 0, nn = outer ? n : n.map(x => -x);
+      R.face.push(outer); R.shade.push(1 - Math.max(0, nn[0] * LG[0] + nn[1] * LG[1] + nn[2] * LG[2])); }
+    R.depth = dsum / R.pts.length;
+  }
+  const C = proj(0, lift, 0);
+  return { rays, C, lift, us };
+}
+let PAPERPAT = null;
+function washClip(c, ox, oy, R, q, seed) {
+  const p = new Path2D(), rr = R * eOut(q);
+  for (let i = 0; i <= 90; i++) { const a = i / 90 * TAU; const n = fbm(Math.cos(a) * 1.6 + seed, Math.sin(a) * 1.6, seed, 3);
+    const r2 = rr * (.78 + .44 * n); const x = ox + Math.cos(a) * r2, y = oy + Math.sin(a) * r2; i ? p.lineTo(x, y) : p.moveTo(x, y); }
+  p.closePath(); c.clip(p);
+}
+const RAY_OUT = [146, 100, 66], RAY_IN = [218, 164, 124], SAC = [150, 136, 118];
+function drawHero(c, t, p, q) {
+  const hb = heroBuild(t), { rays, C } = hb, a = HA;
+  const pr = f => clamp((p - f[0]) / (f[1] - f[0]));
+  const pOut = pr([0, .5]), pHat = pr([.45, 1]), pDot = pr([.3, .95]);
+  c.lineJoin = 'round'; c.lineCap = 'round';
+  const back = rays.filter(R => R.depth < 0).sort((x, y) => x.depth - y.depth), front = rays.filter(R => R.depth >= 0).sort((x, y) => x.depth - y.depth);
+  const drawRay = R => {
+    const J = R.pts.length - 1;
+    const quads = []; for (let j = 0; j < J; j++) quads.push([R.L[j], R.L[j + 1], R.R[j + 1], R.R[j]]);
+    c.fillStyle = PAPERPAT; for (const qd of quads) { c.beginPath(); qd.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); c.fill(); c.lineWidth = .8; c.strokeStyle = PAPERPAT; c.stroke(); }
+    if (q > 0) { c.save(); washClip(c, HX - 40, HB - 150, 420, q, 7);
+      for (let j = 0; j < J; j++) { const col = R.face[j] ? RAY_OUT : RAY_IN, sh = R.shade[j]; c.fillStyle = rgba(col.map(v => v * (1 - .28 * sh)), .62);
+        c.beginPath(); quads[j].forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); c.fill(); }
+      c.globalAlpha = .35; c.fillStyle = GRANPAT; for (const qd of quads) { c.beginPath(); qd.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); c.fill(); }
+      c.globalAlpha = 1; c.restore(); }
+    // outline, growing from base to tip
+    const n = Math.max(1, Math.round(J * pOut)); if (pOut > 0) { c.strokeStyle = INK; c.lineWidth = 1.5;
+      c.beginPath(); for (let j = 0; j <= n; j++) j ? c.lineTo(...R.L[j]) : c.moveTo(...R.L[j]); if (n === J) for (let j = J; j >= 0; j--) c.lineTo(...R.R[j]); c.stroke();
+      if (n < J) { c.beginPath(); for (let j = 0; j <= n; j++) j ? c.lineTo(...R.R[j].slice(0, 2)) : c.moveTo(...R.R[j]); c.stroke(); } }
+    // hatching along the ray (dense where the face is turned from the light)
+    if (pHat > 0) { c.lineWidth = .75; c.strokeStyle = INK; const offs = [-.7, -.45, -.2, .05, .3, .55, .78];
+      for (const [oi, o] of offs.entries()) { const thr = LV[oi % LV.length] * .9 + .1; c.beginPath(); let on = false;
+        const m = Math.round(J * pHat);
+        for (let j = 1; j < m; j++) { const sh = R.shade[j] + (R.face[j] ? .18 : -.15); const x = lerp(R.C[j][0], o < 0 ? R.L[j][0] : R.R[j][0], Math.abs(o)), y = lerp(R.C[j][1], o < 0 ? R.L[j][1] : R.R[j][1], Math.abs(o));
+          if (sh > thr) { on ? c.lineTo(x, y) : c.moveTo(x, y); on = true; } else on = false; }
+        c.stroke(); }
+      c.lineWidth = .55; for (const o of [-.33, .36]) { c.beginPath(); let on = false; const m = Math.round(J * pHat);
+        for (let j = 2; j < m - 1; j++) { const x = lerp(R.C[j][0], o < 0 ? R.L[j][0] : R.R[j][0], Math.abs(o)), y = lerp(R.C[j][1], o < 0 ? R.L[j][1] : R.R[j][1], Math.abs(o));
+          if (!R.face[j]) { on ? c.lineTo(x, y) : c.moveTo(x, y); on = true; } else on = false; } c.stroke(); } }
+  };
+  back.forEach(drawRay);
+  // spore sac
+  const [cx, cy] = C;
+  const sac = new Path2D(); sac.arc(cx, cy, a, 0, TAU);
+  c.fillStyle = PAPERPAT; c.fill(sac);
+  if (q > 0) { c.save(); washClip(c, HX - 40, HB - 150, 420, q, 7); const g = c.createRadialGradient(cx - a * .4, cy - a * .45, a * .1, cx, cy, a);
+    g.addColorStop(0, rgba([196, 182, 160], .6)); g.addColorStop(1, rgba([118, 102, 88], .7)); c.fillStyle = g; c.fill(sac); c.globalAlpha = .4; c.fillStyle = GRANPAT; c.fill(sac); c.globalAlpha = 1; c.restore(); }
+  if (pDot > 0) { c.fillStyle = INK; const nd = Math.round(SAC_DOTS.length * pDot);
+    for (let i = 0; i < nd; i++) { const [x, y, v] = SAC_DOTS[i]; const nz = Math.sqrt(Math.max(0, 1 - x * x - y * y)); const sh = 1 - Math.max(0, x * LG[0] - y * LG[1] + nz * LG[2]);
+      if (Math.pow(sh, 1.6) * 1.25 - .08 > v) { c.beginPath(); c.arc(cx + x * a * .97, cy + y * a * .97, .85, 0, TAU); c.fill(); } } }
+  if (pOut > 0) { c.strokeStyle = INK; c.lineWidth = 1.7; c.beginPath(); c.arc(cx, cy, a, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(pOut * 1.6)); c.stroke();
+    // contour arcs on the shaded side
+    c.lineWidth = .8; for (let k = 1; k <= 5; k++) { const rr = a - k * 3.6; if (pHat <= 0) break; c.beginPath(); c.arc(cx, cy, rr, -.15, Math.PI * (.55 - k * .04) * pHat); c.stroke(); } }
+  // peristome (the pointed mouth)
+  if (pOut > .3) { const pa = clamp((pOut - .3) / .5); const bw = a * .2, by = cy - a * .92, ty = cy - a * 1.24;
+    c.fillStyle = PAPERPAT; c.beginPath(); c.moveTo(cx - bw, by + 3); c.quadraticCurveTo(cx - bw * .5, by - a * .12, cx, ty); c.quadraticCurveTo(cx + bw * .5, by - a * .12, cx + bw, by + 3); c.fill();
+    if (q > 0) { c.save(); washClip(c, HX - 40, HB - 150, 420, q, 7); c.fillStyle = rgba([110, 96, 84], .55); c.fill(); c.restore(); }
+    c.globalAlpha = pa; c.strokeStyle = INK; c.lineWidth = 1.3; c.beginPath(); c.moveTo(cx - bw, by + 3); c.quadraticCurveTo(cx - bw * .5, by - a * .12, cx, ty); c.quadraticCurveTo(cx + bw * .5, by - a * .12, cx + bw, by + 3); c.stroke();
+    c.lineWidth = .7; for (let k = -3; k <= 3; k++) { c.beginPath(); c.moveTo(cx + k * bw * .28, by + 2); c.lineTo(cx + k * 1.2, ty + 4); c.stroke(); }
+    c.beginPath(); c.ellipse(cx, by + 3, bw * 1.15, 4, 0, 0, Math.PI); c.stroke(); c.globalAlpha = 1; }
+  front.forEach(drawRay);
+  // spore puff
+  const tp = t - T.puff;
+  if (tp > 0 && tp < 3) { const ox = cx, oy = cy - a * 1.26; c.fillStyle = INK;
+    for (const s of SPORES) { const u = tp - s.dl; if (u <= 0) continue; const k = 2.2, e = (1 - Math.exp(-k * u)) / k;
+      const x = ox + s.vx * e + 10 * Math.sin(u * 2 + s.ph) + 16 * u, y = oy + s.vy * e - 12 * u; const al = clamp(1 - u / 1.9) * clamp(u / .08);
+      if (al <= 0) continue; c.globalAlpha = al * .8; c.beginPath(); c.arc(x, y, s.s * (1 + u * .3), 0, TAU); c.fill(); }
+    c.globalAlpha = 1; }
+  return hb;
+}
+</script>
+<script src="plate.js"></script>
+</body></html>
