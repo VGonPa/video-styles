@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}svg{position:absolute;left:-9999px;top:0}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<svg id="sv" width="10" height="10"><path id="sp" d="M0 0"/></svg>
+<script>
+// ── single-panel-absurd · a one-panel rural/scientific absurdist gag, loose ink with grey-green washes ──
+// A tear-off desk-calendar page. The panel inks itself in with a round, slightly shaky brush-pen line,
+// the grey and green washes bloom, and one small thing happens: a car slows down on the country road,
+// and a cow quietly rises onto her hind legs to watch it go and add a mark to the tally on the fence.
+// The caption is typed in below. The page is torn off over the top of the pad and the next day's
+// panel inks itself: penguins, banded by researchers, one holds up her flipper to show the band.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2, DEG = Math.PI / 180;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eIO2 = u => u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const backOut = (u, c = 1.7) => u >= 1 ? 1 : 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+const PAPER = '#f4f1e6', INK = '#1b1c18';
+const WASHC = { n: [104, 108, 102], g: [96, 128, 86], d: [44, 48, 42], s: [150, 160, 150] };
+const SERIF = '"Libre Baskerville"';
+// the pad and the panel on its sheet
+const PADX = 400, PADW = 1120, BIND0 = 22, BIND1 = 60, SHY1 = 1044;
+const PX = 500, PY = 126, PW = 920, PH = 660;
+const T = {
+  d1: [0.2, 1.5], w1: 1.2, car: [1.05, 3.35], rise: [2.0, 2.65], tally: [2.8, 3.05], c1: 3.25,
+  flip: [5.35, 6.2],
+  d2: [6.0, 7.0], w2: 6.75, flipper: 7.1, c2: 7.35, out: [9.5, 10.0],
+};
+const CAP1 = ['“Nine today who slowed down to say ‘moo.’ One begins', 'to wonder who is anthropomorphizing whom.”'];
+const CAP2 = ['“Eleven years of study, and they still can’t tell', 'us apart without the jewelry.”'];
+
+// ── scene authoring ──────────────────────────────────────────────────────────────────────────
+// Items are drawn in the order written (painter's order); the pen also inks strokes in that order.
+// S: pen stroke. FILL 'paper' knocks out what is behind (appears when the next stroke starts);
+// FILL 'ink' is a solid black. WASH blooms in after the line work. XF: authoring matrix; GRP: an
+// animated group whose matrix comes from the scene's groups(t).
+let CUR, XF = new DOMMatrix(), GRP = null;
+const newScene = () => ({ items: [] });
+const S = (d, w = 1, o = {}) => { for (const p of d.split(/(?=M)/)) if (p.trim()) CUR.items.push({ k: 's', d: p, w, g: GRP, m: XF, ...o }); };
+const WASH = (d, tone, delay = 0, col = 'n', rule = 'nonzero') => CUR.items.push({ k: 'w', d, tone, delay, col, rule, g: GRP, m: XF });
+const FILL = (d, col = 'paper', rule = 'nonzero') => CUR.items.push({ k: 'f', d, col, rule, g: GRP, m: XF });
+const at = (x, y, s = 1, mir = false) => new DOMMatrix().translate(x, y).scale(mir ? -s : s, s);
+const P = (m, x, y) => { const q = m.transformPoint(new DOMPoint(x, y)); return [q.x, q.y]; };
+const rotAbout = (x, y, a) => new DOMMatrix().translate(x, y).rotate(a / DEG).translate(-x, -y);
+function crD(pts) {                                            // Catmull-Rom through points → cubic path
+  let d = `M ${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+    d += ` C ${p1[0] + (p2[0] - p0[0]) / 6} ${p1[1] + (p2[1] - p0[1]) / 6} ${p2[0] - (p3[0] - p1[0]) / 6} ${p2[1] - (p3[1] - p1[1]) / 6} ${p2[0]} ${p2[1]}`;
+  }
+  return d;
+}
+function tube(pts, w0, w1) {                                   // outline of a tube along a centreline
+  const L = [], R = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1]; const n = Math.hypot(dx, dy) || 1; dx /= n; dy /= n;
+    const w = lerp(w0, w1, i / (pts.length - 1)) / 2;
+    L.push([pts[i][0] - dy * w, pts[i][1] + dx * w]); R.push([pts[i][0] + dy * w, pts[i][1] - dx * w]);
+  }
+  return { L, R };
+}
+// a leg: paper knock-out, two side lines, a black hoof
+function leg(pts, w0, w1, hoof = true, lw = 1) {
+  const { L, R } = tube(pts, w0, w1), e = pts[pts.length - 1];
+  FILL('M ' + [...L, ...R.slice().reverse()].map(p => p.join(' ')).join(' L ') + ' Z');
+  S(crD(L), lw); S(crD(R), lw);
+  if (hoof) { const h = w1 / 2 + 1; FILL(`M ${e[0] - h} ${e[1] - 11} L ${e[0] + h} ${e[1] - 11} L ${e[0] + h + 2} ${e[1]} L ${e[0] - h - 2} ${e[1]} Z`, 'ink'); S(`M ${e[0] - h - 2} ${e[1]} L ${e[0] + h + 2} ${e[1]}`, .8); }
+}
+const ell = (cx, cy, rx, ry) => `M ${cx - rx} ${cy} C ${cx - rx} ${cy - ry * 1.33} ${cx + rx} ${cy - ry * 1.33} ${cx + rx} ${cy} C ${cx + rx} ${cy + ry * 1.33} ${cx - rx} ${cy + ry * 1.33} ${cx - rx} ${cy} Z`;
+const tuft = (x, y, s = 1) => S(`M ${x - 7 * s} ${y} C ${x - 6 * s} ${y - 6 * s} ${x - 4 * s} ${y - 10 * s} ${x - 3 * s} ${y - 13 * s} M ${x} ${y} C ${x} ${y - 7 * s} ${x + 1 * s} ${y - 12 * s} ${x + 2 * s} ${y - 16 * s} M ${x + 6 * s} ${y} C ${x + 6 * s} ${y - 5 * s} ${x + 8 * s} ${y - 8 * s} ${x + 10 * s} ${y - 10 * s}`, .6);
+
+// ── the cow (authored facing right on all fours, feet on y = 0, rump at x ≈ 0) ─────────────────
+// pivots: hip, shoulder, neck base, tail root (local coords)
+const COW = { hip: [46, -104], sh: [192, -96], neck: [206, -134], tail: [22, -146] };
+const COWBODY = 'M 30 -152 C 70 -160 140 -152 192 -154 C 216 -152 228 -128 224 -102 C 220 -82 206 -66 190 -63 C 150 -56 100 -59 70 -63 C 44 -63 24 -76 17 -96 C 9 -116 11 -146 30 -152 Z';
+function cowHeadUp() {                                        // head raised, looking ahead
+  S('M 190 -153 C 206 -160 220 -168 236 -174', 1);                                  // top of neck
+  S('M 222 -106 C 232 -116 242 -124 252 -128', 1);                                  // dewlap
+  const hd = 'M 234 -176 C 232 -196 252 -204 268 -198 C 284 -190 294 -170 300 -150 C 306 -134 302 -118 288 -114 C 274 -111 264 -117 256 -126 C 246 -138 236 -154 234 -176 Z';
+  FILL('M 190 -153 C 206 -160 220 -168 236 -174 L 256 -126 C 244 -124 232 -116 222 -106 L 200 -120 Z');
+  FILL(hd); S(hd, 1.05);
+  FILL('M 244 -188 C 230 -198 216 -196 212 -188 C 220 -180 234 -180 244 -180 Z'); S('M 244 -188 C 230 -198 216 -196 212 -188 C 220 -180 234 -180 244 -180', .85);   // ear
+  S('M 256 -198 C 254 -210 260 -216 266 -214 C 266 -208 264 -203 264 -199', .8);   // horn
+  FILL('M 280 -140 C 290 -146 304 -144 304 -132 C 304 -118 290 -113 282 -118 C 276 -124 276 -134 280 -140 Z', 'paper');
+  WASH('M 280 -140 C 290 -146 304 -144 304 -132 C 304 -118 290 -113 282 -118 C 276 -124 276 -134 280 -140 Z', .42, .1, 'n');   // muzzle
+  S('M 282 -140 C 280 -130 280 -122 285 -116', .6);
+  S('M 295 -136 C 298 -137 299 -134 297 -132', .7);                                   // nostril
+  S('M 262 -176 C 266 -181 274 -181 277 -175', .8);                                   // heavy lid
+  FILL(ell(270, -173.5, 3.2, 3), 'ink');
+  FILL('M 244 -178 C 250 -190 262 -194 268 -186 C 262 -180 252 -176 244 -178 Z', 'ink');   // patch over the eye
+}
+function cowHeadGraze() {                                     // head down in the grass
+  S('M 190 -153 C 214 -144 232 -118 242 -90', 1);
+  S('M 222 -104 C 226 -86 228 -70 229 -54', 1);
+  const hd = 'M 232 -96 C 250 -104 270 -94 276 -74 C 282 -52 284 -30 278 -14 C 272 -2 254 -2 247 -10 C 238 -24 230 -44 228 -64 C 227 -78 226 -90 232 -96 Z';
+  FILL('M 190 -153 C 214 -144 232 -118 242 -90 L 229 -54 C 228 -70 226 -86 222 -104 L 200 -130 Z');
+  FILL(hd); S(hd, 1.05);
+  FILL('M 240 -92 C 228 -106 214 -108 208 -102 C 214 -92 228 -88 240 -86 Z'); S('M 240 -92 C 228 -106 214 -108 208 -102 C 214 -92 228 -88 240 -86', .85);
+  S('M 256 -100 C 258 -112 266 -116 270 -112 C 268 -106 266 -102 264 -98', .8);
+  WASH('M 250 -26 C 262 -32 280 -30 280 -18 C 280 -4 262 -1 252 -8 C 246 -14 246 -22 250 -26 Z', .42, .1, 'n');
+  S('M 250 -26 C 256 -30 270 -32 279 -26', .6);
+  S('M 260 -72 C 264 -68 270 -68 273 -72', .8);                                        // eyes closed, content
+  FILL('M 234 -84 C 244 -94 256 -92 258 -82 C 250 -78 240 -78 234 -84 Z', 'ink');
+}
+function cowTail() {
+  const [x, y] = COW.tail;
+  S(`M ${x} ${y} C ${x - 14} ${y + 14} ${x - 18} ${y + 44} ${x - 15} ${y + 74}`, .9);
+  FILL(`M ${x - 15} ${y + 72} C ${x - 24} ${y + 82} ${x - 20} ${y + 94} ${x - 12} ${y + 98} C ${x - 8} ${y + 90} ${x - 8} ${y + 80} ${x - 15} ${y + 72} Z`, 'ink');
+}
+// grp: {body, fore, head, tail} group names (or null for a static cow)
+function cow(m, grp, graze) {
+  XF = m;
+  GRP = null;
+  leg([[74, -80], [72, -44], [78, -24], [76, 0]], 22, 15);                         // far hind
+  GRP = grp.fore; leg([[204, -80], [206, -40], [208, 0]], 22, 15);                  // far fore
+  GRP = null;
+  leg([[40, -96], [48, -54], [40, -30], [48, 0]], 32, 17);                          // near hind: thigh, hock
+  GRP = grp.body;
+  FILL('M 70 -66 C 70 -40 104 -40 106 -64 Z'); S('M 70 -66 C 70 -40 104 -40 106 -64', .9);   // udder
+  S('M 80 -46 L 80 -38', .7); S('M 95 -46 L 96 -38', .7);
+  WASH('M 70 -66 C 70 -40 104 -40 106 -64 Z', .3, .15, 'n');
+  GRP = grp.tail; cowTail();
+  GRP = grp.body;
+  FILL(COWBODY); S(COWBODY, 1.1);
+  S('M 62 -146 C 74 -120 72 -92 60 -68', .55);                                      // thigh
+  S('M 176 -150 C 170 -130 172 -110 180 -92', .5);                                  // shoulder
+  WASH('M 17 -96 C 24 -76 44 -63 70 -63 C 100 -59 150 -56 190 -63 C 206 -66 220 -82 224 -102 C 200 -86 150 -80 100 -84 C 60 -86 30 -90 17 -96 Z', .3, .05, 'n');
+  FILL('M 92 -150 C 112 -156 134 -146 132 -124 C 128 -104 102 -106 94 -120 C 86 -132 84 -144 92 -150 Z', 'ink');
+  FILL('M 28 -136 C 38 -146 56 -138 54 -120 C 50 -106 34 -110 26 -118 C 20 -124 22 -132 28 -136 Z', 'ink');
+  FILL('M 158 -126 C 172 -134 188 -124 186 -108 C 182 -96 166 -98 160 -106 C 154 -112 152 -120 158 -126 Z', 'ink');
+  GRP = grp.head; if (graze) cowHeadGraze(); else cowHeadUp();
+  GRP = grp.fore; leg([[184, -86], [182, -42], [180, 0]], 26, 17);                 // near fore
+  GRP = null; XF = new DOMMatrix();
+}
+
+// ── the car (facing right, wheels on y = 0) ──
+function car(m) {
+  XF = m; GRP = 'car';
+  const body = 'M 0 -12 L 0 -28 C 0 -33 4 -36 10 -36 L 30 -38 C 38 -52 48 -58 64 -58 L 88 -58 C 100 -58 106 -50 112 -38 L 124 -36 C 130 -35 133 -30 133 -26 L 133 -12 Z';
+  FILL(body); WASH(body, .5, 0, 'n');
+  S('M 0 -12 L 0 -28 C 0 -33 4 -36 10 -36 L 30 -38 C 38 -52 48 -58 64 -58 L 88 -58 C 100 -58 106 -50 112 -38 L 124 -36 C 130 -35 133 -30 133 -26 L 133 -12', 1, { inst: 1 });
+  S('M 0 -12 L 14 -12 M 42 -12 L 92 -12 M 120 -12 L 133 -12', .9, { inst: 1 });
+  FILL('M 42 -40 C 48 -50 54 -53 64 -53 L 72 -53 L 72 -40 Z M 78 -53 L 88 -53 C 96 -53 100 -47 104 -40 L 78 -40 Z');
+  S('M 42 -40 C 48 -50 54 -53 64 -53 L 72 -53 L 72 -40 Z M 78 -53 L 88 -53 C 96 -53 100 -47 104 -40 L 78 -40 Z', .7, { inst: 1 });
+  FILL(ell(88, -45, 5, 5.5), 'ink'); FILL('M 83 -40 L 93 -40 L 93 -38 L 83 -38 Z', 'ink');   // the driver
+  S('M 74 -34 L 74 -14', .5, { inst: 1 }); S('M 60 -30 L 66 -30', .6, { inst: 1 });
+  for (const x of [28, 106]) { FILL(ell(x, -10, 12, 12), 'ink'); FILL(ell(x, -10, 4.5, 4.5)); }
+  GRP = null; XF = new DOMMatrix();
+}
+
+// ── scene 1 · the pasture ─────────────────────────────────────────────────────────────────────
+const HY1 = 300, COWA = at(150, 598), COWB = at(832, 616, 1, true);
+const SC1 = newScene(); CUR = SC1;
+WASH(`M 0 0 L ${PW} 0 L ${PW} ${HY1} L 0 ${HY1} Z`, .2, 0, 's');
+for (const [x, y, s] of [[620, 92, 1], [180, 150, .7]]) {                          // two flat clouds
+  const d = `M ${x - 70 * s} ${y} C ${x - 72 * s} ${y - 14 * s} ${x - 52 * s} ${y - 22 * s} ${x - 36 * s} ${y - 14 * s} C ${x - 28 * s} ${y - 34 * s} ${x + 6 * s} ${y - 36 * s} ${x + 14 * s} ${y - 18 * s} C ${x + 30 * s} ${y - 28 * s} ${x + 60 * s} ${y - 20 * s} ${x + 62 * s} ${y} Z`;
+  FILL(d); S(d, .8);
+}
+S(`M 0 ${HY1} C 240 ${HY1 - 1} 600 ${HY1 + 1} ${PW} ${HY1}`, 1);                 // the horizon, dead flat
+for (const [x, y, s] of [[380, 120, 1], [408, 108, .8], [430, 128, .7]]) S(`M ${x - 9 * s} ${y - 3 * s} C ${x - 6 * s} ${y - 6 * s} ${x - 2 * s} ${y - 4 * s} ${x} ${y} C ${x + 2 * s} ${y - 4 * s} ${x + 6 * s} ${y - 6 * s} ${x + 9 * s} ${y - 3 * s}`, .6);
+// a lone tree, far left
+S('M 96 300 C 98 286 97 270 94 258 M 106 300 C 104 284 106 268 108 258', .8);
+FILL('M 70 262 C 56 256 58 230 76 226 C 76 206 104 200 114 214 C 132 208 146 228 136 244 C 146 258 130 272 114 266 C 104 276 82 274 70 262 Z');
+S('M 70 262 C 56 256 58 230 76 226 C 76 206 104 200 114 214 C 132 208 146 228 136 244 C 146 258 130 272 114 266 C 104 276 82 274 70 262 Z', .9);
+WASH('M 70 262 C 56 256 58 230 76 226 C 76 206 104 200 114 214 C 132 208 146 228 136 244 C 146 258 130 272 114 266 C 104 276 82 274 70 262 Z', .6, .1, 'g');
+// a farmhouse and a silo on the horizon, far right
+FILL('M 736 300 L 736 262 L 760 244 L 784 262 L 784 300 Z M 792 300 L 792 240 C 792 228 814 228 814 240 L 814 300 Z');
+S('M 736 300 L 736 262 L 760 244 L 784 262 L 784 300', .8); S('M 730 266 L 760 242 L 790 266', .8);
+S('M 752 300 L 752 284 L 764 284 L 764 300', .5); S('M 768 272 L 778 272 L 778 280 L 768 280 Z', .5);
+S('M 792 300 L 792 240 C 792 228 814 228 814 240 L 814 300', .8); S('M 792 252 L 814 252', .4); S('M 792 266 L 814 266', .4);
+WASH('M 730 266 L 760 242 L 790 266 L 784 262 L 760 244 L 736 262 Z M 792 240 C 792 228 814 228 814 240 Z', .6, .1, 'd');
+WASH('M 736 300 L 736 262 L 760 244 L 784 262 L 784 300 Z M 792 300 L 792 240 L 814 240 L 814 300 Z', .22, .15, 'n');
+// the country road just behind the fence
+WASH(`M 0 ${HY1} L ${PW} ${HY1} L ${PW} 316 L 0 316 Z`, .5, .05, 'g');
+WASH(`M 0 316 L ${PW} 316 L ${PW} 334 L 0 334 Z`, .3, .1, 'n');
+S(`M 0 316 C 300 315 620 317 ${PW} 316`, .7); S(`M 0 334 C 300 335 620 333 ${PW} 334`, .7);
+car(at(0, 0, .82));
+// ground
+WASH(`M 0 334 L ${PW} 334 L ${PW} ${PH} L 0 ${PH} Z`, .55, .1, 'g');
+WASH(`M 0 520 C 200 500 500 540 ${PW} 510 L ${PW} ${PH} L 0 ${PH} Z`, .18, .2, 'g');
+// the fence: two wires, posts; the tally board on one post
+S(`M 0 354 C 300 356 620 352 ${PW} 355`, .55); S(`M 0 372 C 300 374 620 370 ${PW} 373`, .55);
+for (const x of [34, 154, 520, 640, 760, 880]) { const d = `M ${x - 5} 392 L ${x - 5} 344 L ${x + 5} 342 L ${x + 5} 392 Z`; FILL(d); S(d, .75); WASH(d, .4, .1, 'n'); }
+const TB = { x: 316, y: 352, w: 74, h: 38 };                                        // the tally board
+{ const d = `M 310 414 L 310 336 L 323 334 L 323 414 Z`; FILL(d); S(d, .8); WASH(d, .4, .1, 'n');
+  const b = `M ${TB.x - 34} ${TB.y - 2} L ${TB.x + 36} ${TB.y} L ${TB.x + 35} ${TB.y + TB.h} L ${TB.x - 35} ${TB.y + TB.h - 2} Z`;
+  FILL(b); S(b, .85); WASH(b, .22, .12, 'n');
+  S(`M ${TB.x - 30} ${TB.y + 6} l 0 0.5 M ${TB.x + 31} ${TB.y + 7} l 0 0.5`, 1.2);  // nails
+  for (let i = 0; i < 8; i++) {
+    const x = TB.x - 26 + i * 6.5 + (i > 4 ? 6 : 0);
+    if (i === 4) S(`M ${TB.x - 30} ${TB.y + 28} L ${TB.x - 2} ${TB.y + 10}`, .7);
+    else S(`M ${x} ${TB.y + 9} L ${x + 1} ${TB.y + 29}`, .7);
+  }
+  S(`M ${TB.x + 26} ${TB.y + 9} L ${TB.x + 27} ${TB.y + 29}`, .75, { at: T.tally });  // no. 9
+}
+for (const [x, y, s] of [[60, 430, .8], [230, 420, .7], [470, 440, .8], [700, 430, .7], [860, 450, .9], [330, 470, .8], [600, 480, .9]]) tuft(x, y, s);
+// shadows
+WASH(ell(270, 604, 150, 14), .45, .25, 'g'); WASH(ell(690, 622, 150, 14), .45, .25, 'g');
+// the listener, grazing, facing left
+cow(COWB, { body: null, fore: null, head: 'headB', tail: 'tailB' }, true);
+// the one who keeps count
+cow(COWA, { body: 'body', fore: 'fore', head: 'head', tail: 'tail' }, false);
+for (const [x, y, s] of [[40, 630, 1.2], [470, 640, 1.1], [880, 646, 1.2], [120, 560, 1], [560, 600, 1]]) tuft(x, y, s);
+// signature
+S('M 842 646 C 840 630 846 620 852 622 C 860 624 858 636 846 636 M 862 646 C 866 636 872 634 872 640 C 872 646 864 646 866 640 M 878 646 C 884 628 888 616 886 614 C 882 626 882 640 886 646 M 892 646 C 898 628 902 616 900 614 C 896 626 896 640 900 646', .55);
+SC1.groups = t => {
+  const G = {};
+  // the car: slows as it passes the pasture, then leaves
+  const cu = seg(t, T.car[0], T.car[1]);
+  if (cu > 0 && cu < 1) { const f = cu + .82 * Math.sin(TAU * cu) / TAU; G.car = new DOMMatrix().translate(lerp(-170, 960, f), 328); }
+  // the rise: a small settle, then up onto the hind legs with a touch of overshoot
+  const r0 = seg(t, T.rise[0], T.rise[0] + .14), r1 = seg(t, T.rise[0] + .1, T.rise[1]);
+  const k = -.035 * Math.sin(Math.PI * r0) * (1 - r1) + backOut(r1, 1.2);
+  const tap = Math.sin(Math.PI * seg(t, T.tally[0] - .12, T.tally[1] + .1)) ** 2;
+  const lh = P(COWA, ...COW.hip), ls = P(COWA, ...COW.sh), ln = P(COWA, ...COW.neck), lt = P(COWA, ...COW.tail);
+  G.body = rotAbout(lh[0], lh[1], -78 * DEG * k);
+  G.fore = G.body.multiply(rotAbout(ls[0], ls[1], (62 * k - 70 * tap) * DEG));
+  const look = seg(t, T.car[0] + .6, T.car[1] - .2);
+  G.head = G.body.multiply(rotAbout(ln[0], ln[1], (70 * k - 6 + 8 * eIO2(look)) * DEG));
+  G.tail = G.body.multiply(rotAbout(lt[0], lt[1], 70 * k * DEG));
+  // the listener chews on, tail swishing
+  const lb = P(COWB, ...COW.neck), tb = P(COWB, ...COW.tail);
+  G.headB = rotAbout(lb[0], lb[1], 1.6 * Math.sin(t * 7.5) * DEG);
+  G.tailB = rotAbout(tb[0], tb[1], (8 * Math.sin(t * 2.6) - 4) * DEG);
+  return G;
+};
+
+// ── the penguin (authored facing right, feet on y = 0, ~300 tall); flipper pivot at the shoulder ──
+const PEN = { sh: [-12, -204] };
+function penguin(m, flipG, detail = true) {
+  XF = m; GRP = null;
+  const sil = 'M 0 -296 C 28 -296 48 -276 49 -250 C 50 -228 44 -214 50 -196 C 72 -150 80 -95 70 -55 C 62 -24 38 -10 8 -8 C -24 -8 -50 -20 -60 -50 C -74 -90 -66 -150 -52 -190 C -46 -210 -48 -230 -44 -252 C -40 -280 -24 -296 0 -296 Z';
+  const back = 'M 44 -226 C 22 -200 14 -150 20 -100 C 26 -60 30 -32 22 -9 C -10 -7 -48 -18 -60 -50 C -74 -90 -66 -150 -52 -190 C -46 -210 -48 -230 -44 -252 C -40 -280 -24 -296 0 -296 C 28 -296 48 -276 49 -250 C 49 -240 47 -232 44 -226 Z';
+  if (detail) { FILL('M 2 -10 C 12 0 28 3 38 0 C 30 -6 22 -10 14 -12 Z M -34 -14 C -28 -3 -14 2 -6 0 L -8 -10 Z'); S('M 2 -10 C 12 0 28 3 38 0 C 30 -6 22 -10 14 -12', .8); S('M -34 -14 C -28 -3 -14 2 -6 0', .8); WASH('M 2 -10 C 12 0 28 3 38 0 C 30 -6 22 -10 14 -12 Z M -34 -14 C -28 -3 -14 2 -6 0 L -8 -10 Z', .35, .1, 'n'); }
+  FILL('M -58 -44 L -84 -14 L -50 -24 Z'); S('M -58 -44 L -84 -14 L -50 -24', .8); FILL('M -58 -44 L -84 -14 L -50 -24 Z', 'ink');   // tail
+  FILL(sil); S(sil, 1.1);
+  FILL(back, 'ink');
+  S('M 44 -226 C 22 -200 14 -150 20 -100 C 26 -60 30 -32 22 -9', .8);            // edge of the white front
+  if (detail) WASH('M 60 -140 C 70 -100 68 -60 50 -30 C 44 -60 40 -100 46 -150 Z', .18, .15, 'n');
+  FILL('M 47 -258 L 80 -249 L 47 -240 Z', 'ink');                                  // beak
+  FILL(ell(22, -262, 9, 8.5)); S(ell(22, -262, 9, 8.5), .7);                         // white eye ring
+  FILL(ell(24, -262, 3.4, 3.6), 'ink');
+  GRP = flipG;
+  const fl = 'M -14 -208 C 2 -204 8 -172 6 -132 C 4 -106 -2 -92 -8 -90 C -16 -94 -24 -128 -26 -160 C -28 -186 -26 -204 -14 -208 Z';
+  FILL(fl); S(fl, .95); FILL(fl, 'ink');
+  const band = 'M -26 -178 C -16 -181 -2 -182 5 -180 L 5 -164 C -4 -166 -16 -165 -25 -162 Z';   // the research band
+  FILL(band); S(band, .7); WASH(band, .2, .2, 'n');
+  if (detail) S('M -18 -174 L -18 -168 M -13 -175 L -9 -175 L -12 -168 M -4 -175 L -4 -169', .38);
+  GRP = null; XF = new DOMMatrix();
+}
+
+// ── scene 2 · the colony ──────────────────────────────────────────────────────────────────────
+const HY2 = 250, PENA = at(290, 612, 1), PENB = at(640, 618, 1, true);
+const SC2 = newScene(); CUR = SC2;
+WASH(`M 0 0 L ${PW} 0 L ${PW} ${HY2} L 0 ${HY2} Z`, .26, 0, 's');
+S(`M 0 ${HY2} C 260 ${HY2 + 1} 600 ${HY2 - 1} ${PW} ${HY2}`, 1);
+for (const d of ['M 100 250 L 116 236 L 132 238 L 146 222 L 172 226 L 190 238 L 216 250 Z', 'M 660 250 L 672 240 L 688 242 L 702 231 L 716 238 L 728 250 Z']) { FILL(d); S(d, .8); WASH(d, .16, .1, 'n'); }   // flat bergs
+WASH(`M 0 ${HY2} L ${PW} ${HY2} L ${PW} 284 L 0 284 Z`, .55, .05, 'g');           // the sea
+S('M 30 264 L 70 264 M 300 272 L 360 272 M 520 262 L 560 262 M 780 274 L 840 274', .4);
+S(`M 0 284 C 120 282 200 288 340 284 C 480 280 600 288 740 283 C 820 281 880 285 ${PW} 284`, .9);   // ice edge
+WASH(`M 0 284 L ${PW} 284 L ${PW} ${PH} L 0 ${PH} Z`, .1, .1, 'n');
+S('M 40 400 C 120 396 180 402 240 398 M 560 520 C 640 516 700 522 780 518 M 60 560 C 110 556 150 560 190 558', .4);
+// the field station: a hut, an anemometer mast, a camera on a tripod pointed at the colony
+{ const hut = 'M 770 346 L 770 306 C 770 282 880 282 880 306 L 880 346 Z';
+  FILL(hut); S(hut, .85); WASH(hut, .4, .1, 'g');
+  S('M 804 346 L 804 316 L 826 316 L 826 346', .6); FILL(ell(854, 318, 7, 7)); S(ell(854, 318, 7, 7), .5);
+  S('M 872 290 L 872 226', .7); S('M 860 230 L 884 230', .6);
+  FILL(ell(859, 228, 4, 3), 'ink'); FILL(ell(885, 228, 4, 3), 'ink');
+  S('M 722 322 L 708 354 M 722 322 L 736 354 M 722 322 L 723 356', .6);
+  const cam = 'M 710 304 L 734 304 L 734 322 L 710 322 Z M 710 308 L 696 305 L 696 320 L 710 318 Z';
+  FILL(cam); S(cam, .75); WASH(cam, .85, .1, 'd');
+  S('M 700 358 L 780 356', .35); }
+// the colony, all alike, all banded
+const colony = [[60, 372, .2], [128, 370, .19], [196, 374, .2], [380, 371, .19], [446, 374, .2], [514, 370, .19], [582, 373, .2], [648, 372, .19],
+  [30, 420, .27], [120, 424, .28], [470, 424, .27], [760, 430, .29], [860, 426, .28]];
+for (const [x, y, s] of colony) { WASH(ell(x - 4, y, 44 * s, 5 * s), .3, .2, 'n'); penguin(at(x, y, s, (x * 7 + y) % 3 === 0), null, false); }
+// shadows, the two in front
+WASH(ell(280, 612, 110, 12), .35, .25, 'n'); WASH(ell(652, 618, 110, 12), .35, .25, 'n');
+penguin(PENB, null);
+penguin(PENA, 'flip');
+S('M 120 640 C 160 636 200 640 230 638 M 700 646 C 760 642 820 646 870 644', .45);
+S('M 842 646 C 840 630 846 620 852 622 C 860 624 858 636 846 636 M 862 646 C 866 636 872 634 872 640 C 872 646 864 646 866 640 M 878 646 C 884 628 888 616 886 614 C 882 626 882 640 886 646 M 892 646 C 898 628 902 616 900 614 C 896 626 896 640 900 646', .55);
+SC2.groups = t => {
+  const [sx, sy] = P(PENA, ...PEN.sh);
+  const u = seg(t, T.flipper, T.flipper + .42), a0 = seg(t, T.flipper - .12, T.flipper);
+  const k = backOut(u, 1.5) - .06 * Math.sin(Math.PI * a0) * (1 - u);
+  return { flip: rotAbout(sx, sy, (-100 * k + 2 * Math.sin(t * 3) * k) * DEG) };
+};
+</script>
+<script>
+// ── brush-pen line: sample each path, wobble it gently, keep it round and fairly even ────────────
+const sp = document.getElementById('sp');
+function buildScene(sc, seed) {
+  const r = rng(seed); let total = 0;
+  const strokes = sc.items.filter(s => s.k === 's');
+  for (const s of strokes) {
+    sp.setAttribute('d', s.d); const L = sp.getTotalLength(), n = Math.max(2, Math.ceil(L / 2.4));
+    const ph1 = r() * TAU, ph2 = r() * TAU, f1 = .025 + r() * .02, f2 = .09 + r() * .06, pr = .85 + r() * .3, amp = .5 + r() * .45;
+    const pts = [];
+    for (let i = 0; i <= n; i++) { const q = sp.getPointAtLength(L * i / n); pts.push(P(s.m, q.x, q.y)); }
+    const sc0 = Math.sqrt(Math.abs(s.m.a * s.m.d - s.m.b * s.m.c)), Lw = L * sc0;
+    const Lf = [], Rt = [];
+    for (let i = 0; i <= n; i++) {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n, i + 1)];
+      let dx = b[0] - a[0], dy = b[1] - a[1]; const mm = Math.hypot(dx, dy) || 1; dx /= mm; dy /= mm;
+      const d = Lw * i / n, wob = amp * (Math.sin(d * f1 + ph1) * .6 + Math.sin(d * f2 + ph2) * .4);
+      const taper = Math.pow(clamp(d / 5), .5) * Math.pow(clamp((Lw - d) / 7), .5);
+      const hw = Math.max(.45, 1.75 * s.w * pr * Math.max(.55, sc0) * (0.5 + 0.5 * taper) * (0.9 + 0.14 * Math.sin(d * .05 + ph2)));
+      const cx = pts[i][0] - dy * wob, cy = pts[i][1] + dx * wob;
+      Lf.push([cx - dy * hw, cy + dx * hw]); Rt.push([cx + dy * hw, cy - dx * hw]);
+    }
+    Object.assign(s, { L: Lw, n, Lf, Rt, full: poly(Lf, Rt, n) });
+    if (!s.inst && !s.at) total += Lw + 40;
+  }
+  let acc = 0;
+  for (const s of strokes) { if (s.inst || s.at) continue; s.a = acc / total; acc += s.L + 40; s.b = (acc - 40) / total; }
+  // fills: a paper knock-out appears as the next stroke starts; solid black once the previous one ends
+  sc.items.forEach((it, i) => {
+    if (it.k === 's') return;
+    const p = new Path2D(); p.addPath(new Path2D(it.d), it.m); it.path = p;
+    if (it.k === 'f') {
+      if (it.col === 'paper') { let j = i; while (j < sc.items.length && !(sc.items[j].k === 's' && sc.items[j].a !== undefined)) j++; it.a = j < sc.items.length ? sc.items[j].a : 1; }
+      else { let j = i; while (j >= 0 && !(sc.items[j].k === 's' && sc.items[j].b !== undefined)) j--; it.a = j >= 0 ? sc.items[j].b : 0; }
+    }
+  });
+}
+function poly(Lf, Rt, k) {
+  const p = new Path2D(); p.moveTo(Lf[0][0], Lf[0][1]);
+  for (let i = 1; i <= k; i++) p.lineTo(Lf[i][0], Lf[i][1]);
+  for (let i = k; i >= 0; i--) p.lineTo(Rt[i][0], Rt[i][1]);
+  p.closePath(); return p;
+}
+
+// ── textures ────────────────────────────────────────────────────────────────────────────────
+function noiseCanvas(w, h, seed, fn) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d');
+  const img = x.createImageData(w, h), r = rng(seed);
+  const oct = [[64, .5], [32, .3], [8, .2]].map(([s, a]) => { const gw = Math.ceil(w / s), gh = Math.ceil(h / s), g = new Float32Array(gw * gh); for (let i = 0; i < g.length; i++) g[i] = r(); return { s, a, gw, gh, g }; });
+  for (let y = 0; y < h; y++) for (let X = 0; X < w; X++) {
+    let v = 0;
+    for (const o of oct) { const fx = X / o.s, fy = y / o.s, ix = fx | 0, iy = fy | 0, ux = fx - ix, uy = fy - iy, g = o.g, gw = o.gw, gh = o.gh;
+      const x0 = ix % gw, x1 = (ix + 1) % gw, y0 = (iy % gh) * gw, y1 = ((iy + 1) % gh) * gw;
+      const sx = ux * ux * (3 - 2 * ux), sy = uy * uy * (3 - 2 * uy);
+      v += o.a * lerp(lerp(g[y0 + x0], g[y0 + x1], sx), lerp(g[y1 + x0], g[y1 + x1], sx), sy); }
+    const px = fn(v, r(), X, y), i = (y * w + X) * 4; img.data[i] = px[0]; img.data[i + 1] = px[1]; img.data[i + 2] = px[2]; img.data[i + 3] = px[3];
+  }
+  x.putImageData(img, 0, 0); return c;
+}
+const washPat = {}; let inkPat, paperC, baseC;
+function buildTextures() {
+  for (const [k, c] of Object.entries(WASHC)) washPat[k] = ctx.createPattern(noiseCanvas(512, 512, 7 + k.charCodeAt(0), (v, g) => [c[0], c[1], c[2], 255 * clamp(.66 + (v - .5) * .7 + (g - .5) * .2)]), 'repeat');
+  inkPat = ctx.createPattern(noiseCanvas(256, 256, 11, v => [27, 28, 24, 255 * clamp(.96 + (v - .5) * .12)]), 'repeat');
+  paperC = noiseCanvas(W, H, 3, (v, g) => { const k = (v - .5) * 6 + (g - .5) * 5; return [244 + k, 241 + k, 230 + k * .9, 255]; });
+  const x = paperC.getContext('2d'), r = rng(5);
+  for (let i = 0; i < 700; i++) { x.strokeStyle = `rgba(110,110,90,${.025 + r() * .035})`; x.lineWidth = .6; x.beginPath(); const px = r() * W, py = r() * H, a = r() * TAU, l = 5 + r() * 14; x.moveTo(px, py); x.quadraticCurveTo(px + Math.cos(a) * l * .5 + r() * 4, py + Math.sin(a) * l * .5, px + Math.cos(a) * l, py + Math.sin(a) * l); x.stroke(); }
+  // the desk under the pad: a dark green blotter
+  baseC = noiseCanvas(W, H, 21, (v, g) => { const k = (v - .5) * 16 + (g - .5) * 8; return [58 + k, 66 + k, 56 + k, 255]; });
+  const b = baseC.getContext('2d');
+  const vg = b.createRadialGradient(W / 2, H / 2, 380, W / 2, H / 2, 1150); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.45)'); b.fillStyle = vg; b.fillRect(0, 0, W, H);
+  b.save(); b.shadowColor = 'rgba(0,0,0,.45)'; b.shadowBlur = 40; b.shadowOffsetX = 14; b.shadowOffsetY = 18;
+  b.fillStyle = '#d9d4c4'; b.fillRect(PADX, BIND0, PADW, SHY1 - BIND0 + 12); b.restore();
+  for (let i = 0; i < 4; i++) { b.fillStyle = `rgb(${226 - i * 9},${222 - i * 9},${208 - i * 9})`; b.fillRect(PADX + 2 + i, SHY1 + 2 + i * 3, PADW - 2, 3); b.fillRect(PADX + PADW - 1, BIND1 + 4 + i * 3, 2 + i, SHY1 - BIND1); }
+  // the glued binding strip across the top
+  const bg = b.createLinearGradient(0, BIND0, 0, BIND1); bg.addColorStop(0, '#3f4a3c'); bg.addColorStop(.5, '#34402f'); bg.addColorStop(1, '#262f23');
+  b.fillStyle = bg; b.fillRect(PADX - 4, BIND0, PADW + 8, BIND1 - BIND0);
+  b.fillStyle = 'rgba(255,255,255,.08)'; b.fillRect(PADX - 4, BIND0 + 3, PADW + 8, 2);
+}
+
+// ── the calendar sheet ──────────────────────────────────────────────────────────────────────
+const sheets = {};
+function buildSheet(day, date) {
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  x.save(); x.beginPath(); x.rect(PADX, BIND1, PADW, SHY1 - BIND1); x.clip(); x.drawImage(paperC, 0, 0); x.restore();
+  x.fillStyle = INK; x.textBaseline = 'alphabetic';
+  x.font = `700 20px ${SERIF}`; x.letterSpacing = '6px';
+  x.textAlign = 'left'; x.fillText(day, PX, 102);
+  x.font = `400 20px ${SERIF}`; x.textAlign = 'right'; x.fillText(date, PX + PW + 6, 102);
+  x.letterSpacing = '0px'; x.fillStyle = 'rgba(27,28,24,.8)'; x.fillRect(PX, 111, PW, 1.3);
+  x.font = `400 16px ${SERIF}`; x.letterSpacing = '5px'; x.textAlign = 'center'; x.fillStyle = 'rgba(27,28,24,.7)';
+  x.fillText('THE BACK FORTY', 960, 1012); x.letterSpacing = '0px';
+  x.strokeStyle = 'rgba(27,28,24,.95)'; x.lineWidth = 2.2; x.strokeRect(PX, PY, PW, PH);
+  const g = x.createLinearGradient(0, BIND1, 0, BIND1 + 26); g.addColorStop(0, 'rgba(30,35,25,.28)'); g.addColorStop(1, 'rgba(30,35,25,0)'); x.fillStyle = g; x.fillRect(PADX, BIND1, PADW, 26);
+  return c;
+}
+
+// ── draw one panel at time t ────────────────────────────────────────────────────────────────
+function cartoon(c, sc, t, D, tw) {
+  const G = sc.groups(t), base = new DOMMatrix().translate(PX, PY);
+  c.save(); c.beginPath(); c.rect(PX + 1, PY + 1, PW - 2, PH - 2); c.clip();
+  const pu = seg(t, D[0], D[1]);
+  let wi = 0;
+  for (const it of sc.items) {
+    let m = base;
+    if (it.g) { if (!G[it.g]) continue; m = base.multiply(G[it.g]); }
+    c.setTransform(m);
+    if (it.k === 's') {
+      c.fillStyle = INK; c.globalAlpha = 1;
+      if (it.inst) { c.fill(it.full); continue; }
+      const u = it.at ? seg(t, it.at[0], it.at[1]) : (pu - it.a) / (it.b - it.a);
+      if (u <= 0) continue;
+      if (u >= 1) { c.fill(it.full); continue; }
+      c.fill(poly(it.Lf, it.Rt, Math.max(1, Math.floor(u * it.n))));
+    } else if (it.k === 'f') {
+      const inst = it.g === 'car';
+      const u = inst ? 1 : seg(pu, it.a, it.a + (it.col === 'paper' ? .004 : .02)); if (u <= 0) continue;
+      c.globalAlpha = eOut(u); c.fillStyle = it.col === 'paper' ? '#f4f1e6' : inkPat; c.fill(it.path, it.rule);
+    } else {
+      const i = wi++, inst = it.g === 'car';
+      const u = inst ? 1 : seg(t, tw + it.delay + (i % 6) * .025, tw + it.delay + .4 + (i % 6) * .025); if (u <= 0) continue;
+      const pat = washPat[it.col];
+      c.globalAlpha = it.tone * eOut(u); c.fillStyle = pat; c.fill(it.path, it.rule);
+      c.save(); c.clip(it.path, it.rule); c.globalAlpha = it.tone * eOut(u) * .3; c.strokeStyle = pat; c.lineWidth = 5; c.stroke(it.path); c.restore();
+    }
+  }
+  c.globalAlpha = 1; c.setTransform(1, 0, 0, 1, 0, 0); c.restore();
+}
+
+// ── the typed caption: one key strike per letter, slight typewriter irregularity ──────────────
+const caps = {};
+function layoutCaption(lines, t0, seed) {
+  const r = rng(seed), glyphs = []; let tt = t0;
+  ctx.font = `400 33px ${SERIF}`;
+  lines.forEach((ln, li) => {
+    const w = ctx.measureText(ln).width, x0 = 960 - w / 2, y = PY + PH + 70 + li * 50;
+    for (let i = 0; i < ln.length; i++) {
+      const ch = ln[i]; glyphs.push({ ch, x: x0 + ctx.measureText(ln.slice(0, i)).width, y: y + (r() - .5) * 1.2, a: .82 + r() * .18, t: tt });
+      tt += ch === ' ' ? .016 : ch === ',' || ch === '.' ? .05 : .0115 + r() * .004;
+    }
+    tt += .08;
+  });
+  return { glyphs, end: tt };
+}
+function caption(c, cp, t) {
+  c.font = `400 33px ${SERIF}`; c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  for (const g of cp.glyphs) { if (t < g.t) break; if (g.ch === ' ') continue; c.globalAlpha = g.a * clamp((t - g.t) / .02); c.fillStyle = INK; c.fillText(g.ch, g.x, g.y); }
+  c.globalAlpha = 1;
+}
+
+// ── the tear-off: the top sheet peels up over the binding, in perspective, and is gone ─────────
+let sheet1C = null, flipT, flipS;
+function flipSheet(u) {
+  if (!sheet1C) { sheet1C = document.createElement('canvas'); sheet1C.width = W; sheet1C.height = H; const x = sheet1C.getContext('2d');
+    x.drawImage(sheets[1], 0, 0); cartoon(x, SC1, T.flip[0], T.d1, T.w1); caption(x, caps[1], T.flip[0]); }
+  const e = eInOut(u), th = e * Math.PI * 1.02, F = 3200, N = 180, y0 = BIND1 + 6, dh = (SHY1 - y0) / N;
+  const curl = Math.sin(Math.PI * clamp(u * 1.15)) * .9;
+  // shadow the page casts on the next sheet
+  const sh = Math.sin(Math.PI * clamp(u * 1.25));
+  const g = ctx.createLinearGradient(0, BIND1, 0, BIND1 + 700 * sh + 40);
+  g.addColorStop(0, `rgba(25,30,20,${.42 * sh})`); g.addColorStop(1, 'rgba(25,30,20,0)'); ctx.fillStyle = g; ctx.fillRect(PADX, BIND1, PADW, SHY1 - BIND1);
+  let Y = 0, Z = 0;
+  const pt = (y, z) => { const s = F / (F - z); return [s, 540 + (y - 540) * s]; };
+  if (!flipT) { flipT = document.createElement('canvas'); flipT.width = W; flipT.height = H; flipS = document.createElement('canvas'); flipS.width = W; flipS.height = H; }
+  const tx = flipT.getContext('2d'), sx = flipS.getContext('2d');
+  tx.setTransform(1, 0, 0, 1, 0, 0); tx.globalCompositeOperation = 'source-over'; tx.clearRect(0, 0, W, H);
+  sx.setTransform(1, 0, 0, 1, 0, 0); sx.clearRect(0, 0, W, H);
+  let [s0, yy0] = pt(y0, 0);
+  for (let i = 0; i < N; i++) {
+    const a = th + curl * Math.pow((i + .5) / N, 1.6);
+    Y += Math.cos(a) * dh; Z += Math.sin(a) * dh;
+    const [s1, yy1] = pt(y0 + Y, Z), s = (s0 + s1) / 2, d = (yy1 - yy0) / dh;
+    const M = [s, 0, 0, d, 960 - 960 * s, yy0 - (y0 + i * dh) * d]; tx.setTransform(...M); sx.setTransform(...M);
+    const sy = y0 + i * dh;
+    if (d > 0) {
+      tx.drawImage(sheet1C, PADX, sy, PADW, dh + .8, PADX, sy, PADW, dh + .8);
+      const v = 255 * (1 - clamp((1 - Math.cos(a)) * .35)); sx.fillStyle = `rgb(${v},${v},${v * .97})`;
+    } else {
+      const lt = clamp(.5 + .5 * -Math.cos(a)); tx.fillStyle = `rgb(${190 + 40 * lt},${186 + 40 * lt},${172 + 38 * lt})`; tx.fillRect(PADX, sy, PADW, dh + .8);
+      sx.fillStyle = '#fff';
+    }
+    sx.fillRect(PADX, sy, PADW, dh + .8);
+    s0 = s1; yy0 = yy1;
+  }
+  tx.setTransform(1, 0, 0, 1, 0, 0); tx.globalCompositeOperation = 'multiply'; tx.drawImage(flipS, 0, 0); tx.globalCompositeOperation = 'source-over';
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(flipT, 0, 0);
+}
+// the ragged stub the torn sheet leaves under the binding
+let stubP;
+function stub() {
+  if (!stubP) { const r = rng(77); stubP = new Path2D(); stubP.moveTo(PADX, BIND1); for (let x = PADX; x <= PADX + PADW; x += 9) stubP.lineTo(x, BIND1 + 4 + r() * 7); stubP.lineTo(PADX + PADW, BIND1); stubP.closePath(); }
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.25)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 2; ctx.fillStyle = '#ebe7da'; ctx.fill(stubP); ctx.restore();
+}
+
+// ── frame ───────────────────────────────────────────────────────────────────────────────────
+window.draw = ({ t }) => {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(baseC, 0, 0);
+  if (t < T.flip[0]) { ctx.drawImage(sheets[1], 0, 0); cartoon(ctx, SC1, t, T.d1, T.w1); caption(ctx, caps[1], t); }
+  else {
+    ctx.drawImage(sheets[2], 0, 0); cartoon(ctx, SC2, t, T.d2, T.w2); caption(ctx, caps[2], t);
+    stub();
+    if (t < T.flip[1]) flipSheet(seg(t, T.flip[0], T.flip[1]));
+  }
+  const fade = Math.max(1 - eOut(seg(t, 0, .35)), eIO2(seg(t, T.out[0], T.out[1])));
+  if (fade > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = fade; ctx.fillStyle = '#1c2119'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+window.events = () => {
+  const ev = [];
+  for (const [sc, D] of [[SC1, T.d1], [SC2, T.d2]]) for (const s of sc.items) if (s.k === 's' && s.a !== undefined && s.L > 30) ev.push({ k: 'pen', t: +(D[0] + s.a * (D[1] - D[0])).toFixed(3), d: +((s.b - s.a) * (D[1] - D[0])).toFixed(3) });
+  ev.push({ k: 'field', t: 0, d: T.flip[0] + .3 }, { k: 'ice', t: T.flip[0] + .2, d: DUR - T.flip[0] - .2 });
+  ev.push({ k: 'wash', t: T.w1 }, { k: 'wash', t: T.w2 });
+  ev.push({ k: 'car', t: T.car[0], d: T.car[1] - T.car[0] });
+  ev.push({ k: 'rise', t: T.rise[0] }, { k: 'tally', t: T.tally[0], d: T.tally[1] - T.tally[0] });
+  for (const i of [1, 2]) { for (const g of caps[i].glyphs) if (g.ch !== ' ') ev.push({ k: 'key', t: +g.t.toFixed(3) }); else ev.push({ k: 'space', t: +g.t.toFixed(3) });
+    ev.push({ k: 'bell', t: +(caps[i].end + .02).toFixed(3) }); }
+  ev.push({ k: 'tear', t: T.flip[0] - .02, d: T.flip[1] - T.flip[0] });
+  ev.push({ k: 'flipper', t: T.flipper }, { k: 'squawk', t: T.flipper + .05 }, { k: 'squawk2', t: T.c2 - .15 });
+  return ev;
+};
+window.ready = (async () => {
+  await document.fonts.load(`400 33px ${SERIF}`); await document.fonts.load(`700 20px ${SERIF}`); await document.fonts.ready;
+  buildScene(SC1, 101); buildScene(SC2, 202); buildTextures();
+  sheets[1] = buildSheet('WEDNESDAY', 'OCTOBER 14'); sheets[2] = buildSheet('THURSDAY', 'OCTOBER 15');
+  caps[1] = layoutCaption(CAP1, T.c1, 31); caps[2] = layoutCaption(CAP2, T.c2, 32);
+})();
+</script>
+</body></html>
