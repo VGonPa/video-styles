@@ -4,9 +4,9 @@ Visual family · Clean vector shapes and bold color.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (18) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (15) · [Social & Short-Form](../../categories/use-cases/social.md) (29) · [Storytelling & Brand](../../categories/use-cases/story.md) (34) · [Data & Results](../../categories/use-cases/data.md) (5) · [News & Current Affairs](../../categories/use-cases/news.md) (6) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (20)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (18) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (16) · [Social & Short-Form](../../categories/use-cases/social.md) (30) · [Storytelling & Brand](../../categories/use-cases/story.md) (34) · [Data & Results](../../categories/use-cases/data.md) (5) · [News & Current Affairs](../../categories/use-cases/news.md) (6) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (20)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (5) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (12) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (5) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (5) · [Comics & Cartoons](../../categories/families/comics.md) (9) · [Games](../../categories/families/games.md) (3)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (12) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (5) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (5) · [Comics & Cartoons](../../categories/families/comics.md) (9) · [Games](../../categories/families/games.md) (3)
 
 <table>
 <tr>
@@ -17,6 +17,7 @@ Visual family · Clean vector shapes and bold color.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/editorial-illustration/editorial-illustration.mp4"><img src="../../styles/editorial-illustration/preview.gif" alt="Editorial Illustration" width="100%"></a><br><b>64 · Editorial Illustration</b><br><a href="../../styles/editorial-illustration/editorial-illustration.mp4">video</a> · <a href="../../styles/editorial-illustration">source</a></td>
+<td width="25%" align="center"><a href="../../styles/kawaii/kawaii.mp4"><img src="../../styles/kawaii/preview.gif" alt="Kawaii" width="100%"></a><br><b>68 · Kawaii</b><br><a href="../../styles/kawaii/kawaii.mp4">video</a> · <a href="../../styles/kawaii">source</a></td>
 </tr>
 </table>
 
@@ -27,3 +28,4 @@ Visual family · Clean vector shapes and bold color.
 | 28 | [Neo-Brutalism](../../styles/neo-brutalism/) | Chunky UI cards, hard shadows | App launches, product promos, and punchy social clips | [Flat Graphics](../../categories/families/flat-graphics.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Product & Launches](../../categories/use-cases/product.md) |
 | 29 | [Infographic Explainer](../../styles/infographic/) | Flat icons, counters and simple characters | Fast explainers with stats, steps, and everyday examples | [Flat Graphics](../../categories/families/flat-graphics.md) | [Explainers](../../categories/use-cases/explainer.md) |
 | 64 | [Editorial Illustration](../../styles/editorial-illustration/) | Witty op-ed metaphor, riso-grained | Opinion pieces, big ideas and thoughtful news explainers | [Flat Graphics](../../categories/families/flat-graphics.md) | [News & Current Affairs](../../categories/use-cases/news.md), [Explainers](../../categories/use-cases/explainer.md) |
+| 68 | [Kawaii](../../styles/kawaii/) | Pastel chibi stickers that bounce | Cheerful social posts, cute products and friendly greetings | [Flat Graphics](../../categories/families/flat-graphics.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Product & Launches](../../categories/use-cases/product.md) |
