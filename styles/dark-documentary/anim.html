@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── dark-documentary · "The Silent Frequency" ──────────────────────────────────────────────
+// Near-black, cold white/grey palette, one accent (signal red). Thin serif titles with wide tracking,
+// subtle grain + vignette, slow camera moves everywhere.
+//  A  0.0–2.7  chapter card "CHAPTER I — THE SIGNAL" (letters resolve with stagger, hairlines grow)
+//  B  2.4–6.0  dark hidden-line terrain, camera tilts down and dollies; a glowing red line traces the
+//              signal's 3D path from an unknown origin to relay station K-7; coordinate readouts
+//  C  5.7–8.3  a memo on cold paper, typewriter text, black redaction bars sweep over the evidence
+//  D  8.0–10   camera dives into a redaction bar → black → end title "THE SILENT FREQUENCY" → fade
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eSine = u => .5 - .5 * Math.cos(Math.PI * u);
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const deg = d => d * Math.PI / 180;
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash = (a, b = 0) => { let h = Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) | 0; h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; };
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+const SERIF = '"Cormorant Garamond"', MONO = '"IBM Plex Mono"', TYPE = '"Courier Prime"';
+const BG = '#060709', FG = '#e8ebee', GREY = '#8d959d', DIM = '#4d545b', RED = '#e0412c';
+const T = { chapIn: .35, lineIn: .6, titleIn: .95, chapOut: 2.15, chapOutB: 2.7,
+  terIn: 2.4, terFull: 3.3, station: 2.95, origin: 3.35, trace: 3.7, traceEnd: 5.0, recv: 5.02, terOut: 5.55, terOutB: 6.05,
+  docIn: 5.75, docFull: 6.3, type0: 6.2, redact: 7.45, underline: 7.58, dive: 7.95, diveB: 8.5,
+  endIn: 8.55, endOut: 9.55 };
+
+// ── value noise / terrain ─────────────────────────────────────────────────────────────────
+const vn = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  return lerp(lerp(a, b, u), lerp(c, d, u), v) * 2 - 1; };
+const fbm = (x, y, o = 5) => { let s = 0, a = .5, f = 1; for (let i = 0; i < o; i++) { s += a * vn(x * f + i * 17.3, y * f - i * 9.1); a *= .5; f *= 2.03; } return s; };
+const ridge = (x, y) => { let s = 0, a = .55, f = 1; for (let i = 0; i < 5; i++) { const n = 1 - Math.abs(vn(x * f + 40, y * f + 11)); s += a * n * n; a *= .5; f *= 2.1; } return s; };
+const height = (x, z) => { const k = clamp((z - 20) / 140);
+  return fbm(x * .035, z * .035) * (2.5 + 3 * k) + ridge(x * .018, z * .018) * (2 + 26 * k * k) - 4; };
+const Z0 = 0, Z1 = 230, NROW = 118, NCOL = 190;
+let GRID;   // rows far→near: {z, pts:[[x,y]...]}
+function buildGrid() {
+  GRID = [];
+  for (let r = NROW - 1; r >= 0; r--) {
+    const z = Z0 + (Z1 - Z0) * Math.pow(r / (NROW - 1), 1.18);
+    const X = 30 + z * 1.25, pts = [];
+    for (let i = 0; i < NCOL; i++) { const x = -X + 2 * X * i / (NCOL - 1); pts.push([x, height(x, z)]); }
+    GRID.push({ z, pts });
+  }
+}
+// signal path: origin (far ridge) → relay station (valley near camera)
+const OX = 46, OZ = 168, SX = -16, SZ = 52;
+let OY, SY;
+const pathPt = u => { const x = lerp(OX, SX, u), z = lerp(OZ, SZ, u);
+  const y = lerp(OY, SY, u) + 24 * Math.sin(Math.PI * Math.pow(u, 1.5)); return [x, y, z]; };
+const groundPt = u => { const [x, , z] = pathPt(u); return [x, height(x, z) + .3, z]; };
+
+// ── camera ────────────────────────────────────────────────────────────────────────────────
+let CAM;
+function camAt(t) {
+  const u = eInOut(seg(t, T.terIn - .2, T.terOutB));
+  const tilt = eOut(seg(t, T.terIn, 4.2));
+  return { x: lerp(-4, 6, u), y: lerp(30, 24, u), z: lerp(-26, -8, u), yaw: deg(lerp(-7, 4, u)), pitch: deg(lerp(-4, 9, tilt) + 1.5 * u), f: 1150 };
+}
+function proj(x, y, z) {
+  const c = CAM, dx = x - c.x, dy = y - c.y, dz = z - c.z;
+  const cy = Math.cos(c.yaw), sy = Math.sin(c.yaw), xr = dx * cy - dz * sy, zr = dx * sy + dz * cy;
+  const cp = Math.cos(c.pitch), sp = Math.sin(c.pitch);
+  const zc = -dy * sp + zr * cp, yc = dy * cp + zr * sp;
+  if (zc < .5) return null;
+  return [W / 2 + xr * c.f / zc, H / 2 - yc * c.f / zc, zc];
+}
+
+// ── precomputed layers: grain, vignette, paper ────────────────────────────────────────────
+let GRAIN = [], VIG, PAPER;
+function buildGrain() {
+  for (let k = 0; k < 4; k++) {
+    const c = mk(384, 384), g = c.getContext('2d'), id = g.createImageData(384, 384), r = rng(900 + k);
+    for (let i = 0; i < id.data.length; i += 4) { const v = r(); const w = v > .5;
+      id.data[i] = id.data[i + 1] = id.data[i + 2] = w ? 235 : 0; id.data[i + 3] = Math.pow(Math.abs(v - .5) * 2, 2.2) * (w ? 18 : 40); }
+    g.putImageData(id, 0, 0); GRAIN.push(ctx.createPattern(c, 'repeat'));
+  }
+  VIG = mk(W, H); const v = VIG.getContext('2d');
+  const gr = v.createRadialGradient(W / 2, H / 2, 260, W / 2, H / 2, 1180);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(.55, 'rgba(0,0,0,.18)'); gr.addColorStop(1, 'rgba(0,0,0,.78)');
+  v.fillStyle = gr; v.fillRect(0, 0, W, H);
+}
+const DW = 1180, DH = 1560, PS = 1.5;
+function buildPaper() {
+  PAPER = mk(DW * PS, DH * PS); const p = PAPER.getContext('2d'); p.scale(PS, PS);
+  p.fillStyle = '#bfc1be'; p.fillRect(0, 0, DW, DH);
+  const r = rng(77);
+  // fibres + mottling
+  const id = p.getImageData(0, 0, DW * PS, DH * PS), d = id.data;
+  for (let y = 0; y < DH * PS; y++) for (let x = 0; x < DW * PS; x++) {
+    const i = (y * DW * PS + x) * 4, m = fbm(x * .004, y * .004, 4) * 16 + fbm(x * .05, y * .012, 2) * 4 + (r() - .5) * 10;
+    d[i] += m; d[i + 1] += m; d[i + 2] += m + 1.5; }
+  p.putImageData(id, 0, 0);
+  // horizontal fold + age
+  const fold = p.createLinearGradient(0, 700, 0, 740); fold.addColorStop(0, 'rgba(0,0,0,0)'); fold.addColorStop(.5, 'rgba(0,0,0,.09)'); fold.addColorStop(.52, 'rgba(255,255,255,.08)'); fold.addColorStop(1, 'rgba(0,0,0,0)');
+  p.fillStyle = fold; p.fillRect(0, 700, DW, 40);
+  const edge = p.createRadialGradient(DW / 2, 600, 300, DW / 2, 600, 1100); edge.addColorStop(0, 'rgba(40,40,36,0)'); edge.addColorStop(1, 'rgba(40,40,36,.35)');
+  p.fillStyle = edge; p.fillRect(0, 0, DW, DH);
+  // static letterhead
+  p.fillStyle = '#1d1e20'; p.textBaseline = 'alphabetic';
+  p.font = `700 30px ${TYPE}`; p.letterSpacing = '9px'; p.textAlign = 'center';
+  p.fillText('NORTHERN RELAY SURVEY', DW / 2, 120);
+  p.font = `400 20px ${TYPE}`; p.letterSpacing = '6px'; p.fillText('INTERNAL MEMORANDUM', DW / 2, 156);
+  p.fillRect(110, 186, DW - 220, 2); p.fillRect(110, 192, DW - 220, 1);
+  p.textAlign = 'left'; p.letterSpacing = '0px'; p.font = `400 24px ${TYPE}`;
+  const hd = [['FILE:', '77-114'], ['DATE:', '04 NOV 1977'], ['TO:', null], ['RE:', 'ANOMALOUS RECEPTION, STATION K-7']];
+  hd.forEach(([k, v], i) => { const y = 250 + i * 40; p.fillText(k, 110, y); if (v) p.fillText(v, 220, y); else redBar(p, 220, y - 20, 300, 27, 5); });
+  p.font = `700 18px ${TYPE}`; p.letterSpacing = '4px'; p.textAlign = 'right'; p.fillStyle = 'rgba(29,30,32,.8)'; p.fillText('PAGE 1 OF 3', DW - 110, 250);
+  p.fillRect(110, 424, DW - 220, 1);
+  // footer: redacted authorization + form number (fills the lower page)
+  p.textAlign = 'left'; p.letterSpacing = '0px'; p.fillStyle = '#1d1e20'; p.font = `400 24px ${TYPE}`;
+  p.fillText('AUTHORIZED:', 110, 900); redBar(p, 290, 880, 360, 27, 9);
+  p.fillText('CC:', 110, 940); redBar(p, 290, 920, 220, 27, 13); redBar(p, 530, 920, 170, 27, 17);
+  p.fillRect(110, 990, 380, 1);
+  p.font = `700 17px ${TYPE}`; p.letterSpacing = '4px'; p.fillStyle = 'rgba(29,30,32,.7)'; p.fillText('NRS FORM 12-B  ·  RESTRICTED', 110, 1030);
+}
+function redBar(g, x, y, w, h, seed, prog = 1) {   // redaction bar with uneven marker ends
+  if (prog <= 0) return; const r = rng(seed); g.save(); g.fillStyle = '#0c0c0d'; g.beginPath();
+  const ww = w * prog; g.moveTo(x, y + r() * 2);
+  for (let i = 1; i <= 10; i++) g.lineTo(x + ww * i / 10, y + (r() - .5) * 2);
+  g.lineTo(x + ww + 3 * r(), y + h * .5); g.lineTo(x + ww, y + h + (r() - .5) * 2);
+  for (let i = 9; i >= 0; i--) g.lineTo(x + ww * i / 10, y + h + (r() - .5) * 2);
+  g.lineTo(x - 2 * r(), y + h * .5); g.closePath(); g.fill(); g.restore();
+}
+
+// ── text helpers ──────────────────────────────────────────────────────────────────────────
+function tracked(txt, x, y, font, track, color, t, t0, stag = .045, dur = .6, align = 'center', rise = 10) {
+  ctx.font = font; ctx.letterSpacing = '0px';
+  const ws = [...txt].map(ch => ctx.measureText(ch).width), tw = ws.reduce((a, b) => a + b, 0) + track * (txt.length - 1);
+  let cx = align === 'center' ? x - tw / 2 : x; const mid = (txt.length - 1) / 2;
+  [...txt].forEach((ch, i) => {
+    const a = eOut(seg(t, t0 + Math.abs(i - mid) * stag, t0 + Math.abs(i - mid) * stag + dur));
+    if (a > 0 && ch !== ' ') { ctx.globalAlpha = a * (color.a ?? 1); ctx.fillStyle = color.c; ctx.fillText(ch, cx, y + rise * (1 - a)); }
+    cx += ws[i] + track;
+  });
+  ctx.globalAlpha = 1; return tw;
+}
+function typed(txt, x, y, t, t0, rate, font, color, track = 3, cursor = true) {
+  const n = Math.floor((t - t0) * rate); if (n <= 0) return;
+  ctx.font = font; ctx.letterSpacing = track + 'px'; ctx.fillStyle = color; ctx.textAlign = 'left';
+  const s = txt.slice(0, Math.min(n, txt.length)); ctx.fillText(s, x, y);
+  if (cursor && n < txt.length + 8 && Math.floor(t * 8) % 2 === 0) { const w = ctx.measureText(s).width; ctx.fillRect(x + w + 2, y - 15, 10, 18); }
+  ctx.letterSpacing = '0px';
+}
+function hairline(x0, x1, y, a, col = FG, w = 1) { ctx.globalAlpha = a; ctx.fillStyle = col; ctx.fillRect(Math.min(x0, x1), y - w / 2, Math.abs(x1 - x0), w); ctx.globalAlpha = 1; }
+
+// ── A: chapter card ───────────────────────────────────────────────────────────────────────
+function drawChapter(t) {
+  const out = 1 - eSine(seg(t, T.chapOut, T.chapOutB)); if (out <= 0) return;
+  const drift = t * .012;
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(1 + drift, 1 + drift); ctx.translate(-W / 2, -H / 2 - 50 * (1 - out) * 0);
+  ctx.globalAlpha = 1; ctx.textBaseline = 'alphabetic';
+  const f = out;
+  tracked('CHAPTER I', W / 2, 452, `500 30px ${SERIF}`, 16 + 4 * seg(t, 0, 2.7), { c: GREY, a: f }, t, T.chapIn, .035, .7);
+  const lw = 250 * eInOut(seg(t, T.lineIn, T.lineIn + .9)), y = 500;
+  hairline(W / 2 - 22, W / 2 - 22 - lw, y, .7 * f); hairline(W / 2 + 22, W / 2 + 22 + lw, y, .7 * f);
+  const dA = eOut(seg(t, T.lineIn + .25, T.lineIn + .7)) * f;
+  ctx.save(); ctx.globalAlpha = dA; ctx.fillStyle = RED; ctx.translate(W / 2, y); ctx.rotate(Math.PI / 4); ctx.fillRect(-4, -4, 8, 8); ctx.restore();
+  ctx.shadowColor = 'rgba(220,230,240,.35)'; ctx.shadowBlur = 18;
+  tracked('THE SIGNAL', W / 2, 640, `300 136px ${SERIF}`, 30 + 14 * eOut(seg(t, T.titleIn, 2.7)), { c: FG, a: f }, t, T.titleIn, .06, .9, 'center', 0);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+// ── B: terrain ────────────────────────────────────────────────────────────────────────────
+function leader(px, py, dx, dy, len, prog, a, col = FG) {
+  if (prog <= 0) return [px + dx, py + dy];
+  ctx.globalAlpha = a; ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(px, py);
+  const p1 = clamp(prog * 2), p2 = clamp(prog * 2 - 1);
+  const ex = px + dx * p1, ey = py + dy * p1; ctx.lineTo(ex, ey);
+  if (p2 > 0) ctx.lineTo(ex + len * p2 * Math.sign(dx || 1), ey);
+  ctx.stroke(); ctx.globalAlpha = 1; return [px + dx, py + dy];
+}
+function drawTerrain(t) {
+  const a = eSine(seg(t, T.terIn, T.terFull)) * (1 - eSine(seg(t, T.terOut, T.terOutB)));
+  if (a <= 0) return;
+  CAM = camAt(t);
+  ctx.save(); ctx.globalAlpha = 1;
+  // sky: faint cold haze at the horizon line
+  const hz = proj(CAM.x, 0, CAM.z + 4000); const hy = hz ? hz[1] : H * .3;
+  const sky = ctx.createLinearGradient(0, hy - 420, 0, hy + 60);
+  sky.addColorStop(0, BG); sky.addColorStop(.85, '#10151b'); sky.addColorStop(1, '#141b22');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  // hidden-line ridges, far → near
+  for (const row of GRID) {
+    if (row.z - CAM.z < 4) continue;
+    const P = []; for (const [x, y] of row.pts) { const p = proj(x, y, row.z); if (p) P.push(p); }
+    if (P.length < 2) continue;
+    const zc = P[P.length >> 1][2], d = clamp(zc / 250);
+    ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]); for (let i = 1; i < P.length; i++) ctx.lineTo(P[i][0], P[i][1]);
+    const s = new Path2D(); s.moveTo(P[0][0], P[0][1]); for (let i = 1; i < P.length; i++) s.lineTo(P[i][0], P[i][1]);
+    ctx.lineTo(P[P.length - 1][0], H + 400); ctx.lineTo(P[0][0], H + 400); ctx.closePath();
+    ctx.fillStyle = `rgb(${6 + 8 * d},${7 + 10 * d},${9 + 12 * d})`; ctx.fill();
+    ctx.strokeStyle = `rgba(196,208,220,${(.08 + .62 * Math.pow(1 - d, 1.4))})`; ctx.lineWidth = lerp(1.6, .8, d); ctx.stroke(s);
+  }
+  // ground track (dashed) + glowing signal arc
+  const pr = eInOut(seg(t, T.trace, T.traceEnd));
+  const N = 160, arc = [], gnd = [];
+  for (let i = 0; i <= N * pr; i++) { const u = i / N; arc.push(proj(...pathPt(u))); gnd.push(proj(...groundPt(u))); }
+  if (pr > 0) { const u = pr; arc.push(proj(...pathPt(u))); gnd.push(proj(...groundPt(u))); }
+  const line = (pts) => { ctx.beginPath(); let m = false; for (const p of pts) { if (!p) continue; m ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); m = true; } };
+  if (arc.length > 1) {
+    ctx.setLineDash([6, 9]); ctx.strokeStyle = 'rgba(224,65,44,.55)'; ctx.lineWidth = 1.3; line(gnd); ctx.stroke(); ctx.setLineDash([]);
+    // vertical drop lines every few steps
+    ctx.strokeStyle = 'rgba(224,65,44,.16)'; ctx.lineWidth = 1;
+    for (let i = 8; i < arc.length - 1; i += 12) { const A = arc[i], G = gnd[i]; if (A && G) { ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(G[0], G[1]); ctx.stroke(); } }
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(224,65,44,.18)'; ctx.lineWidth = 9; line(arc); ctx.stroke();
+    ctx.shadowColor = 'rgba(255,90,60,.9)'; ctx.shadowBlur = 16; ctx.strokeStyle = '#ff6a4d'; ctx.lineWidth = 2.2; line(arc); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.strokeStyle = 'rgba(255,225,215,.9)'; ctx.lineWidth = .9; line(arc); ctx.stroke();
+    const hd = arc[arc.length - 1];
+    if (hd && pr < 1) { const g = ctx.createRadialGradient(hd[0], hd[1], 0, hd[0], hd[1], 26); g.addColorStop(0, 'rgba(255,235,225,1)'); g.addColorStop(.25, 'rgba(255,90,60,.7)'); g.addColorStop(1, 'rgba(255,60,40,0)'); ctx.fillStyle = g; ctx.fillRect(hd[0] - 30, hd[1] - 30, 60, 60); }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  // origin marker
+  const o = proj(OX, OY, OZ), s = proj(SX, SY, SZ);
+  const oa = eOut(seg(t, T.origin, T.origin + .4));
+  if (o && oa > 0) {
+    for (let k = 0; k < 2; k++) { const ph = ((t - T.origin) * .9 + k * .5) % 1; if (t < T.origin) break;
+      ctx.globalAlpha = oa * (1 - ph) * .8; ctx.strokeStyle = RED; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(o[0], o[1], 6 + 34 * eOut(ph), 0, TAU); ctx.stroke(); }
+    ctx.globalAlpha = oa; ctx.fillStyle = RED; ctx.beginPath(); ctx.arc(o[0], o[1], 4.5, 0, TAU); ctx.fill();
+    const [lx, ly] = leader(o[0] + 8, o[1] - 8, 60, -60, 250, seg(t, T.origin + .05, T.origin + .5), .75 * oa, GREY);
+    typed('ORIGIN — UNKNOWN', lx + 4, ly - 12, t, T.origin + .35, 34, `400 21px ${MONO}`, FG, 4, false);
+    typed('ELEV. 1,940 M', lx + 4, ly + 26, t, T.origin + .7, 30, `300 17px ${MONO}`, GREY, 3, false);
+    ctx.globalAlpha = 1;
+  }
+  // relay station marker
+  const sa = eOut(seg(t, T.station, T.station + .35));
+  if (s && sa > 0) {
+    const hit = seg(t, T.recv, T.recv + .8);
+    if (hit > 0 && hit < 1) { ctx.globalAlpha = (1 - hit) * .9; ctx.strokeStyle = RED; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(s[0], s[1], 8 + 60 * eOut(hit), 0, TAU); ctx.stroke(); }
+    ctx.globalAlpha = sa; ctx.strokeStyle = FG; ctx.lineWidth = 1.4; ctx.strokeRect(s[0] - 6, s[1] - 6, 12, 12);
+    ctx.fillStyle = t > T.recv ? RED : FG; ctx.fillRect(s[0] - 2.5, s[1] - 2.5, 5, 5);
+    const [lx, ly] = leader(s[0] - 9, s[1] - 9, -70, -70, 270, seg(t, T.station + .05, T.station + .5), .75 * sa, GREY);
+    const x0 = lx - 270;
+    typed('RELAY STATION K-7', x0, ly - 12, t, T.station + .3, 36, `400 21px ${MONO}`, FG, 4, false);
+    typed('66°41\'08"N  142°19\'54"W', x0, ly + 26, t, T.station + .6, 40, `300 17px ${MONO}`, GREY, 2, false);
+    typed('RECEIVED 02:14:07 UTC', x0, ly + 52, t, T.recv + .05, 40, `400 17px ${MONO}`, RED, 2, false);
+    ctx.globalAlpha = 1;
+  }
+  // HUD readouts
+  const ha = eOut(seg(t, T.terIn + .5, T.terIn + 1.1));
+  ctx.globalAlpha = ha;
+  ctx.font = `300 18px ${MONO}`; ctx.letterSpacing = '4px'; ctx.fillStyle = GREY; ctx.textAlign = 'left';
+  const secs = 2 + Math.floor((t - T.terIn) * 1.4);
+  ctx.fillText(`03 NOV 1977   02:14:${String(clamp(secs, 0, 59)).padStart(2, '0')} UTC`, 120, 118);
+  hairline(120, 180, 140, .5 * ha, GREY);
+  ctx.fillText(`ALT ${(1610 - (t - T.terIn) * 38).toFixed(0)} M   HDG ${(311 + (t - T.terIn) * 3.2).toFixed(1)}°`, 120, H - 110);
+  ctx.textAlign = 'right';
+  ctx.fillText('BAND  1420.405 MHZ', W - 120, 118);
+  // tiny oscilloscope: flat until the signal arrives
+  const amp = seg(t, T.trace, T.trace + .3) * (1 - seg(t, T.traceEnd + .4, T.terOut));
+  ctx.strokeStyle = amp > .02 ? RED : DIM; ctx.lineWidth = 1.3; ctx.beginPath();
+  for (let i = 0; i <= 120; i++) { const x = W - 120 - 280 + i * 280 / 120, e = Math.sin(Math.PI * i / 120);
+    const y = 150 + amp * e * 14 * Math.sin(i * .55 - t * 22) * (0.7 + .3 * Math.sin(i * .13 + t * 3)); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+  ctx.letterSpacing = '0px'; ctx.globalAlpha = 1;
+  ctx.restore();
+  // scene fade (to black), applied over the whole scene
+  if (a < 1) { ctx.fillStyle = `rgba(6,7,9,${1 - a})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ── C: redacted memo ──────────────────────────────────────────────────────────────────────
+const BODY = [
+  { s: 'At 02:14 UTC the array recorded a signal' },
+  { s: 'at 1420.405 MHz lasting 72 seconds.' },
+  { s: 'Bearing traced to VARN RIDGE, SECTOR 9.', red: [18, 38], seed: 21 },
+  { s: 'Tapes forwarded to DR. H. OSTROVA.', red: [19, 33], seed: 33 },
+  { s: 'It has not been detected since.', last: true },
+];
+const BX = 110, BY = 500, LH = 62, FS = 32, CW = FS * .6;
+const typeRate = 92;
+const lineStart = []; { let c = 0; BODY.forEach((L, i) => { if (i < 2) { lineStart.push(-99); return; } lineStart.push(T.type0 + c / typeRate); c += L.s.length + 6; }); }
+const redT = [6.95, 7.35];
+const DIVE = (() => { const L = BODY[2]; return [BX + (L.red[0] + (L.red[1] - L.red[0]) / 2) * CW, BY + 2 * LH - FS * .32]; })();
+function docView(t) {
+  const u = eSine(seg(t, T.docIn - .2, T.diveB)), dv = eIn(seg(t, T.dive, T.diveB));
+  let F = [lerp(600, 610, u), lerp(560, 640, u)], S = lerp(.96, 1.04, u), rot = deg(lerp(-3.2, -1.6, u));
+  const lf = Math.log(S), lt = Math.log(46);
+  F = [lerp(F[0], DIVE[0], eInOut(seg(t, T.dive, T.diveB - .1))), lerp(F[1], DIVE[1], eInOut(seg(t, T.dive, T.diveB - .1)))];
+  S = Math.exp(lerp(lf, lt, dv)); rot = lerp(rot, 0, dv);
+  return { F, S, rot };
+}
+function drawDoc(t) {
+  const a = eSine(seg(t, T.docIn, T.docFull)); if (a <= 0 || t > T.diveB + .05) return;
+  const v = docView(t);
+  ctx.save();
+  ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+  ctx.translate(W / 2, H / 2); ctx.rotate(v.rot); ctx.scale(v.S, v.S); ctx.translate(-v.F[0], -v.F[1]);
+  // soft drop shadow, paper
+  ctx.shadowColor = 'rgba(0,0,0,.8)'; ctx.shadowBlur = 60 * Math.min(1, 1 / v.S); ctx.shadowOffsetY = 18;
+  ctx.drawImage(PAPER, 0, 0, DW, DH); ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  // typewriter body: per-glyph ink weight and baseline jitter
+  ctx.font = `400 ${FS}px ${TYPE}`; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  BODY.forEach((L, li) => {
+    const n = Math.floor((t - lineStart[li]) * typeRate); if (n <= 0) return;
+    const y = BY + li * LH;
+    for (let i = 0; i < Math.min(n, L.s.length); i++) { const ch = L.s[i]; if (ch === ' ') continue;
+      const h = hash(li * 101 + i, 7); ctx.fillStyle = `rgba(22,23,25,${.78 + .22 * h})`;
+      ctx.fillText(ch, BX + i * CW + (hash(i, li) - .5) * 1.2, y + (hash(li, i * 3) - .5) * 1.6); }
+    if (n < L.s.length && Math.floor(t * 10) % 2 === 0) { ctx.fillStyle = 'rgba(22,23,25,.8)'; ctx.fillRect(BX + n * CW, y + 6, CW - 2, 3); }
+    if (L.red) { const k = li === 2 ? 0 : 1; const p = eInOut(seg(t, redT[k], redT[k] + .28));
+      redBar(ctx, BX + L.red[0] * CW - 6, y - FS * .82, (L.red[1] - L.red[0]) * CW + 12, FS * 1.02, L.seed, p); }
+    if (L.last) { const p = eInOut(seg(t, T.underline, T.underline + .3)); if (p > 0) { ctx.fillStyle = RED; ctx.globalAlpha = .85; ctx.fillRect(BX - 4, y + 12, (L.s.length * CW + 8) * p, 2.5); ctx.globalAlpha = 1; } }
+  });
+  // margin note: a red tick against the last line
+  ctx.restore();
+  // cold light falloff over the page (screen-space so it reads as a lamp)
+  const lg = ctx.createRadialGradient(W * .42, H * .35, 120, W * .5, H * .5, 1150);
+  lg.addColorStop(0, 'rgba(10,14,20,0)'); lg.addColorStop(1, 'rgba(4,6,9,.72)');
+  ctx.fillStyle = lg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(40,60,90,.06)'; ctx.fillRect(0, 0, W, H);
+  if (a < 1) { ctx.fillStyle = `rgba(6,7,9,${1 - a})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ── D: end title ──────────────────────────────────────────────────────────────────────────
+function drawEnd(t) {
+  if (t < T.diveB - .05) return;
+  ctx.fillStyle = t < T.diveB ? '#0c0c0d' : BG; ctx.fillRect(0, 0, W, H);
+  const f = 1 - eSine(seg(t, T.endOut, 9.95)); if (f <= 0) return;
+  const s = 1 + (t - T.endIn) * .012;
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(s, s); ctx.translate(-W / 2, -H / 2);
+  ctx.shadowColor = 'rgba(220,230,240,.3)'; ctx.shadowBlur = 16;
+  tracked('THE SILENT FREQUENCY', W / 2, 548, `300 84px ${SERIF}`, 17 + 5 * eOut(seg(t, T.endIn, 10)), { c: FG, a: f }, t, T.endIn, .035, .8, 'center', 0);
+  ctx.shadowBlur = 0;
+  const lw = 300 * eInOut(seg(t, T.endIn + .35, T.endIn + 1.0));
+  hairline(W / 2 - 20, W / 2 - 20 - lw, 610, .6 * f); hairline(W / 2 + 20, W / 2 + 20 + lw, 610, .6 * f);
+  const da = eOut(seg(t, T.endIn + .5, T.endIn + .8)) * f;
+  ctx.save(); ctx.globalAlpha = da; ctx.fillStyle = RED; ctx.translate(W / 2, 610); ctx.rotate(Math.PI / 4); ctx.fillRect(-4, -4, 8, 8); ctx.restore();
+  tracked('FILE 77-114 · UNRESOLVED', W / 2, 668, `300 20px ${MONO}`, 7, { c: '#a9b0b7', a: f }, t, T.endIn + .55, .012, .5, 'center', 0);
+  ctx.restore();
+}
+
+// ── compose ───────────────────────────────────────────────────────────────────────────────
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+  drawTerrain(t);
+  drawChapter(t);
+  drawDoc(t);
+  drawEnd(t);
+  // grain (refreshed at 6 fps to keep the encode light), vignette, opening fade
+  const st = Math.floor(t * 6 + 1e-4), g = GRAIN[st % 4];
+  ctx.save(); ctx.scale(1.5, 1.5); ctx.translate(-Math.floor(hash(st, 3) * 384), -Math.floor(hash(st, 5) * 384));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W + 400, H + 400); ctx.restore();
+  ctx.drawImage(VIG, 0, 0);
+  const fin = 1 - eSine(seg(t, 0, .5));
+  if (fin > 0) { ctx.fillStyle = `rgba(0,0,0,${fin})`; ctx.fillRect(0, 0, W, H); }
+  const fout = eSine(seg(t, 9.65, 10)); if (fout > 0) { ctx.fillStyle = `rgba(0,0,0,${fout})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await Promise.all([`300 100px ${SERIF}`, `500 30px ${SERIF}`, `300 20px ${MONO}`, `400 20px ${MONO}`, `400 30px ${TYPE}`, `700 30px ${TYPE}`]
+    .map(f => document.fonts.load(f, 'THE SILENT FREQUENCY CHAPTER I abc 0123456789 — · °\'"')));
+  await document.fonts.ready;
+  OY = height(OX, OZ) + 1; SY = height(SX, SZ) + .4;
+  buildGrid(); buildGrain(); buildPaper(); render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [{ t: 0, k: 'drone' }, { t: T.titleIn, k: 'boom', v: .8 }, { t: T.lineIn, k: 'shimmer' },
+    { t: T.terIn - .1, k: 'wind', d: 3.6 }, { t: T.origin, k: 'ping' }, { t: T.trace, k: 'signal', d: T.traceEnd - T.trace + .3 },
+    { t: T.recv, k: 'ping', v: 1.3 }, { t: T.docIn - .15, k: 'slide' },
+    { t: redT[0], k: 'bar', d: .28 }, { t: redT[1], k: 'bar', d: .28 }, { t: T.dive, k: 'whoosh', d: T.diveB - T.dive + .1 },
+    { t: T.diveB, k: 'thud' }, { t: T.endIn, k: 'boom', v: 1 }, { t: T.endIn + .05, k: 'chord' }];
+  const ui = (t0, n, rate) => { for (let i = 0; i < n; i += 2) ev.push({ t: t0 + i / rate, k: 'tick' }); };
+  ui(T.station + .3, 17, 36); ui(T.station + .6, 24, 40); ui(T.origin + .35, 16, 34); ui(T.origin + .7, 13, 30); ui(T.recv + .05, 21, 40);
+  BODY.forEach((L, li) => { if (li < 2) return; for (let i = 0; i < L.s.length; i++) if (L.s[i] !== ' ' && i % 2 === 0) ev.push({ t: lineStart[li] + i / typeRate, k: 'key' });
+    ev.push({ t: lineStart[li] + L.s.length / typeRate + .02, k: 'ret' }); });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
