@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── 8-Bit Console · "Monday Quest" ─────────────────────────────────────
+// Everything is drawn on a 256×240 virtual screen (8×8 tile grid, third-generation console
+// resolution) and enlarged 4× with nearest neighbour into the 1920×1080 frame (pillarboxed like
+// a console on a widescreen TV). Colours come only from the classic 64-entry console palette
+// (16 of them are used); sprites have 3 colours + transparency; no dithering, no blending.
+// Title (palette fade-in) → vertical scroll → Stage 1 office: run, jump, coffee, emails, hit +
+// flicker → full-screen flip scroll → boss "THE INBOX" → caffeinated power run → stomp → explosion
+// → weekend flag → "LEVEL CLEAR!" → palette-step fade to black.
+const W = 1920, H = 1080, VW = 256, VH = 240, SC = 4, OX = (W - VW * SC) / 2, OY = (H - VH * SC) / 2, DUR = 10;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled = false;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.imageSmoothingEnabled = false; return c; };
+const VC = mk(VW, VH), V = VC.getContext('2d'), BUF_A = mk(VW, VH), BUF_B = mk(VW, VH);
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const R = Math.round, F = Math.floor;
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ── the console's 64-colour master palette (index = hardware colour number) ──
+const NESPAL = [
+  '#7C7C7C', '#0000FC', '#0000BC', '#4428BC', '#940084', '#A80020', '#A81000', '#881400', '#503000', '#007800', '#006800', '#005800', '#004058', '#000000', '#000000', '#000000',
+  '#BCBCBC', '#0078F8', '#0058F8', '#6844FC', '#D800CC', '#E40058', '#F83800', '#E45C10', '#AC7C00', '#00B800', '#00A800', '#00A844', '#008888', '#000000', '#000000', '#000000',
+  '#F8F8F8', '#3CBCFC', '#6888FC', '#9878F8', '#F878F8', '#F85898', '#F87858', '#FCA044', '#F8B800', '#B8F818', '#58D854', '#58F898', '#00E8D8', '#787878', '#000000', '#000000',
+  '#FCFCFC', '#A4E4FC', '#B8B8F8', '#D8B8F8', '#F8B8F8', '#F8A4C0', '#F0D0B0', '#FCE0A8', '#F8D878', '#D8F878', '#B8F8B8', '#B8F8D8', '#00FCFC', '#F8D8F8', '#000000', '#000000'];
+// the 16 colours this cartridge uses
+const P = { k: 0x0F, w: 0x30, cr: 0x37, sky: 0x21, bl: 0x12, sk: 0x27, or: 0x17, br: 0x07, rd: 0x16, gd: 0x28, gn: 0x1A, lg: 0x2A, gy: 0x00, lgy: 0x10, lc: 0x31, db: 0x02 };
+const hex = i => NESPAL[i];
+// palette fade: every step subtracts one brightness row (0x10); below row 0 → black
+const FADE = [0, 1, 2, 3, 4].map(f => { const m = new Map(); for (let i = 0; i < 64; i++) { const j = i - 16 * f; const a = parseInt(NESPAL[i].slice(1), 16), b = parseInt(NESPAL[j < 0 ? 0x0F : j].slice(1), 16); if (!m.has(a)) m.set(a, b); } return m; });
+
+const rect = (x, y, w, h, ci) => { V.fillStyle = hex(ci); V.fillRect(R(x), R(y), w, h); };
+// sprite from a character grid: map char → palette index ('.' transparent)
+function grid(rows, map) {
+  const h = rows.length, w = Math.max(...rows.map(r => r.length)), c = mk(w, h), x = c.getContext('2d');
+  rows.forEach((r, y) => [...r].forEach((ch, i) => { if (map[ch] !== undefined) { x.fillStyle = hex(map[ch]); x.fillRect(i, y, 1, 1); } }));
+  return c;
+}
+const spr = (c, x, y, flip = false) => { if (!flip) V.drawImage(c, R(x), R(y)); else { V.save(); V.translate(R(x) + c.width, R(y)); V.scale(-1, 1); V.drawImage(c, 0, 0); V.restore(); } };
+
+// ── text: 8×8 pixel font, thresholded to hard pixels and tinted with one palette colour ──
+const TX = {};
+function textCan(s, ci) {
+  const key = s + '|' + ci; if (TX[key]) return TX[key];
+  const c = mk(s.length * 8, 8), x = c.getContext('2d');
+  x.font = '8px "Press Start 2P"'; x.textBaseline = 'top'; x.fillStyle = '#fff'; x.fillText(s, 0, 0);
+  const d = x.getImageData(0, 0, c.width, 8), [r, g, b] = [1, 3, 5].map(k => parseInt(hex(ci).slice(k, k + 2), 16));
+  for (let i = 0; i < d.data.length; i += 4) { const on = d.data[i + 3] > 110; d.data[i] = r; d.data[i + 1] = g; d.data[i + 2] = b; d.data[i + 3] = on ? 255 : 0; }
+  x.putImageData(d, 0, 0); return TX[key] = c;
+}
+function txt(s, x, y, ci, sc = 1, sh = -1, sho = 1) {
+  const c = textCan(s, ci);
+  if (sh >= 0) V.drawImage(textCan(s, sh), R(x) + sho, R(y) + sho, c.width * sc, 8 * sc);
+  V.drawImage(c, R(x), R(y), c.width * sc, 8 * sc);
+}
+const txtC = (s, cx, y, ci, sc = 1, sh = -1, sho = 1) => txt(s, cx - s.length * 4 * sc, y, ci, sc, sh, sho);
+
+// ── hero: 18×24 office worker, built from a pose skeleton (head, torso, jointed limbs, hands) ──
+const HEAD = [
+  '...kkkkk...',
+  '..kkkkkkkk.',
+  '.kkkkkkkkkk',
+  '.kkkkssssk.',
+  '.kkksssksss',
+  '.kkssssssss',
+  '..kssssss..',
+  '...ksssk...',
+  '....sss....'];
+const POSES = {
+  stand: { fa: [[9, 10], [10, 12], [10, 14]], ba: [[7, 10], [7, 12], [7, 14]], fl: [[9, 16], [10, 19], [10, 22]], bl: [[7, 16], [7, 19], [6, 22]] },
+  run1: { fa: [[9, 10], [7, 12], [5, 13]], ba: [[8, 10], [11, 12], [13, 11]], fl: [[9, 16], [12, 18], [13, 22]], bl: [[7, 16], [6, 19], [3, 20]] },
+  run2: { fa: [[9, 10], [9, 12], [10, 14]], ba: [[7, 10], [7, 12], [7, 14]], fl: [[9, 16], [10, 19], [9, 22]], bl: [[7, 16], [9, 18], [6, 20]] },
+  run3: { fa: [[9, 10], [11, 12], [13, 10]], ba: [[7, 10], [5, 12], [3, 13]], fl: [[9, 16], [8, 19], [5, 21]], bl: [[7, 16], [10, 18], [12, 22]] },
+  jump: { fa: [[9, 10], [11, 7], [12, 4]], ba: [[7, 10], [5, 12], [3, 11]], fl: [[9, 16], [12, 17], [12, 21]], bl: [[7, 16], [5, 19], [3, 22]] },
+  hurt: { fa: [[9, 10], [12, 8], [13, 5]], ba: [[7, 10], [4, 8], [3, 5]], fl: [[9, 16], [11, 19], [13, 22]], bl: [[7, 16], [5, 19], [3, 22]] },
+  cheer: { fa: [[9, 10], [10, 6], [11, 2]], ba: [[7, 10], [7, 12], [7, 14]], fl: [[9, 16], [10, 19], [11, 22]], bl: [[7, 16], [7, 19], [5, 22]] }
+};
+function makeHero(pose, pal) {
+  const GW = 18, GH = 25, g = Array.from({ length: GH }, () => new Array(GW).fill(0));
+  const set = (x, y, v) => { if (x >= 0 && y >= 0 && x < GW && y < GH) g[y][x] = v; };
+  const box = (x, y, w, h, v) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) set(x + i, y + j, v); };
+  const line = (a, b, th, v) => { let [x0, y0] = a; const [x1, y1] = b, dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1; let e = dx + dy;
+    const o = -F((th - 1) / 2); for (;;) { box(x0 + o, y0 + o, th, th, v); if (x0 === x1 && y0 === y1) break; const e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } } };
+  const limbArm = a => { line(a[0], a[1], 3, 1); line(a[1], a[2], 3, 1); line(a[0], a[1], 1, 3); line(a[1], a[2], 1, 3); box(a[2][0], a[2][1], 2, 2, 2); };
+  const limbLeg = l => { line(l[0], l[1], 2, 1); line(l[1], l[2], 2, 1); box(l[2][0] - 1, l[2][1], 4, 2, 1); };
+  const p = POSES[pose];
+  limbArm(p.ba); limbLeg(p.bl); limbLeg(p.fl);
+  box(5, 9, 7, 7, 1); box(6, 10, 5, 5, 3); box(8, 10, 1, 4, 1); box(7, 10, 3, 1, 1); box(5, 15, 7, 1, 1);
+  HEAD.forEach((r, y) => [...r].forEach((ch, i) => { if (ch === 'k') set(3 + i, y, 1); else if (ch === 's') set(3 + i, y, 2); }));
+  limbArm(p.fa);
+  const c = mk(GW, GH), x = c.getContext('2d');
+  g.forEach((r, y) => r.forEach((v, i) => { if (v) { x.fillStyle = hex(pal[v - 1]); x.fillRect(i, y, 1, 1); } }));
+  return c;
+}
+const HPALS = [[P.k, P.sk, P.bl], [P.k, P.w, P.rd], [P.br, P.gd, P.w], [P.bl, P.sk, P.gd]];  // normal + 3 "caffeinated" cycles
+const HERO = {}; for (const k in POSES) HERO[k] = HPALS.map(pl => makeHero(k, pl));
+
+// ── other sprites ──
+const COFFEE = [0, 1].map(f => grid([
+  f ? '...w..w...' : '..w..w....',
+  f ? '..w..w....' : '...w..w...',
+  'kkkkkkkk..',
+  'knnnnnnk..',
+  'kwwwwwwkkk',
+  'kwwwwwwk.k',
+  'kwwnnwwk.k',
+  'kwwwwwwkkk',
+  'kwwwwwwk..',
+  '.kkkkkk...'], { k: P.k, w: P.w, n: P.br }));
+const MAIL = [0, 1].map(f => grid(f ? [
+  '..................',
+  '...kkkkkkkkkkkk...',
+  'k..kwkwwwwwwkwk..k',
+  'kk.kwwkwwwwkwwk.kk',
+  'kwkkwkwkwwkwkwkkwk',
+  'kwwkwwkkrrkkwwkwwk',
+  '.kwkwwwwrrwwwwkwk.',
+  '..kkwwwwwwwwwwkk..',
+  '...kwwwwwwwwwwk...',
+  '...kkkkkkkkkkkk...'] : [
+  '...kkkkkkkkkkkk...',
+  '...kwkwwwwwwkwk...',
+  '...kwwkwwwwkwwk...',
+  '..kkwkwkwwkwkwkk..',
+  '.kwkwwkkrrkkwwkwk.',
+  'kwwkwwwwrrwwwwkwwk',
+  'kwwkwwwwwwwwwwkwwk',
+  'kk.kwwwwwwwwwwk.kk',
+  'k..kwwwwwwwwwwk..k',
+  '...kkkkkkkkkkkk...'], { k: P.k, w: P.w, r: P.rd }));
+const HEART = [P.rd, P.gy].map(c => grid([
+  '.rr.rr.',
+  'rwrrrrr',
+  'rrrrrrr',
+  '.rrrrr.',
+  '..rrr..',
+  '...r...'], { r: c, w: c === P.rd ? P.w : P.gy }));
+const MUGI = grid([
+  'kkkkkk..',
+  'knnnnk..',
+  'kwwwwkkk',
+  'kwwwwk.k',
+  'kwwwwkkk',
+  '.kkkk...'], { k: P.lgy, w: P.w, n: P.br });
+function puff(f) { // explosion frames 0..3, 16×16
+  const c = mk(16, 16), x = c.getContext('2d'); const r = (a, b, w, h, ci) => { x.fillStyle = hex(ci); x.fillRect(a, b, w, h); };
+  if (f === 0) { r(6, 4, 4, 8, P.w); r(4, 6, 8, 4, P.w); r(7, 7, 2, 2, P.gd); }
+  else if (f === 1) { r(4, 2, 8, 12, P.gd); r(2, 4, 12, 8, P.gd); r(6, 4, 4, 8, P.w); r(4, 6, 8, 4, P.w); r(0, 7, 2, 2, P.rd); r(14, 7, 2, 2, P.rd); r(7, 0, 2, 2, P.rd); r(7, 14, 2, 2, P.rd); }
+  else if (f === 2) { r(2, 2, 4, 4, P.rd); r(10, 2, 4, 4, P.or); r(2, 10, 4, 4, P.or); r(10, 10, 4, 4, P.rd); r(6, 6, 4, 4, P.gd); r(7, 7, 2, 2, P.w); }
+  else { r(0, 0, 2, 2, P.gy); r(14, 1, 2, 2, P.gy); r(1, 14, 2, 2, P.gy); r(13, 13, 2, 2, P.gy); r(7, 7, 2, 2, P.lgy); }
+  return c;
+}
+const PUFF = [0, 1, 2, 3].map(puff);
+
+// ── timeline (seconds) ──
+const T_SCROLL = 1.5, L0 = 1.95, VRUN = 140;
+const J1 = [2.822, 3.322], T_FALL = 3.4, J2 = [3.85, 4.35], J3 = [4.45, 4.95], T_HIT = 4.62, T_LAND = 4.99, T_RES = 5.05;
+const T_FLIP = 5.41, T_ROOM = 5.91, LVLW = 448;
+const T_DROP = 6.0, T_BLAND = 6.35, T_HP = 6.4, T_FIRE = 6.75, T_POW = 6.95, T_DASH = 7.0, J5 = [7.4, 7.72], J6 = [7.72, 8.1], T_BOOM = 7.95, T_GONE = 8.3;
+const T_POLE = 8.3, T_RUN2 = 8.35, T_TOUCH = 8.82, T_CLEAR = 8.9, T_WKND = 9.1, T_TALLY = [9.1, 9.45], T_FADE = 9.5;
+const jumpY = (s, y0, y1, h) => y0 + (y1 - y0) * s - h * 4 * s * (1 - s);
+const xHit = 24 + VRUN * (T_HIT - L0);
+function heroLevelX(t) {
+  if (t < T_HIT) return 24 + VRUN * (t - L0);
+  if (t < T_LAND) return xHit - 16 * seg(t, T_HIT, T_LAND);
+  if (t < T_RES) return xHit - 16;
+  return xHit - 16 + VRUN * (t - T_RES);
+}
+const yHit = jumpY(seg(T_HIT, J3[0], J3[1]), 208, 208, 44);
+function heroLevelY(t) {
+  if (t >= J1[0] && t < J1[1]) return jumpY(seg(t, J1[0], J1[1]), 208, 176, 42);
+  if (t >= J1[1] && t < T_FALL) return 176;
+  if (t >= T_FALL && t < T_FALL + 0.2667) return 176 + 450 * (t - T_FALL) ** 2;
+  if (t >= J2[0] && t < J2[1]) return jumpY(seg(t, J2[0], J2[1]), 208, 208, 44);
+  if (t >= J3[0] && t < T_HIT) return jumpY(seg(t, J3[0], J3[1]), 208, 208, 44);
+  if (t >= T_HIT && t < T_LAND) { const u = t - T_HIT; return Math.min(208, yHit - 60 * u + 450 * u * u); }
+  return 208;
+}
+// flying emails in the office: [x at time tRef, tRef, speed, top y]
+const LMAIL = [[325, 4.1, 110, 190], [409, 4.7, 110, 192], [xHit + 6, T_HIT, 130, 150]];
+const mailX = (m, t) => m[0] - m[2] * (t - m[1]);
+// coffee cups (world x, y top); collection time = hero centre passes cup centre
+const CUPS = [[100, 197], [182, 134], [420, 197]];
+const CUP_T = CUPS.map(c => { for (let t = L0; t < T_FLIP; t += 1 / 600) if (t > T_RES || t < T_HIT) { if (heroLevelX(t) + 9 >= c[0] + 5) return t; } return 99; });
+// boss-room email volley, and the moment each one bursts against the caffeinated hero
+const BMAIL = [0, 1, 2, 3, 4].map(i => ({ te: T_FIRE + 0.05 * i, y: [182, 170, 192, 176, 186][i] }));
+const heroDashX = t => 8 + 180 * (t - T_DASH);
+BMAIL.forEach(m => { m.tb = 99; for (let t = m.te; t < J5[0] + 0.3; t += 1 / 600) { if (170 - 150 * (t - m.te) <= heroDashX(Math.max(t, T_DASH)) + 12 && t >= T_DASH) { m.tb = t; break; } } });
+const BOSS_X = 170;
+function bossY(t) { if (t < T_DROP) return -60; if (t < T_BLAND) return -44 + 208 * seg(t, T_DROP, T_BLAND) ** 2; return 164 + (t > T_BLAND + 0.3 && t < J5[1] ? F(t * 4) % 2 : 0); }
+const RB = rng(77), BOOMS = Array.from({ length: 9 }, (_, i) => ({ t: T_BOOM + 0.045 * i, x: BOSS_X - 6 + RB() * 44, y: 150 + RB() * 44 }));
+const SCORE_EV = [];
+CUP_T.forEach(t => SCORE_EV.push([t, 500])); BMAIL.forEach(m => SCORE_EV.push([m.tb, 200])); SCORE_EV.push([J5[1], 5000]);
+function score(t) { let s = 0; for (const [te, v] of SCORE_EV) if (t >= te) s += v; s += R(2400 * seg(t, T_TALLY[0], T_TALLY[1]) / 50) * 50; return s; }
+function clockMin(t) { return 9 * 60 + F(480 * seg(t, L0, T_TALLY[1])); }
+const pad = (n, k) => String(n).padStart(k, '0');
+
+// ── scenery ──
+function floorTiles(sx, ex, camX, oy, top, body, seam) {
+  for (let y = 208; y < 240; y += 8) {
+    rect(sx - camX, y + oy, ex - sx, 8, y === 208 ? top : body);
+    if (y === 208) rect(sx - camX, y + oy, ex - sx, 1, P.lgy === top ? P.w : P.lc);
+    const off = ((y - 208) / 8) % 2 ? 8 : 0;
+    for (let x = sx + off; x < ex; x += 16) rect(x - camX, y + oy, 1, 8, seam);
+    rect(sx - camX, y + 7 + oy, ex - sx, 1, seam);
+  }
+}
+function windowPane(x, y) { // 48×64 office window
+  rect(x, y, 48, 64, P.k); rect(x + 1, y + 1, 46, 62, P.lgy); rect(x + 4, y + 4, 40, 56, P.sky);
+  rect(x + 8, y + 36, 8, 24, P.lc); rect(x + 18, y + 28, 10, 32, P.lc); rect(x + 32, y + 42, 10, 18, P.lc);
+  for (let j = 0; j < 4; j++) { rect(x + 20, y + 32 + j * 7, 2, 3, P.sky); rect(x + 24, y + 32 + j * 7, 2, 3, P.sky); }
+  rect(x + 23, y + 4, 2, 56, P.lgy); rect(x + 4, y + 30, 40, 2, P.lgy);
+  for (let j = 0; j < 6; j++) { rect(x + 8 + j, y + 20 - j, 1, 1, P.w); rect(x + 12 + j, y + 20 - j, 1, 1, P.w); }
+}
+function plant(x, y) { // pot on the floor, y = floor top
+  rect(x + 3, y - 12, 10, 12, P.k); rect(x + 4, y - 11, 8, 10, P.or); rect(x + 4, y - 11, 8, 2, P.br);
+  const L = [[7, -30, 2, 18], [2, -26, 4, 3], [4, -23, 3, 10], [10, -27, 4, 3], [9, -24, 3, 11], [0, -20, 5, 3], [11, -21, 5, 3], [5, -34, 3, 5], [8, -32, 3, 3]];
+  L.forEach(([a, b, w, h]) => rect(x + a - 1, y + b - 1, w + 2, h + 2, P.k));
+  L.forEach(([a, b, w, h], i) => rect(x + a, y + b, w, h, i % 3 ? P.gn : P.lg));
+}
+function cooler(x, y) {
+  rect(x, y - 24, 16, 24, P.k); rect(x + 1, y - 23, 14, 22, P.lgy); rect(x + 3, y - 16, 4, 2, P.bl); rect(x + 9, y - 16, 4, 2, P.rd);
+  rect(x + 2, y - 44, 12, 20, P.k); rect(x + 3, y - 43, 10, 18, P.lc); rect(x + 5, y - 41, 2, 12, P.w); rect(x + 6, y - 47, 4, 3, P.k);
+}
+function wallClock(cx, cy, mins) {
+  rect(cx - 9, cy - 7, 18, 14, P.k); rect(cx - 7, cy - 9, 14, 18, P.k); rect(cx - 8, cy - 6, 16, 12, P.w); rect(cx - 6, cy - 8, 12, 16, P.w);
+  for (const [a, b] of [[0, -7], [6, 0], [0, 6], [-7, 0]]) rect(cx + a, cy + b, 1, 1, P.k);
+  const hand = (ang, len, ci) => { for (let r = 0; r <= len; r++) rect(cx + R(Math.sin(ang) * r), cy - R(Math.cos(ang) * r), 1, 1, ci); };
+  hand((mins % 60) / 60 * 2 * Math.PI, 5, P.k); hand(((mins / 60) % 12) / 12 * 2 * Math.PI, 3, P.rd);
+}
+function desk(x0, x1, top, oy, camX) {
+  const x = x0 - camX; const w = x1 - x0;
+  rect(x, top + oy, w, 8, P.k); rect(x + 1, top + 1 + oy, w - 2, 5, P.or); rect(x + 1, top + 6 + oy, w - 2, 1, P.br);
+  rect(x + 3, top + 8 + oy, 5, 32 - 8, P.k); rect(x + 4, top + 8 + oy, 3, 24, P.br);
+  rect(x + w - 26, top + 8 + oy, 24, 20, P.k); rect(x + w - 25, top + 8 + oy, 22, 19, P.or); rect(x + w - 25, top + 17 + oy, 22, 1, P.br); rect(x + w - 16, top + 12 + oy, 4, 1, P.k); rect(x + w - 16, top + 21 + oy, 4, 1, P.k);
+  rect(x + w - 26, top + 28 + oy, 5, 4, P.k); rect(x + w - 7, top + 28 + oy, 5, 4, P.k);
+}
+function monitor(x, y) { // 18×16 on a desk top y
+  rect(x, y - 16, 18, 13, P.k); rect(x + 1, y - 15, 16, 11, P.lgy); rect(x + 3, y - 13, 12, 7, P.db);
+  rect(x + 4, y - 12, 7, 1, P.w); rect(x + 4, y - 10, 9, 1, P.lc); rect(x + 4, y - 8, 5, 1, P.lc);
+  rect(x + 7, y - 3, 4, 3, P.k); rect(x + 4, y - 1, 10, 1, P.k);
+}
+function drawOffice(camX, oy, t) {
+  rect(0, 32 + oy, VW, 176, P.cr);
+  rect(0, 150 + oy, VW, 1, P.k); rect(0, 151 + oy, VW, 4, P.or); rect(0, 155 + oy, VW, 1, P.k);
+  rect(0, 156 + oy, VW, 44, P.lc); for (let x = 0; x < LVLW + 16; x += 32) rect(x - camX, 160 + oy, 1, 36, P.w);
+  rect(0, 200 + oy, VW, 8, P.br); rect(0, 200 + oy, VW, 1, P.k);
+  for (let i = 0; i < 5; i++) { const x = 24 + 96 * i - camX; if (x > -48 && x < VW) windowPane(x, 56 + oy); }
+  wallClock(192 - camX, 84 + oy, clockMin(t));
+  plant(56 - camX, 208 + oy); plant(344 - camX, 208 + oy); cooler(296 - camX, 208 + oy);
+  desk(160, 240, 176, oy, camX); monitor(162 - camX, 176 + oy);
+  floorTiles(0, LVLW, camX, oy, P.lgy, P.gy, P.k);
+}
+function drawBossRoom(sx, oy, t) {
+  rect(sx, 32 + oy, VW, 176, P.k);
+  for (let i = 0; i < 3; i++) { const x = sx + 16 + 80 * i;
+    rect(x, 48 + oy, 64, 96, P.gy); rect(x + 3, 51 + oy, 58, 90, P.db); rect(x + 31, 51 + oy, 2, 90, P.gy); rect(x + 3, 94 + oy, 58, 2, P.gy);
+    const rs = rng(40 + i); for (let j = 0; j < 6; j++) { const bx = x + 3 + F(rs() * 50), bw = 6 + F(rs() * 8), bh = 20 + F(rs() * 40);
+      rect(bx, 141 - bh + oy, bw, bh, P.k); for (let q = 0; q < bh / 6 - 1; q++) if (rs() > 0.45) rect(bx + 2, 141 - bh + 3 + q * 6 + oy, 2, 2, P.gd); }
+    rect(x + 3, 94 + oy, 58, 2, P.gy); rect(x + 31, 51 + oy, 2, 90, P.gy); }
+  rect(sx, 150 + oy, VW, 58, P.k); rect(sx, 200 + oy, VW, 8, P.gy); rect(sx, 200 + oy, VW, 1, P.lgy);
+  floorTiles(0, VW, -sx, oy, P.bl, P.db, P.k);
+}
+// THE INBOX: 48×44 metal tray monster stuffed with mail, with an unread badge
+function drawBoss(x, y, t, flash, mouthOpen) {
+  const O = flash ? P.w : P.k, B = flash ? P.rd : P.gy, L = flash ? P.w : P.lgy, E = flash ? P.rd : P.w;
+  for (let i = 0; i < 3; i++) { const ex = x + 5 + i * 13, ey = y + (i === 1 ? 0 : 3) + (F(t * 6 + i) % 2);
+    rect(ex, ey, 14, 12, O); rect(ex + 1, ey + 1, 12, 10, E); for (let j = 0; j < 5; j++) { rect(ex + 1 + j, ey + 1 + j, 1, 1, O); rect(ex + 12 - j, ey + 1 + j, 1, 1, O); } }
+  rect(x, y + 10, 48, 34, O); rect(x + 1, y + 11, 46, 32, B); rect(x + 1, y + 11, 46, 3, L); rect(x + 1, y + 14, 46, 1, O);
+  rect(x + 3, y + 40, 42, 1, O);
+  // angry brows + eyes looking left at the hero
+  for (let j = 0; j < 7; j++) { rect(x + 8 + j, y + 17 + F(j / 2), 1, 2, O); rect(x + 39 - j, y + 17 + F(j / 2), 1, 2, O); }
+  rect(x + 8, y + 21, 9, 7, O); rect(x + 9, y + 22, 7, 5, E); rect(x + 9, y + 23, 3, 3, O);
+  rect(x + 31, y + 21, 9, 7, O); rect(x + 32, y + 22, 7, 5, E); rect(x + 32, y + 23, 3, 3, O);
+  const mh = mouthOpen ? 9 : 4; rect(x + 11, y + 31, 26, mh, O); if (mouthOpen) rect(x + 13, y + 33, 22, mh - 3, P.rd);
+  for (let j = 0; j < 6; j++) { rect(x + 12 + j * 4, y + 31, 3, 2, E); rect(x + 13 + j * 4, y + 33, 1, 1, E); }
+  // unread badge "99+"
+  rect(x + 30, y - 4, 28, 12, O); rect(x + 31, y - 3, 26, 10, P.rd); rect(x + 30, y - 4, 1, 1, P.k); rect(x + 57, y - 4, 1, 1, P.k); rect(x + 30, y + 7, 1, 1, P.k); rect(x + 57, y + 7, 1, 1, P.k);
+  txt('99+', x + 32, y - 2, P.w);
+}
+function drawFlag(x, t, oy) { // pole at x; grows from the floor, flag climbs when touched
+  const g = seg(t, T_POLE, T_POLE + 0.25); if (g <= 0) return;
+  const top = 208 - R(88 * g / 8) * 8;
+  rect(x - 1, top + oy, 4, 208 - top, P.k); rect(x, top + oy, 2, 208 - top, P.w);
+  if (g >= 1) { rect(x - 3, top - 7 + oy, 8, 8, P.k); rect(x - 2, top - 6 + oy, 6, 6, P.gd); rect(x - 1, top - 5 + oy, 2, 2, P.w); }
+  const fy = R(150 - 26 * seg(t, T_TOUCH, T_TOUCH + 0.23)), wav = F(t * 6) % 2;
+  if (top > fy) return;
+  rect(x - 32, fy + oy, 31, 16 + wav, P.k); rect(x - 31, fy + 1 + oy, 29, 14 + wav, P.gd); rect(x - 31, fy + 14 + wav + oy, 29, 1, P.or);
+  txt('SAT', x - 29, fy + 4 + oy, P.k);
+}
+function drawHUD(t, room) {
+  rect(0, 0, VW, 32, P.k);
+  txt('SCORE', 16, 8, P.w); txt(pad(score(t), 6), 16, 18, P.w);
+  txt('LIFE', 72, 8, P.w); const lives = t >= T_HIT ? 2 : 3;
+  for (let i = 0; i < 3; i++) spr(HEART[i < lives ? 0 : 1], 72 + i * 9, 19);
+  const cups = t >= T_POW ? Math.max(0, 3 - F(seg(t, T_POW, T_POW + 0.15) * 3.99)) : CUP_T.filter(c => t >= c).length;
+  txt('COFFEE', 112, 8, P.w); spr(MUGI, 116, 19); txt('x' + cups, 128, 18, P.gd);
+  const m = clockMin(t); txt('MON', 176, 8, P.w); txt(pad(F(m / 60), 2) + ':' + pad(m % 60, 2), 176, 18, t >= T_TALLY[0] ? P.gd : P.w);
+  if (room) { const on = t >= T_BLAND + 0.05; if (on) { txt('THE INBOX', 16, 40, P.rd);
+    const full = F(16 * seg(t, T_HP, T_HP + 0.35)) - F(16 * seg(t, J5[1], J5[1] + 0.23));
+    for (let i = 0; i < 16; i++) { rect(96 + i * 6, 40, 5, 8, P.gy); if (i < full) rect(96 + i * 6, 40, 5, 8, P.rd), rect(96 + i * 6, 40, 5, 2, P.w); } } }
+}
+function heroPose(t) {
+  if (t < L0) return ['stand', 0];
+  const n = F(t * 12) % 3, run = ['run1', 'run2', 'run3'][n];
+  if (t < T_FLIP) {
+    if (t >= T_HIT && t < T_LAND) return ['hurt', 0];
+    if (heroLevelY(t) < 207.5) return ['jump', 0];
+    if (t >= T_LAND && t < T_RES) return ['stand', 0];
+    return [run, 0];
+  }
+  const f = R(t * 30), pw = t >= T_POW && t < J5[1] + 0.1 ? 1 + f % 3 : 0;
+  if (t < T_ROOM) return [run, 0];
+  if (t < T_DASH) return ['stand', pw];
+  if (t < J5[0]) return [run, pw];
+  if (t < J6[1]) return ['jump', pw];
+  if (t < T_RUN2) return ['stand', 0];
+  if (t < T_TOUCH) return [run, 0];
+  return ['cheer', 0];
+}
+function heroRoomXY(t) {
+  if (t < T_DASH) return [8, 208];
+  if (t < J5[0]) return [heroDashX(t), 208];
+  if (t < J5[1]) { const s = seg(t, J5[0], J5[1]); return [heroDashX(J5[0]) + (172 - heroDashX(J5[0])) * s, jumpY(s, 208, 164, 50)]; }
+  if (t < J6[1]) { const s = seg(t, J6[0], J6[1]); return [172 - 52 * s, jumpY(s, 164, 208, 36)]; }
+  if (t < T_RUN2) return [120, 208];
+  if (t < T_TOUCH) return [120 + (202 - 120) * seg(t, T_RUN2, T_TOUCH), 208];
+  return [202, 208];
+}
+function popup(s, x, y, t0, t, ci = P.w) { const u = t - t0; if (u < 0 || u > 0.5) return; txt(s, x, y - R(u * 30), ci); }
+
+// ── title screen ──
+function drawTitle(oy, t) {
+  rect(0, oy, VW, VH, P.k);
+  const sy = R(Math.max(0, 240 - 240 * seg(t, 0.1, 0.75)) / 2) * 2;  // logo scrolls up into place
+  for (let x = 16; x < 240; x += 8) { rect(x, 30 + sy + oy, 6, 2, P.or); rect(x + 4, 122 + sy + oy, 6, 2, P.or); }
+  txtC('MONDAY', 128, 40 + sy + oy, P.gd, 3, P.or, 2);
+  txtC('QUEST', 128, 72 + sy + oy, P.w, 3, P.bl, 2);
+  txtC('STAGE 1  THE WORK WEEK', 128, 106 + sy + oy, P.lc);
+  // legend strip: hero → coffee → email → weekend flag
+  if (t > 0.55) {
+    const by = 160 + oy; rect(24, by, 208, 1, P.gy);
+    spr(HERO.stand[0], 32, by - 25); spr(COFFEE[F(t * 4) % 2], 82, by - 11);
+    spr(MAIL[F(t * 8) % 2], 128, by - 18 - (F(t * 4) % 2));
+    rect(203, by - 30, 2, 30, P.w); rect(185, by - 30, 18, 11, P.gd);
+    for (let x = 56; x < 196; x += 8) if (x < 80 || (x > 96 && x < 124) || x > 150) rect(x, by - 6, 2, 2, P.gy);
+    const on = t < 1.1 ? (t % 0.5) < 0.33 : F(t * 15) % 2 === 0;
+    if (on && t < T_SCROLL) txtC('PUSH START', 128, 184 + oy, P.w);
+    txtC('© 1989 TINYCART SOFT', 128, 216 + oy, P.gy);
+  }
+}
+
+// ── one frame ──
+function render(t) {
+  const n = R(t * 30);
+  V.imageSmoothingEnabled = false;
+  rect(0, 0, VW, VH, P.k);
+  if (t < T_SCROLL) drawTitle(0, t);
+  else if (t < L0) {
+    // vertical full-screen scroll: the title slides up, stage 1 comes up from below
+    const so = R(240 * seg(t, T_SCROLL, L0) / 4) * 4;
+    drawTitle(0, t); BUF_A.getContext('2d').drawImage(VC, 0, 0);
+    rect(0, 0, VW, VH, P.k); drawOffice(0, 0, L0); spr(HERO.stand[0], 24, 184); drawHUD(L0, false); BUF_B.getContext('2d').drawImage(VC, 0, 0);
+    rect(0, 0, VW, VH, P.k); V.drawImage(BUF_A, 0, -so); V.drawImage(BUF_B, 0, 240 - so);
+  } else {
+    // camera: follows the hero inside the office, then a full-screen flip scroll into the boss room
+    let camX, shake = 0;
+    if (t < T_FLIP) camX = clamp(R(heroLevelX(t)) - 112, 0, LVLW - VW);
+    else camX = LVLW - VW + R(256 * seg(t, T_FLIP, T_ROOM));
+    if (t > T_BLAND && t < T_BLAND + 0.3) shake = n % 2 ? 2 : -2;
+    const oy = shake;
+    if (camX < LVLW) drawOffice(camX, oy, t);
+    if (camX > LVLW - VW) drawBossRoom(LVLW - camX, oy, t);
+    const [pose, pal] = heroPose(t);
+    const flick = t >= T_HIT && t < T_HIT + 1.1 && n % 2 === 1;   // invincibility flicker
+    if (t < T_FLIP) {
+      // cups, emails, hero
+      CUPS.forEach((c, i) => { if (t < CUP_T[i]) spr(COFFEE[F(t * 4) % 2], c[0] - camX, c[1] + oy + (F(t * 4 + i) % 2)); popup('500', c[0] - camX - 6, c[1] - 30 + oy, CUP_T[i], t, P.gd); });
+      LMAIL.forEach(m => { const x = mailX(m, t) - camX; if (x > -20 && x < VW) spr(MAIL[F(t * 8) % 2], x, m[3] + oy + (F(t * 5) % 2)); });
+      if (!flick) spr(HERO[pose][pal], R(heroLevelX(t)) - camX, R(heroLevelY(t)) - 24 + oy, t >= T_HIT && t < T_LAND);
+    } else if (t < T_ROOM) {
+      const hx = 432 + (456 - 432) * seg(t, T_FLIP, T_ROOM);
+      if (!flick) spr(HERO[pose][pal], R(hx) - camX, 184 + oy);
+    } else {
+      const bx = BOSS_X, by = R(bossY(t));
+      if (t >= T_DROP && t < T_BOOM + 0.2) { const hit = t >= J5[1]; drawBoss(bx + (hit && n % 2 ? 1 : 0), by + oy, t, hit && n % 2 === 0, t > T_FIRE - 0.03 && t < T_FIRE + 0.33); }
+      // email volley with sprite flicker: more than 3 sprites on a line → alternate frames
+      const vis = BMAIL.filter(m => t >= m.te && t < m.tb);
+      vis.forEach((m, i) => { if (vis.length > 3 && (i + n) % 2) return; spr(MAIL[F(t * 8) % 2], 170 - 150 * (t - m.te), m.y + oy); });
+      BMAIL.forEach(m => { const u = t - m.tb; if (u >= 0 && u < 0.2) spr(PUFF[F(u / 0.05)], 170 - 150 * (m.tb - m.te) - 1, m.y - 3 + oy); });
+      popup('COMBO x5', 40, 146 + oy, BMAIL[4].tb, t, P.w);
+      BOOMS.forEach(b => { const u = t - b.t; if (u >= 0 && u < 0.24) spr(PUFF[Math.min(3, F(u / 0.06))], b.x, b.y + oy); });
+      popup('5000', 180, 150 + oy, J5[1], t, P.gd);
+      drawFlag(226, t, oy);
+      const [hx, hy] = heroRoomXY(t); spr(HERO[pose][pal], R(hx), R(hy) - 24 + oy);
+      if (t >= T_POW && t < 7.55) { const on = F(t * 10) % 2 === 0 || t < T_POW + 0.3; if (on) txt('CAFFEINATED!', clamp(R(hx) - 38, 4, 156), 140 + oy, P.gd, 1, P.rd); }
+      if (t >= T_CLEAR) { rect(24, 54 + oy, 208, 62, P.k); rect(24, 54 + oy, 208, 1, P.w); rect(24, 115 + oy, 208, 1, P.w); }
+      if (t >= T_CLEAR) { txtC('LEVEL CLEAR!', 128, 62 + oy, P.w, 2, P.rd, 2); }
+      if (t >= T_WKND) { txtC('WEEKEND UNLOCKED', 128, 90 + oy, P.gd); }
+      if (t >= T_TALLY[0] + 0.1) txtC('TIME BONUS  ' + pad(R(2400 * seg(t, T_TALLY[0], T_TALLY[1]) / 50) * 50, 4), 128, 104 + oy, P.lc);
+    }
+    drawHUD(t, t >= T_ROOM);
+  }
+  // palette fade in (title) and out (ending): whole-palette brightness steps
+  let fade = 0;
+  if (t < 0.36) fade = 4 - F(t / 0.09);
+  if (t >= T_FADE) fade = Math.min(4, 1 + F((t - T_FADE) / 0.12));
+  if (fade > 0) {
+    const id = V.getImageData(0, 0, VW, VH), d = id.data, m = FADE[fade];
+    for (let i = 0; i < d.length; i += 4) { const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2], v = m.get(k); if (v !== undefined) { d[i] = v >> 16; d[i + 1] = (v >> 8) & 255; d[i + 2] = v & 255; } else { d[i] = d[i + 1] = d[i + 2] = 0; } }
+    V.putImageData(id, 0, 0);
+  }
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = false; ctx.drawImage(VC, OX, OY, VW * SC, VH * SC);
+}
+
+window.ready = (async () => {
+  await document.fonts.load('8px "Press Start 2P"'); await document.fonts.ready;
+  textCan('warm', P.w);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => {
+  const E = [];
+  E.push({ k: 'music', s: 'title', t: 0.2 }, { k: 'start', t: 1.1 }, { k: 'music', s: 'level', t: L0 }, { k: 'stop', t: T_ROOM });
+  for (const j of [J1, J2, J3]) E.push({ k: 'jump', t: j[0] });
+  CUP_T.forEach(t => E.push({ k: 'coin', t })); E.push({ k: 'hurt', t: T_HIT });
+  E.push({ k: 'drop', t: T_DROP }, { k: 'thud', t: T_BLAND });
+  for (let i = 0; i < 16; i++) E.push({ k: 'tick', t: T_HP + i * 0.35 / 16 });
+  E.push({ k: 'music', s: 'boss', t: T_FIRE });
+  BMAIL.forEach(m => { E.push({ k: 'shoot', t: m.te }); E.push({ k: 'pop', t: m.tb }); });
+  E.push({ k: 'power', t: T_POW }, { k: 'jump', t: J5[0] }, { k: 'stomp', t: J5[1] }, { k: 'stop', t: T_BOOM });
+  for (let i = 0; i < 16; i++) E.push({ k: 'tickd', t: J5[1] + i * 0.23 / 16 });
+  BOOMS.forEach(b => E.push({ k: 'boom', t: b.t }));
+  E.push({ k: 'rise', t: T_POLE }, { k: 'flag', t: T_TOUCH }, { k: 'fanfare', t: T_CLEAR });
+  for (let i = 0; i < 8; i++) E.push({ k: 'tally', t: T_TALLY[0] + i * 0.35 / 8 });
+  return E.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
