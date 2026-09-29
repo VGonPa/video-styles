@@ -1,0 +1,394 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// paint-doodle: "A brief history of the chair". Everything is drawn on a 960x540 bitmap with hard,
+// aliased mouse lines and real flood fills (so stray strokes leave white gaps), then blown up 2x
+// with nearest-neighbour. Characters are stiff cut-outs that slide, rotate and swap poses; captions
+// pop in with the text-tool selection box; one deliberately bad stepped face zoom.
+const W = 1920, H = 1080, LW = 960, LH = 540, TAU = Math.PI * 2, DUR = 9.6;
+const cv = document.getElementById('c'), X = cv.getContext('2d');
+const low = document.createElement('canvas'); low.width = LW; low.height = LH;
+const L = low.getContext('2d');
+const FONT = "'Comic Neue'";
+const PAL = { k: '#000000', w: '#ffffff', g: '#7f7f7f', lg: '#c3c3c3', dr: '#880015', r: '#ed1c24', o: '#ff7f27',
+  y: '#fff200', gr: '#22b14c', tq: '#00a2e8', ind: '#3f48cc', pu: '#a349a4', br: '#b97a57', pk: '#ffaec9',
+  gold: '#ffc90e', cr: '#efe4b0', lime: '#b5e61d', ltq: '#99d9ea', bg: '#7092be', lav: '#c8bfe7' };
+const col = c => PAL[c] || c;
+const u32 = c => { const h = col(c); const r = parseInt(h.slice(1, 3), 16), g = parseInt(h.slice(3, 5), 16), b = parseInt(h.slice(5, 7), 16); return ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0; };
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eo = u => 1 - Math.pow(1 - u, 3), eio = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const back = u => { const c = 2.2; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+const q12 = t => Math.floor(t * 12) / 12; // cut-out motion on twelves
+
+// ---------- wobbly mouse line ----------
+function wobble(pts, closed, amp, r) {
+  const P = closed ? [...pts, pts[0]] : pts.slice();
+  const cum = [0]; for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+  const Ltot = cum[cum.length - 1] || 1, n = Math.max(2, Math.ceil(Ltot / 4));
+  const c1 = closed ? Math.max(1, Math.round(Ltot / 150)) : Ltot / 150 + .3, c2 = closed ? Math.max(2, Math.round(Ltot / 55)) : Ltot / 55;
+  const p1 = r() * TAU, p2 = r() * TAU, out = [];
+  let j = 0;
+  for (let i = 0; i <= n; i++) {
+    const s = i / n * Ltot; while (j < P.length - 2 && cum[j + 1] < s) j++;
+    const a = P[j], b = P[j + 1], sl = (cum[j + 1] - cum[j]) || 1, u = (s - cum[j]) / sl;
+    const dx = (b[0] - a[0]) / sl, dy = (b[1] - a[1]) / sl;
+    const off = amp * (0.7 * Math.sin(TAU * c1 * s / Ltot + p1) + 0.3 * Math.sin(TAU * c2 * s / Ltot + p2));
+    const jit = (i > 0 && i < n) ? (r() - .5) * .5 : 0;
+    out.push([a[0] + (b[0] - a[0]) * u - dy * off + jit, a[1] + (b[1] - a[1]) * u + dx * off + jit]);
+  }
+  return out;
+}
+const ell = (cx, cy, rx, ry, n = 26, a0 = 0) => Array.from({ length: n }, (_, i) => { const a = a0 + i / n * TAU; return [cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]; });
+
+// ---------- a bitmap sprite built from Paint operations ----------
+class Spr {
+  constructor(w, h, seed, ox = 0, oy = 0, k = 1) {
+    this.w = w; this.h = h; this.ox = ox; this.oy = oy; this.k = k; this.r = mulberry(seed);
+    this.c = document.createElement('canvas'); this.c.width = w; this.c.height = h;
+    this.x = this.c.getContext('2d'); this.img = this.x.createImageData(w, h); this.d = new Uint32Array(this.img.data.buffer);
+    this.s = document.createElement('canvas'); this.s.width = w; this.s.height = h; this.sx = this.s.getContext('2d');
+    this.sx.setTransform(k, 0, 0, k, ox * (1 - k), oy * (1 - k)); // draw in 'model' units, scaled about the origin
+  }
+  _merge(c, thr = 110) {
+    const sd = this.sx.getImageData(0, 0, this.w, this.h).data, v = u32(c), d = this.d;
+    for (let i = 0, p = 3; i < d.length; i++, p += 4) if (sd[p] >= thr) d[i] = v;
+    this.sx.save(); this.sx.setTransform(1, 0, 0, 1, 0, 0); this.sx.clearRect(0, 0, this.w, this.h); this.sx.restore();
+  }
+  _path(pts, closed, amp) {
+    const q = wobble(pts, closed, amp, this.r), s = this.sx; s.beginPath();
+    q.forEach((p, i) => i ? s.lineTo(p[0], p[1]) : s.moveTo(p[0], p[1])); if (closed) s.closePath();
+  }
+  // stroke a polyline / closed shape, optional path fill (dx,dy = sloppy mis-registered fill)
+  line(pts, o = {}) {
+    const { lw = 3, c = 'k', closed = false, amp = 1.2, fill = null, dx = 0, dy = 0 } = o;
+    if (fill) { this.sx.save(); this.sx.translate(dx, dy); this._path(pts, closed || true, amp * .6); this.sx.fillStyle = col(fill); this.sx.fill(); this.sx.restore(); this._merge(fill, 128); }
+    if (lw > 0) { this._path(pts, closed, amp); const s = this.sx; s.lineWidth = lw; s.lineCap = 'round'; s.lineJoin = 'round'; s.strokeStyle = col(c); s.stroke(); this._merge(c); }
+    return this;
+  }
+  shape(pts, fill, o = {}) { return this.line(pts, { ...o, closed: true, fill }); }
+  dot(x, y, rr, c = 'k') { const s = this.sx; s.beginPath(); s.arc(x, y, rr, 0, TAU); s.fillStyle = col(c); s.fill(); this._merge(c, 128); return this; }
+  rect(x, y, w, h, c) { this.sx.fillStyle = col(c); this.sx.fillRect(x, y, w, h); this._merge(c, 128); return this; }
+  text(str, x, y, size, c = 'k', o = {}) {
+    const { weight = 700, align = 'left', rot = 0 } = o, s = this.sx;
+    s.save(); s.translate(x, y); s.rotate(rot); s.font = `${weight} ${size}px ${FONT}`; s.textAlign = align; s.textBaseline = 'alphabetic';
+    s.fillStyle = col(c); s.fillText(str, 0, 0); s.restore(); this._merge(c, 120); return this;
+  }
+  // real bucket fill: 4-connected, same-colour region; refuses to leak through the sprite border
+  fill(x, y, c, edge = false) {
+    x = (x * this.k + this.ox * (1 - this.k)) | 0; y = (y * this.k + this.oy * (1 - this.k)) | 0; const w = this.w, h = this.h, d = this.d, t = d[y * w + x], v = u32(c);
+    if (t === v) return this;
+    const st = [y * w + x], seen = []; let touched = false; d[y * w + x] = v; seen.push(y * w + x);
+    while (st.length) {
+      const i = st.pop(), px = i % w, py = (i / w) | 0;
+      if (px === 0 || py === 0 || px === w - 1 || py === h - 1) touched = true;
+      if (px > 0 && d[i - 1] === t) { d[i - 1] = v; st.push(i - 1); seen.push(i - 1); }
+      if (px < w - 1 && d[i + 1] === t) { d[i + 1] = v; st.push(i + 1); seen.push(i + 1); }
+      if (py > 0 && d[i - w] === t) { d[i - w] = v; st.push(i - w); seen.push(i - w); }
+      if (py < h - 1 && d[i + w] === t) { d[i + w] = v; st.push(i + w); seen.push(i + w); }
+    }
+    if (touched && !edge) { for (const i of seen) d[i] = t; console.log('fill leaked, reverted', x, y, c); }
+    return this;
+  }
+  done() { this.x.putImageData(this.img, 0, 0); return this; }
+}
+
+// ---------- people (side view, facing right; origin = hip) ----------
+const POSE = {
+  stand: { na: [[6, -102], [16, -60], [32, -38]], fa: [[-6, -102], [-16, -62], [-8, -36]],
+    nl: [[6, 0], [14, 48], [10, 96], [30, 98]], fl: [[-6, 0], [-9, 48], [-14, 96], [6, 98]] },
+  sit: { na: [[6, -102], [14, -58], [42, -26]], fa: [[-6, -102], [-10, -58], [30, -30]],
+    nl: [[6, 0], [54, 2], [56, 74], [76, 76]], fl: [[-4, 0], [46, -2], [44, 72], [64, 74]] },
+  point: { na: [[6, -102], [36, -112], [54, -150]], fa: [[-6, -102], [-16, -62], [-8, -36]],
+    nl: [[6, 0], [14, 48], [10, 96], [30, 98]], fl: [[-6, 0], [-9, 48], [-14, 96], [6, 98]] },
+  wheee: { na: [[6, -102], [34, -112], [62, -122]], fa: [[-6, -102], [-30, -114], [-52, -128]],
+    nl: [[6, 0], [54, 2], [60, 46], [80, 44]], fl: [[-4, 0], [46, -2], [50, 44], [70, 42]] },
+  scep: { na: [[6, -102], [18, -60], [44, -48]], fa: [[-6, -102], [-10, -58], [30, -30]],
+    nl: [[6, 0], [54, 2], [56, 74], [76, 76]], fl: [[-4, 0], [46, -2], [44, 72], [64, 74]] },
+};
+function limb(S, ox, oy, pts, hand) {
+  const P = pts.map(p => [ox + p[0], oy + p[1]]);
+  if (hand) {
+    S.line(P, { lw: 4 });
+    const e = P[1], hnd = P[2], a = Math.atan2(hnd[1] - e[1], hnd[0] - e[0]);
+    S.shape(ell(hnd[0] + Math.cos(a) * 4, hnd[1] + Math.sin(a) * 4, 6, 5, 12, a), 'w', { lw: 2.4, amp: .4 });
+    S.line([[hnd[0] + Math.cos(a - 1.3) * 5, hnd[1] + Math.sin(a - 1.3) * 5], [hnd[0] + Math.cos(a - .7) * 11, hnd[1] + Math.sin(a - .7) * 11]], { lw: 2.6, amp: .3 });
+  } else {
+    S.line(P.slice(0, 3), { lw: 4 }); S.line([P[2], P[3]], { lw: 5, amp: .4 });
+  }
+}
+function head(S, hx, hy, r, o = {}) {
+  const pts = []; for (let i = 0; i < 24; i++) { const a = -Math.PI + i / 24 * TAU; if (a > .02 && a < .5) { if (!pts.nose) { pts.push([hx + r * 1.38, hy + r * .38]); pts.nose = 1; } continue; } pts.push([hx + Math.cos(a) * r, hy + Math.sin(a) * r]); }
+  S.shape(pts, 'w', { lw: 3, amp: .8 });
+  if (o.wide) { S.shape(ell(hx + r * .42, hy - r * .22, 7, 8, 14), 'w', { lw: 2.2, amp: .3 }); S.dot(hx + r * .5, hy - r * .2, 1.6); }
+  else S.dot(hx + r * .45, hy - r * .22, 2.6);
+  if (o.wide) S.shape(ell(hx + r * .72, hy + r * .6, 4, 3.4, 10), 'k', { lw: 1.5, amp: .2 });
+  else S.line([[hx + r * .48, hy + r * .58], [hx + r * .82, hy + r * .52]], { lw: 2.4, amp: .3 });
+}
+function person(S, ox, oy, pose, who, o = {}) {
+  const P = POSE[pose], hx = ox + 8, hy = oy - 152, R = 28;
+  limb(S, ox, oy, P.fl); limb(S, ox, oy, P.fa, true);
+  if (who === 'cave' && (pose === 'sit')) {}
+  // torso
+  const tor = [[ox - 17, oy - 110], [ox + 17, oy - 110], [ox + 19, oy - 60], [ox + 16, oy + 4], [ox - 16, oy + 4], [ox - 19, oy - 60]];
+  if (who === 'cave') {
+    S.shape([[ox - 18, oy - 104], [ox + 4, oy - 112], [ox + 19, oy - 58], [ox + 22, oy + 10], [ox + 6, oy + 4], [ox - 8, oy + 12], [ox - 20, oy + 4], [ox - 20, oy - 60]], 'o', { dx: 2, dy: 1 });
+    [[ox - 6, oy - 80], [ox + 8, oy - 50], [ox - 10, oy - 30], [ox + 10, oy - 10], [ox - 4, oy - 4]].forEach(p => S.shape(ell(p[0], p[1], 4.5, 3.5, 10), 'br', { lw: 0 }));
+    S.line([[ox - 14, oy - 106], [ox - 16, oy - 60], [ox - 20, oy - 10]], { lw: 3 }); // bare shoulder edge
+  } else if (who === 'king') {
+    S.shape([[ox - 20, oy - 110], [ox + 18, oy - 110], [ox + 24, oy - 50], [ox + 30, oy + 16], [ox - 26, oy + 16], [ox - 24, oy - 56]], 'r', { dx: 1, dy: 2 });
+    S.shape([[ox - 20, oy - 114], [ox + 20, oy - 114], [ox + 20, oy - 100], [ox - 20, oy - 100]], 'w', { lw: 2.4 });
+    [-12, -2, 9].forEach(dx => S.dot(ox + dx, oy - 107, 1.6));
+    S.line([[ox + 2, oy - 98], [ox + 4, oy + 14]], { lw: 2, c: 'gold' });
+  } else {
+    S.shape(tor, 'w', { dx: 1, dy: 1 });
+    S.shape([[ox + 6, oy - 108], [ox + 12, oy - 108], [ox + 13, oy - 60], [ox + 9, oy - 52], [ox + 5, oy - 60]], 'r', { lw: 2, amp: .3 });
+    S.line([[ox - 18, oy - 4], [ox + 17, oy - 4]], { lw: 3, c: 'k' }); // belt
+  }
+  limb(S, ox, oy, P.nl);
+  // neck
+  S.line([[ox + 4, oy - 126], [ox + 3, oy - 110]], { lw: 4 });
+  head(S, hx, hy, R, o);
+  if (who === 'cave') {
+    S.shape([[hx - 28, hy + 6], [hx - 30, hy - 18], [hx - 16, hy - 32], [hx + 2, hy - 30], [hx + 18, hy - 26], [hx + 26, hy - 12], [hx + 10, hy - 16], [hx - 4, hy - 12], [hx - 12, hy - 2], [hx - 18, hy + 14]], 'br', { lw: 2.6, dx: 1 });
+    S.shape([[hx + 2, hy + 14], [hx + 18, hy + 20], [hx + 30, hy + 18], [hx + 24, hy + 34], [hx + 8, hy + 38], [hx - 6, hy + 28]], 'br', { lw: 2.6 });
+  } else if (who === 'king') {
+    S.shape([[hx - 18, hy - 18], [hx - 20, hy - 44], [hx - 9, hy - 30], [hx, hy - 48], [hx + 9, hy - 30], [hx + 20, hy - 44], [hx + 18, hy - 18]], 'gold', { lw: 2.6, amp: .5 });
+    S.fill(hx, hy - 24, 'gold'); S.dot(hx, hy - 25, 2.6, 'r'); S.dot(hx - 11, hy - 25, 2, 'tq');
+    S.shape([[hx + 4, hy + 14], [hx + 20, hy + 20], [hx + 32, hy + 18], [hx + 26, hy + 44], [hx + 12, hy + 56], [hx - 2, hy + 34]], 'w', { lw: 2.6 });
+  } else {
+    [[-10, -20, -4, -34], [-2, -22, 4, -36], [6, -20, 12, -32]].forEach(([a, b, c2, d]) => S.line([[hx + a, hy + b], [hx + c2, hy + d]], { lw: 2.4, amp: .5 }));
+    S.line([[hx - 26, hy - 2], [hx - 22, hy - 16], [hx - 14, hy - 22]], { lw: 3, amp: .4 }); // side hair
+  }
+  if (pose === 'scep') { const hnd = [ox + 44, oy - 48]; S.line([[hnd[0] + 4, hnd[1] + 24], [hnd[0] + 14, hnd[1] - 56]], { lw: 5, c: 'k' }); S.line([[hnd[0] + 4, hnd[1] + 24], [hnd[0] + 14, hnd[1] - 56]], { lw: 2.4, c: 'gold', amp: 0 }); S.shape(ell(hnd[0] + 15, hnd[1] - 62, 8, 8, 14), 'gold', { lw: 2.6 }); }
+  limb(S, ox, oy, P.na, true);
+  if (pose === 'point') S.line([[ox + 54, oy - 156], [ox + 56, oy - 170]], { lw: 3.4, amp: .2 });
+}
+
+// ---------- props ----------
+const ROCK = [[-110, 0], [-118, -30], [-96, -64], [-50, -80], [10, -84], [66, -74], [104, -48], [116, -14], [112, 0]];
+function rock(S, ox, oy, c) {
+  S.line(ROCK.map(p => [ox + p[0], oy + p[1]]), { closed: true, lw: 3.4 });
+  S.line([[ox - 70, oy - 40], [ox - 40, oy - 52], [ox - 20, oy - 44]], { lw: 2.4 }); // stray crack: leaves fill gaps
+  S.line([[ox + 40, oy - 20], [ox + 62, oy - 34], [ox + 58, oy - 12], [ox + 44, oy - 22]], { lw: 2.4 });
+  S.fill(ox, oy - 20, c); S.fill(ox - 80, oy - 20, c);
+}
+function officeChair(S, ox, oy) {
+  S.shape([[ox - 40, oy - 104], [ox - 22, oy - 108], [ox - 20, oy - 6], [ox - 40, oy - 4]], 'k', { lw: 3 });
+  S.shape([[ox - 34, oy + 2], [ox + 64, oy + 2], [ox + 66, oy + 18], [ox - 34, oy + 18]], 'ind', { lw: 3 });
+  S.line([[ox + 12, oy + 18], [ox + 12, oy + 56]], { lw: 6 });
+  S.line([[ox - 40, oy + 62], [ox + 64, oy + 62]], { lw: 5 });
+  [[ox - 40], [ox + 12], [ox + 64]].forEach(([wx]) => S.shape(ell(wx, oy + 70, 7, 7, 12), 'g', { lw: 2.6, amp: .3 }));
+}
+function throneBits(S, ox, oy) {
+  S.shape([[ox - 118, oy - 34], [ox - 124, oy - 200], [ox - 104, oy - 236], [ox - 84, oy - 212], [ox - 70, oy - 238], [ox - 54, oy - 206], [ox - 60, oy - 70]], 'gold', { lw: 3.4 });
+  S.dot(ox - 88, oy - 170, 7, 'r'); S.shape(ell(ox - 88, oy - 170, 8, 8, 12), null, { lw: 2.4 });
+  S.shape([[ox - 60, oy - 92], [ox + 70, oy - 94], [ox + 76, oy - 74], [ox - 62, oy - 70]], 'r', { lw: 3, dx: -2 });
+}
+
+// ---------- scene assets ----------
+let A = {};
+function build() {
+  // backgrounds -------------------------------------------------
+  const cave = new Spr(LW, LH, 3);
+  cave.line([[-10, 400], [120, 396], [300, 404], [520, 398], [760, 404], [970, 398]], { lw: 3.4 });
+  cave.line([[560, 400], [640, 300], [720, 270], [800, 280], [880, 320], [970, 330]], { lw: 3.4 }); // hill
+  cave.shape([[770, 402], [772, 350], [796, 326], [826, 330], [846, 360], [848, 402]], 'k', { lw: 3 }); // cave mouth
+  cave.shape(ell(870, 86, 44, 44, 22), 'y', { lw: 3 });
+  for (let i = 0; i < 8; i++) { const a = i / 8 * TAU + .2; cave.line([[870 + Math.cos(a) * 56, 86 + Math.sin(a) * 56], [870 + Math.cos(a) * 80, 86 + Math.sin(a) * 80]], { lw: 3 }); }
+  cave.line([[560, 140], [580, 116], [614, 114], [630, 94], [670, 92], [690, 114], [724, 118], [736, 142], [560, 142]], { closed: true, lw: 3 });
+  cave.line([[610, 134], [622, 124], [634, 134], [622, 140]], { closed: true, lw: 2 }); // lazy scribble -> a white hole in the cloud
+  cave.line([[690, 200], [702, 186], [720, 200]], { lw: 3 }); cave.line([[730, 178], [742, 164], [758, 178]], { lw: 3 }); // birds
+  cave.fill(20, 20, 'ltq', true); cave.fill(700, 130, 'w'); cave.fill(660, 360, 'gr', true); cave.fill(300, 470, 'br', true);
+  cave.line([[250, 60], [256, 54], [262, 62]], { lw: 2 });
+  [[70, 440], [210, 470], [420, 500], [620, 450], [880, 480], [520, 430]].forEach(([gx, gy]) => cave.line([[gx - 8, gy + 8], [gx - 4, gy - 6], [gx, gy + 8], [gx + 5, gy - 8], [gx + 9, gy + 8]], { lw: 2.4 }));
+  A.cave = cave.done();
+
+  const hall = new Spr(LW, LH, 5);
+  hall.line([[-10, 410], [970, 404]], { lw: 3.4 });
+  for (let y = 60; y < 400; y += 70) hall.line([[-10, y], [970, y + 3]], { lw: 2.2 });
+  for (let row = 0; row < 6; row++) for (let bx = (row % 2) * 60 + 20; bx < 960; bx += 120) hall.line([[bx, row * 70 - 10], [bx + 1, row * 70 + 60]], { lw: 2.2 });
+  hall.fill(5, 5, 'lg', true);
+  for (let row = 0; row < 6; row++) for (let bx = 0; bx < 960; bx += 120) { const sx = (row % 2) * 60 + 40 + bx, sy = row * 70 + 25; if (sy < 400 && sx < 950) hall.fill(sx, sy, 'lg', true); }
+  for (let row = 0; row < 6; row++) if (row * 70 + 25 < 400) hall.fill(4, row * 70 + 25, 'lg', true);
+  hall.shape([[150, 60], [240, 60], [240, 260], [195, 230], [150, 260]], 'pu', { lw: 3 });
+  hall.shape([[720, 60], [810, 60], [810, 260], [765, 230], [720, 260]], 'pu', { lw: 3 });
+  hall.shape(ell(195, 130, 16, 16, 14), 'gold', { lw: 2.4 }); hall.shape(ell(765, 130, 16, 16, 14), 'gold', { lw: 2.4 });
+  hall.shape([[330, 412], [630, 412], [760, 545], [200, 545]], 'r', { lw: 3 });
+  hall.fill(20, 480, 'br', true); hall.fill(900, 480, 'br', true);
+  A.hall = hall.done();
+
+  const off = new Spr(LW, LH, 7);
+  off.line([[-10, 420], [970, 416]], { lw: 3.4 });
+  off.shape([[600, 70], [860, 74], [856, 290], [598, 288]], 'ltq', { lw: 3.4 });
+  for (let y = 100; y < 290; y += 26) off.line([[602, y], [856, y + 2]], { lw: 2 }); // blinds (the fill stays behind them)
+  off.shape(ell(170, 110, 42, 42, 22), 'w', { lw: 3.4 });
+  off.line([[170, 110], [170, 82]], { lw: 3 }); off.line([[170, 110], [190, 118]], { lw: 3 });
+  off.shape([[80, 330], [120, 330], [114, 416], [86, 416]], 'o', { lw: 3 });
+  [[-40, -60], [-10, -80], [20, -58], [36, -30], [-30, -30]].forEach(([dx, dy]) => off.shape([[100, 332], [100 + dx * .6 - 10, 332 + dy * .7], [100 + dx, 332 + dy], [100 + dx * .6 + 8, 332 + dy * .5]], 'gr', { lw: 2.6 }));
+  off.fill(400, 40, 'cr', true); off.fill(400, 480, 'lg', true);
+  off.line([[300, 470], [320, 476]], { lw: 2 }); off.line([[700, 500], [724, 498]], { lw: 2 });
+  A.off = off.done();
+
+  // characters ---------------------------------------------------
+  const mk = (pose, who, seed, o) => { const S = new Spr(300, 380, seed, 130, 240, 1.2); person(S, 130, 240, pose, who, o); return S.done(); };
+  A.caveStand = mk('stand', 'cave', 11); A.caveSit = mk('sit', 'cave', 12);
+  A.kingStand = mk('stand', 'king', 13); A.kingSit = mk('scep', 'king', 14);
+  A.manPoint = mk('point', 'man', 15); A.manWide = mk('point', 'man', 15, { wide: 1 });
+  const spin = new Spr(320, 380, 16, 160, 240, 1.2); officeChair(spin, 160, 240); person(spin, 160, 240, 'wheee', 'man', { wide: 1 }); A.spin = spin.done();
+  const ch = new Spr(240, 330, 17, 110, 220, 1.2); officeChair(ch, 110, 220); A.chair = ch.done();
+  const rk = new Spr(260, 120, 18, 130, 104); rock(rk, 130, 104, 'lg'); A.rock = rk.done();
+  const rg = new Spr(260, 120, 18, 130, 104); rock(rg, 130, 104, 'gold'); A.rockGold = rg.done();
+  const tb = new Spr(260, 260, 19, 130, 244); throneBits(tb, 130, 244); A.throneBits = tb.done();
+
+  // title chair doodle
+  const tc = new Spr(220, 260, 21, 110, 240);
+  tc.shape([[40, 20], [66, 18], [70, 150], [44, 152]], 'br', { lw: 3.4 });
+  tc.shape([[40, 150], [176, 146], [178, 170], [40, 174]], 'br', { lw: 3.4 });
+  [[50, 174, 46, 240], [168, 170, 172, 238], [72, 172, 78, 226], [150, 170, 146, 224]].forEach(([a, b, c2, d]) => tc.line([[a, b], [c2, d]], { lw: 5 }));
+  tc.line([[44, 60], [68, 58]], { lw: 2.6 }); tc.line([[44, 100], [68, 98]], { lw: 2.6 });
+  A.tchair = tc.done();
+
+  // small UI bits: arrow cursor, paint bucket, underline, speed lines
+  const cur = new Spr(40, 50, 22, 2, 2);
+  cur.x.fillStyle = '#fff'; cur.x.strokeStyle = '#000';
+  cur.sx.beginPath(); [[2, 2], [2, 36], [11, 28], [18, 44], [24, 41], [17, 26], [29, 26]].forEach((p, i) => i ? cur.sx.lineTo(p[0], p[1]) : cur.sx.moveTo(p[0], p[1])); cur.sx.closePath();
+  cur.sx.fillStyle = '#fff'; cur.sx.fill(); cur._merge('w', 128);
+  cur.sx.beginPath(); [[2, 2], [2, 36], [11, 28], [18, 44], [24, 41], [17, 26], [29, 26]].forEach((p, i) => i ? cur.sx.lineTo(p[0], p[1]) : cur.sx.moveTo(p[0], p[1])); cur.sx.closePath();
+  cur.sx.lineWidth = 2; cur.sx.strokeStyle = '#000'; cur.sx.stroke(); cur._merge('k', 100); A.cursor = cur.done();
+  const bk = new Spr(64, 64, 23, 8, 58);
+  bk.shape([[14, 26], [36, 10], [56, 32], [34, 50]], 'lg', { lw: 3, amp: .3 });
+  bk.line([[24, 20], [30, 4], [42, 6], [46, 22]], { lw: 3, amp: .3 });
+  bk.shape([[14, 26], [6, 44], [8, 58], [14, 44]], 'gold', { lw: 2.4, amp: .2 });
+  A.bucket = bk.done();
+  const ul = new Spr(700, 40, 24); ul.line([[10, 24], [180, 18], [360, 26], [520, 16], [690, 22]], { lw: 4.4, c: 'r', amp: 2 }); ul.line([[40, 32], [300, 30]], { lw: 3, c: 'r', amp: 1.4 }); A.underline = ul.done();
+  for (let k = 0; k < 2; k++) {
+    const sl = new Spr(460, 360, 30 + k, 230, 200);
+    for (let i = 0; i < 5; i++) { const a0 = -2.6 + i * 1.25 + k * .6, pts = []; for (let j = 0; j <= 8; j++) { const a = a0 + j * .09; pts.push([230 + Math.cos(a) * (190 + i % 2 * 20), 200 + Math.sin(a) * (120 + i % 2 * 14)]); } sl.line(pts, { lw: 3, c: 'g', amp: 1 }); }
+    A['speed' + k] = sl.done();
+  }
+
+  // captions --------------------------------------------------------
+  const cap = (str, size = 34, c = 'k', w = 700, bgc = 'w') => {
+    L.font = `${w} ${size}px ${FONT}`; const tw = Math.ceil(L.measureText(str).width) + 16, th = Math.ceil(size * 1.35);
+    const S = new Spr(tw, th, 40, 0, 0); if (bgc) S.rect(0, 0, tw, th, bgc); S.text(str, 8, Math.round(size * 1.02), size, c, { weight: w }); return S.done();
+  };
+  A.t1 = cap('A Brief History', 66); A.t2 = cap('of the Chair', 66, 'k'); A.t3 = cap('(abridged. very.)', 26, 'g', 400);
+  A.c1 = cap('40,000 BC. Man invents sitting.'); A.c1b = cap('Back support: pending.', 26, 'k', 400);
+  A.c2 = cap('1300 AD. Same rock. More gold.'); A.c2b = cap('(and a cushion, for the ego)', 26, 'k', 400);
+  A.c3 = cap('Then someone added wheels.'); A.c3b = cap('...wait.', 64);
+  A.c4 = cap('He is still spinning.'); A.c4b = cap('That was the history of the chair.', 26, 'k', 400);
+}
+
+// ---------- compositing on the 960x540 bitmap ----------
+function put(s, x, y, o = {}) {
+  const { rot = 0, sx = 1, sy = 1, alpha = 1 } = o;
+  L.save(); L.globalAlpha = alpha; L.translate(Math.round(x), Math.round(y)); if (rot) L.rotate(rot); L.scale(sx, sy);
+  L.drawImage(s.c, -s.ox, -s.oy); L.restore();
+}
+// caption: pops in (stepped 0 -> 1.15 -> 1) and shows the text-tool selection box for its first moments
+function caption(s, x, y, t0, t) {
+  if (t < t0) return;
+  const d = t - t0, k = d < 1 / 12 ? 0.6 : d < 2 / 12 ? 1.1 : 1;
+  L.save(); L.translate(Math.round(x), Math.round(y)); L.scale(k, k); L.drawImage(s.c, 0, 0); L.restore();
+  if (d < 0.38) {
+    L.save(); L.lineWidth = 1; L.strokeStyle = '#000'; L.setLineDash([3, 3]);
+    L.strokeRect(Math.round(x) - 2.5, Math.round(y) - 2.5, Math.round(s.w * k) + 5, Math.round(s.h * k) + 5);
+    L.setLineDash([]); L.fillStyle = '#fff';
+    [[0, 0], [1, 0], [0, 1], [1, 1]].forEach(([a, b]) => { const px = Math.round(x - 2 + a * (s.w * k + 4)) - 2, py = Math.round(y - 2 + b * (s.h * k + 4)) - 2; L.fillRect(px, py, 5, 5); L.strokeRect(px + .5, py + .5, 4, 4); });
+    L.restore();
+  }
+}
+const T = { title: 0, cave: 1.5, gold: 3.85, king: 4.35, office: 6.3, zoom: 6.95, spin: 7.75 };
+
+function render(t) {
+  L.imageSmoothingEnabled = false; L.fillStyle = '#fff'; L.fillRect(0, 0, LW, LH);
+  const tq = q12(t);
+  if (t < T.cave) {
+    // ---- title card ----
+    const d = t - 0.12;
+    if (d > 0) caption(A.t1, 120, 150, 0.12, t);
+    caption(A.t2, 150, 244, 0.45, t);
+    if (t > 0.72) { const r = seg(t, 0.72, 1.12), w = Math.round(A.underline.w * eo(r)); if (w > 0) L.drawImage(A.underline.c, 0, 0, w, 40, 110, 342, w, 40);
+      if (r < 1) put(A.cursor, 110 + w, 360); }
+    if (t > 0.95) { const d2 = t - 0.95, k = d2 < 1 / 12 ? .5 : d2 < 2 / 12 ? 1.18 : d2 < 3 / 12 ? .95 : 1; put(A.tchair, 770, 420, { sx: k * 1.1, sy: k * 1.1, rot: -.08 }); }
+    caption(A.t3, 150, 392, 1.1, t);
+  } else if (t < T.king) {
+    // ---- 40,000 BC ----
+    put(A.cave, 0, 0);
+    const rx = 470, ry = 402;
+    const goldT = T.gold + 0.28; // the click
+    put(tq >= goldT ? A.rockGold : A.rock, rx, ry);
+    if (tq >= goldT + 0.1) { const d = tq - goldT - 0.1; put(A.throneBits, rx, ry + 4, { sy: d < 1 / 12 ? .4 : d < 2 / 12 ? 1.12 : 1 }); }
+    const sat = 2.3;
+    if (t < sat) { // slide in, stiff, bob on twelves, overshoot at the stop
+      const u = seg(tq, 1.55, 2.15), xx = -100 + (250 - -100) * back(u);
+      put(A.caveStand, xx, 282 + (u < 1 ? Math.abs(Math.sin(tq * 18)) * -6 : 0), { rot: u < 1 ? -.05 : 0 });
+    } else if (t < T.gold) {
+      const d = tq - sat; put(A.caveSit, 440, 320 - (d < 1 / 12 ? 22 : 0));
+    } else { // he stands up and is dragged out, deadpan
+      const u = seg(tq, T.gold, T.gold + .4); put(A.caveStand, 440 + 90 * u, 282 + 420 * u * u, { rot: .1 * u }); // exits by sinking out of frame, like a dragged cut-out
+    }
+    if (t > T.gold && tq < goldT + .25) { const u = seg(t, T.gold, goldT); put(A.bucket, lerp(700, 505, eo(u)), lerp(260, 350, eo(u)) + (tq >= goldT && tq < goldT + .1 ? 3 : 0)); }
+    if (t < T.gold) { caption(A.c1, 250, 22, 2.45, t); caption(A.c1b, 560, 466, 3.05, t); }
+  } else if (t < T.office) {
+    // ---- 1300 AD ----
+    put(A.hall, 0, 0);
+    const rx = 470, ry = 402;
+    put(A.throneBits, rx, ry + 4); put(A.rockGold, rx, ry);
+    const sat = 5.0;
+    if (t < sat) { const u = seg(tq, T.king + .05, 4.85); put(A.kingStand, 1080 - (1080 - 560) * eo(u), 282, { sx: -1, rot: u < 1 ? .04 : 0 }); }
+    else if (t < sat + 1 / 12) put(A.kingStand, 480, 268, { rot: -.2 });
+    else { const d = tq - sat; put(A.kingSit, 440, 320 - (d < 2 / 12 ? 16 : 0)); }
+    caption(A.c2, 250, 426, 4.5, t); caption(A.c2b, 330, 480, 5.45, t);
+  } else if (t < T.spin) {
+    // ---- the inventor + the deliberately bad face zoom ----
+    const wide = t >= T.zoom + 0.42;
+    const z = t < T.zoom ? 1 : t < T.zoom + .16 ? 2.2 : t < T.zoom + .32 ? 4 : 6.5; // three hard zoom steps
+    const shake = z > 1 ? Math.round((mulberry(Math.floor(t * 12) + 99)() - .5) * 4) : 0;
+    const fx = 330 + 10 + 12, fy = 300 - 182; // face centre on screen
+    L.save();
+    if (z > 1) { L.translate(LW / 2 + shake, LH / 2 - 20); L.scale(z, z); L.translate(-fx, -fy); }
+    put(A.off, 0, 0); put(A.chair, 580, 328);
+    put(wide ? A.manWide : A.manPoint, 330, 300);
+    L.restore();
+    if (z === 1) { caption(A.c3, 250, 460, T.office + .15, t); }
+    else caption(A.c3b, 60, 400, T.zoom + 0.42, t);
+  } else {
+    // ---- the spin that never ends ----
+    put(A.off, 0, 0);
+    const d = t - T.spin, ph = Math.pow(Math.max(0, d - 0.15), 1.6) * 5.2; // spin angle, accelerating
+    const d12 = q12(d);
+    const k = Math.cos(ph), s = Math.abs(k) < .12 ? .12 * Math.sign(k || 1) : k;
+    if (d > .5) put(A[Math.floor(t * 12) % 2 ? 'speed0' : 'speed1'], 474, 250);
+    put(A.spin, 460, 326 + (d12 < 1 / 12 ? -16 : 0), { sx: s });
+    caption(A.c4, 250, 440, 8.35, t); caption(A.c4b, 290, 490, 8.9, t);
+  }
+  // blow the bitmap up 2x with hard pixels; the end fades to a blank white canvas
+  X.imageSmoothingEnabled = false; X.drawImage(low, 0, 0, W, H);
+  const f = seg(t, 9.15, 9.55); if (f > 0) { X.fillStyle = `rgba(255,255,255,${eio(f)})`; X.fillRect(0, 0, W, H); }
+}
+const lerp = (a, b, u) => a + (b - a) * u;
+
+window.ready = (async () => {
+  await document.fonts.load(`700 40px ${FONT}`); await document.fonts.load(`400 40px ${FONT}`); await document.fonts.ready;
+  build(); render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs -> events.json -> audio.py)
+window.events = () => {
+  const E = [], e = (t, k, v = {}) => E.push({ t: +t.toFixed(3), k, ...v });
+  e(0.12, 'pop'); e(0.45, 'pop'); e(0.72, 'scribble', { d: 0.4 }); e(0.95, 'stamp'); e(1.1, 'pop', { v: .6 });
+  e(1.5, 'cut'); e(1.55, 'slide', { d: .65 }); e(2.2, 'bonk', { v: .5 }); e(2.3, 'thud'); e(2.45, 'pop'); e(3.05, 'pop', { v: .6 });
+  e(3.85, 'slide', { d: .4 }); e(4.13, 'click'); e(4.13, 'fill'); e(4.23, 'stamp');
+  e(4.35, 'cut'); e(4.4, 'slide', { d: .45 }); e(4.5, 'pop'); e(4.62, 'fanfare'); e(5.0, 'thud'); e(5.45, 'pop', { v: .6 });
+  e(6.3, 'cut'); e(6.45, 'pop'); e(6.95, 'zoom'); e(7.11, 'zoom'); e(7.27, 'zoom'); e(7.37, 'pop');
+  e(7.75, 'cut'); e(7.75, 'thud');
+  let a = 0; for (let tt = 7.9; tt < 9.6; tt += 1 / 60) { const ph = Math.pow(Math.max(0, tt - T.spin - 0.15), 1.6) * 5.2; if (Math.floor(ph / Math.PI) > a) { a = Math.floor(ph / Math.PI); e(tt, 'squeak', { v: a }); } }
+  e(8.35, 'pop'); e(8.9, 'pop', { v: .6 }); e(9.15, 'end');
+  return E;
+};
+</script></body></html>
