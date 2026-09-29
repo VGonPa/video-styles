@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#fbf8f1}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── minimal-strip · a four-panel daily drawn with a thin, trembling pen line and a lot of white paper ──
+// "Slow Days" (original cast): a small boy and a thoughtful turtle share a park bench.
+// He asks whether carrying a house all day gets heavy. She says only when she thinks about it.
+// A leaf falls, he sighs. "I think about mine all the time." / "That's why I think slowly."
+// Then the strip slides off the page and the leaf from her shell drifts down onto the empty paper.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const sInOut = u => 0.5 - 0.5 * Math.cos(Math.PI * clamp(u));
+const backOut = u => { const c = 2.2; return u >= 1 ? 1 : 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function hash(a, b) { let h = Math.imul(a * 374761393 + b * 668265263 | 0, 1274126177); h ^= h >>> 13; h = Math.imul(h, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+// ── palette: warm paper, soft brown-black pen, a few flat soft colours ──
+const PAPER = '#fbf8f1', INK = '#2c2825', INK_SOFT = '#6f6760';
+const SKIN = '#fbe3cf', CHEEK = 'rgba(236,150,140,0.35)', HAIR = '#9a6a4c', SWEATER = '#f0cf7e', SHORTS = '#8fa3c4', SHOE = '#9d7a64';
+const SHELL = '#b4c89c', SHELL_D = '#9fb487', TSKIN = '#dcdfb0', LEAF = '#e39a52', LEAF_D = '#c97a3c';
+const BENCH = '#f1e6d4', DUSK = '#fbe8d6', DUSK2 = '#f8dcc6';
+const FONT = '"Short Stack"';
+const LW = 2.7;                    // pen width (px)
+
+// ── strip geometry ──
+const PW = 420, PH = 440, GUT = 20, PY = 312, PX0 = (W - (4 * PW + 3 * GUT)) / 2;
+const PX = i => PX0 + i * (PW + GUT);
+const SEAT = 318, GROUND = 392, BOYX = 130, TURX = 296;
+
+// ── timeline ──
+const T = {
+  title: 0.12, border: [0.32, 2.30, 3.90, 5.62], bdur: 0.38,
+  b1: 0.95, b2: 2.78, sighA: 5.05, sighB: 5.75, b3: 5.95, b4: 6.85, smile: 7.85,
+  leaf: [4.18, 5.18], slide: [8.5, 9.15], drop: [8.6, 9.45],
+};
+
+// ── pen ────────────────────────────────────────────────────────────────────────────────
+// Every stroke gets a unique seed (draw order) and the boil frame (8 fps): the line trembles like a
+// real pen held lightly, a slow static wobble plus a small nervous boil.
+let SEED = 0, BF = 0;
+function jit(pts, amp = 1) {
+  const s = SEED++, p1 = hash(s, BF) * TAU, p2 = hash(s + 77, BF) * TAU, p3 = hash(s, 9999) * TAU, p4 = hash(s + 5, 9999) * TAU;
+  const out = []; let L = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    if (i > 0) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    const d = amp * (0.42 * Math.sin(L * 0.052 + p1) + 0.3 * Math.sin(L * 0.13 + p2) + 0.75 * Math.sin(L * 0.017 + p3) + 0.2 * Math.sin(L * 0.31 + p4));
+    out.push([pts[i][0] - ty * d, pts[i][1] + tx * d]);
+  }
+  return out;
+}
+function tracePts(pts, closed) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); if (closed) ctx.closePath(); }
+// pen stroke; frac < 1 draws only the first part (a pen drawing the line on)
+function ink(pts, w = LW, o = {}) {
+  let p = jit(pts, o.amp ?? 1);
+  if (o.frac !== undefined) { if (o.frac <= 0) return; p = p.slice(0, Math.max(2, Math.ceil(p.length * o.frac))); }
+  // pressure: a little thinner at both ends
+  ctx.strokeStyle = o.col || INK; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const n = p.length;
+  if (n < 6 || o.flat) { ctx.lineWidth = w; tracePts(p, o.closed); ctx.stroke(); return; }
+  const k = Math.max(2, Math.floor(n / 5));
+  ctx.lineWidth = w * 0.72; tracePts(p.slice(0, k + 1)); ctx.stroke(); tracePts(p.slice(n - k - 1)); ctx.stroke();
+  ctx.lineWidth = w; tracePts(p.slice(k, n - k)); ctx.stroke();
+  if (o.closed) { ctx.lineWidth = w * 0.8; tracePts([p[n - 1], p[0]]); ctx.stroke(); }
+}
+// flat colour, printed a hair off-register from the line
+function flat(pts, col) { ctx.save(); ctx.translate(1.6, 1.1); ctx.fillStyle = col; tracePts(pts, true); ctx.fill(); ctx.restore(); }
+function shape(pts, col, w = LW) { if (col) flat(pts, col); ink(pts, w, { closed: true }); }
+// union blob: capsules ({c: pts, w}) and polygons, one continuous trembling outline, then colour
+function blob(parts, col, w = LW) {
+  const J = parts.map(p => p.c ? { c: jit(p.c, 0.6), w: p.w } : { p: jit(p, 0.8) });
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const pass of [0, 1]) for (const p of J) {
+    ctx.strokeStyle = ctx.fillStyle = pass ? col : INK;
+    if (p.c) { tracePts(p.c); ctx.lineWidth = p.w + (pass ? 0 : 2 * w); ctx.stroke(); }
+    else { tracePts(p.p, true); if (!pass) { ctx.lineWidth = 2 * w; ctx.stroke(); } ctx.fill(); }
+  }
+  ctx.restore();
+}
+// geometry samplers
+function E(cx, cy, rx, ry, a0 = 0, a1 = TAU, rot = 0) {
+  const n = Math.max(10, Math.ceil(Math.abs(a1 - a0) * Math.max(rx, ry) / 4)), c = Math.cos(rot), s = Math.sin(rot), o = [];
+  for (let i = 0; i <= n; i++) { const a = lerp(a0, a1, i / n), x = Math.cos(a) * rx, y = Math.sin(a) * ry; o.push([cx + x * c - y * s, cy + x * s + y * c]); }
+  return o;
+}
+function Bz(p0, p1, p2, p3) {
+  const n = Math.max(6, Math.ceil((Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) + Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) + Math.hypot(p3[0] - p2[0], p3[1] - p2[1])) / 5)), o = [];
+  for (let i = 0; i <= n; i++) { const u = i / n, v = 1 - u; o.push([v * v * v * p0[0] + 3 * v * v * u * p1[0] + 3 * v * u * u * p2[0] + u * u * u * p3[0], v * v * v * p0[1] + 3 * v * v * u * p1[1] + 3 * v * u * u * p2[1] + u * u * u * p3[1]]); }
+  return o;
+}
+const Qz = (a, c, b) => Bz(a, [a[0] + 2 / 3 * (c[0] - a[0]), a[1] + 2 / 3 * (c[1] - a[1])], [b[0] + 2 / 3 * (c[0] - b[0]), b[1] + 2 / 3 * (c[1] - b[1])], b);
+function Ln(a, b) { const n = Math.max(2, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 6)), o = []; for (let i = 0; i <= n; i++) o.push([lerp(a[0], b[0], i / n), lerp(a[1], b[1], i / n)]); return o; }
+const cat = (...a) => a.reduce((o, p) => o.concat(o.length ? p.slice(1) : p), []);
+const poly = (...v) => cat(...v.map((p, i) => Ln(p, v[(i + 1) % v.length])));
+
+// ── characters ────────────────────────────────────────────────────────────────────────
+// The boy: seated on the bench, front view. origin = centre of his hips on the seat.
+// o.sh shoulder lift (+ = slump), o.tilt head tilt, o.lx/o.ly pupil offset, o.lid 0..1 closed, o.mouth, o.swing
+function boy(o) {
+  ctx.save(); ctx.translate(o.x, o.y);
+  const sh = o.sh || 0, sw = o.swing || 0;
+  // shins + shoes hanging over the front of the seat (swinging, one then the other)
+  for (const sx of [-1, 1]) {
+    const a = sw * Math.sin(o.ph + (sx > 0 ? Math.PI : 0));
+    const K = [sx * 15, 8], A = [K[0] + Math.sin(a) * 36 + sx * 2, K[1] + Math.cos(a) * 36];
+    blob([{ c: Ln(K, A), w: 9 }], SKIN);
+    const sa = sx * 0.12 + a * 0.5;
+    shape(E(A[0] + sx * 3, A[1] + 5, 11.5, 6.5, 0, TAU, sa), SHOE);
+    ink(Ln([A[0] - 5, A[1] - 3], [A[0] + 5, A[1] - 3]), 1.8);     // sock top
+  }
+  // shorts: knees toward us, a crease between the thighs
+  shape(cat(Ln([-31, -12], [31, -12]), Qz([31, -12], [34, 10], [20, 14]), Qz([20, 14], [8, 16], [1, 8]), Qz([1, 8], [-8, 16], [-20, 14]), Qz([-20, 14], [-34, 10], [-31, -12])), SHORTS);
+  // sweater
+  const S = sh;
+  shape(cat(Qz([-8, -58 + S], [-24, -60 + S], [-27, -46 + S]), Qz([-27, -46 + S], [-31, -26], [-32, -9]), Ln([-32, -9], [32, -9]), Qz([32, -9], [31, -26], [27, -46 + S]), Qz([27, -46 + S], [24, -60 + S], [8, -58 + S])), SWEATER);
+  ink(Ln([-28, -15], [28, -15]), 1.7, { amp: 0.6 });          // ribbed hem
+  // arms: shoulders → elbows → palms flat on the seat beside him
+  for (const sx of [-1, 1]) {
+    const Sh = [sx * 24, -50 + S], El = [sx * 36, -27 + S * 0.5], Hd = [sx * 41, -5];
+    blob([{ c: cat(Ln(Sh, El), Ln(El, Hd)), w: 11 }], SWEATER);
+    ink(Ln([Hd[0] - 6, Hd[1] - 5], [Hd[0] + 6, Hd[1] - 5]), 1.7, { amp: 0.4 }); // cuff
+    blob([E(Hd[0] + sx * 1, Hd[1] + 2, 6.5, 5.5), { c: Ln([Hd[0] - sx * 4, Hd[1]], [Hd[0] - sx * 7, Hd[1] + 5]), w: 4 }], SKIN, 2.2); // palm + thumb
+  }
+  // neck
+  flat(poly([-6, -66 + S], [6, -66 + S], [6, -56 + S], [-6, -56 + S]), SKIN);
+  ink(Ln([-6, -67 + S], [-6, -58 + S]), 2.2); ink(Ln([6, -67 + S], [6, -58 + S]), 2.2);
+  ink(Qz([-9, -58 + S], [0, -52 + S], [9, -58 + S]), 2.2);   // collar
+  // head (big)
+  ctx.save(); ctx.translate(0, -114 + S); ctx.rotate(o.tilt || 0);
+  for (const sx of [-1, 1]) shape(E(sx * 51, 2, 7, 10, 0, TAU, 0), SKIN, 2.4);
+  shape(E(0, 0, 53, 48), SKIN);
+  // hair: a soft mop with an uneven fringe
+  const top = E(0, -2, 56, 52, Math.PI + 0.42, TAU - 0.42);
+  const fr = [], fx0 = top[top.length - 1], n = 9;
+  for (let i = 0; i <= n; i++) { const u = i / n, x = lerp(fx0[0], top[0][0], u); fr.push([x, -26 + (i % 2 ? 8 : 0) + Math.sin(u * Math.PI) * -6 + (u > 0.02 && u < 0.98 ? 0 : -2)]); }
+  shape(cat(top, fr), HAIR);
+  ink(Qz([-18, -44], [-10, -38], [-6, -30]), 1.6, { amp: 0.5 }); ink(Qz([14, -46], [19, -38], [20, -30]), 1.6, { amp: 0.5 });
+  // face
+  ctx.fillStyle = CHEEK; for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(sx * 30, 17, 9, 5.5, 0, 0, TAU); ctx.fill(); }
+  const lx = (o.lx || 0) * 4, ly = (o.ly || 0) * 4, lid = o.lid || 0;
+  for (const sx of [-1, 1]) {
+    const ex = sx * 16 + lx, ey = 2 + ly;
+    const bs = o.browSad || 0; ink(Qz([sx * 9 + lx * 0.5, -15 - bs], [sx * 16 + lx * 0.5, -17 - bs * 0.3], [sx * 23 + lx * 0.5, -14 + bs * 0.6]), 2.1, { amp: 0.3 });
+    if (lid > 0.6) ink(Qz([ex - 6, ey], [ex, ey + 4], [ex + 6, ey]), 2.2, { amp: 0.3 });           // closed: a small curve
+    else { ctx.fillStyle = INK; ctx.beginPath(); ctx.ellipse(ex, ey, 3.8, 4.4 * (1 - lid * 0.9), 0, 0, TAU); ctx.fill(); }
+  }
+  ink(Qz([-2, 9], [5, 12], [0, 16]), 2, { amp: 0.3 });              // nose
+  const m = o.mouth || 'flat';
+  if (m === 'talk') { shape(E(0, 28, 6, 4.5), '#c9776d', 2.1); }
+  else if (m === 'smile') ink(Qz([-9, 25], [0, 25 + 7 * (o.smile ?? 1)], [9, 25]), 2.2, { amp: 0.3 });
+  else if (m === 'sad') ink(Qz([-8, 29], [0, 25], [8, 29]), 2.2, { amp: 0.3 });
+  else if (m === 'o') shape(E(0, 28, 3.6, 4.2), '#c9776d', 2);
+  else ink(Ln([-7, 27], [7, 27]), 2.2, { amp: 0.3 });
+  ctx.restore();
+  ctx.restore();
+}
+
+// The turtle: on the bench, side view facing left (towards the boy). origin = bottom centre of the shell.
+// o.hx/o.hy head offset, o.eye pupil y offset, o.lid 0..1, o.talk
+function turtle(o) {
+  ctx.save(); ctx.translate(o.x, o.y);
+  const hx = o.hx || 0, hy = o.hy || 0;
+  // back leg + tail
+  blob([{ c: Ln([30, -6], [36, 3]), w: 13 }], TSKIN, 2.4);
+  shape(poly([46, -8], [61, -3], [46, -1]), TSKIN, 2.2);
+  // neck + head
+  const N0 = [-36, -14], HC = [-64 + hx, -30 + hy];
+  blob([{ c: Qz(N0, [-52 + hx * 0.5, -16 + hy * 0.3], HC), w: 17 }, E(HC[0], HC[1], 18, 14.5, 0, TAU, -0.12)], TSKIN, 2.5);
+  // eye: a thoughtful, half-lidded dot
+  const ex = HC[0] - 5, ey = HC[1] - 4, lid = o.lid ?? 0.45;
+  if (lid > 0.85) ink(Ln([ex - 5, ey + 1], [ex + 5, ey + 1]), 2.1, { amp: 0.3 });
+  else {
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.ellipse(ex + (o.ex || 0), ey + 1 + (o.eye || 0) * 0.6, 3.2, 3.6, 0, 0, TAU); ctx.fill();
+    const ly = ey - 4 + lid * 5.5;
+    ctx.fillStyle = TSKIN; ctx.fillRect(ex - 5, ly - 7, 10, 6.5);
+    ink(Qz([ex - 6.5, ly + 1.5], [ex, ly - 3], [ex + 6.5, ly + 1.5]), 2.1, { amp: 0.3 });
+  }
+  if (o.talk) shape(E(HC[0] - 12, HC[1] + 6, 3.4, 2.8), '#b06f63', 1.8);
+  else ink(Qz([HC[0] - 16, HC[1] + 5], [HC[0] - 10, HC[1] + 8 + (o.smile || 0) * 2.5], [HC[0] - 3, HC[1] + 6]), 1.9, { amp: 0.3 });
+  // front leg
+  blob([{ c: Ln([-26, -6], [-31, 3]), w: 13 }], TSKIN, 2.4);
+  for (const k of [-1, 0, 1]) ink(Ln([-31 + k * 3.5, 6], [-31 + k * 3.5, 9]), 1.4, { amp: 0.1, flat: true });
+  // shell: dome + rim + a few plates
+  const dome = cat(E(0, -4, 50, 42, Math.PI, TAU), Qz([50, -4], [0, 4], [-50, -4]));
+  shape(dome, SHELL);
+  ink(Qz([-47, -10], [0, -2], [47, -10]), 2, { amp: 0.6 });
+  ink(poly([-13, -36], [13, -36], [22, -22], [13, -12], [-13, -12], [-22, -22]), 2, { amp: 0.6, closed: true });
+  for (const [a, b] of [[[-22, -22], [-41, -26]], [[22, -22], [41, -26]], [[-13, -12], [-19, -5]], [[13, -12], [19, -5]], [[-13, -36], [-20, -43]], [[13, -36], [20, -43]]]) ink(Ln(a, b), 1.9, { amp: 0.5 });
+  ctx.restore();
+}
+
+function leaf(x, y, rot, s = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s);
+  const p = cat(Qz([-13, 0], [-2, -9], [13, 0]), Qz([13, 0], [-2, 9], [-13, 0]));
+  shape(p, LEAF, 2.1);
+  ink(Ln([-19, 1.5], [9, 0]), 1.6, { amp: 0.2 });
+  for (const k of [-6, 1]) { ink(Ln([k, 0], [k + 5, -4]), 1.2, { amp: 0.1, flat: true }); ink(Ln([k, 0], [k + 5, 4]), 1.2, { amp: 0.1, flat: true }); }
+  ctx.restore();
+}
+
+// ── scenery ─────────────────────────────────────────────────────────────────────────
+function scenery(dusk) {
+  if (dusk) { flat(poly([0, 0], [PW, 0], [PW, GROUND], [0, GROUND]), DUSK); }
+  // tree trunk at the left edge
+  flat(cat(Qz([14, GROUND], [22, 200], [18, -5]), Ln([18, -5], [44, -5]), Qz([44, -5], [46, 200], [42, GROUND])), '#efe2cf');
+  ink(Qz([14, GROUND + 2], [22, 200], [18, -5]), LW); ink(Qz([42, GROUND + 2], [46, 200], [44, -5]), LW);
+  ink(Qz([22, 150], [27, 138], [31, 126]), 1.6, { amp: 0.4 }); ink(Qz([36, 250], [34, 240], [37, 228]), 1.6, { amp: 0.4 });
+  // ground + a few grass ticks
+  ink(cat(Qz([-4, GROUND], [120, GROUND - 4], [220, GROUND + 1]), Qz([220, GROUND + 1], [320, GROUND + 5], [PW + 4, GROUND - 1])), LW);
+  for (const [gx, gl] of [[70, 7], [78, 5], [196, 6], [360, 8], [368, 5], [300, 4]]) ink(Ln([gx, GROUND + 1], [gx + 2, GROUND - gl]), 1.6, { amp: 0.2, flat: true });
+  // bench: plank + two legs
+  for (const lx of [88, 318]) { flat(poly([lx - 5, SEAT + 10], [lx + 5, SEAT + 10], [lx + 5, GROUND], [lx - 5, GROUND]), BENCH); ink(Ln([lx - 5, SEAT + 11], [lx - 5, GROUND + 1]), 2.3); ink(Ln([lx + 5, SEAT + 11], [lx + 5, GROUND + 1]), 2.3); }
+  shape(poly([62, SEAT], [346, SEAT], [346, SEAT + 11], [62, SEAT + 11]), BENCH, 2.5);
+}
+
+// ── balloons ────────────────────────────────────────────────────────────────────────
+function balloon(t, t0, cx, cy, lines, tip, o = {}) {
+  const u = seg(t, t0, t0 + 0.26); if (u <= 0) return;
+  const fs = o.fs || 25, lh = fs * 1.28;
+  ctx.font = `${fs}px ${FONT}`;
+  const tw = Math.max(...lines.map(l => ctx.measureText(l).width));
+  const rx = tw / 2 * 1.1 + 24, ry = lines.length * lh / 2 * 1.08 + 17;
+  ctx.save(); ctx.translate(cx, cy); const sc = lerp(0.82, 1, backOut(u)); ctx.scale(sc, sc); ctx.globalAlpha = clamp(u * 2.5);
+  // outline: oval with a pointed tail toward the speaker
+  const tx = tip[0] - cx, ty = tip[1] - cy, at = Math.atan2(ty / ry, tx / rx), gap = o.gap || 0.17;
+  const pts = cat(E(0, 0, rx, ry, at + gap, at + TAU - gap), Qz(E(0, 0, rx, ry, at - gap, at - gap)[0], [tx * 0.55, ty * 0.55], [tx, ty]), Qz([tx, ty], [tx * 0.5 + 6, ty * 0.5], E(0, 0, rx, ry, at + gap, at + gap)[0]));
+  flat(pts, '#fffdf8');
+  ink(pts, 2.4, { closed: true });
+  ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const j = (hash(SEED++, BF) - 0.5) * 0.9;
+  lines.forEach((l, i) => ctx.fillText(l, j, (i - (lines.length - 1) / 2) * lh + 2 + j * 0.5));
+  ctx.restore();
+}
+
+// ── panels ──────────────────────────────────────────────────────────────────────────
+const talkAt = (t, a, d) => t > a && t < a + d && Math.floor((t - a) * 7) % 2 === 0;
+const blinkAt = (t, list) => list.some(b => t > b && t < b + 0.13);
+const swingPh = t => t * 3.1;
+
+function panel1(t) {
+  scenery(false);
+  turtle({ x: TURX, y: SEAT, lid: blinkAt(t, [2.1]) ? 1 : 0.5, hy: 2, eye: 1 });
+  boy({ x: BOYX, y: SEAT, swing: 0.32, ph: swingPh(t), lx: 0.9, ly: 0.1, mouth: talkAt(t, T.b1, 1.1) ? 'talk' : 'flat', lid: blinkAt(t, [1.7]) ? 1 : 0 });
+  balloon(t, T.b1, 216, 78, ['DOESN’T IT GET HEAVY,', 'CARRYING YOUR HOUSE', 'AROUND ALL DAY?'], [150, 142], { fs: 24 });
+}
+function panel2(t) {
+  scenery(false);
+  // she lifts her head a little to answer, then a slow blink
+  const up = eOut(seg(t, T.b2 - 0.35, T.b2 + 0.1));
+  turtle({ x: TURX, y: SEAT, hy: 2 - up * 7, hx: -up * 2, lid: blinkAt(t, [3.55]) ? 1 : lerp(0.5, 0.35, up), talk: talkAt(t, T.b2, 0.8), eye: -up });
+  boy({ x: BOYX, y: SEAT, swing: 0.32 * (1 - seg(t, 3.3, 3.9)), ph: swingPh(t), lx: 1, ly: 0.2, mouth: 'flat', lid: blinkAt(t, [3.2]) ? 1 : 0 });
+  balloon(t, T.b2, 270, 96, ['ONLY WHEN I', 'THINK ABOUT IT.'], [238, 262]);
+}
+function leafFall(t) {
+  const u = seg(t, T.leaf[0], T.leaf[1]);
+  const x = lerp(200, TURX - 4, sInOut(u)) + 42 * Math.sin(u * Math.PI * 2.6) * (1 - u);
+  const y = lerp(-20, 272, u * (0.6 + 0.4 * u));
+  const r = 0.9 * Math.sin(u * Math.PI * 2.6 + 0.6) * (1 - u) + 0.28 * u;
+  const land = seg(t, T.leaf[1], T.leaf[1] + 0.25);
+  return { x, y: y - Math.sin(land * Math.PI) * 2.5, r, u };
+}
+function panel3(t) {
+  scenery(true);
+  const L = leafFall(t);
+  // the sigh: a breath in (shoulders up), a long breath out (slump), eyes closed
+  const inh = sInOut(seg(t, T.sighA, T.sighA + 0.35)), exh = sInOut(seg(t, T.sighA + 0.35, T.sighB + 0.2));
+  const sh = -3.5 * inh + 8.5 * exh;
+  const eyesShut = t > T.sighA + 0.25 && t < T.sighB + 0.35;
+  const lk = t < T.leaf[1] + 0.1 ? { lx: clamp((L.x - BOYX) / 70, -1, 1), ly: clamp((L.y - 196) / 90, -1, 1) } : { lx: 0.8, ly: 0.8 };
+  boy({ x: BOYX, y: SEAT, sh, ph: 0, swing: 0, ...lk, lid: eyesShut ? 1 : 0, tilt: -0.05 * exh, mouth: eyesShut ? 'o' : 'flat', browSad: 3 * exh });
+  const le = t < T.leaf[1] ? clamp((L.y - 262) / 120, -1.2, 0.2) : 0.2;
+  turtle({ x: TURX, y: SEAT, hy: -3, lid: blinkAt(t, [T.leaf[1] + 0.08]) ? 1 : 0.45, eye: le * 3, ex: t < T.leaf[1] ? 1.2 : 0 });
+  if (L.u > 0) leaf(L.x, L.y - 1, L.r, 1.35);
+  // "sigh" in small pen letters, drifting up and fading
+  const su = seg(t, T.sighA + 0.4, T.sighB + 0.55);
+  if (su > 0 && su < 1) {
+    ctx.save(); ctx.globalAlpha = Math.sin(su * Math.PI) * 0.95; ctx.fillStyle = INK_SOFT; ctx.font = `21px ${FONT}`; ctx.textAlign = 'center';
+    ctx.fillText('SIGH', BOYX + 70, 150 - su * 16); ctx.restore();
+  }
+}
+function panel4(t, leafOff) {
+  scenery(true);
+  const turn = sInOut(seg(t, T.smile - 0.3, T.smile + 0.1));
+  const smile = eOut(seg(t, T.smile, T.smile + 0.35));
+  boy({ x: BOYX, y: SEAT, sh: 5 * (1 - turn), ph: 0, swing: 0, lx: lerp(0.3, 1, turn), ly: lerp(0.9, 0.2, turn), mouth: talkAt(t, T.b3, 0.8) ? 'talk' : (smile > 0 ? 'smile' : 'sad'), smile, browSad: 2.5 * (1 - turn), lid: blinkAt(t, [6.7]) ? 1 : 0, tilt: 0.06 * turn });
+  const lean = sInOut(seg(t, T.b4 - 0.3, T.b4 + 0.4));
+  turtle({ x: TURX - 2 * lean, y: SEAT, hy: -3 - lean * 2, hx: -2 * lean, lid: blinkAt(t, [8.2]) ? 1 : 0.5, talk: talkAt(t, T.b4, 0.7), smile: smile });
+  if (!leafOff) leaf(TURX - 4, 271, 0.28, 1.35);
+  balloon(t, T.b3, 142, 72, ['I THINK ABOUT', 'MINE ALL', 'THE TIME.'], [134, 144], { fs: 24 });
+  balloon(t, T.b4, 296, 196, ['THAT’S', 'WHY I THINK', 'SLOWLY.'], [236, 262], { fs: 24, gap: 0.22 });
+}
+const PANELS = [panel1, panel2, panel3, panel4];
+
+// ── page ────────────────────────────────────────────────────────────────────────────
+let PAPERTEX;
+function buildTextures() {
+  const r = rng(89);
+  PAPERTEX = mk(W, H); const g = PAPERTEX.getContext('2d');
+  g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
+  const id = g.getImageData(0, 0, W, H);
+  for (let i = 0; i < W * H; i++) { const n = (r() - 0.5) * 7; id.data[i * 4] += n; id.data[i * 4 + 1] += n; id.data[i * 4 + 2] += n - 0.5; }
+  g.putImageData(id, 0, 0);
+  g.globalAlpha = 0.045; g.strokeStyle = '#8a7a62'; g.lineWidth = 1;
+  for (let i = 0; i < 2600; i++) { const x = r() * W, y = r() * H, a = r() * TAU, l = 3 + r() * 11; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a) * l * 0.5 + 2, y + Math.sin(a) * l * 0.5, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+  g.globalAlpha = 1;
+  const vg = g.createRadialGradient(W / 2, H / 2, 500, W / 2, H / 2, 1250); vg.addColorStop(0, 'rgba(120,100,70,0)'); vg.addColorStop(1, 'rgba(120,100,70,0.10)'); g.fillStyle = vg; g.fillRect(0, 0, W, H);
+}
+function framePanel(i, t) {
+  const t0 = T.border[i], x = PX(i);
+  const bu = seg(t, t0, t0 + T.bdur); if (bu <= 0) return;
+  ctx.save(); ctx.translate(x, PY);
+  const cu = eOut(seg(t, t0 + T.bdur * 0.55, t0 + T.bdur + 0.28));
+  if (cu > 0) {
+    ctx.save(); ctx.beginPath(); ctx.rect(-1, -1, PW + 2, PH + 2); ctx.clip(); ctx.globalAlpha = cu;
+    PANELS[i](t, false); ctx.restore();
+  }
+  // the border, pen-drawn on from the top-left corner
+  const per = cat(Ln([0, 0], [PW, 0]), Ln([PW, 0], [PW, PH]), Ln([PW, PH], [0, PH]), Ln([0, PH], [0, 0]));
+  ink(per, 2.9, { frac: eInOut(bu), amp: 1.1 });
+  ctx.restore();
+}
+function strip(t) {
+  // masthead: title, a tiny turtle doodle, and a byline
+  const tu = eOut(seg(t, T.title, T.title + 0.45));
+  if (tu > 0) {
+    ctx.save(); ctx.globalAlpha = tu; ctx.translate(0, (1 - tu) * 8);
+    ctx.fillStyle = INK; ctx.font = `34px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('SLOW DAYS', PX0 + 4, PY - 24);
+    const tw = ctx.measureText('SLOW DAYS').width;
+    ctx.save(); ctx.translate(PX0 + tw + 50, PY - 30); ctx.scale(0.36, 0.36);
+    turtle({ x: 0, y: 0, lid: 0.5 }); ctx.restore();
+    ctx.fillStyle = INK_SOFT; ctx.font = `22px ${FONT}`; ctx.textAlign = 'right';
+    ctx.fillText('by Nell Okafor', PX(3) + PW - 4, PY - 26);
+    ctx.restore();
+  }
+  for (let i = 0; i < 4; i++) framePanel(i, t);
+  // a signature tucked into the last panel's corner
+  const su = seg(t, T.border[3] + 0.4, T.border[3] + 0.8);
+  if (su > 0) { ctx.save(); ctx.globalAlpha = su; ctx.fillStyle = INK_SOFT; ctx.font = `17px ${FONT}`; ctx.textAlign = 'right'; ctx.fillText('Okafor', PX(3) + PW - 12, PY + PH - 14); ctx.restore(); }
+}
+
+window.draw = ({ t }) => {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  SEED = 0; BF = Math.floor(t * 8 + 1e-4);
+  ctx.drawImage(PAPERTEX, 0, 0);
+  // camera: a barely-there push in on the strip
+  const z = 1 + 0.022 * sInOut(seg(t, 0, T.slide[0]));
+  ctx.translate(W / 2, H * 0.47); ctx.scale(z, z); ctx.translate(-W / 2, -H * 0.47);
+  // the strip slides off to the left like a page being pulled away (small anticipation to the right first)
+  const ant = 16 * Math.sin(Math.PI * seg(t, T.slide[0] - 0.22, T.slide[0] + 0.04));
+  const dx = -2150 * eIn(seg(t, T.slide[0], T.slide[1])) + ant;
+  const slid = t >= T.slide[0];
+  if (dx > -2100) { ctx.save(); ctx.translate(dx, 0); strip(t); ctx.restore(); }
+  // ...but the leaf on her shell stays behind, and drifts down onto the empty page
+  if (slid) {
+    const u = seg(t, T.drop[0], T.drop[1]), p0 = [PX(3) + TURX - 4, PY + 271], p1 = [W / 2 + 10, H * 0.5 + 40];
+    const drag = Math.max(dx, -140) * (1 - sInOut(seg(t, T.slide[0], T.drop[0] + 0.25)));
+    const x = lerp(p0[0], p1[0], sInOut(u)) + drag + 46 * Math.sin(u * Math.PI * 2.2) * (1 - u);
+    const y = lerp(p0[1], p1[1], u * u * (3 - 2 * u)) - 40 * Math.sin(u * Math.PI) * (1 - u);
+    const r = 0.28 + 1.0 * Math.sin(u * Math.PI * 2.2 + 0.4) * (1 - u) * seg(t, T.slide[0], T.slide[0] + 0.3) + (-0.1 - 0.28) * sInOut(u);
+    const land = seg(t, T.drop[1], T.drop[1] + 0.22);
+    leaf(x, y - Math.sin(land * Math.PI) * 2, r, lerp(1.35, 1.8, sInOut(u)));
+    // sign-off under the leaf
+    const su = eOut(seg(t, T.drop[1] - 0.1, T.drop[1] + 0.35));
+    if (su > 0) {
+      ctx.save(); ctx.globalAlpha = su; ctx.fillStyle = INK_SOFT; ctx.font = `26px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('SLOW DAYS', p1[0] - 6, p1[1] + 70 + (1 - su) * 6); ctx.restore();
+    }
+  }
+  // gentle fade-in from blank paper
+  const fin = 1 - seg(t, 0, 0.25);
+  if (fin > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = fin; ctx.drawImage(PAPERTEX, 0, 0); ctx.globalAlpha = 1; }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+// panel 4 draws its own leaf until the strip starts to slide
+const _p4 = panel4; PANELS[3] = (t) => _p4(t, t >= T.slide[0]);
+
+window.events = () => {
+  const ev = [{ k: 'pen', t: T.title, d: 0.4, v: 0.5 }];
+  T.border.forEach(b => ev.push({ k: 'pen', t: b, d: T.bdur, v: 1 }));
+  for (const b of [T.b1, T.b2, T.b3, T.b4]) ev.push({ k: 'pop', t: b });
+  ev.push({ k: 'leaf', t: T.leaf[0], d: T.leaf[1] - T.leaf[0] }, { k: 'land', t: T.leaf[1] });
+  ev.push({ k: 'sigh', t: T.sighA, d: T.sighB - T.sighA + 0.5 });
+  ev.push({ k: 'note', t: T.b4 + 0.15, n: [64, 67] }, { k: 'note', t: T.smile, n: [72] });
+  ev.push({ k: 'slide', t: T.slide[0] - 0.05, d: T.slide[1] - T.slide[0] + 0.1 });
+  ev.push({ k: 'leaf', t: T.drop[0], d: T.drop[1] - T.drop[0], v: 0.7 }, { k: 'land', t: T.drop[1], v: 0.7 });
+  ev.push({ k: 'chord', t: T.drop[1] - 0.05 });
+  return ev;
+};
+window.ready = (async () => {
+  await document.fonts.load(`25px ${FONT}`); await document.fonts.ready; buildTextures();
+})();
+</script>
+</body></html>
