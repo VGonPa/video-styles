@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── viking-runes · Norse runestone at dusk ─────────────────────────────────────────────
+// Close on a blank granite stone lit by a torch → an interlaced ribbon-serpent band chisels itself around the edge
+// (chips, dust, fresh-cut grooves) and red ochre paint floods in behind the chisel → the serpent's head bites over its
+// own tail → Elder Futhark runes are cut into the band one by one; each glows like an ember and hands its English letter
+// to the centre panel: MAKE YOUR MARK → the camera pulls back to the whole stone on a mound above a misty fjord at dusk,
+// the torch revealed beside it → light fades to the torch, then to black.
+// Runes are real Elder Futhark shapes used as a transliteration of English letters (Y is written with jera, ᛃ).
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eSine = u => 0.5 - 0.5 * Math.cos(Math.PI * u);
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eBack = u => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); };
+const smooth = (a, b, x) => { const u = clamp((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+function hash2(x, y, s) { let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(s, 982451653); h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
+function vnoise(x, y, s) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s), c = hash2(xi, yi + 1, s), d = hash2(xi + 1, yi + 1, s);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, y, s, o = 4) { let sum = 0, amp = .5, f = 1, n = 0; for (let i = 0; i < o; i++) { sum += amp * vnoise(x * f, y * f, s + i * 17); n += amp; f *= 2.03; amp *= .5; } return sum / n; }
+const n1 = (x, s = 0) => vnoise(x, 0.5, s);
+
+const SERIF = '"Cinzel"';
+const OCHRE = '#9e3321', BLACKP = '#15110f';
+
+// ── timeline ──
+const T = { band0: 0.4, band1: 3.45, paint0: 0.7, paint1: 3.7, head0: 3.38, head1: 3.95, bind0: 2.85, bind1: 3.8,
+  rune0: 4.05, runeStep: 0.17, runeCarve: 0.2, pulse: 7.0, pull0: 7.15, pull1: 9.25, cap: 8.15, fade0: 9.2 };
+
+// ── geometry helpers ──
+function catmull(pts, closed, per = 24) {
+  const out = [], n = pts.length, m = closed ? n : n - 1;
+  const P = i => closed ? pts[(i + n) % n] : pts[clamp(i, 0, n - 1)];
+  for (let i = 0; i < m; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    for (let k = 0; k < per; k++) {
+      const u = k / per, u2 = u * u, u3 = u2 * u;
+      out.push([0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * u + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * u2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * u3),
+                0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * u + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * u2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * u3)]);
+    }
+  }
+  if (!closed) out.push(pts[n - 1]);
+  return out;
+}
+function resample(poly, step) {       // → {x,y,tx,ty,s} arrays at even arc length
+  const cum = [0]; for (let i = 1; i < poly.length; i++) cum.push(cum[i - 1] + Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]));
+  const L = cum[cum.length - 1], N = Math.floor(L / step) + 1, X = [], Y = [], S = [];
+  let j = 0;
+  for (let k = 0; k < N; k++) { const s = Math.min(L, k * step); while (j < cum.length - 2 && cum[j + 1] < s) j++;
+    const u = (s - cum[j]) / Math.max(1e-6, cum[j + 1] - cum[j]); X.push(lerp(poly[j][0], poly[j + 1][0], u)); Y.push(lerp(poly[j][1], poly[j + 1][1], u)); S.push(s); }
+  const TX = [], TY = [];
+  for (let k = 0; k < N; k++) { const a = Math.max(0, k - 2), b = Math.min(N - 1, k + 2); const dx = X[b] - X[a], dy = Y[b] - Y[a], l = Math.hypot(dx, dy) || 1; TX.push(dx / l); TY.push(dy / l); }
+  return { X, Y, TX, TY, S, L, N };
+}
+
+// ── the stone (stone space: x right, y down, ground at y≈505) ──
+const STONE_CP = [[-418, 560], [-410, 300], [-394, 40], [-376, -180], [-352, -350], [-296, -455], [-190, -528], [-40, -578], [110, -598], [238, -574], [326, -498], [370, -330], [384, -70], [398, 250], [424, 560]];
+let STONE_OUT;   // polygon
+function buildOutline() {
+  const p = catmull(STONE_CP, false, 18), out = [];
+  for (let i = 0; i < p.length; i++) { const [x, y] = p[i]; const a = Math.atan2(y, x); const j = (fbm(Math.cos(a) * 2.2 + 5, Math.sin(a) * 2.2 + 5, 7, 4) - .5) * 34 + (vnoise(a * 18, 3, 8) - .5) * 7;
+    const l = Math.hypot(x, y) || 1; out.push([x + x / l * j, y + y / l * j]); }
+  out.push([410, 640], [-405, 640]);
+  STONE_OUT = out;
+}
+function stonePath(c) { c.beginPath(); STONE_OUT.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); }
+
+// the serpent band: tail tip (bottom centre) → left side → over the top → right side → head crossing over the tail
+const BAND_BODY = [[176, 282], [64, 392], [-100, 434], [-242, 405], [-312, 290], [-322, 60], [-310, -170], [-276, -345], [-196, -452], [-74, -508], [66, -518], [190, -482], [272, -398], [306, -252], [318, -20], [322, 210], [306, 330], [258, 402], [150, 342], [36, 304]];
+const HW = 50;           // ribbon half-width
+let BAND, BL, BR, HWs, SPLIT, RIBBONS = [], CROSS = [];
+function hwAt(s, L) { return HW * (0.04 + 0.96 * Math.pow(smooth(0, 340, s), .8)); }
+// a ribbon: centreline + outline edges + carving / painting schedule
+function makeRibbon(poly, hwf, o) {
+  const P = resample(poly, 3), L = [], R = [];
+  for (let k = 0; k < P.N; k++) { const hw = hwf(P.S[k], P.L), nx = -P.TY[k], ny = P.TX[k]; L.push([P.X[k] + nx * hw, P.Y[k] + ny * hw]); R.push([P.X[k] - nx * hw, P.Y[k] - ny * hw]); }
+  return Object.assign({ P, L, R, N: P.N }, o);
+}
+const rCut = (rb, t) => Math.floor(eSine(seg(t, rb.c0, rb.c1)) * (rb.N - 1));
+const rPaint = (rb, t) => Math.floor(eSine(seg(t, rb.p0, rb.p1)) * (rb.N - 1));
+function spiral(cx, cy, r0, r1, a0, turns, dir, n = 40) { const o = []; for (let i = 0; i <= n; i++) { const u = i / n, a = a0 + dir * turns * TAU * u, r = lerp(r0, r1, u); o.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } return o; }
+function buildBand() {
+  const curl = spiral(208, 214, 4, 34, 0.44 - 1.2 * TAU, 1.2, 1, 36);   // the tail starts as a tight curl
+  const bandPts = catmull([...curl.filter((p, i) => i % 3 === 0), ...BAND_BODY], false, 16);
+  const main = makeRibbon(bandPts, hwAt, { c0: T.band0, c1: T.band1, p0: T.paint0, p1: T.paint1, red: true });
+  BAND = main.P; BL = main.L; BR = main.R;
+  SPLIT = Math.floor(BAND.N - 380 / 3);     // the head section that crosses over the tail
+  RIBBONS = [main];
+  // knotwork: slender black rings that bind the band at its lower corners (each wraps over, then under it)
+  for (const [qx, qy, ph] of [[-262, 392, .0], [318, 232, .5]]) {
+    let kc = 0, bd = 1e9; for (let k = 0; k < BAND.N; k++) { const d = Math.hypot(BAND.X[k] - qx, BAND.Y[k] - qy); if (d < bd) { bd = d; kc = k; } }
+    const cx = BAND.X[kc], cy = BAND.Y[kc], tx = BAND.TX[kc], ty = BAND.TY[kc], nx = -ty, ny = tx, pts = [];
+    for (let i = 0; i <= 96; i++) { const th = ph + i / 96 * TAU * 1.03, a1 = 88 * Math.cos(th), a2 = 30 * Math.sin(th); pts.push([cx + nx * a1 + tx * a2, cy + ny * a1 + ty * a2]); }
+    RIBBONS.push(makeRibbon(pts, () => 12, { c0: T.bind0, c1: T.bind1, p0: T.bind0 + .3, p1: T.bind1 + .25, red: false }));
+  }
+  findCrossings();
+}
+function segX(a, b, c, d) { const r = [b[0] - a[0], b[1] - a[1]], s = [d[0] - c[0], d[1] - c[1]], den = r[0] * s[1] - r[1] * s[0]; if (Math.abs(den) < 1e-9) return null;
+  const u = ((c[0] - a[0]) * s[1] - (c[1] - a[1]) * s[0]) / den, v = ((c[0] - a[0]) * r[1] - (c[1] - a[1]) * r[0]) / den; return (u >= 0 && u < 1 && v >= 0 && v < 1) ? u : null; }
+function findCrossings() {    // centreline crossings; over/under alternates along each binder (first one goes under the band)
+  CROSS = [];
+  const pt = (rb, i) => [rb.P.X[i], rb.P.Y[i]];
+  for (let bi = 1; bi < RIBBONS.length; bi++) {
+    const b = RIBBONS[bi], m = RIBBONS[0], hits = [];
+    for (let i = 0; i < b.N - 1; i++) for (let j = 0; j < m.N - 1; j++) if (segX(pt(b, i), pt(b, i + 1), pt(m, j), pt(m, j + 1)) !== null) hits.push({ bi, ib: i, im: j });
+    hits.forEach((h, k) => { h.mainOver = k % 2 === 0; CROSS.push(h); });
+  }
+}
+const idxAt = s => clamp(Math.floor(s / 3), 0, BAND.N - 1);
+function ribbonPoly(c, i0, i1, rb = RIBBONS[0]) {
+  const L = rb.L, R = rb.R;
+  c.beginPath(); c.moveTo(L[i0][0], L[i0][1]);
+  for (let k = i0 + 1; k <= i1; k++) c.lineTo(L[k][0], L[k][1]);
+  for (let k = i1; k >= i0; k--) c.lineTo(R[k][0], R[k][1]);
+  c.closePath();
+}
+function polyStroke(c, P, i0, i1) { c.beginPath(); c.moveTo(P[i0][0], P[i0][1]); for (let k = i0 + 1; k <= i1; k++) c.lineTo(P[k][0], P[k][1]); }
+
+// serpent head in local frame (x forward along tangent, y across), drawn at band end
+const HEAD = catmull([[0, -HW], [40, -HW - 8], [96, -50], [140, -30], [176, -12], [190, -2], [180, 6], [152, 12], [112, 30], [62, 46], [22, HW + 4], [0, HW]].map(([x, y]) => [x, -y]), false, 10);
+const MOUTH = catmull([[186, 2], [150, -2], [122, -8]], false, 8);
+const LAPPET = catmull([[70, -54], [40, -84], [-6, -98], [-52, -90], [-76, -64], [-68, -40], [-46, -40], [-42, -58], [-56, -63]].map(([x, y]) => [x, -y]), false, 12);
+const EYE = catmull([[80, -24], [100, -38], [130, -25], [102, -15], [80, -24]].map(([x, y]) => [x, -y]), false, 8);
+const PUPIL = [104, 26];
+const plen = P => { let l = 0; for (let i = 1; i < P.length; i++) l += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); return l; };
+
+// ── runes (Elder Futhark), unit box x∈[0,.6], y∈[0,1] (y down) ──
+const RUNE = {
+  M: [[[0, 0], [0, 1]], [[.6, 0], [.6, 1]], [[0, 0], [.6, .42]], [[.6, 0], [0, .42]]],
+  A: [[[0, 0], [0, 1]], [[0, 0], [.46, .24]], [[0, .28], [.46, .52]]],
+  K: [[[.46, .24], [.08, .5], [.46, .76]]],
+  E: [[[0, 1], [0, 0], [.3, .3], [.6, 0], [.6, 1]]],
+  Y: [[[.3, .12], [.06, .36], [.3, .6]], [[.3, .4], [.54, .64], [.3, .88]]],
+  O: [[[.02, .95], [.56, .34], [.3, .04], [.04, .34], [.58, .95]]],
+  U: [[[0, 1], [0, 0], [.52, .34], [.52, 1]]],
+  R: [[[0, 1], [0, 0], [.46, .25], [0, .5], [.46, 1]]],
+  ':': 'dots'
+};
+const GLYPHS = 'MAKE:YOUR:MARK'.split('');
+const RUNE_H = 70; let RUNE_S0 = 0, RUNE_DS = 100;
+let RUNES = [];         // {ch, s, x, y, ang, t0, letter index}
+let LETTERS = [];       // {ch, tx, ty, w, rune}
+function buildRunes() {
+  const lines = ['MAKE', 'YOUR', 'MARK'], LY = [-268, -88, 92], FS = 104;
+  ctx.font = `700 ${FS}px ${SERIF}`;
+  const pos = [];
+  lines.forEach((ln, li) => { const ws = [...ln].map(ch => ctx.measureText(ch).width), gap = 12, tot = ws.reduce((a, b) => a + b, 0) + gap * (ln.length - 1);
+    let x = -tot / 2 + 2; ws.forEach((w, i) => { pos.push({ ch: ln[i], tx: x + w / 2, ty: LY[li], w }); x += w + gap; }); });
+  let li = 0; RUNES = [];
+  { let k0 = 0, k1 = BAND.N - 1; while (!(BAND.X[k0] < -250 && BAND.Y[k0] < 150)) k0++; while (!(BAND.X[k1] > 250 && BAND.Y[k1] < 60)) k1--;
+    RUNE_S0 = BAND.S[k0]; RUNE_DS = (BAND.S[k1] - BAND.S[k0]) / (GLYPHS.length - 1); }
+  GLYPHS.forEach((ch, i) => {
+    const s = RUNE_S0 + i * RUNE_DS, k = idxAt(s);
+    const r = { ch, s, x: BAND.X[k], y: BAND.Y[k], ang: Math.atan2(BAND.TY[k], BAND.TX[k]), t0: T.rune0 + i * T.runeStep, li: -1 };
+    if (ch !== ':') { r.li = li; pos[li].rune = i; li++; }
+    RUNES.push(r);
+  });
+  LETTERS = pos;
+}
+function runeSegs(ch) {          // → list of polylines in rune-local units (centred, rotated frame: x along band, y across)
+  const P = RUNE[ch], w = .6 * RUNE_H; if (P === 'dots') return 'dots';
+  return P.map(pl => pl.map(([x, y]) => [x * RUNE_H - w / 2, (y - .5) * RUNE_H]));
+}
+
+// ── precomputed textures ──
+const TS = 1.7, SX0 = -440, SY0 = -610, SW = 880, SH = 1260;   // stone texture: world rect & resolution
+let STONE_TEX, PAINT_PAT, BLACK_PAT, PAINT_TEX, BG, BG_BLUR, MIST, GRAIN = [], VIG, GROUND;
+function buildStone() {
+  const w = Math.round(SW * TS), h = Math.round(SH * TS), c = mk(w, h), g = c.getContext('2d');
+  const img = g.createImageData(w, h), d = img.data;
+  for (let py = 0; py < h; py++) {
+    const y = SY0 + py / TS;
+    for (let px = 0; px < w; px++) {
+      const x = SX0 + px / TS;
+      const big = fbm(x / 210, y / 210, 3, 4), med = vnoise(x / 34, y / 34, 11), sp1 = vnoise(x / 3.2, y / 3.2, 21), sp2 = fbm(x / 6, y / 6, 31, 2), fel = vnoise(x / 11, y / 11, 41);
+      const hsh = hash2(Math.floor(x * 1.3 + 7e3), Math.floor(y * 1.3 + 7e3), 5) * .5 + vnoise(x * 1.1, y * 1.1, 6) * .5;
+      // hewn relief: height field lit from the torch side (upper right)
+      const hA = (xx, yy) => fbm(xx / 150, yy / 150, 13, 4) + .12 * vnoise(xx / 18, yy / 18, 17);
+      const h0 = hA(x, y), dx = hA(x + 2.5, y) - h0, dy = hA(x, y + 2.5) - h0;
+      const lit = clamp(1 + (dx * .75 - dy * .55) * 16, .7, 1.3);
+      let v = (106 + (big - .5) * 50 + (med - .5) * 16) * lit;
+      let r = v * .985, gg = v * .985, b = v * 1.0;
+      if (sp2 > .66) { const k = Math.min(1, (sp2 - .66) * 4.5); r -= 90 * k; gg -= 90 * k; b -= 84 * k; }        // biotite / hornblende
+      if (sp1 > .8) { const k = (sp1 - .8) * 4; r += 70 * k; gg += 70 * k; b += 70 * k; }         // quartz glints
+      if (fel > .76) { const k = (fel - .76) * 2.4; r += 26 * k; gg += 8 * k; b += 2 * k; }          // pinkish feldspar
+      if (hsh > .86) { r += 24; gg += 24; b += 24; } else if (hsh < .13) { r -= 26; gg -= 26; b -= 24; }
+      // lichen patches (pale grey-green) mostly high on the stone, weathering darker near the ground
+      const lic = fbm(x / 34 + 9, y / 34, 51, 4) * .7 + .3 * fbm(x / 160, y / 160, 52, 2);
+      const lk = smooth(.64, .7, lic) * (0.25 + 0.75 * smooth(250, -400, y)) * (vnoise(x / 4, y / 4, 61) > .35 ? 1 : .3);
+      if (lk > 0) { const dot = .8 + .2 * vnoise(x / 2.5, y / 2.5, 62); r = lerp(r, 150 * dot, lk * .55); gg = lerp(gg, 156 * dot, lk * .55); b = lerp(b, 128 * dot, lk * .55); }
+      const damp = smooth(200, 560, y) * .28; r *= 1 - damp; gg *= 1 - damp * .9; b *= 1 - damp * .8;
+      const i = (py * w + px) * 4; d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+    }
+  }
+  const raw = mk(w, h); raw.getContext('2d').putImageData(img, 0, 0);
+  g.setTransform(TS, 0, 0, TS, -SX0 * TS, -SY0 * TS);
+  g.save(); stonePath(g); g.clip();
+  g.drawImage(raw, SX0, SY0, SW, SH);
+  // hairline cracks
+  const R = rng(77);
+  g.lineCap = 'round';
+  for (let k = 0; k < 7; k++) {
+    let x = lerp(-340, 340, R()), y = lerp(-500, 450, R()), a = R() * TAU; g.beginPath(); g.moveTo(x, y);
+    const n = 10 + R() * 18; for (let i = 0; i < n; i++) { a += (R() - .5) * .9; x += Math.cos(a) * 9; y += Math.sin(a) * 9; g.lineTo(x, y); }
+    g.strokeStyle = 'rgba(40,36,34,.45)'; g.lineWidth = 1.3; g.stroke(); g.strokeStyle = 'rgba(210,205,196,.18)'; g.lineWidth = 1; g.translate(.9, .9); g.stroke(); g.translate(-.9, -.9);
+  }
+  // rounded, weathered edge: inner shadow all round, torch-side rim light on the right
+  g.filter = 'blur(26px)'; g.lineWidth = 70; g.strokeStyle = 'rgba(20,22,30,.55)'; stonePath(g); g.stroke();
+  g.filter = 'blur(10px)'; g.lineWidth = 16; g.strokeStyle = 'rgba(15,15,20,.5)'; stonePath(g); g.stroke();
+  g.filter = 'none';
+  g.restore();
+  // rim light on the right edge (outside the clip, then clipped to the rim)
+  g.save(); stonePath(g); g.clip();
+  const rg = g.createLinearGradient(-100, 0, 420, 0); rg.addColorStop(0, 'rgba(255,190,130,0)'); rg.addColorStop(1, 'rgba(255,190,130,.5)');
+  g.filter = 'blur(6px)'; g.lineWidth = 12; g.strokeStyle = rg; g.translate(-5, 0); stonePath(g); g.stroke(); g.filter = 'none';
+  g.restore();
+  STONE_TEX = c;
+}
+function buildPaint(rgb, seed) {
+  const s = 512, c = mk(s, s), g = c.getContext('2d'), img = g.createImageData(s, s), d = img.data;
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const n = fbm(x / 40, y / 40, seed, 4), f = vnoise(x / 3, y / 3, seed + 2), streak = vnoise((x + y) / 26, (x - y) / 5, seed + 4);
+    const i = (y * s + x) * 4;
+    d[i] = rgb[0] + (n - .5) * 50; d[i + 1] = rgb[1] + (n - .5) * 22; d[i + 2] = rgb[2] + (n - .5) * 14;
+    let a = .8 + (n - .5) * .5 - (f > .76 ? .5 : 0) - (streak > .72 ? .3 : 0);
+    d[i + 3] = clamp(a, .25, 1) * 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+// sky, fjord walls, water — composed for the wide shot, 1.1× screen
+const BW = 2112, BH = 1188, HOR = 700;
+function ridge(x, seed, oct, sc) { return fbm(x / sc, 0.37 * seed, seed, oct); }
+function buildBG() {
+  const c = mk(BW, BH), g = c.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, HOR);
+  sky.addColorStop(0, '#0f1426'); sky.addColorStop(.3, '#1f2540'); sky.addColorStop(.58, '#433f5c'); sky.addColorStop(.8, '#8a6269'); sky.addColorStop(.93, '#c98563'); sky.addColorStop(1, '#e0a06a');
+  g.fillStyle = sky; g.fillRect(0, 0, BW, HOR + 2);
+  // last light behind the fjord mouth
+  const glow = g.createRadialGradient(1180, HOR, 10, 1180, HOR, 640); glow.addColorStop(0, 'rgba(255,196,130,.55)'); glow.addColorStop(.4, 'rgba(230,140,100,.18)'); glow.addColorStop(1, 'rgba(200,120,110,0)');
+  g.fillStyle = glow; g.fillRect(0, 0, BW, HOR);
+  // thin cloud streaks
+  const R = rng(5);
+  for (let k = 0; k < 16; k++) { const y = lerp(170, 560, R()), x = R() * BW, w = 240 + R() * 520;
+    const cg = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0); const a = .05 + R() * .08, col = y > 420 ? '240,170,140' : '120,110,150';
+    cg.addColorStop(0, `rgba(${col},0)`); cg.addColorStop(.5, `rgba(${col},${a})`); cg.addColorStop(1, `rgba(${col},0)`);
+    g.fillStyle = cg; g.fillRect(x - w / 2, y, w, 3 + R() * 6); }
+  // stars
+  for (let k = 0; k < 90; k++) { const x = R() * BW, y = R() * 330, a = (.15 + R() * .5) * (1 - y / 330); g.fillStyle = `rgba(230,230,255,${a})`; g.fillRect(x, y, R() < .15 ? 2 : 1.3, R() < .15 ? 2 : 1.3); }
+  // mountain layers: far → near
+  const layers = [
+    { col: '#5b5874', base: HOR, f: x => 150 + 120 * ridge(x, 3, 5, 260) - 60 * Math.exp(-Math.pow((x - 1180) / 260, 2)), haze: .0 },
+    { col: '#3b3b58', base: HOR, f: x => 110 + 150 * ridge(x, 8, 5, 200) + 360 * smooth(900, 0, x) * 0 + 420 * Math.pow(smooth(820, -40, x), 1.4) - 40 * Math.exp(-Math.pow((x - 1180) / 200, 2)) },
+    { col: '#262740', base: HOR, f: x => 40 + 90 * ridge(x, 13, 5, 150) + 560 * Math.pow(smooth(1560, 2112, x), 1.2) + 120 * Math.pow(smooth(700, 0, x), 1.5) },
+  ];
+  const profiles = [];
+  for (const L of layers) {
+    g.beginPath(); g.moveTo(0, L.base); const prof = [];
+    for (let x = 0; x <= BW; x += 4) { const y = L.base - L.f(x); prof.push(y); g.lineTo(x, y); }
+    g.lineTo(BW, L.base); g.closePath();
+    const mg = g.createLinearGradient(0, HOR - 700, 0, HOR); mg.addColorStop(0, L.col); mg.addColorStop(1, shade(L.col, 1.25));
+    g.fillStyle = mg; g.fill();
+    // haze at the foot of each layer
+    const hz = g.createLinearGradient(0, HOR - 120, 0, HOR); hz.addColorStop(0, 'rgba(170,140,150,0)'); hz.addColorStop(1, 'rgba(170,140,150,.28)');
+    g.fillStyle = hz; g.fill();
+    profiles.push({ prof, col: L.col });
+  }
+  // snow streaks on the far peaks
+  // water: sky reflection with mountain reflections, then ripple lines
+  const wg = g.createLinearGradient(0, HOR, 0, BH); wg.addColorStop(0, '#b07c66'); wg.addColorStop(.18, '#5e4f63'); wg.addColorStop(1, '#161a2b');
+  g.fillStyle = wg; g.fillRect(0, HOR, BW, BH - HOR);
+  const refl = mk(BW, BH - HOR), rgc = refl.getContext('2d');
+  for (const { prof, col } of profiles) {
+    rgc.beginPath(); rgc.moveTo(0, 0);
+    prof.forEach((y, i) => rgc.lineTo(i * 4, (HOR - y) * .55)); rgc.lineTo(BW, 0); rgc.closePath(); rgc.fillStyle = shade(col, .8); rgc.globalAlpha = .55; rgc.fill();
+  }
+  for (let y = 0; y < BH - HOR; y += 2) { const off = Math.sin(y * .7) * 6 + Math.sin(y * .23) * 4; g.globalAlpha = .9; g.drawImage(refl, 0, y, BW, 2, off, HOR + y, BW, 2); }
+  g.globalAlpha = 1;
+  for (let k = 0; k < 260; k++) { const y = HOR + 4 + Math.pow(R(), 1.6) * (BH - HOR), x = R() * BW, w = 20 + R() * 140 * (1 + (y - HOR) / 200);
+    const near = Math.exp(-Math.pow((x - 1180) / 380, 2)); g.fillStyle = `rgba(255,${190 + R() * 30},150,${(.05 + .3 * near) * (1 - (y - HOR) / (BH - HOR))})`; g.fillRect(x, y, w, 1.5); }
+  BG = c;
+  BG_BLUR = mk(BW / 2, BH / 2); const bb = BG_BLUR.getContext('2d'); bb.filter = 'blur(7px)'; bb.drawImage(c, 0, 0, BW / 2, BH / 2);
+}
+function shade(hex, k) { const n = parseInt(hex.slice(1), 16); const r = clamp(((n >> 16) & 255) * k, 0, 255), g = clamp(((n >> 8) & 255) * k, 0, 255), b = clamp((n & 255) * k, 0, 255); return `rgb(${r | 0},${g | 0},${b | 0})`; }
+function buildMist() {
+  const c = mk(2400, 420), g = c.getContext('2d'), R = rng(33);
+  g.filter = 'blur(24px)';
+  for (let k = 0; k < 140; k++) { const x = R() * 2400, y = 210 + (R() - .5) * 160 * R(), rx = 90 + R() * 260, ry = 14 + R() * 34;
+    g.fillStyle = `rgba(196,190,212,${.02 + R() * .045})`; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, TAU); g.fill();
+    if (x < 400) { g.beginPath(); g.ellipse(x + 2400, y, rx, ry, 0, 0, TAU); g.fill(); } if (x > 2000) { g.beginPath(); g.ellipse(x - 2400, y, rx, ry, 0, 0, TAU); g.fill(); } }
+  g.filter = 'none'; MIST = c;
+}
+function buildGrain() {
+  for (let k = 0; k < 3; k++) {
+    const c = mk(960, 540), g = c.getContext('2d'), img = g.createImageData(960, 540), d = img.data, R = rng(100 + k);
+    for (let i = 0; i < d.length; i += 4) { const v = 128 + (R() + R() + R() - 1.5) * 70; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
+    g.putImageData(img, 0, 0); GRAIN.push(c);
+  }
+  VIG = mk(W, H); const v = VIG.getContext('2d'); const rg = v.createRadialGradient(W / 2, H * .52, H * .35, W / 2, H * .52, H * 1.05);
+  rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(1, 'rgba(4,4,10,.72)'); v.fillStyle = rg; v.fillRect(0, 0, W, H);
+}
+// grass tufts along the mound (world space), fixed
+let TUFTS = [];
+const groundY = x => 505 + 230 * (1 - Math.exp(-Math.pow(x / 1250, 2))) + 6 * Math.sin(x / 37) + 5 * Math.sin(x / 13.3);
+function buildGround() {
+  const R = rng(44); TUFTS = [];
+  for (let x = -2800; x < 3000; x += 7 + R() * 9) {
+    const n = 2 + (R() * 4 | 0), y = groundY(x) + 2;
+    for (let k = 0; k < n; k++) TUFTS.push({ x: x + (R() - .5) * 8, y, h: (14 + R() * 34) * (1 + Math.exp(-Math.pow(x / 500, 2)) * .5), lean: (R() - .5) * .8, ph: R() * TAU });
+  }
+}
+
+// ── chips & dust (precomputed emission list) ──
+let CHIPS = [];
+function bandTip(t) { const u = eSine(seg(t, T.band0, T.band1)); return u * BAND.L; }
+function buildChips() {
+  const R = rng(9); CHIPS = [];
+  const emit = (t0, x, y, nx, ny, n, big) => {
+    for (let k = 0; k < n; k++) { const a = Math.atan2(ny, nx) + (R() - .5) * 2.6, sp = 160 + R() * 380;
+      CHIPS.push({ t0, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 180 - R() * 200, sz: (big ? 3 : 2) + R() * (big ? 5 : 3.5), rot: R() * TAU, vr: (R() - .5) * 20, life: .5 + R() * .5, sh: R(), dust: false }); }
+    CHIPS.push({ t0, x, y, vx: (R() - .5) * 40, vy: -30 - R() * 40, sz: 12 + R() * 14, life: .55 + R() * .4, dust: true });
+  };
+  for (let t = T.band0; t < T.band1; t += 1 / 40) {
+    const k = idxAt(bandTip(t)), nx = -BAND.TY[k], ny = BAND.TX[k];
+    emit(t, BL[k][0], BL[k][1], nx, ny, 2, false); emit(t + 1 / 80, BR[k][0], BR[k][1], -nx, -ny, 2, false);
+  }
+  for (let b = 1; b < RIBBONS.length; b++) { const rb = RIBBONS[b]; for (let t = rb.c0; t < rb.c1; t += 1 / 30) { const k = rCut(rb, t); emit(t, rb.P.X[k], rb.P.Y[k], -rb.P.TY[k], rb.P.TX[k], 1, false); } }
+  for (let t = T.head0; t < T.head1; t += 1 / 40) { const p = headTipWorld(seg(t, T.head0, T.head1)); emit(t, p[0], p[1], 0, -1, 2, false); }
+  RUNES.forEach(r => { for (let t = r.t0; t < r.t0 + T.runeCarve; t += 1 / 45) { const p = runeTipWorld(r, seg(t, r.t0, r.t0 + T.runeCarve)); emit(t, p[0], p[1], Math.cos(r.ang - Math.PI / 2), Math.sin(r.ang - Math.PI / 2), 3, true); } });
+}
+function headFrame() { const k = BAND.N - 1; return { x: BAND.X[k], y: BAND.Y[k], a: Math.atan2(BAND.TY[k], BAND.TX[k]) }; }
+function toWorld(f, p) { const c = Math.cos(f.a), s = Math.sin(f.a); return [f.x + p[0] * c - p[1] * s, f.y + p[0] * s + p[1] * c]; }
+function pointAlong(P, u) { const L = plen(P) * u; let acc = 0; for (let i = 1; i < P.length; i++) { const l = Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); if (acc + l >= L) { const v = (L - acc) / (l || 1); return [lerp(P[i - 1][0], P[i][0], v), lerp(P[i - 1][1], P[i][1], v)]; } acc += l; } return P[P.length - 1]; }
+function headTipWorld(u) { return toWorld(headFrame(), pointAlong(HEAD, u)); }
+function runeTipWorld(r, u) {
+  const segs = runeSegs(r.ch); if (segs === 'dots' || !Array.isArray(segs)) return [r.x, r.y];
+  const all = [].concat(...segs.map(pl => pl)); const p = pointAlong(all, u); const c = Math.cos(r.ang), s = Math.sin(r.ang);
+  return [r.x + p[0] * c - p[1] * s, r.y + p[0] * s + p[1] * c];
+}
+
+// ── camera ──
+function camera(t) {
+  // close on the tail → follow the chisel up the left side → settle on the full face → pull back to the fjord
+  const a = eSine(seg(t, 0.0, 2.0)), b = eInOut(seg(t, 1.6, 4.1)), c = eInOut(seg(t, T.pull0, T.pull1));
+  let cx = lerp(-40, -150, a), cy = lerp(290, -40, a), sc = lerp(1.5, 1.28, a);
+  cx = lerp(cx, 0, b); cy = lerp(cy, -12, b); sc = lerp(sc, 0.86, b);
+  cx = lerp(cx, 250, c); cy = lerp(cy, -70, c); sc = lerp(sc, 0.44, c);
+  // slow drift + breathing
+  sc *= 1 + 0.012 * Math.sin(t * .6); cx += 6 * Math.sin(t * .45); cy += 4 * Math.sin(t * .37 + 1);
+  return { cx, cy, sc, wide: c };
+}
+const flick = t => 0.84 + 0.07 * Math.sin(t * 13.1) + 0.05 * Math.sin(t * 23.7 + 1) + 0.04 * Math.sin(t * 41.3 + 2) + 0.03 * (n1(t * 9, 3) - .5);
+const TORCH = { x: 690, y: -150 };
+
+// ── drawing ──
+function drawBackground(t, cam) {
+  const close = 1 - cam.wide;
+  const z = 1 + 0.35 * close, ox = -(cam.cx - 250) * 0.08, oy = -(cam.cy + 70) * 0.05 + 20 * close;
+  const w = BW * z, h = BH * z, x = W / 2 - w / 2 + ox, y = H / 2 - h / 2 + oy;
+  ctx.drawImage(BG, x, y, w, h);
+  if (close > 0.01) { ctx.globalAlpha = clamp(close * 1.4); ctx.drawImage(BG_BLUR, x, y, w, h); ctx.globalAlpha = 1; }
+  // drifting mist over the water
+  const my = y + (HOR - 200) * z, mw = 2400 * z, mh = 420 * z;
+  for (let L = 0; L < 2; L++) {
+    const off = ((t * (14 + L * 10) + L * 900) * z) % mw;
+    ctx.globalAlpha = L ? .7 : .9;
+    ctx.drawImage(MIST, x - mw + off, my + L * 60 * z, mw, mh); ctx.drawImage(MIST, x + off, my + L * 60 * z, mw, mh);
+  }
+  ctx.globalAlpha = 1;
+  // water glints
+  for (let k = 0; k < 26; k++) { const gy = HOR + 10 + (k * 37) % 300, gx = 1180 + Math.sin(k * 12.9) * 420 + Math.sin(t * .8 + k) * 18;
+    const a = .18 * (.5 + .5 * Math.sin(t * 2.3 + k * 1.7)) * Math.exp(-Math.pow((gx - 1180) / 360, 2));
+    ctx.fillStyle = `rgba(255,210,160,${a})`; ctx.fillRect(x + gx * z, y + gy * z, (30 + (k % 5) * 14) * z, 1.6 * z); }
+}
+function drawGrooves(c, rb, i0, i1, fresh) {
+  // carved outline of a ribbon: lit lip (offset toward the torch side) + dark incision
+  c.lineJoin = 'round'; c.lineCap = 'round';
+  const w = rb.red ? 1 : .8;
+  for (const P of [rb.L, rb.R]) {
+    c.save(); c.translate(2.2, 2.2); polyStroke(c, P, i0, i1); c.strokeStyle = 'rgba(214,206,194,.42)'; c.lineWidth = 7 * w; c.stroke(); c.restore();
+    polyStroke(c, P, i0, i1); c.strokeStyle = 'rgba(26,22,22,.9)'; c.lineWidth = 7.5 * w; c.stroke();
+    polyStroke(c, P, i0, i1); c.strokeStyle = 'rgba(8,7,8,.8)'; c.lineWidth = 3 * w; c.stroke();
+  }
+  if (fresh) {   // fresh-cut stone dust on the last stretch of the grooves
+    const j0 = Math.max(i0, i1 - 40);
+    for (const P of [rb.L, rb.R]) for (let k = j0; k < i1; k += 2) { const a = (k - j0) / 40; c.strokeStyle = `rgba(226,218,204,${.5 * a})`; c.lineWidth = 5; c.beginPath(); c.moveTo(P[k][0], P[k][1]); c.lineTo(P[Math.min(i1, k + 2)][0], P[Math.min(i1, k + 2)][1]); c.stroke(); }
+  }
+}
+function paintRibbon(c, rb, i0, i1, edge) {
+  if (i1 <= i0) return;
+  c.save(); ribbonPoly(c, i0, i1, rb); c.clip();
+  c.fillStyle = rb.red ? PAINT_PAT : BLACK_PAT; c.globalAlpha = .92; c.fillRect(-500, -700, 1000, 1400); c.globalAlpha = 1;
+  if (edge) { const j0 = Math.max(i0, i1 - 24); c.save(); ribbonPoly(c, j0, i1, rb); c.clip(); c.fillStyle = rb.red ? 'rgba(200,80,45,.35)' : 'rgba(60,50,45,.35)'; c.fillRect(-500, -700, 1000, 1400); c.restore(); }
+  c.restore();
+}
+// draw part [i0,i1] of a ribbon as far as it has been carved / painted at time t; restore = re-lay stone inside first (it lies on top)
+function drawRibbonRange(rb, i0, i1, t, restore) {
+  const iCut = rCut(rb, t), j1 = Math.min(i1, iCut); if (j1 <= i0 || t < rb.c0) return;
+  if (restore) { ctx.save(); ribbonPoly(ctx, i0, j1, rb); ctx.clip(); ctx.drawImage(STONE_TEX, SX0, SY0, SW, SH); ctx.restore(); }
+  const iP = Math.min(j1, rPaint(rb, t)); paintRibbon(ctx, rb, i0, iP, iP < j1 || iP < rb.N - 1);
+  drawGrooves(ctx, rb, i0, j1, j1 === iCut && t < rb.c1 + .05);
+}
+function spark(x, y, t) { const on = (Math.floor(t * 20) % 2 === 0) ? 1 : .35, g = ctx.createRadialGradient(x, y, 0, x, y, 22);
+  g.addColorStop(0, `rgba(255,236,200,${.9 * on})`); g.addColorStop(1, 'rgba(255,200,140,0)'); ctx.fillStyle = g; ctx.fillRect(x - 22, y - 22, 44, 44); }
+function drawBand(t) {
+  const m = RIBBONS[0];
+  drawRibbonRange(m, 0, SPLIT, t, false);
+  drawRibbonRange(m, SPLIT, m.N - 1, t, true);      // the head section passes over the tail
+  for (let b = 1; b < RIBBONS.length; b++) drawRibbonRange(RIBBONS[b], 0, RIBBONS[b].N - 1, t, true);
+  // interlace: where the band goes over a binder, re-lay that stretch of band on top
+  for (const c of CROSS) if (c.mainOver && rCut(RIBBONS[c.bi], t) > c.ib - 6) { const k = 16; drawRibbonRange(m, Math.max(0, c.im - k), Math.min(m.N - 1, c.im + k), t, true); }
+  for (const rb of RIBBONS) if (t > rb.c0 && t < rb.c1) { const k = rCut(rb, t); spark(rb.L[k][0], rb.L[k][1], t); spark(rb.R[k][0], rb.R[k][1], t); }
+}
+function drawHead(t) {
+  const u = eSine(seg(t, T.head0, T.head1)); if (u <= 0) return;
+  const f = headFrame();
+  ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.a);
+  const P2 = pts => { const p = new Path2D(); pts.forEach(([x, y], i) => i ? p.lineTo(x, y) : p.moveTo(x, y)); return p; };
+  const hp = P2(HEAD); hp.closePath();
+  const lp = P2(LAPPET), mp = P2(MOUTH), ep = P2(EYE);
+  // re-lay stone under the head (it lies over the tail), then paint it red as the carving completes
+  const pv = smooth(.5, 1, u);
+  ctx.save(); ctx.clip(hp); ctx.rotate(-f.a); ctx.translate(-f.x, -f.y); ctx.drawImage(STONE_TEX, SX0, SY0, SW, SH);
+  if (pv > 0) { ctx.globalAlpha = .92 * pv; ctx.fillStyle = PAINT_PAT; ctx.fillRect(-500, -700, 1000, 1400); ctx.globalAlpha = 1; }
+  ctx.restore();
+  const groove = (p, len, v, wd = 1) => {
+    if (v <= 0) return; ctx.setLineDash([len * v, len * 2]);
+    ctx.save(); ctx.translate(2.2, 2.2); ctx.strokeStyle = 'rgba(214,206,194,.42)'; ctx.lineWidth = 7 * wd; ctx.stroke(p); ctx.restore();
+    ctx.strokeStyle = 'rgba(26,22,22,.9)'; ctx.lineWidth = 7.5 * wd; ctx.stroke(p); ctx.strokeStyle = 'rgba(8,7,8,.8)'; ctx.lineWidth = 3 * wd; ctx.stroke(p);
+  };
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  groove(hp, plen(HEAD) + 20, clamp(u * 1.3));
+  // lappet: a slender carved crest sweeping back over the neck, painted black
+  const lv = clamp(u * 1.6 - .45), Ll = plen(LAPPET);
+  if (lv > 0) { ctx.setLineDash([Ll * lv, Ll * 2]);
+    ctx.save(); ctx.translate(2, 2); ctx.strokeStyle = 'rgba(214,206,194,.4)'; ctx.lineWidth = 24; ctx.stroke(lp); ctx.restore();
+    ctx.strokeStyle = 'rgba(22,18,18,.95)'; ctx.lineWidth = 24; ctx.stroke(lp);
+    ctx.strokeStyle = BLACK_PAT; ctx.lineWidth = 14; ctx.stroke(lp); }
+  groove(mp, plen(MOUTH), clamp(u * 2 - 1), .8);
+  groove(ep, plen(EYE), clamp(u * 2 - .9), .8);
+  ctx.setLineDash([]);
+  const ev = smooth(T.head1, T.head1 + .25, t), [ex, ey] = PUPIL;
+  if (ev > 0) { ctx.fillStyle = `rgba(18,14,12,${.95 * ev})`; ctx.beginPath(); ctx.arc(ex, ey, 7, 0, TAU); ctx.fill();
+    const gl = smooth(T.head1, T.head1 + .12, t) * (1 - smooth(T.head1 + .2, T.head1 + .8, t));
+    if (gl > 0) { const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, 50); g.addColorStop(0, `rgba(255,210,130,${.9 * gl})`); g.addColorStop(1, 'rgba(255,140,60,0)'); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.fillRect(ex - 50, ey - 50, 100, 100); ctx.globalCompositeOperation = 'source-over'; } }
+  ctx.restore();
+}
+function strokeRune(c, segs, u) {     // partial polyline set, u∈[0,1] over the total stroke length
+  const tot = segs.reduce((a, pl) => a + plen(pl), 0); let left = tot * u;
+  c.beginPath();
+  for (const pl of segs) {
+    if (left <= 0) break; c.moveTo(pl[0][0], pl[0][1]);
+    for (let i = 1; i < pl.length; i++) { const l = Math.hypot(pl[i][0] - pl[i - 1][0], pl[i][1] - pl[i - 1][1]);
+      if (left >= l) { c.lineTo(pl[i][0], pl[i][1]); left -= l; } else { const v = left / l; c.lineTo(lerp(pl[i - 1][0], pl[i][0], v), lerp(pl[i - 1][1], pl[i][1], v)); left = 0; break; } }
+  }
+}
+function runeGlow(r, t) {   // 0..1 ember glow
+  const g1 = smooth(r.t0 + .08, r.t0 + .26, t) * (1 - smooth(r.t0 + .4, r.t0 + 1.0, t));
+  const g2 = smooth(T.pulse, T.pulse + .18, t - (r.s - RUNE_S0) / 5200) * (1 - smooth(T.pulse + .3, T.pulse + .9, t - (r.s - RUNE_S0) / 5200));
+  return Math.max(g1, g2 * .8);
+}
+function drawRunes(t) {
+  for (const r of RUNES) {
+    const u = seg(t, r.t0, r.t0 + T.runeCarve); if (u <= 0) continue;
+    ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(r.ang);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const glow = runeGlow(r, t);
+    if (r.ch === ':') {
+      const dots = [[0, -13], [0, 13]];
+      dots.forEach(([x, y], i) => { if (u < i * .5) return; ctx.fillStyle = 'rgba(214,206,194,.35)'; ctx.beginPath(); ctx.arc(x + 1.8, y + 1.8, 6.5, 0, TAU); ctx.fill(); ctx.fillStyle = BLACKP; ctx.beginPath(); ctx.arc(x, y, 6, 0, TAU); ctx.fill(); });
+      ctx.restore(); continue;
+    }
+    const segs = runeSegs(r.ch);
+    ctx.save(); ctx.translate(2, 2); strokeRune(ctx, segs, u); ctx.strokeStyle = 'rgba(230,190,170,.35)'; ctx.lineWidth = 8.5; ctx.stroke(); ctx.restore();
+    strokeRune(ctx, segs, u); ctx.strokeStyle = BLACKP; ctx.lineWidth = 8.5; ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 3.5; ctx.stroke();
+    if (glow > 0.01) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.shadowColor = `rgba(255,120,30,${glow})`; ctx.shadowBlur = 40 * glow;
+      ctx.strokeStyle = `rgba(255,${150 + 60 * glow},${60 + 60 * glow},${glow})`; ctx.lineWidth = 7; ctx.stroke();
+      ctx.shadowBlur = 0; ctx.strokeStyle = `rgba(255,245,210,${glow * .8})`; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.restore();
+  }
+}
+function letterState(L, t) {
+  const r = RUNES[L.rune], f0 = r.t0 + .26, f1 = f0 + .52;
+  return { r, f0, f1, u: seg(t, f0, f1) };
+}
+function drawLetters(t) {
+  const FS = 104;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const L of LETTERS) {
+    const { r, f0, f1, u } = letterState(L, t); if (t < f0) continue;
+    const pulse = smooth(T.pulse + .1, T.pulse + .3, t) * (1 - smooth(T.pulse + .4, T.pulse + 1.1, t));
+    if (u >= 1) {
+      // carved and painted black in the centre panel; lands with a small overshoot, cools from ember to black
+      const k = seg(t, f1, f1 + .28), s = lerp(1.16, 1, eBack(k)), cool = 1 - smooth(f1, f1 + .7, t);
+      ctx.save(); ctx.translate(L.tx, L.ty); ctx.scale(s, s);
+      ctx.font = `700 ${FS}px ${SERIF}`;
+      ctx.fillStyle = 'rgba(222,212,198,.45)'; ctx.fillText(L.ch, 3, 3);
+      ctx.fillStyle = BLACKP; ctx.fillText(L.ch, 0, 0);
+      const g = Math.max(cool, pulse * .7);
+      if (g > .01) { ctx.globalCompositeOperation = 'lighter'; ctx.shadowColor = `rgba(255,110,30,${g})`; ctx.shadowBlur = 36 * g; ctx.fillStyle = `rgba(255,${120 + 80 * g},50,${g * .95})`; ctx.fillText(L.ch, 0, 0); ctx.shadowBlur = 0; ctx.globalCompositeOperation = 'source-over'; }
+      ctx.restore();
+      if (k < 1) { // dust ring on landing
+        const R = rng(L.rune * 7 + 3); for (let q = 0; q < 10; q++) { const a = R() * TAU, d = 30 + k * 90 * (0.6 + R() * .6); ctx.fillStyle = `rgba(210,200,185,${.35 * (1 - k)})`; ctx.beginPath(); ctx.arc(L.tx + Math.cos(a) * d * 1.3, L.ty + Math.sin(a) * d * .7, 3 + 6 * k, 0, TAU); ctx.fill(); }
+      }
+    } else {
+      // ember letter in flight along a raised arc, with a short trail
+      const e = eInOut(u), mx = lerp(r.x, L.tx, .5) * .6, my = Math.min(r.y, L.ty) - 120;
+      const B = v => [(1 - v) * (1 - v) * r.x + 2 * v * (1 - v) * mx + v * v * L.tx, (1 - v) * (1 - v) * r.y + 2 * v * (1 - v) * my + v * v * L.ty];
+      ctx.globalCompositeOperation = 'lighter';
+      for (let q = 4; q >= 0; q--) {
+        const v = clamp(e - q * .06), [x, y] = B(v), sz = lerp(56, FS, v), a = (q ? .18 * (1 - q / 5) : 1) * (0.6 + 0.4 * Math.sin(Math.PI * clamp(u * 1.2)));
+        ctx.font = `700 ${sz}px ${SERIF}`;
+        ctx.shadowColor = 'rgba(255,110,30,.9)'; ctx.shadowBlur = q ? 0 : 30;
+        ctx.fillStyle = `rgba(255,${170 + 50 * (1 - v)},90,${a})`; ctx.fillText(L.ch, x, y);
+      }
+      ctx.shadowBlur = 0; ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+}
+function drawChips(t) {
+  for (const p of CHIPS) {
+    const dt = t - p.t0; if (dt < 0 || dt > p.life) continue;
+    const a = 1 - dt / p.life;
+    if (p.dust) { const x = p.x + p.vx * dt, y = p.y + p.vy * dt, r = p.sz * (1 + dt * 3);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, `rgba(205,198,186,${.22 * a})`); g.addColorStop(1, 'rgba(205,198,186,0)'); ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r); continue; }
+    const x = p.x + p.vx * dt, y = p.y + p.vy * dt + 900 * dt * dt, rot = p.rot + p.vr * dt;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+    ctx.fillStyle = p.sh < .5 ? `rgba(196,190,180,${a})` : `rgba(140,134,128,${a})`;
+    ctx.beginPath(); ctx.moveTo(-p.sz, -p.sz * .4); ctx.lineTo(p.sz * .6, -p.sz * .7); ctx.lineTo(p.sz, p.sz * .5); ctx.lineTo(-p.sz * .3, p.sz * .6); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+}
+function drawTorch(t, f) {
+  const { x, y } = TORCH;
+  // rough wooden stake (tapered, slightly leaning), rope bindings, iron fire basket
+  const gy = groundY(x) + 30, bx0 = x + 22;
+  ctx.fillStyle = '#1d1512'; ctx.beginPath(); ctx.moveTo(bx0 - 24, gy); ctx.lineTo(x - 14, y + 56); ctx.lineTo(x + 14, y + 56); ctx.lineTo(bx0 + 24, gy); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = `rgba(255,150,80,${.28 * f})`; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(bx0 + 13, gy - 40); ctx.lineTo(x + 8, y + 64); ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 2; for (let k = 0; k < 5; k++) { const v = .15 + k * .17; ctx.beginPath(); ctx.moveTo(lerp(bx0 - 8, x - 4, v), lerp(gy, y + 56, v)); ctx.lineTo(lerp(bx0 - 6, x - 3, v + .08), lerp(gy, y + 56, v + .08)); ctx.stroke(); }
+  ctx.strokeStyle = '#3a2c20'; ctx.lineWidth = 5; for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(x - 13, y + 90 + k * 9); ctx.lineTo(x + 13, y + 84 + k * 9); ctx.stroke(); }
+  ctx.strokeStyle = '#100c0b'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+  for (let k = -2; k <= 2; k++) { ctx.beginPath(); ctx.moveTo(x + k * 5, y + 58); ctx.quadraticCurveTo(x + k * 26, y + 40, x + k * 24, y - 10); ctx.stroke(); }
+  ctx.lineWidth = 6; ctx.beginPath(); ctx.ellipse(x, y - 8, 52, 11, 0, 0, TAU); ctx.stroke(); ctx.beginPath(); ctx.ellipse(x, y + 26, 38, 8, 0, 0, TAU); ctx.stroke();
+  // glowing logs
+  const lg = ctx.createRadialGradient(x, y + 4, 0, x, y + 4, 50); lg.addColorStop(0, `rgba(255,190,90,${.9 * f})`); lg.addColorStop(1, 'rgba(160,50,10,0)'); ctx.fillStyle = lg; ctx.fillRect(x - 50, y - 46, 100, 100);
+  ctx.globalCompositeOperation = 'lighter';
+  // big glow
+  const R = 520 * f, gg = ctx.createRadialGradient(x, y - 60, 0, x, y - 60, R); gg.addColorStop(0, `rgba(255,170,80,${.38 * f})`); gg.addColorStop(.3, `rgba(255,120,40,${.14 * f})`); gg.addColorStop(1, 'rgba(255,90,20,0)');
+  ctx.fillStyle = gg; ctx.fillRect(x - R, y - 60 - R, 2 * R, 2 * R);
+  // flame tongues
+  for (let k = 0; k < 7; k++) {
+    const h = (150 + 90 * n1(t * 4.5 + k * 3.1, k)) * (k === 0 ? 1.15 : .6 + .08 * k) * f, wv = 34 - k * 3, sway = 22 * (n1(t * 3 + k * 7, 40 + k) - .5) + 10 * Math.sin(t * 5 + k);
+    const bx = x + (k - 3) * 9;
+    const fg = ctx.createLinearGradient(0, y, 0, y - h);
+    fg.addColorStop(0, `rgba(255,240,190,${.75})`); fg.addColorStop(.35, 'rgba(255,170,60,.55)'); fg.addColorStop(.8, 'rgba(220,70,20,.25)'); fg.addColorStop(1, 'rgba(160,30,10,0)');
+    ctx.fillStyle = fg; ctx.beginPath(); ctx.moveTo(bx - wv, y);
+    ctx.bezierCurveTo(bx - wv, y - h * .45, bx + sway * .5 - wv * .3, y - h * .7, bx + sway, y - h);
+    ctx.bezierCurveTo(bx + sway * .5 + wv * .3, y - h * .7, bx + wv, y - h * .45, bx + wv, y); ctx.closePath(); ctx.fill();
+  }
+  // embers
+  for (let j = 0; j < 28; j++) {
+    const p = (t * (.45 + (j % 5) * .07) + j * .618) % 1, ex = x + Math.sin(j * 3.7 + t * 1.3 + p * 4) * (20 + p * 60), ey = y - 40 - p * 420;
+    ctx.fillStyle = `rgba(255,${180 - p * 80},80,${(1 - p) * .9})`; ctx.fillRect(ex, ey, 3.5 * (1 - p * .5), 3.5 * (1 - p * .5));
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+function drawGround(t, f) {
+  ctx.beginPath(); ctx.moveTo(-3200, 2400); for (let x = -3200; x <= 3400; x += 20) ctx.lineTo(x, groundY(x)); ctx.lineTo(3400, 2400); ctx.closePath();
+  const gg = ctx.createLinearGradient(0, 480, 0, 900); gg.addColorStop(0, '#2a2c22'); gg.addColorStop(1, '#101210'); ctx.fillStyle = gg; ctx.fill();
+  // torch warmth on the ground
+  const tg = ctx.createRadialGradient(TORCH.x, groundY(TORCH.x), 0, TORCH.x, groundY(TORCH.x), 900); tg.addColorStop(0, `rgba(255,140,60,${.22 * f})`); tg.addColorStop(1, 'rgba(255,140,60,0)');
+  ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = tg; ctx.fillRect(TORCH.x - 900, groundY(TORCH.x) - 900, 1800, 1800); ctx.globalCompositeOperation = 'source-over';
+  // grass tufts swaying in the wind
+  ctx.lineCap = 'round'; ctx.lineWidth = 3;
+  for (const g of TUFTS) {
+    const sw = g.lean * g.h + Math.sin(t * 1.7 + g.ph + g.x * .004) * g.h * .12;
+    const warm = Math.exp(-Math.pow((g.x - TORCH.x) / 600, 2));
+    ctx.strokeStyle = warm > .1 ? `rgb(${40 + 60 * warm * f | 0},${40 + 30 * warm * f | 0},${26 + 10 * warm | 0})` : '#23261d';
+    ctx.beginPath(); ctx.moveTo(g.x, g.y); ctx.quadraticCurveTo(g.x + sw * .3, g.y - g.h * .6, g.x + sw, g.y - g.h); ctx.stroke();
+  }
+}
+function lightStone(t, f) {
+  ctx.save(); stonePath(ctx); ctx.clip();
+  // dusk: cool shade away from the torch
+  ctx.globalCompositeOperation = 'multiply';
+  const mg = ctx.createLinearGradient(-420, 0, 440, 0); mg.addColorStop(0, 'rgb(118,126,165)'); mg.addColorStop(.55, 'rgb(190,190,205)'); mg.addColorStop(1, 'rgb(255,236,215)');
+  ctx.fillStyle = mg; ctx.fillRect(-460, -620, 920, 1300);
+  // warm torch light, flickering
+  ctx.globalCompositeOperation = 'lighter';
+  const rg = ctx.createRadialGradient(TORCH.x, TORCH.y - 60, 50, TORCH.x, TORCH.y - 60, 1350); rg.addColorStop(0, `rgba(255,150,70,${.32 * f})`); rg.addColorStop(.5, `rgba(255,120,50,${.12 * f})`); rg.addColorStop(1, 'rgba(255,100,40,0)');
+  ctx.fillStyle = rg; ctx.fillRect(-460, -620, 920, 1300);
+  // rune/letter glow spills onto the stone
+  let gsum = 0; for (const r of RUNES) gsum += runeGlow(r, t);
+  if (gsum > .01) { const gl = ctx.createRadialGradient(0, -80, 0, 0, -80, 560); gl.addColorStop(0, `rgba(255,120,40,${.05 * Math.min(3, gsum)})`); gl.addColorStop(1, 'rgba(255,100,30,0)'); ctx.fillStyle = gl; ctx.fillRect(-460, -620, 920, 1300); }
+  ctx.restore();
+}
+
+function render(t) {
+  const cam = camera(t), f = flick(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#0c0e18'; ctx.fillRect(0, 0, W, H);
+  drawBackground(t, cam);
+  ctx.setTransform(cam.sc, 0, 0, cam.sc, W / 2 - cam.cx * cam.sc, H / 2 - cam.cy * cam.sc);
+  // soft contact shadow behind the stone
+  ctx.drawImage(STONE_TEX, SX0, SY0, SW, SH);
+  drawBand(t); drawHead(t); drawRunes(t);
+  lightStone(t, f);
+  drawLetters(t);
+  drawChips(t);
+  drawGround(t, f);
+  drawTorch(t, f);
+  // low mist creeping over the mound in the wide shot
+  if (cam.wide > 0.02) {
+    ctx.globalAlpha = .55 * cam.wide; const off = (t * 40) % 4800;
+    ctx.drawImage(MIST, -2600 + off - 4800, 420, 4800, 420); ctx.drawImage(MIST, -2600 + off, 420, 4800, 420); ctx.globalAlpha = 1;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // caption
+  const cap = smooth(T.cap, T.cap + .8, t) * (1 - smooth(9.35, 9.8, t));
+  if (cap > 0) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.font = `500 34px ${SERIF}`;
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '8px';
+    ctx.fillStyle = `rgba(0,0,0,${.4 * cap})`; ctx.fillText('CARVED AT DUSK · READ FOR A THOUSAND YEARS', W / 2 + 2, 1002 + 2);
+    ctx.fillStyle = `rgba(236,214,186,${cap})`; ctx.fillText('CARVED AT DUSK · READ FOR A THOUSAND YEARS', W / 2, 1002 + 8 * (1 - eOut(cap)));
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '0px';
+  }
+  // grade: vignette, grain (refreshed at 12 fps), fade in / out
+  ctx.drawImage(VIG, 0, 0);
+  ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = .16; ctx.drawImage(GRAIN[Math.floor(t * 12) % 3], 0, 0, W, H); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  const fin = 1 - smooth(0, .5, t), fout = smooth(T.fade0, 9.95, t);
+  const dark = Math.max(fin, fout * .9);
+  if (dark > 0) { ctx.fillStyle = `rgba(3,3,6,${dark})`; ctx.fillRect(0, 0, W, H); }
+  // the torch outlasts the fade by a beat
+  if (fout > 0 && fout < 1) {
+    ctx.setTransform(cam.sc, 0, 0, cam.sc, W / 2 - cam.cx * cam.sc, H / 2 - cam.cy * cam.sc);
+    ctx.globalAlpha = fout * (1 - smooth(9.6, 9.95, t)) * .8; drawTorch(t, f * (1 - .5 * fout)); ctx.globalAlpha = 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  const last = smooth(9.75, 9.97, t); if (last > 0) { ctx.fillStyle = `rgba(0,0,0,${last})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await document.fonts.load(`700 100px ${SERIF}`, 'MAKE YOUR MARK CARVED AT DUSK · READ FOR A THOUSAND YEARS');
+  await document.fonts.load(`500 40px ${SERIF}`, 'CARVED AT DUSK · READ FOR A THOUSAND YEARS');
+  await document.fonts.ready;
+  buildOutline(); buildBand(); buildRunes(); buildStone(); PAINT_PAT = ctx.createPattern(buildPaint([122, 36, 24], 91), 'repeat'); BLACK_PAT = ctx.createPattern(buildPaint([16, 13, 12], 71), 'repeat');
+  buildBG(); buildMist(); buildGrain(); buildGround(); buildChips();
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [];
+  for (let t = T.band0; t < T.band1; t += 1 / 9) ev.push({ t, k: 'tap', v: .7 + .3 * Math.sin(t * 7) });
+  for (let t = T.head0; t < T.head1; t += 1 / 9) ev.push({ t, k: 'tap', v: .8 });
+  ev.push({ t: T.band0, k: 'scrape', d: T.band1 - T.band0 });
+  ev.push({ t: T.head1 + .02, k: 'glint' });
+  RUNES.forEach((r, i) => { ev.push({ t: r.t0, k: 'tap', v: 1 }); ev.push({ t: r.t0 + .1, k: 'tap', v: .8 });
+    if (r.li >= 0) { ev.push({ t: r.t0 + .2, k: 'chime', i: r.li }); const f1 = r.t0 + .26 + .52; ev.push({ t: f1, k: 'land', v: 1 }); } });
+  ev.push({ t: T.pulse, k: 'swell' });
+  ev.push({ t: T.pull0, k: 'wind', d: T.pull1 - T.pull0 + .6 });
+  ev.push({ t: T.cap, k: 'horn' });
+  return ev;
+};
+</script></body></html>
