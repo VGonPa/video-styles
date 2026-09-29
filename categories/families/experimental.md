@@ -4,9 +4,9 @@ Visual family · Type- and rhythm-driven pieces.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (19) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (16) · [Social & Short-Form](../../categories/use-cases/social.md) (35) · [Storytelling & Brand](../../categories/use-cases/story.md) (37) · [Data & Results](../../categories/use-cases/data.md) (6) · [News & Current Affairs](../../categories/use-cases/news.md) (6) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (21)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (20) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (16) · [Social & Short-Form](../../categories/use-cases/social.md) (36) · [Storytelling & Brand](../../categories/use-cases/story.md) (37) · [Data & Results](../../categories/use-cases/data.md) (6) · [News & Current Affairs](../../categories/use-cases/news.md) (6) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (21)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (13) · [Nostalgia](../../categories/families/nostalgia.md) (9) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (5) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (5) · [Comics & Cartoons](../../categories/families/comics.md) (9) · [Games](../../categories/families/games.md) (7)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (6) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (13) · [Nostalgia](../../categories/families/nostalgia.md) (9) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (6) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (5) · [Comics & Cartoons](../../categories/families/comics.md) (9) · [Games](../../categories/families/games.md) (7)
 
 <table>
 <tr>
@@ -17,6 +17,7 @@ Visual family · Type- and rhythm-driven pieces.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/glitch/glitch.mp4"><img src="../../styles/glitch/preview.gif" alt="Glitch" width="100%"></a><br><b>54 · Glitch</b><br><a href="../../styles/glitch/glitch.mp4">video</a> · <a href="../../styles/glitch">source</a></td>
+<td width="25%" align="center"><a href="../../styles/absurd-minimal/absurd-minimal.mp4"><img src="../../styles/absurd-minimal/preview.gif" alt="Absurd Minimal" width="100%"></a><br><b>75 · Absurd Minimal</b><br><a href="../../styles/absurd-minimal/absurd-minimal.mp4">video</a> · <a href="../../styles/absurd-minimal">source</a></td>
 </tr>
 </table>
 
@@ -27,3 +28,4 @@ Visual family · Type- and rhythm-driven pieces.
 | 48 | [Split-Flap Board](../../styles/split-flap/) | Clattering mechanical departures board | Headlines, schedules, announcements and big reveals | [Experimental](../../categories/families/experimental.md) | [News & Current Affairs](../../categories/use-cases/news.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
 | 53 | [1-Bit Dither](../../styles/dither-1bit/) | Two inks, ordered dither, stormy night | Moody stories, mysteries and atmospheric title cards | [Experimental](../../categories/families/experimental.md) | [Storytelling & Brand](../../categories/use-cases/story.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
 | 54 | [Glitch](../../styles/glitch/) | Corrupted digital signal, beat-synced | Bold title hits, reveals, and high-energy social openers | [Experimental](../../categories/families/experimental.md) | [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Social & Short-Form](../../categories/use-cases/social.md) |
+| 75 | [Absurd Minimal](../../styles/absurd-minimal/) | Fast deadpan doodles on loud color | Rapid-fire explainers and history told with a shrug | [Experimental](../../categories/families/experimental.md) | [Explainers](../../categories/use-cases/explainer.md), [Social & Short-Form](../../categories/use-cases/social.md) |

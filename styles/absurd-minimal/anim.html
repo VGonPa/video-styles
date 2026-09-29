@@ -1,0 +1,378 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// absurd-minimal: "the history of coffee, i guess". Flat saturated fields, crude boiling doodles,
+// lowercase deadpan words popping one by one, tilted extruded 3D words, hard cuts every 0.4-1 s.
+const W = 1920, H = 1080, TAU = Math.PI * 2, DUR = 9.5;
+const cv = document.getElementById('c'), x = cv.getContext('2d');
+const F = 'Rubik', INK = '#141414';
+const C = { orange: '#ff5b1a', blue: '#2433ff', green: '#2fd36b', pink: '#ff3cb4', yellow: '#ffe12e', purple: '#7a36ff',
+  cyan: '#18c9ff', amber: '#ff9a00', red: '#ff2b4f', navy: '#0f1150', brown: '#6b3a1e', goat: '#f6f1e7' };
+
+// ---------- helpers ----------
+const hash = n => { let h = Math.imul(n | 0, 0x9E3779B1) ^ 0x85ebca6b; h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; h = Math.imul(h, 0x297a2d39); h ^= h >>> 15; return (h >>> 0) / 4294967296; };
+let BOIL = 0; // line boil clock: 12 drawings per second
+const jx = (id, k, a) => (hash(id * 7919 + k * 131 + BOIL * 1543) - 0.5) * 2 * a;
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eo = u => 1 - Math.pow(1 - u, 3), ei = u => u * u * u;
+const back = u => { const c = 1.8; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+const pop = (dt, d = 0.12) => dt < 0 ? 0 : back(clamp(dt / d));
+const lerp = (a, b, u) => a + (b - a) * u;
+
+function shape(pts, o = {}) {
+  const { fill = null, stroke = INK, lw = 7, id = 1, closed = true, smooth = false, a = 2.4 } = o;
+  const p = pts.map((q, i) => [q[0] + jx(id, i * 2, a), q[1] + jx(id, i * 2 + 1, a)]);
+  const n = p.length; x.beginPath();
+  if (smooth && closed) {
+    const m = i => { const A = p[(i + n) % n], B = p[(i + 1) % n]; return [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2]; };
+    const s = m(-1); x.moveTo(s[0], s[1]);
+    for (let i = 0; i < n; i++) { const q = m(i); x.quadraticCurveTo(p[i][0], p[i][1], q[0], q[1]); }
+    x.closePath();
+  } else if (smooth) {
+    x.moveTo(p[0][0], p[0][1]);
+    for (let i = 1; i < n - 1; i++) x.quadraticCurveTo(p[i][0], p[i][1], (p[i][0] + p[i + 1][0]) / 2, (p[i][1] + p[i + 1][1]) / 2);
+    x.lineTo(p[n - 1][0], p[n - 1][1]);
+  } else { p.forEach((q, i) => i ? x.lineTo(q[0], q[1]) : x.moveTo(q[0], q[1])); if (closed) x.closePath(); }
+  if (fill) { x.fillStyle = fill; x.fill(); }
+  if (stroke && lw) { x.strokeStyle = stroke; x.lineWidth = lw; x.lineJoin = 'round'; x.lineCap = 'round'; x.stroke(); }
+}
+const ellPts = (cx, cy, rx, ry, rot = 0, n = 24) => Array.from({ length: n }, (_, i) => {
+  const a = i / n * TAU, px = Math.cos(a) * rx, py = Math.sin(a) * ry;
+  return [cx + px * Math.cos(rot) - py * Math.sin(rot), cy + px * Math.sin(rot) + py * Math.cos(rot)]; });
+const ell = (cx, cy, rx, ry, o = {}) => shape(ellPts(cx, cy, rx, ry, o.rot || 0), { ...o, smooth: true });
+const line = (pts, o = {}) => shape(pts, { ...o, closed: false, fill: null, smooth: o.smooth ?? pts.length > 2 });
+const bg = c => { x.fillStyle = c; x.fillRect(-50, -50, W + 100, H + 100); };
+
+// lowercase deadpan text, word by word (the full line is laid out first so words never shift)
+function words(list, cx, cy, size, col, lt, o = {}) {
+  x.save(); x.font = `${o.w || 500} ${size}px ${F}`;
+  const sp = x.measureText(' ').width * 1.3, ws = list.map(([w]) => x.measureText(w).width);
+  const tot = ws.reduce((a, b) => a + b, 0) + sp * (list.length - 1);
+  x.translate(cx, cy); if (o.rot) x.rotate(o.rot);
+  let px = o.align === 'left' ? 0 : o.align === 'right' ? -tot : -tot / 2;
+  x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = col;
+  list.forEach(([w, tw], i) => {
+    const s = pop(lt - tw, 0.1);
+    if (s > 0) { x.save(); x.translate(px + ws[i] / 2, 0); x.scale(s, s); x.fillText(w, 0, 0); x.restore(); }
+    px += ws[i] + sp;
+  });
+  x.restore();
+}
+// tilted, extruded fake-3D word
+function text3d(str, cx, cy, size, o = {}) {
+  const { rot = 0, yaw = 0, pitch = 0.3, depth = 16, face = '#fff', side = INK, sc = 1, lit = '#ffffff' } = o;
+  x.save(); x.translate(cx, cy); x.rotate(rot); x.scale(sc, sc);
+  x.font = `800 ${size}px ${F}`; x.textAlign = 'center'; x.textBaseline = 'middle';
+  const a = 0.55 + 0.45 * Math.cos(yaw), b = Math.sin(yaw) * 0.22, d = Math.cos(pitch);
+  const ex = -Math.sin(yaw) * 0.9 + 0.35, ey = Math.sin(pitch) * 1.1 + 0.25, st = size * 0.011;
+  for (let i = depth; i >= 1; i--) {
+    x.save(); x.translate(ex * st * i, ey * st * i); x.transform(a, b, 0, d, 0, 0);
+    x.fillStyle = side; x.fillText(str, 0, 0); x.restore();
+  }
+  x.save(); x.transform(a, b, 0, d, 0, 0);
+  const g = x.createLinearGradient(0, -size * 0.45, 0, size * 0.4); g.addColorStop(0, lit); g.addColorStop(0.55, face); g.addColorStop(1, face);
+  x.fillStyle = g; x.fillText(str, 0, 0); x.restore();
+  x.restore();
+}
+
+// ---------- doodles ----------
+function bean(bx, by, s, rot = 0, id = 40) {
+  x.save(); x.translate(bx, by); x.rotate(rot); x.scale(s, s);
+  ell(0, 0, 28, 19, { fill: '#7a4322', lw: 5, id });
+  line([[-19, 3], [-6, -6], [6, 6], [19, -3]], { stroke: '#3a1d0c', lw: 4, id: id + 1 });
+  x.restore();
+}
+function note(nx, ny, s, id, col = INK) {
+  x.save(); x.translate(nx, ny); x.scale(s, s);
+  ell(0, 0, 17, 12, { fill: col, stroke: col, lw: 3, rot: -0.4, id });
+  line([[14, -4], [14, -72]], { stroke: col, lw: 7, id: id + 1, smooth: false });
+  line([[14, -72], [40, -52]], { stroke: col, lw: 9, id: id + 2, smooth: false });
+  x.restore();
+}
+function sparkle(sx, sy, r, col, id) {
+  const p = []; for (let i = 0; i < 8; i++) { const a = i / 8 * TAU, rr = i % 2 ? r * 0.28 : r; p.push([sx + Math.cos(a) * rr, sy + Math.sin(a) * rr]); }
+  shape(p, { fill: col, stroke: null, id, a: 1.5 });
+}
+function goat(gx, gy, s, o = {}) {
+  const id = o.id || 100, wp = o.walk || 0, sw = o.walkAmp || 0, dip = o.dip || 0;
+  x.save(); x.translate(gx, gy); if (o.rot) x.rotate(o.rot); x.scale(s * (o.flip ? -1 : 1), s);
+  const leg = (hx, hy, ph, k, col) => {
+    const a = Math.sin(wp + ph) * sw, kx = hx + Math.sin(a) * 58, ky = hy + 56, fx = kx + Math.sin(a * 0.5) * 50, fy = hy + 116;
+    line([[hx, hy], [kx, ky], [fx, fy]], { stroke: col, lw: 13, id: id + k, smooth: false });
+    line([[fx - 5, fy], [fx + 15, fy]], { stroke: col, lw: 16, id: id + k + 50 });
+  };
+  leg(-72, 44, Math.PI, 1, '#3c3c3c'); leg(78, 44, 0, 2, '#3c3c3c');
+  shape([[-126, -28], [-162, -74], [-136, -16]], { fill: C.goat, lw: 6, id: id + 3 });
+  ell(0, 0, 138, 74, { fill: C.goat, lw: 7, id: id + 4 });
+  leg(-96, 40, 0, 5, INK); leg(98, 40, Math.PI, 6, INK);
+  x.save(); x.translate(95, -35 + 62 * dip); x.rotate(1.45 * dip); x.translate(-95, 35);
+  shape([[64, -48], [118, -44], [182, -118], [132, -146]], { fill: C.goat, lw: 7, id: id + 7 });
+  line([[150, -162], [140, -204], [112, -226], [90, -214]], { stroke: '#8c7760', lw: 12, id: id + 8 });
+  line([[134, -158], [120, -196], [94, -212], [76, -200]], { stroke: '#6f5d49', lw: 11, id: id + 9 });
+  ell(126, -150, 32, 11, { fill: '#eadcc8', lw: 6, rot: -0.55, id: id + 10 });
+  shape([[183, -108], [206, -104], [196, -64]], { fill: C.goat, lw: 6, id: id + 11 });
+  ell(172, -134, 56, 36, { fill: C.goat, lw: 7, rot: 0.35, id: id + 12 });
+  const ey = o.eye || 'dot';
+  if (ey === 'happy' || o.blink) line([[166, -142], [178, -153], [190, -142]], { lw: 6, id: id + 13, smooth: false });
+  else if (ey === 'wide') { ell(180, -146, 15, 15, { fill: '#fff', lw: 4, id: id + 13 }); ell(185, -146, 4, 4, { fill: INK, lw: 2, id: id + 14 }); }
+  else ell(180, -145, 6, 7, { fill: INK, lw: 2, id: id + 13, a: 1 });
+  if (o.mouth) ell(206, -112, 11, 8, { fill: INK, lw: 3, id: id + 15 });
+  else line([[216, -121], [204, -112]], { lw: 5, id: id + 15, smooth: false });
+  x.restore();
+  x.restore();
+}
+function cup(cx, cy, s, o = {}) {
+  const id = o.id || 900;
+  x.save(); x.translate(cx, cy); if (o.rot) x.rotate(o.rot); x.scale(s * (o.sx || 1), s * (o.sy || 1));
+  if (o.saucer !== false) ell(0, 62, 108, 18, { fill: '#fff', lw: 6, id });
+  ell(76, -8, 30, 30, { stroke: INK, lw: 24, id: id + 1 }); ell(76, -8, 30, 30, { stroke: o.col || '#fff', lw: 10, id: id + 1 });
+  shape([[-72, -78], [72, -78], [55, 58], [-55, 58]], { fill: o.col || '#fff', lw: 7, id: id + 2 });
+  ell(0, -78, 72, 15, { fill: C.brown, lw: 6, id: id + 3 });
+  if (o.steam != null) for (let i = 0; i < 3; i++) {
+    const p = []; for (let k = 0; k < 7; k++) { const u = k / 6; p.push([-32 + 32 * i + Math.sin(u * 5 + o.steam * 7 + i * 2) * 14, -104 - u * 130]); }
+    line(p, { stroke: o.steamCol || 'rgba(255,255,255,.9)', lw: 9, id: id + 5 + i });
+  }
+  x.restore();
+}
+function pot(cx, cy, s, t, brew, id = 700) {
+  x.save(); x.translate(cx, cy); x.scale(s, s);
+  for (let i = -2; i <= 2; i++) {
+    const h = 60 + 40 * hash(i * 31 + BOIL * 7 + 3);
+    shape([[-26 + i * 52, 112], [i * 52 + jx(id + i, 1, 8), 112 - h], [26 + i * 52, 112]], { fill: '#ff6a00', lw: 5, id: id + 20 + i });
+    shape([[-12 + i * 52, 112], [i * 52, 112 - h * 0.5], [12 + i * 52, 112]], { fill: '#ffe12e', stroke: null, id: id + 30 + i });
+  }
+  line([[-150, -58], [-196, -58], [-196, -24], [-150, -24]], { lw: 11, id: id + 1, smooth: false });
+  line([[150, -58], [196, -58], [196, -24], [150, -24]], { lw: 11, id: id + 2, smooth: false });
+  shape([[-152, -86], [152, -86], [140, 96], [-140, 96]], { fill: '#b9c2cc', lw: 8, id: id + 3 });
+  ell(0, -86, 162, 27, { fill: '#e2e8ee', lw: 7, id: id + 4 });
+  const wc = brew < 0.5 ? '#6cc0ff' : '#5a3218';
+  ell(0, -84, 140, 18, { fill: wc, lw: 4, id: id + 5 });
+  for (let i = 0; i < 4; i++) { const u = (t * 2.5 + i * 0.27) % 1; ell(-90 + i * 60, -86, 9 * (1 - u) + 3, 6 * (1 - u) + 2, { fill: '#fff', lw: 3, id: id + 40 + i }); }
+  x.restore();
+}
+// stick human: head with profile nose, neck, shoulders, shirt torso, jointed limbs, mitten hands with thumbs
+function human(hx, hy, s, o = {}) {
+  const id = o.id || 500, P = o.pose || {};
+  x.save(); x.translate(hx, hy); if (o.rot) x.rotate(o.rot); x.scale(s * (o.flip ? -1 : 1), s);
+  const lim = (p, a1, a2, l1, l2) => { const k = [p[0] + Math.sin(a1) * l1, p[1] + Math.cos(a1) * l1]; return [k, [k[0] + Math.sin(a1 + a2) * l2, k[1] + Math.cos(a1 + a2) * l2]]; };
+  const legD = (p, a1, a2, k, col) => { const [kn, ft] = lim(p, a1, a2, 90, 88);
+    line([p, kn, ft], { stroke: col, lw: 12, id: id + k, smooth: false }); line([[ft[0] - 6, ft[1]], [ft[0] + 26, ft[1]]], { stroke: col, lw: 14, id: id + k + 1 }); };
+  const armD = (p, a1, a2, k, col, cupIt) => { const [el, hd] = lim(p, a1, a2, 78, 70);
+    line([p, el, hd], { stroke: col, lw: 11, id: id + k, smooth: false });
+    ell(hd[0], hd[1], 13, 12, { fill: col, stroke: col, lw: 2, id: id + k + 1 });
+    const ta = a1 + a2 - 0.9; line([[hd[0], hd[1]], [hd[0] + Math.sin(ta) * 20, hd[1] + Math.cos(ta) * 20]], { stroke: col, lw: 8, id: id + k + 2 });
+    if (cupIt) cup(hd[0] + 22, hd[1] - 30, 0.32, { id: id + 80, saucer: false, steam: o.steam, steamCol: o.steamCol }); };
+  const far = '#3a3a3a';
+  legD([-8, -176], P.lb ?? -0.1, P.lb2 ?? 0, 10, far);
+  armD([-16, -314], P.ab ?? -0.25, P.ab2 ?? 0.2, 20, far);
+  shape([[-30, -334], [30, -334], [44, -320], [34, -176], [-34, -176], [-44, -320]], { fill: o.shirt || '#ffe12e', lw: 7, id: id + 30 });
+  legD([8, -176], P.lf ?? 0.1, P.lf2 ?? 0, 40, INK);
+  line([[0, -326], [2, -352]], { lw: 12, id: id + 50 });
+  // head: nose drawn first so the head circle hides its inner edge
+  const hy0 = -392, tilt = P.head || 0;
+  x.save(); x.translate(2, -352); x.rotate(tilt); x.translate(-2, 352);
+  shape([[28, hy0 - 14], [68, hy0 + 6], [30, hy0 + 20]], { fill: o.skin || '#ffffff', lw: 6, id: id + 51 });
+  ell(4, hy0, 43, 43, { fill: o.skin || '#ffffff', lw: 7, id: id + 52 });
+  if (o.hair === 1) line([[-38, hy0 - 16], [-26, hy0 - 44], [2, hy0 - 50], [30, hy0 - 38]], { lw: 12, id: id + 53 });
+  if (o.hair === 2) ell(-40, hy0 - 26, 17, 17, { fill: INK, lw: 4, id: id + 53 });
+  if (o.hair === 3) shape([[-40, hy0 - 12], [-30, hy0 - 44], [10, hy0 - 52], [44, hy0 - 30], [48, hy0 - 22], [-40, hy0 - 12]], { fill: INK, lw: 4, id: id + 53 });
+  if (o.eye === 'wide') { ell(22, hy0 - 6, 17, 17, { fill: '#fff', lw: 5, id: id + 54 }); ell(27 + jx(id, 99, 1.5), hy0 - 6, 4.5, 4.5, { fill: INK, lw: 2, id: id + 55, a: 0.5 }); }
+  else ell(22, hy0 - 6, 5.5, 6.5, { fill: INK, lw: 2, id: id + 54, a: 0.8 });
+  line([[20, hy0 + 24], [34, hy0 + 22]], { lw: 5, id: id + 56, smooth: false });
+  x.restore();
+  armD([20, -316], P.af ?? 0.2, P.af2 ?? 0.3, 60, INK, o.cup);
+  x.restore();
+}
+function eyesPair(ex, ey, s, id, look) {
+  x.save(); x.translate(ex, ey); x.scale(s, s);
+  for (const dx of [-38, 38]) { ell(dx, 0, 30, 22, { fill: '#fff', lw: 5, id: id + dx }); ell(dx + look * 10, 1, 7, 7, { fill: INK, lw: 2, id: id + dx + 7, a: 0.8 }); }
+  x.restore();
+}
+
+// ---------- scenes (hard cuts; local time lt) ----------
+const S = [];
+const scene = (t0, t1, f) => S.push({ t0, t1, f });
+const walkPose = ph => ({ lf: Math.sin(ph) * 0.5, lf2: -Math.max(0, Math.sin(ph + 1.2)) * 0.8, lb: -Math.sin(ph) * 0.5, lb2: -Math.max(0, -Math.sin(ph + 1.2)) * 0.8,
+  af: -Math.sin(ph) * 0.5, af2: 0.4, ab: Math.sin(ph) * 0.5, ab2: 0.4 });
+
+// 0 · title
+scene(0.0, 0.9, lt => {
+  bg(C.orange);
+  words([['the', 0.12], ['history', 0.24], ['of', 0.38], ['coffee', 0.48]], 960, 500, 132, '#fff', lt);
+  const s = pop(lt - 0.62, 0.12); if (s > 0) bean(960, 660, 1.6 * s, lt * 5, 41);
+});
+// 1 · i guess
+scene(0.9, 1.4, lt => {
+  bg(C.blue);
+  const s = pop(lt - 0.03, 0.14);
+  text3d('i guess', 960, 540, 210, { rot: -0.12 + lt * 0.08, yaw: 0.35 - lt * 0.3, pitch: 0.35, face: '#fff', side: '#0a0f78', sc: s, lit: '#fff' });
+});
+// 2 · a goat eats a bean
+const G2 = { x: 860, y: 640, s: 1.1 };
+scene(1.4, 2.3, (lt, t) => {
+  bg(C.green); x.fillStyle = '#22b457'; x.fillRect(0, 812, W, 300);
+  const arr = eo(seg(lt, 0.02, 0.32)), gx = lerp(1250, G2.x, arr);
+  const dip = Math.sin(Math.PI * seg(lt, 0.32, 0.72)) ** 0.6 * (lt < 0.72 ? 1 : 0);
+  const chomped = lt >= 0.52;
+  if (!chomped) { bean(G2.x + 203 * G2.s, G2.y + 150 * G2.s, 1, 0.3, 42);
+    if (lt > 0.06) { line([[1290, 690], [1210, 760], [1105, 790]], { lw: 7, id: 44 }); line([[1128, 768], [1105, 790], [1136, 800]], { lw: 7, id: 45, smooth: false });
+      x.font = `500 60px ${F}`; x.fillStyle = INK; x.textAlign = 'left'; x.fillText('bean', 1300, 690); } }
+  const shake = lt > 0.52 && lt < 0.64 ? jx(7, 1, 7) : 0;
+  x.save(); x.translate(shake, 0);
+  goat(gx, G2.y, G2.s, { walk: lt * 22, walkAmp: arr < 1 ? 0.45 : 0, dip, eye: lt > 0.66 ? 'happy' : 'dot', mouth: lt > 0.44 && lt < 0.56, id: 110 });
+  x.restore();
+  if (chomped && lt < 0.78) { const s = pop(lt - 0.52, 0.08); x.save(); x.translate(1440, 600); x.rotate(-0.2); x.scale(s, s);
+    x.font = `500 92px ${F}`; x.fillStyle = INK; x.textAlign = 'center'; x.fillText('*chomp*', 0, 0); x.restore(); }
+  words([['a', 0.05], ['goat', 0.14], ['eats', 0.3], ['a', 0.42], ['bean', 0.5]], 960, 190, 116, '#fff', lt);
+  words([['(ethiopia,', 0.6], ['9th', 0.64], ['century,', 0.68], ['allegedly)', 0.74]], 60, 1000, 46, 'rgba(20,20,20,.72)', lt, { align: 'left' });
+});
+// 3 · the goat is vibing
+scene(2.3, 3.0, lt => {
+  bg(C.pink);
+  const bounce = Math.abs(Math.sin(lt * TAU * 2.2)), gy = 650 - bounce * 46;
+  goat(600, gy, 1.65, { eye: 'happy', rot: Math.sin(lt * TAU * 2.2) * 0.07, id: 130 });
+  [[0.08, 1000, 330], [0.22, 1130, 250], [0.36, 960, 210], [0.5, 1180, 380]].forEach(([nt, nx, ny], i) => {
+    const s = pop(lt - nt, 0.1); if (s > 0) note(nx + Math.sin(lt * 9 + i) * 10, ny - (lt - nt) * 90, 1.2 * s, 150 + i * 5, INK); });
+  words([['the', 0.03], ['goat', 0.1], ['is', 0.2]], 1480, 330, 104, '#fff', lt);
+  const s = pop(lt - 0.28, 0.14);
+  text3d('vibing', 1480, 560, 230, { rot: 0.1 + Math.sin(lt * TAU * 1.1) * 0.08, yaw: Math.sin(lt * TAU * 1.1) * 0.5, pitch: 0.4, face: C.yellow, side: '#6a0a44', sc: s, lit: '#fffbd0' });
+});
+// 4 · extremely
+scene(3.0, 3.4, lt => {
+  bg(C.yellow);
+  x.save(); x.translate(1640, 860); x.rotate(lt * 9); goat(-20, 0, 0.42, { eye: 'happy', id: 170 }); x.restore();
+  const s = pop(lt - 0.02, 0.12) * lerp(0.92, 1.08, lt / 0.4);
+  text3d('extremely', 900, 500, 250, { rot: -0.16 + lt * 0.35, yaw: -0.5 + lt * 2, pitch: 0.5, face: C.pink, side: INK, sc: s, lit: '#ffc2e6' });
+});
+// 5 · humans notice
+scene(3.4, 4.3, lt => {
+  bg(C.purple); x.fillStyle = '#6429e0'; x.fillRect(0, 900, W, 200);
+  const b = Math.abs(Math.sin(lt * TAU * 2.2));
+  goat(1420, 720 - b * 26, 0.95, { flip: true, eye: 'happy', id: 190 });
+  const arr = seg(lt, 0.0, 0.34), hx = lerp(-120, 640, eo(arr));
+  const walking = arr < 1, ph = lt * 20;
+  const surprised = lt > 0.36;
+  const pose = walking ? walkPose(ph) : { lf: 0.2, lf2: -0.22, lb: -0.12, lb2: -0.1, af: 0.55, af2: -1.9 + 0.1 * Math.sin(lt * 30), ab: -0.35, ab2: 0.5, head: 0.12 };
+  if (surprised && lt < 0.44) Object.assign(pose, { af: 1.2, af2: 1.2, ab: -0.9, ab2: -0.3 });
+  human(hx, 900 - (walking ? Math.abs(Math.sin(ph)) * 10 : 0), 1.3, { pose, shirt: C.yellow, hair: 1, id: 510, eye: surprised ? 'wide' : 'dot' });
+  if (surprised) { const s = pop(lt - 0.36, 0.1); x.save(); x.translate(hx + 20, 250); x.scale(s, s); x.rotate(0.08);
+    x.font = `800 170px ${F}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = INK; x.fillText('!', 7, 7); x.fillStyle = C.yellow; x.fillText('!', 0, 0); x.restore(); }
+  words([['humans', 0.05], ['notice', 0.36]], 1180, 180, 116, '#fff', lt);
+  words([['(they', 0.56], ['also', 0.6], ['want', 0.64], ['to', 0.68], ['vibe)', 0.72]], 1860, 1010, 46, 'rgba(255,255,255,.8)', lt, { align: 'right' });
+});
+// 6 · what if we boiled it
+const DROPS = [0.08, 0.18, 0.28];
+scene(4.3, 5.1, lt => {
+  bg(C.cyan);
+  pot(960, 690, 1.3, lt, seg(lt, 0.42, 0.43));
+  DROPS.forEach((d, i) => { const u = seg(lt, d, d + 0.12); if (u > 0 && u < 1) bean(900 + i * 60, lerp(-60, 570, ei(u)), 1.1, lt * 8 + i, 43 + i);
+    const sp = seg(lt, d + 0.12, d + 0.3); if (sp > 0 && sp < 1) for (let k = 0; k < 5; k++) { const a = -Math.PI * (0.15 + 0.7 * k / 4);
+      ell(900 + i * 60 + Math.cos(a) * sp * 120, 575 + Math.sin(a) * sp * 150 + sp * sp * 120, 9, 12, { fill: '#6cc0ff', lw: 4, id: 60 + i * 5 + k }); } });
+  for (let i = 0; i < 3; i++) { const p = []; for (let k = 0; k < 7; k++) { const u = k / 6; p.push([860 + i * 100 + Math.sin(u * 5 + lt * 8 + i) * 18, 540 - u * 160 - (lt * 60) % 40]); }
+    line(p, { stroke: 'rgba(255,255,255,.9)', lw: 10, id: 80 + i }); }
+  words([['what', 0.06], ['if', 0.14], ['we', 0.24], ['boiled', 0.34], ['it', 0.46]], 960, 180, 116, INK, lt);
+  words([['(nobody', 0.58], ['remembers', 0.62], ['who', 0.66], ['suggested', 0.69], ['this)', 0.72]], 960, 1010, 46, 'rgba(20,20,20,.72)', lt);
+});
+// 7 · coffee → push into the cup
+scene(5.1, 5.9, lt => {
+  const z = ei(seg(lt, 0.56, 0.8)), zs = lerp(1, 44, z);
+  x.save(); x.translate(620, 482); x.scale(zs, zs); x.translate(-620, -482);
+  bg(C.amber);
+  const u = seg(lt, 0.0, 0.14), land = seg(lt, 0.14, 0.3);
+  const sy = u < 1 ? 1.08 : lerp(0.72, 1, back(land)), sx = u < 1 ? 0.94 : lerp(1.2, 1, back(land));
+  cup(620, lerp(-400, 640, ei(u)), 2, { sx, sy, steam: land > 0.3 ? lt : null, id: 910 });
+  const s = pop(lt - 0.2, 0.14);
+  text3d('coffee', 1340, 560, 250, { rot: -0.08 + Math.sin(lt * 5) * 0.05, yaw: 0.55 - lt * 0.9, pitch: 0.35, face: '#fff', side: '#5a2600', sc: s, lit: '#fff' });
+  x.restore();
+  if (z > 0.6) { x.fillStyle = `rgba(107,58,30,${seg(z, 0.6, 1)})`; x.fillRect(0, 0, W, H); }
+});
+// 8 · it spreads
+const CUPS = (() => { const out = []; let k = 0;
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 5; c++) { if (r === 0 && c === 2) continue;
+    out.push({ x: 230 + c * 365 + (hash(k * 3 + 1) - 0.5) * 90, y: 440 + r * 230 + (hash(k * 3 + 2) - 0.5) * 50, rot: (hash(k * 3 + 3) - 0.5) * 0.5, t: 0.12 + hash(k + 77) * 0.5, s: 0.62 + hash(k + 9) * 0.22, k: k++ }); }
+  return out; })();
+scene(5.9, 6.7, lt => {
+  bg(C.red);
+  const r = lerp(1300, 0, eo(seg(lt, 0.0, 0.14)));
+  CUPS.forEach(c => { const s = pop(lt - c.t, 0.12); if (s > 0) cup(c.x, c.y, c.s * s, { rot: c.rot, id: 1000 + c.k * 10, col: c.k % 4 === 1 ? C.yellow : '#fff' }); });
+  words([['it', 0.1], ['spreads', 0.2]], 960, 170, 124, '#fff', lt);
+  words([['(to', 0.46], ['literally', 0.5], ['everywhere)', 0.55]], 960, 270, 50, 'rgba(255,255,255,.85)', lt);
+  if (r > 0) { x.fillStyle = C.brown; x.beginPath(); x.arc(960, 540, r, 0, TAU); x.fill(); }
+});
+// 9 · everyone is awake now
+const CROWD = [[300, C.yellow, 1, false], [630, C.cyan, 2, true], [960, C.pink, 3, false], [1290, C.orange, 0, true], [1620, C.green, 1, false]];
+scene(6.7, 7.6, lt => {
+  bg(C.blue); x.fillStyle = '#1b28d6'; x.fillRect(0, 1000, W, 100);
+  CROWD.forEach(([hx, sh, hair, flip], i) => {
+    const s = pop(lt - 0.03 - i * 0.05, 0.12); if (s <= 0) return;
+    x.save(); x.translate(hx + jx(300 + i, 3, 5), 1010 + jx(300 + i, 4, 3)); x.scale(1, s);
+    human(0, 0, 1.3, { flip, shirt: sh, hair, eye: 'wide', cup: true, steam: lt + i, id: 600 + i * 100,
+      pose: { af: 0.5, af2: -2.3, ab: -0.2, ab2: 0.25, lf: 0.2, lf2: -0.2, lb: -0.1, lb2: -0.12, head: -0.06 + Math.sin(lt * 40 + i) * 0.03 } });
+    x.restore();
+  });
+  words([['everyone', 0.06], ['is', 0.24], ['awake', 0.32], ['now', 0.52]], 960, 170, 120, '#fff', lt);
+});
+// 10 · forever (night)
+const EYES = (() => { const out = []; let i = 0;
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 6; c++) { const ex = 170 + c * 316 + (hash(i * 5 + 1) - 0.5) * 120, ey = 130 + r * 270 + (hash(i * 5 + 2) - 0.5) * 90;
+    if (!(ex > 300 && ex < 1620 && ey > 300 && ey < 800) && hash(i * 5 + 4) > 0.2) out.push({ x: ex, y: ey, s: 0.8 + hash(i * 5 + 3) * 0.5, t: 0.02 + hash(i * 7 + 9) * 0.4 });
+    i++; }
+  return out; })();
+const STARS = Array.from({ length: 26 }, (_, i) => [hash(i + 400) * W, hash(i + 500) * H, 6 + hash(i + 600) * 10]);
+scene(7.6, 8.6, lt => {
+  bg(C.navy);
+  STARS.forEach(([sx, sy, r], i) => { if (hash(i * 13 + BOIL) > 0.25) sparkle(sx, sy, r, '#fff6a8', 2000 + i); });
+  EYES.forEach((e, i) => { const s = pop(lt - e.t, 0.1); if (s > 0) eyesPair(e.x, e.y, e.s * s, 2100 + i * 20, Math.sin(lt * 3 + i) ); });
+  const s = pop(lt - 0.1, 0.16);
+  text3d('forever', 960, 540, 270, { rot: -0.06 + lt * 0.08, yaw: -0.55 + lt * 1.1, pitch: 0.45, face: C.yellow, side: '#9a3d00', sc: s * lerp(0.95, 1.08, lt), lit: '#fffbd8' });
+  words([['(it', 0.55], ['is', 0.58], ['3', 0.61], ['am)', 0.64]], 960, 850, 54, 'rgba(255,255,255,.8)', lt);
+});
+// 11 · anyway (ending: calm goat, iris out)
+scene(8.6, DUR + 1, lt => {
+  bg(C.green); x.fillStyle = '#22b457'; x.fillRect(0, 812, W, 300);
+  goat(840, 640, 1.1, { eye: 'dot', blink: lt > 0.44 && lt < 0.52, id: 110 });
+  cup(1330, 752, 0.62, { steam: lt, id: 950 });
+  if (lt > 0.2) { line([[1540, 600], [1470, 650], [1400, 700]], { lw: 7, id: 46 }); line([[1420, 676], [1400, 700], [1430, 706]], { lw: 7, id: 47, smooth: false });
+    x.font = `500 60px ${F}`; x.fillStyle = INK; x.textAlign = 'left'; x.fillText('his', 1550, 596); }
+  words([['anyway', 0.06]], 960, 200, 120, '#fff', lt);
+  const ir = seg(lt, 0.36, 0.72);
+  if (ir > 0) {
+    const r = lerp(1400, 0, ei(ir) ** 0.8), cx = 840 + 172 * 1.1, cy = 640 - 140 * 1.1;
+    x.fillStyle = '#000'; x.beginPath(); x.rect(-10, -10, W + 20, H + 20); x.arc(cx, cy, Math.max(0, r), 0, TAU, true); x.fill('evenodd');
+  }
+});
+
+function render(t) {
+  BOIL = Math.floor(t * 12);
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1;
+  const sc = S.find(s => t >= s.t0 && t < s.t1) || S[S.length - 1];
+  sc.f(t - sc.t0, t);
+}
+window.ready = (async () => {
+  await Promise.all(['500 100px Rubik', '800 100px Rubik'].map(f => document.fonts.load(f, 'abcdefghijklmnopqrstuvwxyz0123456789(),*!')));
+  await document.fonts.ready; render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = S.map((s, i) => ({ t: s.t0, k: 'cut', i }));
+  const W_ = (t0, ts) => ts.forEach((tw, j) => ev.push({ t: t0 + tw, k: 'word', j }));
+  W_(0, [0.12, 0.24, 0.38, 0.48]); ev.push({ t: 0.62, k: 'pop' });
+  ev.push({ t: 0.93, k: 'stab' });
+  W_(1.4, [0.05, 0.14, 0.3, 0.42, 0.5]); ev.push({ t: 1.92, k: 'chomp' }); W_(1.4, [0.6, 0.64, 0.68, 0.74].map(v => v));
+  W_(2.3, [0.03, 0.1, 0.2]); ev.push({ t: 2.58, k: 'stab' }); for (let i = 0; i < 4; i++) ev.push({ t: 2.3 + i / 4.4, k: 'boing' });
+  ev.push({ t: 3.0, k: 'stab' }); ev.push({ t: 3.0, k: 'whirl', d: 0.4 });
+  W_(3.4, [0.05]); ev.push({ t: 3.76, k: 'ding' }); W_(3.4, [0.56, 0.6, 0.64, 0.68, 0.72]);
+  for (let i = 0; i < 3; i++) ev.push({ t: 3.4 + i * Math.PI / 20 + 0.02, k: 'step' });
+  W_(4.3, [0.06, 0.14, 0.24, 0.34, 0.46]); DROPS.forEach(d => ev.push({ t: 4.3 + d + 0.12, k: 'plop' })); W_(4.3, [0.58, 0.62, 0.66, 0.69, 0.72]);
+  ev.push({ t: 5.24, k: 'clunk' }); ev.push({ t: 5.3, k: 'stab' }); ev.push({ t: 5.66, k: 'whoosh', d: 0.3 });
+  W_(5.9, [0.1, 0.2]); CUPS.forEach(c => ev.push({ t: 5.9 + c.t, k: 'pop' })); W_(5.9, [0.46, 0.5, 0.55]);
+  W_(6.7, [0.06, 0.24, 0.32, 0.52]); ev.push({ t: 7.22, k: 'stab' });
+  ev.push({ t: 7.7, k: 'stab' }); EYES.forEach(e => ev.push({ t: 7.6 + e.t, k: 'blip' })); W_(7.6, [0.55, 0.58, 0.61, 0.64]);
+  W_(8.6, [0.06]); ev.push({ t: 8.6, k: 'end' }); ev.push({ t: 9.05, k: 'bell' });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script></body></html>
