@@ -4,9 +4,9 @@ Use case · Updates, surprising facts, and commentary.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (17) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (15) · [Social & Short-Form](../../categories/use-cases/social.md) (29) · [Storytelling & Brand](../../categories/use-cases/story.md) (34) · [Data & Results](../../categories/use-cases/data.md) (5) · [News & Current Affairs](../../categories/use-cases/news.md) (5) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (20)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (18) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (6) · [Product & Launches](../../categories/use-cases/product.md) (15) · [Social & Short-Form](../../categories/use-cases/social.md) (29) · [Storytelling & Brand](../../categories/use-cases/story.md) (34) · [Data & Results](../../categories/use-cases/data.md) (5) · [News & Current Affairs](../../categories/use-cases/news.md) (6) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (20)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (4) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (12) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (5) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (5) · [Comics & Cartoons](../../categories/families/comics.md) (9) · [Games](../../categories/families/games.md) (3)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (5) · [Art Movements](../../categories/families/art-movements.md) (6) · [Hand Drawn](../../categories/families/hand-drawn.md) (6) · [Texture & Craft](../../categories/families/texture-craft.md) (12) · [Nostalgia](../../categories/families/nostalgia.md) (8) · [Technical](../../categories/families/technical.md) (7) · [Experimental](../../categories/families/experimental.md) (5) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (5) · [Comics & Cartoons](../../categories/families/comics.md) (9) · [Games](../../categories/families/games.md) (3)
 
 <table>
 <tr>
@@ -17,6 +17,7 @@ Use case · Updates, surprising facts, and commentary.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/split-flap/split-flap.mp4"><img src="../../styles/split-flap/preview.gif" alt="Split-Flap Board" width="100%"></a><br><b>48 · Split-Flap Board</b><br><a href="../../styles/split-flap/split-flap.mp4">video</a> · <a href="../../styles/split-flap">source</a></td>
+<td width="25%" align="center"><a href="../../styles/editorial-illustration/editorial-illustration.mp4"><img src="../../styles/editorial-illustration/preview.gif" alt="Editorial Illustration" width="100%"></a><br><b>64 · Editorial Illustration</b><br><a href="../../styles/editorial-illustration/editorial-illustration.mp4">video</a> · <a href="../../styles/editorial-illustration">source</a></td>
 </tr>
 </table>
 
@@ -27,3 +28,4 @@ Use case · Updates, surprising facts, and commentary.
 | 27 | [Newspaper Headline](../../styles/newspaper/) | Broadsheet front page, ink and halftone | Breaking facts, surprising findings, and documentary hooks | [Nostalgia](../../categories/families/nostalgia.md) | [News & Current Affairs](../../categories/use-cases/news.md), [Social & Short-Form](../../categories/use-cases/social.md) |
 | 39 | [Constructivism](../../styles/constructivism/) | Red wedges and shouting diagonals | Calls to action, manifestos, and loud announcements | [Art Movements](../../categories/families/art-movements.md) | [Social & Short-Form](../../categories/use-cases/social.md), [News & Current Affairs](../../categories/use-cases/news.md) |
 | 48 | [Split-Flap Board](../../styles/split-flap/) | Clattering mechanical departures board | Headlines, schedules, announcements and big reveals | [Experimental](../../categories/families/experimental.md) | [News & Current Affairs](../../categories/use-cases/news.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md) |
+| 64 | [Editorial Illustration](../../styles/editorial-illustration/) | Witty op-ed metaphor, riso-grained | Opinion pieces, big ideas and thoughtful news explainers | [Flat Graphics](../../categories/families/flat-graphics.md) | [News & Current Affairs](../../categories/use-cases/news.md), [Explainers](../../categories/use-cases/explainer.md) |
