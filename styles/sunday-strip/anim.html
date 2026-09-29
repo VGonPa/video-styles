@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="js/ink.js"></script>
+<script src="js/characters.js"></script>
+<script src="js/fantasy.js"></script>
+<script>
+// ── sunday-strip · a multi-tier Sunday watercolor strip: brush ink, transparent washes, cold-press paper ──
+// "Juniper & Mortimer" (original): at the kitchen table a girl is told to eat her broccoli. She squints at it,
+// and the middle tier blooms into the late Cretaceous: she is a Tyrannosaurus in a forest of giant broccoli,
+// her stuffed owl a real one overhead. Snap back to the kitchen for her argument, and the parent's reply.
+const cv = document.getElementById('c'); ctx = cv.getContext('2d');
+const DUR = 10.0;
+const STEP = 12, stp = t => Math.floor(t * STEP + 1e-4) / STEP;     // character acting on twos
+const PAPER = '#f5eddb', WALL = '#f1dfa6', WALL_D = '#e2c886', WOOD = '#b98352', CLOTH = '#a9c7d8', FLOOR = '#c89a68';
+
+// ── page layout (page coordinates) ──
+const PG = { x: 14, y: 0, w: 1892, h: 2396 };
+const TIER = [110, 866, 1622], TH = 720;
+const PAN = {
+  title: [40, TIER[0], 560, TH], p1: [630, TIER[0], 620, TH], p2: [1280, TIER[0], 600, TH],
+  fan: [40, TIER[1], 1840, TH], p4: [40, TIER[2], 1060, TH], p5: [1130, TIER[2], 750, TH],
+};
+// ── timeline ──
+const T = {
+  zoomIn: [0.25, 1.25], title: [0.45, 1.0], p1: [0.95, 1.4], bal1: 1.5, p2: [2.0, 2.4], squint: [2.45, 2.9],
+  pan2: [3.05, 3.65], fan: [3.3, 3.85], expand: [3.85, 4.4], cap: 4.55, roar: 5.5, snap: 6.3,
+  bal4: 6.5, p5: [7.2, 7.55], bal5: 7.65, wide: 8.3, pull: [8.95, 9.5], fade: [9.7, 10.0],
+};
+const CAM = { full: [960, 1198, 1080 / 2470], c1: [960, 452, 1.04], c2: [960, 1226, 1.04], c3: [960, 1982, 1.04] };
+function camAt(t) {
+  const L = (A, B, u) => [lerp(A[0], B[0], u), lerp(A[1], B[1], u), Math.exp(lerp(Math.log(A[2]), Math.log(B[2]), u))];
+  if (t < T.pan2[0]) return L(CAM.full, CAM.c1, eInOut(seg(t, ...T.zoomIn)));
+  if (t < T.snap) {   // small anticipation (rise) before gliding down the page
+    const u = seg(t, ...T.pan2), c = L(CAM.c1, CAM.c2, eInOut(u)); c[1] -= 26 * Math.sin(Math.PI * seg(t, T.pan2[0] - 0.2, T.pan2[0] + 0.12)); return c;
+  }
+  return L(CAM.c3, CAM.full, eInOut(seg(t, ...T.pull)));
+}
+const toScr = (c, x, y) => [(x - c[0]) * c[2] + 960, (y - c[1]) * c[2] + 540];
+
+// ── baked layers ──
+let WOODC, PAGEC, PNL = {}, PAT;
+function inkRect(x, y, w, h, lw = 5, seed = 1) {
+  const j = (k) => (hash(seed * 7 + k) - 0.5) * 3;
+  brush([[x + j(1), y], [x + w * 0.5, y + j(2)], [x + w + j(3), y]], lw, { ta: 0.02, tb: 0.04, seed: seed });
+  brush([[x + w, y - 2], [x + w + j(4), y + h * 0.5], [x + w, y + h + 2]], lw, { ta: 0.02, tb: 0.04, seed: seed + 1 });
+  brush([[x + w + 2, y + h], [x + w * 0.5, y + h + j(5)], [x - 2, y + h]], lw, { ta: 0.02, tb: 0.04, seed: seed + 2 });
+  brush([[x, y + h + 2], [x + j(6), y + h * 0.5], [x, y - 2]], lw, { ta: 0.02, tb: 0.04, seed: seed + 3 });
+}
+function bake(w, h, fn) { const c = mk(w, h), p = useCtx(c.getContext('2d')); fn(w, h); useCtx(p); return c; }
+function paperGrain(w, h, a = 1) { ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = a; ctx.fillStyle = ctx.createPattern(PAPER_T, 'repeat'); ctx.fillRect(0, 0, w, h); ctx.restore(); }
+
+function kitchenWall(w, h, o = {}) {
+  ctx.fillStyle = '#fbf6e8'; ctx.fillRect(0, 0, w, h);
+  wash([[-10, -10], [w + 10, -10], [w + 10, o.floor || h], [-10, o.floor || h]], WALL, { raw: true, gran: 0.55, edge: 0, off: [0, 0], a: 0.75 });
+  ctx.save(); ctx.globalCompositeOperation = 'multiply';          // wallpaper: loose dotted stripes
+  for (let x = 30; x < w; x += 70) { ctx.fillStyle = 'rgba(214,170,90,0.28)'; ctx.fillRect(x, 0, 3, o.floor || h); for (let y = 20; y < (o.floor || h); y += 46) { ctx.beginPath(); ctx.arc(x + 35, y + (x % 140 ? 23 : 0), 4, 0, TAU); ctx.fill(); } }
+  ctx.restore();
+  glaze([[0, 0], [w, 0], [w, h], [0, h]], lgrad(0, 0, 0, h, [[0, 'rgba(255,255,255,0)'], [1, WALL_D]]), 0.5, true);
+  if (o.floor) {
+    wash([[-10, o.floor], [w + 10, o.floor], [w + 10, h + 10], [-10, h + 10]], FLOOR, { raw: true, gran: 0.6, off: [0, 0] });
+    for (let x = -40; x < w; x += 90) brush([[x, o.floor + 4], [x + 60, h]], 2, { seed: x, a: 0.5 });
+    brush([[-10, o.floor], [w + 10, o.floor + 3]], 3.6, { seed: 3 });
+  }
+}
+function windowFrame(x, y, w, h) {
+  wash([[x, y], [x + w, y], [x + w, y + h], [x, y + h]], '#a8d0e6', { raw: true, gran: 0.4 });
+  glaze([[x, y], [x + w, y], [x + w, y + h], [x, y + h]], lgrad(0, y, 0, y + h, [[0, '#6fa6cf'], [1, 'rgba(255,255,255,0)']]), 0.5, true);
+  wash(circ(x + w * 0.32, y + h * 0.3, w * 0.16, h * 0.06, 12, 0.3, x), '#ffffff', { gran: 0, edge: 0.2, a: 0.8, off: [0, 0] });
+  wash(circ(x + w * 0.7, y + h * 0.62, w * 0.12, h * 0.05, 12, 0.3, x + 1), '#ffffff', { gran: 0, edge: 0.2, a: 0.7, off: [0, 0] });
+  inkRect(x, y, w, h, 4, x); brush([[x + w / 2, y], [x + w / 2, y + h]], 4, { seed: 2 }); brush([[x, y + h / 2], [x + w, y + h / 2]], 4, { seed: 3 });
+  wash([[x - 16, y + h], [x + w + 16, y + h], [x + w + 16, y + h + 16], [x - 16, y + h + 16]], '#f4efe2', { raw: true }); inkRect(x - 16, y + h, w + 32, 16, 3.2, x + 1);
+  // curtains
+  for (const [cx0, d] of [[x - 30, 1], [x + w + 30, -1]]) {
+    const c = [[cx0, y - 20], [cx0 + d * 70, y - 20], [cx0 + d * 50, y + h * 0.45], [cx0 + d * 64, y + h + 10], [cx0 + d * 6, y + h + 10]];
+    part(c, '#e8a37f', 3.4, { seed: cx0 }); brush([[cx0 + d * 30, y - 10], [cx0 + d * 28, y + h]], 2, { seed: cx0 + 1, a: 0.6 });
+  }
+  brush([[x - 50, y - 20], [x + w + 50, y - 20]], 6, { seed: 9 });
+}
+function tableSide(x0, x1, top, legs) {
+  part([[x0, top], [x1, top], [x1, top + 16], [x0, top + 16]], WOOD, 3.6, { seed: x0 });
+  const cl = [[x0 - 6, top + 2], [x1 + 10, top + 2], [x1 + 10, top + 48], [x0 + 20, top + 50], [x0 - 4, top + 44]];
+  part(cl, CLOTH, 3.6, { seed: x0 + 1 });
+  ctx.save(); tracePts(cr(cl, true, 5), true); ctx.clip(); ctx.globalCompositeOperation = 'multiply';
+  for (let x = x0; x < x1; x += 34) { ctx.fillStyle = 'rgba(80,120,160,0.22)'; ctx.fillRect(x, top, 14, 60); }
+  ctx.fillStyle = 'rgba(80,120,160,0.18)'; ctx.fillRect(x0 - 10, top + 20, x1 - x0 + 30, 12); ctx.restore();
+  for (const lx of legs) part([[lx - 12, top + 48], [lx + 12, top + 48], [lx + 9, top + 300], [lx - 9, top + 300]], '#9c6a3e', 3.6, { seed: lx });
+}
+function chairSide(x, seatY, s) {
+  ctx.save(); ctx.translate(x, seatY); ctx.scale(s, s);
+  part([[-40, -150], [-26, -150], [-22, 0], [-36, 0]], '#9c6a3e', 3.4, { seed: 1 });
+  for (const yy of [-140, -96]) part([[-38, yy], [-8, yy - 4], [-8, yy + 18], [-37, yy + 22]], '#b07a4a', 3, { seed: yy });
+  part([[-48, 0], [70, 0], [70, 14], [-48, 14]], '#b07a4a', 3.4, { seed: 2 });
+  part([[-40, 14], [-28, 14], [-30, 170], [-40, 170]], '#9c6a3e', 3.4, { seed: 3 }); part([[52, 14], [64, 14], [66, 170], [56, 170]], '#9c6a3e', 3.4, { seed: 4 });
+  ctx.restore();
+}
+function clock(x, y, r) {
+  part(circ(x, y, r, r, 20, 0, 3), '#f7f3e6', 4, { seed: 1 }); ctx.save(); tracePts(cr(circ(x, y, r, r, 20, 0, 3), true, 4), true); ctx.clip(); softBlob(x, y, r, '#d9c28a', 0.25); ctx.restore();
+  for (let k = 0; k < 12; k++) { const a = k / 12 * TAU; brush([[x + Math.cos(a) * r * 0.78, y + Math.sin(a) * r * 0.78], [x + Math.cos(a) * r * 0.9, y + Math.sin(a) * r * 0.9]], 2.4, { seed: k }); }
+  brush([[x, y], [x + r * 0.45, y - r * 0.2]], 4, { seed: 1 }); brush([[x, y], [x - r * 0.1, y - r * 0.7]], 3, { seed: 2 });
+}
+
+function buildPanels() {
+  // title panel
+  PNL.title = bake(560, TH, (w, h) => {
+    ctx.fillStyle = '#fbf6e8'; ctx.fillRect(0, 0, w, h);
+    wash(circ(280, 300, 250, 230, 18, 0.12, 5), '#9ccbe3', { gran: 0.45, a: 0.75 });
+    wash(circ(452, 138, 48, 48, 16, 0.06, 2), '#f2c65c', { gran: 0.5 }); inkShape(circ(452, 138, 48, 48, 16, 0.06, 2), 3, { seed: 3 });
+    ctx.save(); ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = '176px "Caveat Brush"'; ctx.translate(276, 318); ctx.rotate(-0.05); ctx.fillText('Juniper', 0, 0);
+    ctx.font = '76px "Caveat Brush"'; ctx.fillStyle = '#b8472f'; ctx.fillText('& Mortimer', 30, 88); ctx.restore();
+    brush([[70, 350], [250, 340], [470, 344]], 6, { seed: 3, col: '#b8472f' });
+    owlPlush(420, 650, 1.05, { tilt: -0.06 });
+    // a broccoli floret stands by as a clue
+    broccoli(150, 660, 0.9, 3, { ang: -0.12 });
+    ctx.fillStyle = INK; ctx.font = '26px "IM Fell English SC"'; ctx.textAlign = 'left'; ctx.fillText('by E. Hollis', 36, 700);
+    paperGrain(w, h);
+  });
+  PNL.p1 = bake(620, TH, (w, h) => {
+    kitchenWall(w, h, { floor: 640 });
+    windowFrame(360, 150, 210, 170);
+    chairSide(150, 512, 1.2);
+    tableSide(252, 660, 426, [300, 590]);
+    plate(420, 424, 0.8, [[-40, -0.4, 1, 1], [0, 0.1, 1.1, 2], [42, 0.5, 0.95, 3]]);
+    owlPlush(560, 430, 0.8, { tilt: 0.04 });
+    paperGrain(w, h);
+  });
+  PNL.p2 = bake(600, TH, (w, h) => {
+    kitchenWall(w, h);
+    softBlob(300, 330, 330, '#f7eccb', 0.6);
+    glaze([[0, 0], [w, 0], [w, h], [0, h]], rgrad(260, 340, 200, 520, [[0, 'rgba(255,255,255,0)'], [1, '#d9b06a']]), 0.45, true);
+    paperGrain(w, h);
+  });
+  PNL.p4 = bake(1060, TH, (w, h) => {
+    kitchenWall(w, h, { floor: 640 });
+    windowFrame(560, 130, 250, 190);
+    clock(955, 200, 58);
+    chairSide(240, 512, 1.2);
+    tableSide(332, 1080, 426, [390, 1000]);
+    plate(540, 424, 0.8, [[-40, -0.4, 1, 1], [0, 0.1, 1.1, 2], [42, 0.5, 0.95, 3]]);
+    milk(690, 430, 0.9);
+    owlPlush(860, 430, 0.95, { tilt: -0.03 });
+    paperGrain(w, h);
+  });
+  PNL.p5 = bake(750, TH, (w, h) => {
+    kitchenWall(w, h, { floor: 690 });
+    windowFrame(470, 110, 230, 190);
+    chairSide(210, 553, 1.35);
+    tableSide(322, 800, 456, [380]);
+    plate(460, 454, 0.9, [[-40, -0.4, 1, 1], [42, 0.5, 0.95, 3]]);
+    owlPlush(660, 460, 1.0, { tilt: 0.08 });
+    paperGrain(w, h);
+  });
+}
+function buildPage() {
+  WOODC = bake(W, H, (w, h) => {
+    ctx.fillStyle = '#6b4a31'; ctx.fillRect(0, 0, w, h); const R = rng(4);
+    for (let i = 0; i < 90; i++) { const y = R() * h; ctx.strokeStyle = `rgba(${R() < .5 ? '40,25,15' : '140,100,65'},${0.15 + R() * 0.2})`; ctx.lineWidth = 1 + R() * 3; ctx.beginPath(); ctx.moveTo(0, y); for (let x = 0; x <= w; x += 60) ctx.lineTo(x, y + Math.sin(x * 0.004 + i) * 8); ctx.stroke(); }
+    ctx.fillStyle = rgrad(960, 540, 300, 1200, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0.45)']]); ctx.fillRect(0, 0, w, h);
+  });
+  PAGEC = bake(1920, 2400, (w, h) => {
+    ctx.fillStyle = PAPER; ctx.fillRect(PG.x, PG.y, PG.w, PG.h);
+    paperGrain(w, h);
+    // masthead
+    ctx.fillStyle = INK; ctx.textBaseline = 'alphabetic';
+    ctx.font = '46px "IM Fell English SC"'; ctx.textAlign = 'center'; ctx.fillText('The Sunday Almanac  ·  Funnies', 960, 76);
+    ctx.font = '26px "IM Fell English SC"'; ctx.textAlign = 'left'; ctx.fillText('Section C', 44, 72);
+    ctx.textAlign = 'right'; ctx.fillText('Sunday, October 4', 1876, 72);
+    brush([[40, 90], [1880, 92]], 3, { seed: 5 }); brush([[40, 97], [1880, 98]], 1.4, { seed: 6 });
+    // pencil panel borders (visible before the ink arrives)
+    for (const k in PAN) { const [x, y, pw, ph] = PAN[k]; ctx.strokeStyle = 'rgba(90,90,100,0.35)'; ctx.lineWidth = 1.4; ctx.strokeRect(x + 2, y + 1, pw - 3, ph - 2); }
+  });
+  PAT = ctx.createPattern(PAPER_T, 'repeat');
+}
+
+// soak reveal: a blooming, irregular wet edge that spreads from a point
+function soakClip(pw, ph, u, cx, cy, seed) {
+  const R = Math.hypot(Math.max(cx, pw - cx), Math.max(cy, ph - cy)) * 1.25 * eOut(u), p = [];
+  for (let i = 0; i < 48; i++) { const a = i / 48 * TAU; const k = 1 + 0.13 * Math.sin(a * 5 + seed) + 0.07 * Math.sin(a * 11 + seed * 2); p.push([cx + Math.cos(a) * R * k, cy + Math.sin(a) * R * k]); }
+  return cr(p, true, 3);
+}
+function drawPanel(key, t, t0, t1, dyn, o = {}) {
+  const [x, y, pw, ph] = PAN[key];
+  const u = t1 == null ? 1 : seg(t, t0, t1);
+  if (u <= 0) return;
+  ctx.save(); ctx.translate(x, y);
+  ctx.beginPath(); ctx.rect(0, 0, pw, ph); ctx.clip();
+  let sp = null;
+  if (u < 1) { sp = soakClip(pw, ph, u, o.cx ?? pw * 0.4, o.cy ?? ph * 0.45, o.seed ?? 1); tracePts(sp, true); ctx.clip(); }
+  if (PNL[key]) ctx.drawImage(PNL[key], 0, 0);
+  if (dyn) dyn(t, pw, ph);
+  ctx.restore();
+  if (sp) { ctx.save(); ctx.translate(x, y); ctx.beginPath(); ctx.rect(0, 0, pw, ph); ctx.clip(); tracePts(sp, true); ctx.globalCompositeOperation = 'multiply'; ctx.strokeStyle = 'rgba(150,120,80,0.35)'; ctx.lineWidth = 5; ctx.stroke(); ctx.restore(); }
+  // ink border: arrives with the wash
+  ctx.save(); ctx.globalAlpha = clamp(u * 2.5); inkRect(x, y, pw, ph, 5.5, x + y); ctx.restore();
+}
+
+// ── panel acting ──
+function dynP1(t) {
+  const s = stp(t);
+  const bl = (s > 1.95 && s < 2.05);
+  girlSide({ x: 170, y: 500, s: 1.2, arm: 'rest', eye: bl ? 'blink' : 'down', eyeDX: 2, eyeDY: 3, mouth: 'flat', headRot: 0.06 });
+  balloon(392, 112, ['JUNIPER, EAT', 'YOUR BROCCOLI.'], [-40, 128], seg(t, T.bal1, T.bal1 + 0.3), { fs: 36 });
+}
+function dynP2(t) {
+  const s = stp(t), sq = eInOut(seg(s, ...T.squint));
+  girlClose(sq, [lerp(0, 10, sq), lerp(0, 4, sq)], s);
+}
+function dynP4(t) {
+  const s = stp(t), talk = s > T.bal4 && s < T.bal4 + 0.9 && Math.floor(s * 6) % 2 === 0;
+  const wag = Math.sin(Math.max(0, s - T.bal4) * 9) * 4 * clamp(1 - (s - T.bal4) / 1.2);
+  girlSide({ x: 260, y: 500, s: 1.2, arm: 'lecture', eye: 'smug', mouth: talk ? 'talk' : 'smug', headRot: -0.07, wrist: [wag, 0] });
+  balloon(590, 142, ["I CAN'T.", 'TYRANNOSAURS WERE', 'STRICTLY CARNIVOROUS.'], [366, 262], seg(t, T.bal4, T.bal4 + 0.3), { fs: 36 });
+}
+function dynP5(t) {
+  const s = stp(t), wide = s > T.wide, look = s > T.wide + 0.55;
+  const lift = eOut(seg(s, T.wide + 0.5, T.wide + 1.1));
+  girlSide({ x: 230, y: 540, s: 1.35, arm: 'fork', eye: wide ? (look ? 'down' : 'wide') : 'open', eyeDX: wide ? (look ? 4 : 0) : -4, eyeDY: look ? 5 : 0,
+    mouth: wide ? 'wobble' : 'flat', headRot: wide ? 0.04 : -0.03, wrist: [lift * 6, -lift * 16], floret: 0.5 });
+  balloon(446, 110, ['AND LOOK HOW THAT', 'TURNED OUT FOR THEM.'], [-40, 118], seg(t, T.bal5, T.bal5 + 0.3), { fs: 36 });
+}
+
+function drawPage(t, cam, fanScr) {
+  ctx.save(); ctx.setTransform(cam[2], 0, 0, cam[2], 960 - cam[0] * cam[2], 540 - cam[1] * cam[2]);
+  // page shadow on the table, then the sheet
+  ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.filter = 'none'; ctx.fillRect(PG.x + 10, PG.y + 14, PG.w, PG.h); ctx.restore();
+  ctx.drawImage(PAGEC, 0, 0);
+  drawPanel('title', t, ...T.title, null, { cx: 280, cy: 300, seed: 2 });
+  drawPanel('p1', t, ...T.p1, dynP1, { cx: 200, cy: 300, seed: 3 });
+  drawPanel('p2', t, ...T.p2, dynP2, { cx: 280, cy: 360, seed: 4 });
+  if (!fanScr) drawPanel('fan', t, ...T.fan, (tt, pw, ph) => drawFantasyPanel(tt, pw, ph), { cx: 900, cy: 360, seed: 5 });
+  drawPanel('p4', t, t < T.snap ? 99 : 0, t < T.snap ? 100 : 0.001, dynP4);
+  drawPanel('p5', t, ...T.p5, dynP5, { cx: 330, cy: 300, seed: 6 });
+  ctx.restore();
+}
+
+window.draw = ({ t }) => {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(WOODC, 0, 0);
+  let cam = camAt(t);
+  const inFan = t >= T.expand[0] && t < T.snap;
+  const ex = eInOut(seg(t, ...T.expand));
+  // snap back: a hard cut with a short jolt
+  if (t >= T.snap) { const j = seg(t, T.snap, T.snap + 0.25); const d = (1 - j) * 18 * Math.sin(j * 40); cam = [cam[0] + d, cam[1] - d * 0.6, cam[2]]; }
+  drawPage(t, cam, inFan);
+  if (inFan) {
+    const [x, y, pw, ph] = PAN.fan, a = toScr(cam, x, y), b = toScr(cam, x + pw, y + ph);
+    const r = [lerp(a[0], -8, ex), lerp(a[1], -8, ex), lerp(b[0], W + 8, ex), lerp(b[1], H + 8, ex)];
+    drawFantasyFull(t, r, ex, cam);
+  }
+  const fade = Math.max(1 - seg(t, 0, 0.35), eInOut(seg(t, ...T.fade)) * 0.92);
+  if (fade > 0) { ctx.globalAlpha = fade; ctx.fillStyle = '#1b1612'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+window.events = () => {
+  const ev = [{ k: 'rustle', t: 0.1, d: 0.9 }];
+  for (const p of [T.title, T.p1, T.p2, T.fan, T.p5]) ev.push({ k: 'wash', t: p[0], d: p[1] - p[0] + 0.2 });
+  for (const b of [T.bal1, T.bal4, T.bal5]) ev.push({ k: 'pop', t: b });
+  ev.push({ k: 'glide', t: T.pan2[0], d: T.pan2[1] - T.pan2[0] });
+  ev.push({ k: 'jungle', t: T.fan[0], d: T.snap - T.fan[0] }, { k: 'swell', t: T.expand[0], d: 0.8 });
+  ev.push({ k: 'roar', t: T.roar }, { k: 'snap', t: T.snap }, { k: 'kitchen', t: T.snap, d: DUR - T.snap });
+  ev.push({ k: 'blink', t: T.wide }, { k: 'rustle', t: T.pull[0], d: 0.8 }, { k: 'chord', t: T.pull[0] + 0.25 });
+  return ev;
+};
+window.ready = (async () => {
+  await document.fonts.load('36px "Patrick Hand"'); await document.fonts.load('80px "Caveat Brush"');
+  await document.fonts.load('italic 40px "IM Fell English"'); await document.fonts.load('40px "IM Fell English SC"');
+  await document.fonts.ready;
+  buildInkTextures(); buildPanels(); buildPage(); buildFantasy();
+})();
+</script>
+</body></html>
