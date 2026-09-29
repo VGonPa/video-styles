@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cosmic Epic</title>
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* ======================================================================
+ * Cosmic Epic: a deep-time journey in raw WebGL2.
+ * We drift past a backlit gas giant whose atmosphere rings with light;
+ * its star slips out from behind the limb, swells red, collapses and
+ * goes supernova. The remnant spreads and fades, the last stars go out,
+ * and a timeline counter racing from 1 billion to 10^100 years lands on
+ * a final title in darkness.
+ *
+ * Pipeline: HDR scene (procedural nebula, ray-traced planet + atmosphere,
+ * star, remnant) + 3D point stars with true parallax -> 7-level dual-
+ * filter bloom -> composite (lens flare, chromatic fringe, ACES, grain,
+ * vignette) -> 2D canvas for the thin wide-tracked titles.
+ * Deterministic: every frame is a pure function of t (seeded RNG only).
+ * ====================================================================== */
+const W = 1920, H = 1080, DUR = 10, AR = W / H;
+const clamp01 = x => Math.min(1, Math.max(0, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const sm = (a, b, x) => { x = clamp01((x - a) / (b - a)); return x * x * (3 - 2 * x); };
+const easeIO = x => { x = clamp01(x); return 0.5 - 0.5 * Math.cos(Math.PI * x); };
+const easeIn3 = x => Math.pow(clamp01(x), 3);
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const v3 = { add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  mul: (a, s) => [a[0] * s, a[1] * s, a[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  norm: a => { const l = Math.hypot(a[0], a[1], a[2]); return [a[0] / l, a[1] / l, a[2] / l]; },
+  mix: (a, b, k) => [lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2], b[2], k)] };
+
+/* ------------------------------------------------------------ timeline */
+const P = [0, 0, -4], PR = 1.0, PATM = 1.075;     // planet (gas giant) and its atmosphere shell
+const S = [0, 0, -2500];                          // the star, far behind the planet
+const T_SWELL = 3.3, T_COLL = 4.75, TB = 5.2;     // red-giant swell, collapse, burst
+const T_DIM0 = 6.0, T_DIM1 = 7.75;                // the stars go out
+const T_TITLE = 8.05;                             // final title in darkness
+const CAMA = [0.2, 0.15, 0.0], CAMB = [1.95, 1.05, -3.0];
+
+function camera(t) {
+  const u = 0.3 * clamp01(t / 5.4) + 0.7 * easeIO(t / 5.4);
+  let pos = v3.add(v3.mix(CAMA, CAMB, u), [0, 0, -0.07 * t]);
+  const toPl = v3.norm(v3.sub(v3.add(P, [0.72, 0.5, 0]), pos));
+  const toSt = v3.norm(v3.sub(S, pos));
+  let f = v3.norm(v3.mix(toPl, toSt, easeIO((t - 0.3) / 4.6)));
+  // a slow roll that settles, and a short shudder after the burst
+  let roll = 0.07 * (1 - easeIO(t / 5.5));
+  const k = t - TB;
+  if (k > 0 && k < 1.2) { const a = 0.0028 * Math.exp(-k / 0.28);
+    f = v3.norm(v3.add(f, [a * Math.sin(k * 71.3), a * Math.sin(k * 53.1 + 1.3), 0])); roll += a * 1.5 * Math.sin(k * 41.7); }
+  const up0 = [Math.sin(roll), Math.cos(roll), 0];
+  const r = v3.norm(v3.cross(f, up0)), up = v3.cross(r, f);
+  const fov = lerp(44, 31, easeIO((t - 2.2) / 4.4)) - 2.0 * sm(6.6, 10, t);
+  return { pos, f, r, up, tan: Math.tan(fov * Math.PI / 360) };
+}
+// star appearance as a function of t: angular radius, colour, surface radiance, boil
+function star(t) {
+  let rad = 0.0042, col = [1.0, 0.93, 0.80], I = 70, boil = 0;
+  const sw = easeIO((t - T_SWELL) / (T_COLL - T_SWELL));
+  rad = lerp(rad, 0.058, sw); col = v3.mix(col, [1.0, 0.13, 0.02], sw); I = lerp(I, 0.55, sw); boil = sw;
+  // two pulses before the collapse (anticipation)
+  const pw = sm(T_COLL - 0.55, T_COLL - 0.2, t) * (1 - sm(T_COLL - 0.05, T_COLL + 0.05, t));
+  rad *= 1 + 0.055 * Math.sin((t - T_COLL + 0.55) * Math.PI * 2 * 2.6) * pw;
+  if (t > T_COLL) {
+    const c = easeIn3((t - T_COLL) / (TB - T_COLL));
+    rad = lerp(rad, 0.0011, c); col = v3.mix(col, [0.72, 0.86, 1.0], sm(0.3, 1, c)); I = lerp(I, 26, c);
+  }
+  return { rad, col, I, boil };
+}
+function supernova(t) {
+  const k = t - TB;
+  if (k < 0) return { flash: 0, r: 0.01, amp: 0, core: 0 };
+  const flash = Math.min(1, k / 0.04) * Math.exp(-k / 0.17);
+  const r = 0.012 + 0.15 * (1 - Math.exp(-k / 0.55)) + 0.026 * k;
+  const amp = Math.min(1, k / 0.12) * (1 - sm(6.1, 7.45, t));
+  const core = Math.min(1, k / 0.3) * (1 - sm(7.25, T_DIM1 + 0.05, t));
+  return { flash, r, amp, core };
+}
+// the timeline counter: 1..10 billion years, then 10^10 .. 10^100
+function counter(t) {
+  if (t < 5.3) { const n = 1 + Math.floor(9 * Math.pow(clamp01((t - 1.7) / 3.35), 1.7) + 1e-9); return { mode: 'b', n }; }
+  const e = 10 + Math.round(90 * Math.pow(clamp01((t - 5.55) / 2.15), 2.3)); return { mode: 'e', n: e };
+}
+// planet occlusion of the star (distance from planet centre to the camera->star line)
+function starVis(cam) {
+  const d = v3.norm(v3.sub(S, cam.pos)), pc = v3.sub(P, cam.pos), tc = v3.dot(pc, d);
+  const h = Math.hypot(...v3.sub(pc, v3.mul(d, tc)));
+  return sm(PR * 0.998, PATM, h);
+}
+function project(cam, p) {
+  const rel = v3.sub(p, cam.pos), z = v3.dot(rel, cam.f);
+  return [v3.dot(rel, cam.r) / (z * cam.tan * AR), v3.dot(rel, cam.up) / (z * cam.tan), z];
+}
+
+/* ------------------------------------------------------------ WebGL2 */
+const out = document.getElementById('c'), ctx = out.getContext('2d');
+const gcv = document.createElement('canvas'); gcv.width = W; gcv.height = H;
+const gl = gcv.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false, alpha: false, premultipliedAlpha: false });
+gl.getExtension('EXT_color_buffer_float'); gl.getExtension('OES_texture_float_linear');
+
+const FSVERT = `#version 300 es
+void main(){ vec2 p = vec2(float((gl_VertexID<<1)&2), float(gl_VertexID&2)); gl_Position = vec4(p*2.-1., 0., 1.); }`;
+
+const NOISE = `
+float hash13(vec3 p3){ p3 = fract(p3*.1031); p3 += dot(p3, p3.zyx+31.32); return fract((p3.x+p3.y)*p3.z); }
+float vnoise(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.-2.*f);
+  return mix(mix(mix(hash13(i),hash13(i+vec3(1,0,0)),f.x), mix(hash13(i+vec3(0,1,0)),hash13(i+vec3(1,1,0)),f.x),f.y),
+             mix(mix(hash13(i+vec3(0,0,1)),hash13(i+vec3(1,0,1)),f.x), mix(hash13(i+vec3(0,1,1)),hash13(i+vec3(1,1,1)),f.x),f.y), f.z); }
+const mat3 M3 = mat3(0.00,0.80,0.60, -0.80,0.36,-0.48, -0.60,-0.48,0.64);
+float fbm(vec3 p){ float a=.5,s=0.; for(int i=0;i<6;i++){ s+=a*vnoise(p); p=M3*p*2.03+vec3(1.7,9.2,4.1); a*=.5; } return s; }
+float fbm4(vec3 p){ float a=.5,s=0.; for(int i=0;i<4;i++){ s+=a*vnoise(p); p=M3*p*2.03+vec3(1.7,9.2,4.1); a*=.5; } return s; }
+float ridged(vec3 p){ float a=.5,s=0.; for(int i=0;i<5;i++){ float n=1.-abs(vnoise(p)*2.-1.); s+=a*n*n; p=M3*p*2.1+vec3(3.1,1.7,5.3); a*=.5; } return s; }
+`;
+
+// ---- scene: nebula, planet + atmosphere, star, supernova remnant (HDR, linear)
+const SCENE = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform vec3 uCam, uR, uU, uF; uniform float uTan, uT;
+uniform vec3 uP; uniform float uPR, uPA;
+uniform vec3 uSd, uScol; uniform float uSrad, uSI, uBoil;
+uniform float uSNr, uSNa, uFlash, uCore, uNeb;
+out vec4 o;
+${NOISE}
+const vec3 TEAL = vec3(0.05,0.55,0.62), VIOLET = vec3(0.34,0.10,0.62), ORANGE = vec3(1.0,0.38,0.08), ROSE = vec3(0.75,0.12,0.32);
+vec3 nebula(vec3 d){
+  vec3 p = d*2.1 + uCam*0.015;
+  vec3 q = vec3(fbm4(p+vec3(1.7,9.2,3.1)), fbm4(p+vec3(8.3,2.8,5.5)), fbm4(p+vec3(4.1,6.3,1.2)));
+  float n = fbm(p*1.25 + 2.0*q);
+  float n2 = fbm4(p*2.6 + 2.6*q + 7.);
+  float bandc = dot(d, normalize(vec3(0.62,1.0,0.05)));
+  float band = exp(-bandc*bandc/0.16) * (0.55 + 0.45*fbm4(p*0.7+3.));
+  float dens = smoothstep(0.46,0.92,n) * band;
+  vec3 col = mix(TEAL, VIOLET, smoothstep(0.42,0.66,q.x+0.2*n2));
+  col = mix(col, ROSE, smoothstep(0.58,0.8,q.y)*0.5);
+  col = mix(col, ORANGE, smoothstep(0.52,0.78,n2)*smoothstep(0.5,0.8,n));
+  float dust = smoothstep(0.40,0.66, fbm(p*3.4 + q*3.0 + 11.));
+  float wisp = pow(ridged(p*2.2 + q*1.6), 2.0);
+  vec3 c = col * dens * (0.35 + 2.2*wisp) * (1. - 0.9*dust);
+  c += vec3(0.020,0.012,0.040) * band * (0.4 + n);          // faint violet haze of the galactic band
+  return c * 0.5;
+}
+vec3 planetShade(vec3 p, vec3 n, vec3 rd){
+  vec3 L = uSd;
+  vec3 pole = normalize(vec3(0.25,1.0,0.12));
+  float lat = dot(n, pole);
+  vec3 e = normalize(cross(pole, vec3(0,0,1))); float lon = atan(dot(n, cross(pole,e)), dot(n,e)) + uT*0.02;
+  float warp = fbm4(vec3(lat*6., cos(lon)*2.2, sin(lon)*2.2)) - .5;
+  float bands = fbm4(vec3(lat*18. + warp*3.5, 0.6*cos(lon), 0.6*sin(lon)));
+  vec3 alb = mix(vec3(0.42,0.46,0.48), vec3(0.78,0.64,0.46), smoothstep(0.35,0.7,bands));
+  alb = mix(alb, vec3(0.28,0.52,0.58), smoothstep(0.6,0.8,fbm4(vec3(lat*40., cos(lon)*6., sin(lon)*6.)))*0.5);
+  float ndl = dot(n, L);
+  float lit = smoothstep(-0.12, 0.35, ndl);
+  vec3 sunc = uScol * 2.6;
+  vec3 c = alb * sunc * lit * (0.25 + 0.75*max(ndl,0.));
+  // terminator band: warm scattered light in the twilight zone
+  c += ORANGE * 0.55 * exp(-pow((ndl-0.02)/0.09,2.)) * alb;
+  // night side: faint nebula-coloured ambient so the bands stay legible as silhouettes
+  c += alb * vec3(0.022,0.030,0.050) * (0.6 + 0.4*n.y);
+  // limb glow on the disk (fresnel), brightest near the star
+  float fr = pow(1. - max(dot(n, -rd), 0.), 4.);
+  c += fr * vec3(0.25,0.65,1.0) * (0.1 + 1.6*smoothstep(-0.4,0.6,ndl));
+  return c;
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy/uRes*2.-1.;
+  vec3 rd = normalize(uF + uv.x*uTan*(uRes.x/uRes.y)*uR + uv.y*uTan*uU);
+  vec3 col = nebula(rd) * uNeb;
+
+  // ---- star + remnant (behind everything)
+  vec3 sT = normalize(cross(uSd, vec3(0,1,0))), sB = cross(sT, uSd);
+  vec2 sp = vec2(dot(rd,sT), dot(rd,sB)); float fwd = dot(rd,uSd);
+  float a = fwd > 0. ? length(sp) : 9.;
+  vec3 starc = vec3(0);
+  {
+    float x = a/uSrad;
+    float disk = smoothstep(1.0, 0.93, x);
+    float limb = sqrt(max(1.-x*x, 0.));
+    float gran = fbm4(vec3(sp/uSrad*3.2, uT*0.6));
+    float surf = mix(1., 0.25 + 1.5*gran*gran, uBoil) * (0.45 + 0.55*limb);
+    starc += uScol * uSI * disk * surf;
+    starc += uScol * uSI * 0.06 * exp(-(x-1.)*1.6) * step(1.,x);               // corona
+    starc += uScol * 0.7 / (1. + pow(a/0.012, 2.)) * (0.4 + 0.6*uSI/70.) * step(0.001, uSI);       // wide glow
+  }
+  // supernova remnant: expanding filamentary shell + shock ring + flash
+  if (uSNa > 0.001 || uFlash > 0.001) {
+    float ang0 = atan(sp.y, sp.x);
+    float edge = fbm4(vec3(cos(ang0)*1.6, sin(ang0)*1.6, 5.) + vec3(sp/uSNr*0.6, 0.));
+    float r = a / uSNr * (1. + 0.55*(edge - .5));
+    vec3 q = vec3(sp/uSNr*1.8, 4.2);
+    float w = fbm4(q*1.1 + 3.);
+    float f = fbm(q + 1.6*vec3(w, w*0.7, 0.));
+    float fil = pow(ridged(q*2.2 + w*2.), 3.);
+    float shell = exp(-pow((r - 0.9 + 0.4*(f-.5))/0.22, 2.));
+    float inner = smoothstep(1.0, 0.0, r);
+    float ang = atan(sp.y, sp.x);
+    float hue = fbm4(vec3(cos(ang)*1.5, sin(ang)*1.5, 1.7) + q*0.35);
+    vec3 sc = mix(TEAL*1.4, ORANGE*1.2, smoothstep(0.35,0.7,hue));
+    sc = mix(sc, VIOLET*1.5, smoothstep(0.62,0.85,f)*0.7);
+    float clump = smoothstep(0.35, 0.75, f);
+    vec3 rem = sc * shell * (0.08 + 3.2*fil*fil + 0.6*clump) * 1.5;
+    rem += mix(VIOLET, TEAL, f) * inner * fil * 0.35;
+    rem += vec3(0.6,0.8,1.0) * pow(inner, 4.) * 0.18;
+    float ring = exp(-pow((a/uSNr - 1.22 - 0.1*(edge-.5))/0.02, 2.)) * smoothstep(0.35, 0.7, fbm4(vec3(cos(ang0)*4., sin(ang0)*4., 2.)));
+    rem += vec3(0.7,0.85,1.0) * ring * 0.4;
+    col = col * (1. - 0.6*shell*clump*uSNa) + rem * uSNa;
+    col += vec3(1.0,0.95,0.9) * uFlash * (60. / (1. + pow(a/0.01, 2.)) + 0.5 / (1. + pow(a/0.12, 2.)));
+  }
+  starc += vec3(0.6,0.8,1.0) * uCore * (40. * exp(-a/0.0009) + 0.6 / (1. + pow(a/0.006, 2.)));
+
+  // ---- planet: ray/sphere, atmosphere as a soft shell of glow around the limb
+  vec3 oc = uCam - uP; float b = dot(oc, rd); float cc = dot(oc,oc) - uPR*uPR; float disc = b*b - cc;
+  float tca = -b; vec3 cp = uCam + rd*tca; float h = length(cp - uP);
+  float front = step(0., tca);
+  if (disc > 0. && tca > 0.) {
+    float th = -b - sqrt(disc); vec3 p = uCam + rd*th; vec3 n = normalize(p - uP);
+    col = planetShade(p, n, rd);
+  } else {
+    col += starc;
+  }
+  if (front > 0. && h < uPR*1.6) {
+    vec3 nl = normalize(cp - uP);
+    float hh = max(h - uPR, 0.)/(uPA - uPR);
+    float dens = exp(-hh*1.35) * step(uPR*0.985, h);
+    float mu = dot(rd, uSd);
+    float fwdS = pow(max(mu,0.), 900.) * 30. + pow(max(mu,0.), 60.) * 2.2;     // forward scattering toward the star
+    float side = smoothstep(-0.55, 0.75, dot(nl, uSd));                          // lit side of the limb
+    vec3 atm = vec3(0.16,0.55,1.0) * (0.03 + 1.9*side*side) + vec3(1.0,0.45,0.15) * fwdS * 0.35;
+    atm += vec3(0.6,0.85,1.0) * fwdS;
+    col += atm * dens * uScol * 0.9;
+    // the star seen through the atmosphere: reddened transmission
+    if (h > uPR) { vec3 T = exp(-vec3(1.0,2.4,5.0) * 2.6 * exp(-hh*2.2)); col = col - starc + starc*T; }
+  }
+  o = vec4(col, 1.);
+}`;
+
+// ---- point stars with true parallax
+const STARV = `#version 300 es
+precision highp float;
+in vec3 aPos; in vec4 aInfo;
+uniform vec3 uCam, uR, uU, uF; uniform float uTan, uAR, uT, uPR; uniform vec3 uP; uniform vec2 uRes;
+out vec3 vCol;
+vec3 temp(float k){ return mix(mix(vec3(1.0,0.62,0.38), vec3(1.0,0.94,0.86), smoothstep(0.,.5,k)), vec3(0.68,0.80,1.0), smoothstep(.5,1.,k)); }
+void main(){
+  vec3 rel = aPos - uCam; float z = dot(rel, uF);
+  gl_PointSize = 0.; gl_Position = vec4(3.,3.,3.,1.); vCol = vec3(0);
+  if (z < 0.1) return;
+  vec3 rd = normalize(rel); vec3 oc = uCam - uP; float b = dot(oc, rd); float disc = b*b - dot(oc,oc) + uPR*uPR;
+  if (disc > 0. && -b > 0. && -b - sqrt(disc) < length(rel)) return;      // hidden behind the planet
+  vec2 ndc = vec2(dot(rel,uR)/(z*uTan*uAR), dot(rel,uU)/(z*uTan));
+  float fade = 1. - smoothstep(aInfo.z - 0.35, aInfo.z, uT);
+  float dist = length(rel);
+  float br = aInfo.x * fade * (dist < 20. ? 1.0 + 0.6*(20.-dist)/16. : 1.);
+  gl_Position = vec4(ndc, 0., 1.);
+  gl_PointSize = clamp(2.2 + 2.2*sqrt(br), 2., 11.) * (uRes.y/1080.);
+  vCol = temp(aInfo.y) * br;
+}`;
+const STARF = `#version 300 es
+precision highp float;
+in vec3 vCol; out vec4 o;
+void main(){ vec2 d = gl_PointCoord*2.-1.; float r2 = dot(d,d); float a = exp(-r2*5.5) * (1.-smoothstep(0.8,1.,r2)); o = vec4(vCol*a, 1.); }`;
+
+// ---- bloom: COD-style 13-tap downsample, 3x3 tent upsample
+const DOWN = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc; uniform vec2 uDst; uniform float uFirst; out vec4 o;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uDst;
+  vec2 t = 1./vec2(textureSize(uSrc,0));
+  vec3 a=texture(uSrc,uv+t*vec2(-2,2)).rgb, b=texture(uSrc,uv+t*vec2(0,2)).rgb, c=texture(uSrc,uv+t*vec2(2,2)).rgb;
+  vec3 d=texture(uSrc,uv+t*vec2(-2,0)).rgb, e=texture(uSrc,uv).rgb, f=texture(uSrc,uv+t*vec2(2,0)).rgb;
+  vec3 g=texture(uSrc,uv+t*vec2(-2,-2)).rgb, h=texture(uSrc,uv+t*vec2(0,-2)).rgb, i=texture(uSrc,uv+t*vec2(2,-2)).rgb;
+  vec3 j=texture(uSrc,uv+t*vec2(-1,1)).rgb, k=texture(uSrc,uv+t*vec2(1,1)).rgb, l=texture(uSrc,uv+t*vec2(-1,-1)).rgb, m=texture(uSrc,uv+t*vec2(1,-1)).rgb;
+  vec3 s = e*0.125 + (a+c+g+i)*0.03125 + (b+d+f+h)*0.0625 + (j+k+l+m)*0.125;
+  if (uFirst > 0.5) s = min(s, vec3(400.));
+  o = vec4(s, 1.);
+}`;
+const UP = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc; uniform float uRad; uniform vec2 uDst; out vec4 o;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uDst; vec2 t = uRad/vec2(textureSize(uSrc,0));
+  vec3 s = texture(uSrc,uv).rgb*4.;
+  s += (texture(uSrc,uv+vec2(t.x,0)).rgb + texture(uSrc,uv-vec2(t.x,0)).rgb + texture(uSrc,uv+vec2(0,t.y)).rgb + texture(uSrc,uv-vec2(0,t.y)).rgb)*2.;
+  s += texture(uSrc,uv+t).rgb + texture(uSrc,uv-t).rgb + texture(uSrc,uv+vec2(t.x,-t.y)).rgb + texture(uSrc,uv+vec2(-t.x,t.y)).rgb;
+  o = vec4(s/16., 1.);
+}`;
+// ---- composite: bloom, lens flare, chromatic fringe, ACES, vignette, grain
+const COMP = `#version 300 es
+precision highp float;
+uniform sampler2D uScene, uBloom, uGrain; uniform vec2 uRes; uniform vec2 uStar; uniform float uFl, uExpo, uFade, uGOff, uBloomK;
+uniform vec3 uFcol; out vec4 o;
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0., 1.); }
+float ghost(vec2 uv, vec2 c, float r, float soft){ float d = length((uv-c)*vec2(uRes.x/uRes.y,1.)); return smoothstep(r, r*soft, d); }
+void main(){
+  vec2 uv = gl_FragCoord.xy/uRes; vec2 dc = uv - .5;
+  float ca = 0.0035 * dot(dc,dc);
+  vec3 c = vec3(texture(uScene, uv - dc*ca*2.).r, texture(uScene, uv).g, texture(uScene, uv + dc*ca*2.).b);
+  c += texture(uBloom, uv).rgb * uBloomK;
+  // lens flare from the star
+  if (uFl > 0.001) {
+    vec2 sp = uStar*0.5+0.5; vec2 ax = vec2(.5) - sp; vec2 asp = vec2(uRes.x/uRes.y,1.);
+    vec3 fl = vec3(0);
+    fl += vec3(0.30,0.55,1.0) * ghost(uv, sp + ax*0.55, 0.035, 0.6) * 0.10;
+    fl += vec3(0.95,0.55,0.25) * ghost(uv, sp + ax*1.25, 0.075, 0.85) * 0.06;
+    fl += vec3(0.35,0.95,0.7) * ghost(uv, sp + ax*1.55, 0.022, 0.4) * 0.12;
+    fl += vec3(0.6,0.35,1.0) * ghost(uv, sp + ax*2.1, 0.13, 0.9) * 0.04;
+    fl += vec3(1.0,0.8,0.5) * ghost(uv, sp + ax*0.85, 0.012, 0.3) * 0.14;
+    vec2 d = (uv - sp)*asp; float r = length(d);
+    // halo ring around the source
+    fl += vec3(0.45,0.7,1.0) * exp(-pow((r-0.22)/0.012,2.)) * 0.05;
+    // anamorphic streak
+    fl += vec3(0.35,0.6,1.0) * exp(-abs(d.y)*420.) * exp(-abs(d.x)*2.6) * 0.55;
+    // starburst rays
+    float an = atan(d.y, d.x);
+    float rays = pow(abs(cos(an*3.0)), 60.) + 0.6*pow(abs(cos(an*3.0 + 0.52)), 90.);
+    fl += uFcol * rays * exp(-r*9.) * 0.9;
+    fl += uFcol * 0.25 / (1. + pow(r/0.03, 2.));
+    c += fl * uFl;
+  }
+  c *= uExpo;
+  c = aces(c);
+  c = pow(c, vec3(1./2.2));
+  float vig = 1. - 0.42*pow(length(dc*vec2(1.0,0.82))*1.35, 2.4);
+  c *= vig;
+  float g = texture(uGrain, gl_FragCoord.xy/256. + vec2(uGOff, uGOff*1.37)).r - .5;
+  c += g * 0.035 * (0.35 + 0.65*(1.-c.g));
+  o = vec4(c * uFade, 1.);
+}`;
+
+function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) + '\n' + src.split('\n').map((l, i) => (i + 1) + ': ' + l).join('\n').slice(0, 4000)); return s; }
+function prog(vs, fs) { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const a = gl.getActiveUniform(p, i); u[a.name] = gl.getUniformLocation(p, a.name); }
+  return { p, u }; }
+function target(w, h, filter = gl.LINEAR) {
+  const tx = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tx);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tx, 0);
+  return { tx, fb, w, h };
+}
+let pScene, pStar, pDown, pUp, pComp, rtScene, mips = [], texGrain, starVAO, NSTAR = 0, emptyVAO;
+
+function buildStars() {
+  const rnd = mulberry32(7919), N = 9000, pos = new Float32Array(N * 3), info = new Float32Array(N * 4);
+  const bandN = v3.norm([0.62, 1.0, 0.05]);
+  for (let i = 0; i < N; i++) {
+    let d;
+    for (;;) { // uniform on the sphere, with a bias toward the galactic band
+      const z = rnd() * 2 - 1, ph = rnd() * Math.PI * 2, s = Math.sqrt(1 - z * z); d = [s * Math.cos(ph), s * Math.sin(ph), z];
+      const bc = v3.dot(d, bandN); if (rnd() < 0.35 + 0.65 * Math.exp(-bc * bc / 0.06)) break;
+    }
+    const dist = 5 * Math.pow(120, rnd());                        // 5 .. 600 units: near stars slide past, far ones barely move
+    const p = v3.add([1, 0.6, -2], v3.mul(d, dist));
+    // keep the camera corridor and the planet clear
+    if (Math.hypot(...v3.sub(p, P)) < 2.2 || Math.hypot(p[0] - 1, p[1] - 0.6, (p[2] + 2) * 0.5) < 3.5) { i--; continue; }
+    pos.set(p, i * 3);
+    const br = 0.25 + 9 * Math.pow(rnd(), 9) + 0.9 * rnd() * rnd();
+    // each star dies at its own moment; the curve thins them slowly, then all at once
+    const death = T_DIM0 + (T_DIM1 - 0.1 - T_DIM0) * Math.pow(rnd(), 0.8);
+    info.set([br, rnd(), death, rnd()], i * 4);
+  }
+  NSTAR = N;
+  starVAO = gl.createVertexArray(); gl.bindVertexArray(starVAO);
+  const b1 = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b1); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+  const l1 = gl.getAttribLocation(pStar.p, 'aPos'); gl.enableVertexAttribArray(l1); gl.vertexAttribPointer(l1, 3, gl.FLOAT, false, 0, 0);
+  const b2 = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b2); gl.bufferData(gl.ARRAY_BUFFER, info, gl.STATIC_DRAW);
+  const l2 = gl.getAttribLocation(pStar.p, 'aInfo'); gl.enableVertexAttribArray(l2); gl.vertexAttribPointer(l2, 4, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+}
+function buildGrain() {
+  const rnd = mulberry32(1234), n = 256, d = new Uint8Array(n * n * 4);
+  for (let i = 0; i < n * n; i++) { const v = (rnd() + rnd() + rnd()) / 3 * 255; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v; d[i * 4 + 3] = 255; }
+  texGrain = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texGrain);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.UNSIGNED_BYTE, d);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+}
+function setCam(u, cam, t) {
+  gl.uniform3fv(u.uCam, cam.pos); gl.uniform3fv(u.uR, cam.r); gl.uniform3fv(u.uU, cam.up); gl.uniform3fv(u.uF, cam.f);
+  gl.uniform1f(u.uTan, cam.tan); gl.uniform1f(u.uT, t); gl.uniform2f(u.uRes, W, H);
+}
+function renderGL(t) {
+  const cam = camera(t), st = star(t), sn = supernova(t), sd = v3.norm(v3.sub(S, cam.pos));
+  const neb = sm(0.0, 1.2, t) * (1 - sm(T_DIM0, T_DIM1 - 0.3, t));
+  gl.bindVertexArray(emptyVAO);
+  // scene
+  gl.bindFramebuffer(gl.FRAMEBUFFER, rtScene.fb); gl.viewport(0, 0, W, H); gl.disable(gl.BLEND);
+  gl.useProgram(pScene.p); const u = pScene.u; setCam(u, cam, t);
+  gl.uniform3fv(u.uP, P); gl.uniform1f(u.uPR, PR); gl.uniform1f(u.uPA, PATM);
+  gl.uniform3fv(u.uSd, sd); gl.uniform3fv(u.uScol, st.col); gl.uniform1f(u.uSrad, st.rad);
+  gl.uniform1f(u.uSI, t < TB ? st.I : 0); gl.uniform1f(u.uBoil, st.boil);
+  gl.uniform1f(u.uSNr, sn.r); gl.uniform1f(u.uSNa, sn.amp); gl.uniform1f(u.uFlash, sn.flash); gl.uniform1f(u.uCore, sn.core); gl.uniform1f(u.uNeb, neb);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  // stars (additive)
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(pStar.p); const us = pStar.u; setCam(us, cam, t);
+  gl.uniform1f(us.uAR, AR); gl.uniform3fv(us.uP, P); gl.uniform1f(us.uPR, PR);
+  gl.bindVertexArray(starVAO); gl.drawArrays(gl.POINTS, 0, NSTAR); gl.bindVertexArray(emptyVAO);
+  gl.disable(gl.BLEND);
+  // bloom chain
+  gl.useProgram(pDown.p); let src = rtScene;
+  mips.forEach((m, i) => { gl.bindFramebuffer(gl.FRAMEBUFFER, m.fb); gl.viewport(0, 0, m.w, m.h);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src.tx); gl.uniform1i(pDown.u.uSrc, 0); gl.uniform1f(pDown.u.uFirst, i === 0 ? 1 : 0); gl.uniform2f(pDown.u.uDst, m.w, m.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3); src = m; });
+  gl.useProgram(pUp.p); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+  for (let i = mips.length - 1; i > 0; i--) { const d = mips[i - 1]; gl.bindFramebuffer(gl.FRAMEBUFFER, d.fb); gl.viewport(0, 0, d.w, d.h);
+    gl.bindTexture(gl.TEXTURE_2D, mips[i].tx); gl.uniform1i(pUp.u.uSrc, 0); gl.uniform1f(pUp.u.uRad, 1.0); gl.uniform2f(pUp.u.uDst, d.w, d.h); gl.drawArrays(gl.TRIANGLES, 0, 3); }
+  gl.disable(gl.BLEND);
+  // composite
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H); gl.useProgram(pComp.p); const uc = pComp.u;
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, rtScene.tx); gl.uniform1i(uc.uScene, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, mips[0].tx); gl.uniform1i(uc.uBloom, 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, texGrain); gl.uniform1i(uc.uGrain, 2); gl.activeTexture(gl.TEXTURE0);
+  const sp = project(cam, S), vis = starVis(cam);
+  const lum = t < TB ? lerp(1.0, 0.45, st.boil) * (t > T_COLL ? lerp(1, 0.3, easeIn3((t - T_COLL) / (TB - T_COLL))) : 1) : 2.4 * sn.flash + 0.35 * sn.core;
+  gl.uniform2f(uc.uRes, W, H); gl.uniform2f(uc.uStar, sp[0], sp[1]); gl.uniform1f(uc.uFl, sp[2] > 0 ? vis * lum : 0);
+  gl.uniform3fv(uc.uFcol, t < TB ? st.col : [0.8, 0.9, 1.0]);
+  gl.uniform1f(uc.uExpo, 1.0 - 0.25 * sm(T_COLL + 0.1, TB, t) * (t < TB ? 1 : 0));
+  gl.uniform1f(uc.uBloomK, 0.16);
+  gl.uniform1f(uc.uFade, sm(0.0, 0.9, t) * (1 - sm(9.35, 9.95, t)));
+  gl.uniform1f(uc.uGOff, (Math.floor(t * 12) * 0.6180339) % 1);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/* ------------------------------------------------------------ titles (2D) */
+const FONT = "'Montserrat'";
+// draw runs [{s, k(scale), up(raise)}] centred at (x, y) with wide tracking
+function title(runs, x, y, size, track, alpha, weight = 200, glow = 18) {
+  if (alpha <= 0.002) return;
+  ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  const ms = runs.map(r => { ctx.font = `${weight} ${size * (r.k || 1)}px ${FONT}`; ctx.letterSpacing = `${track * size * (r.k || 1)}px`;
+    return ctx.measureText(r.s).width; });
+  const lastTrack = track * size * (runs[runs.length - 1].k || 1);
+  let tot = ms.reduce((a, b) => a + b, 0) - lastTrack, cx = x - tot / 2;
+  ctx.fillStyle = `rgba(236,242,255,${alpha})`; ctx.shadowColor = `rgba(170,205,255,${0.55 * alpha})`; ctx.shadowBlur = glow;
+  runs.forEach((r, i) => { ctx.font = `${weight} ${size * (r.k || 1)}px ${FONT}`; ctx.letterSpacing = `${track * size * (r.k || 1)}px`;
+    ctx.fillText(r.s, cx, y - (r.up || 0) * size); cx += ms[i]; });
+  ctx.restore();
+}
+const CAPS = [
+  { a: 0.9, b: 3.7, s: 'A COLD GIANT, WARMED BY ONE STAR' },
+  { a: 3.95, b: 5.15, s: 'THE STAR SWELLS, THEN FALLS INWARD' },
+  { a: 5.75, b: 7.7, s: 'ONE BY ONE, THE STARS GO OUT' },
+];
+function drawText(t) {
+  const fin = sm(9.35, 9.95, t);
+  // counter (bottom centre)
+  const ca = sm(0.5, 1.4, t) * (1 - sm(7.75, 8.1, t));
+  const c = counter(t);
+  const y = 912, size = 64;
+  if (c.mode === 'b') title([{ s: `${c.n} BILLION YEARS FROM NOW` }], W / 2, y, size, 0.34, ca * 0.95);
+  else { // switch-over: brief cross-fade from "10 BILLION" to the power notation
+    const k = sm(5.36, 5.52, t), k0 = 1 - sm(5.26, 5.36, t);
+    title([{ s: '10' }, { s: String(c.n), k: 0.52, up: 0.52 }, { s: ' YEARS FROM NOW' }], W / 2, y, size, 0.34, ca * 0.95 * k);
+    if (k0 > 0) title([{ s: '10 BILLION YEARS FROM NOW' }], W / 2, y, size, 0.34, ca * 0.95 * k0);
+  }
+  for (const cp of CAPS) {
+    const a = sm(cp.a, cp.a + 0.6, t) * (1 - sm(cp.b - 0.45, cp.b, t));
+    title([{ s: cp.s }], W / 2, 984, 24, 0.62 + 0.06 * clamp01((t - cp.a) / (cp.b - cp.a)), a * 0.82, 300, 10);
+  }
+  // final title in darkness: slow fade in with tracking that keeps opening
+  const ft = t - T_TITLE;
+  if (ft > 0) {
+    const a = sm(0, 0.9, ft) * (1 - fin);
+    const tr = 0.16 + 0.05 * clamp01(ft / 1.9);
+    title([{ s: '10' }, { s: '100', k: 0.5, up: 0.55 }, { s: ' YEARS FROM NOW' }], W / 2, 566, 96, tr, a, 100, 24);
+    const a2 = sm(0.75, 1.45, ft) * (1 - fin);
+    title([{ s: 'NOTHING IS LEFT TO SHINE' }], W / 2, 652, 26, 0.7 + 0.05 * clamp01(ft / 1.9), a2 * 0.85, 300, 10);
+  }
+}
+
+window.ready = (async () => {
+  await document.fonts.load(`200 64px ${FONT}`, '0123456789 BILLION YEARS FROM NOW');
+  await document.fonts.load(`100 118px ${FONT}`, '10 YEARS FROM NOW');
+  await document.fonts.load(`300 24px ${FONT}`, 'A COLD GIANT, WARMED BY ONE STAR');
+  await document.fonts.ready;
+  emptyVAO = gl.createVertexArray();
+  pScene = prog(FSVERT, SCENE); pStar = prog(STARV, STARF); pDown = prog(FSVERT, DOWN); pUp = prog(FSVERT, UP); pComp = prog(FSVERT, COMP);
+  rtScene = target(W, H);
+  let w = W, h = H; for (let i = 0; i < 7; i++) { w = Math.max(1, w >> 1); h = Math.max(1, h >> 1); mips.push(target(w, h)); }
+  buildStars(); buildGrain();
+  return true;
+})();
+
+window.draw = ({ t }) => {
+  renderGL(t);
+  ctx.globalAlpha = 1; ctx.drawImage(gcv, 0, 0);
+  drawText(t);
+  return out.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+
+// sound design cues, sampled at the frame rate
+window.events = () => {
+  const ev = []; let last = null, lastTick = -1, vis0 = 0;
+  for (let f = 0; f < DUR * 30; f++) {
+    const t = f / 30, c = counter(t), key = c.mode + c.n;
+    if (t > 1.2 && t < 7.8 && last !== null && key !== last && t - lastTick > 0.028) { ev.push({ k: 'tick', t, v: c.mode === 'b' ? 1 : 0.7, n: c.n }); lastTick = t; }
+    last = key;
+    const v = starVis(camera(t)); if (vis0 < 0.5 && v >= 0.5) ev.push({ k: 'emerge', t }); vis0 = v;
+  }
+  ev.push({ k: 'swell', t: T_SWELL }, { k: 'collapse', t: T_COLL }, { k: 'burst', t: TB }, { k: 'dim', t: T_DIM0 }, { k: 'title', t: T_TITLE });
+  return ev;
+};
+</script>
+</body>
+</html>
