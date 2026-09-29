@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inflated 3D</title>
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#f3ecff;overflow:hidden}canvas{display:block}</style>
+<!-- three.js r159 (MIT), vendored: no CDN at render time -->
+<script src="vendor/three.min.js"></script>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* ======================================================================
+ * Inflated 3D: "Say it with a squish." A playful app-feature teaser.
+ * Every puffy shape (chat bubble, heart, star, check, OK button, cursor,
+ * each title glyph) is built by *inflating* a 2D silhouette:
+ *   canvas mask -> exact signed distance (Felzenszwalb EDT) -> blurred
+ *   (rounds corners, removes medial-axis creases) -> balloon height
+ *   profile h = T*sqrt(u(2-u)) -> front + back sheets, rim vertices snapped
+ *   onto the contour, analytic normals (seamless silhouette).
+ * Shading: MeshPhysical (matte plastic, soft clearcoat, sheen) + a fake
+ * subsurface glow/rim term, PMREM softbox studio environment, soft VSM
+ * key shadow + blob contact shadows on a pastel cyclorama.
+ * Motion: jelly springs (squash/stretch), bumps, inflate/press, and a
+ * precomputed (seeded, fixed-step) confetti simulation with floor bounces.
+ * Deterministic: each frame is a pure function of t.
+ * ====================================================================== */
+const W = 1920, H = 1080, DUR = 10, PI = Math.PI, TAU = 2 * PI;
+const clamp01 = x => Math.min(1, Math.max(0, x)), lerp = (a, b, u) => a + (b - a) * u;
+const sstep = (a, b, x) => { const u = clamp01((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+const easeOut = x => 1 - Math.pow(1 - clamp01(x), 3);
+const easeIn = x => Math.pow(clamp01(x), 3);
+const easeInOut = x => { x = clamp01(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const backIn = (x, c = 1.9) => { x = clamp01(x); return x * x * x * (c + 1) - c * x * x; };
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+// jelly springs
+const popS = (tl, k = 5.5, w = 13) => tl <= 0 ? 0 : 1 - Math.exp(-k * tl) * Math.cos(w * tl);   // 0 -> overshoot -> 1
+const jig = (tl, a = 0.25, k = 5, w = 17) => tl <= 0 ? 0 : a * Math.exp(-k * tl) * Math.sin(w * tl); // damped wobble
+
+/* ------------------------------------------------------------ timeline */
+const POP = [0.35, 0.62, 0.89, 1.16];     // icons pop in
+const BUMP1 = 2.3, BUMP2 = 2.85;          // heart -> bubble, star -> check
+const SPREAD = 3.45;                      // icons fly to corners
+const BTN = 3.75;                         // OK button inflates
+const PRESS = 5.42, RELEASE = 5.66;       // cursor presses the button
+const LIFT = 6.2;                         // button rises, title makes room
+const TITLE = 6.55;                       // title glyphs pop
+const WAVE = 7.95;                        // squish wave across the title
+const SUB = 7.7;                          // subline
+const OUT = 9.3;                          // fade to studio white
+
+/* ---------------------------------------------------- inflation builder */
+function edt(f, w, h) {                   // in-place squared Euclidean distance transform
+  const n = Math.max(w, h), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1), g = new Float64Array(n);
+  const pass = len => {
+    let k = 0; v[0] = 0; z[0] = -1e20; z[1] = 1e20;
+    for (let q = 1; q < len; q++) {
+      let s = ((g[q] + q * q) - (g[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) { k--; s = ((g[q] + q * q) - (g[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+      k++; v[k] = q; z[k] = s; z[k + 1] = 1e20;
+    }
+    k = 0; for (let q = 0; q < len; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + g[v[k]]; }
+  };
+  for (let x = 0; x < w; x++) { for (let y = 0; y < h; y++) g[y] = f[y * w + x]; pass(h); for (let y = 0; y < h; y++) f[y * w + x] = d[y]; }
+  for (let y = 0; y < h; y++) { for (let x = 0; x < w; x++) g[x] = f[y * w + x]; pass(w); for (let x = 0; x < w; x++) f[y * w + x] = d[x]; }
+}
+function boxBlur(a, w, h, r) {
+  if (r < 1) return a; const tmp = new Float32Array(a.length), inv = 1 / (2 * r + 1);
+  for (let it = 0; it < 3; it++) {
+    for (let y = 0; y < h; y++) { const o = y * w; let acc = 0;
+      for (let x = -r; x <= r; x++) acc += a[o + Math.min(w - 1, Math.max(0, x))];
+      for (let x = 0; x < w; x++) { tmp[o + x] = acc * inv; acc += a[o + Math.min(w - 1, x + r + 1)] - a[o + Math.max(0, x - r)]; } }
+    for (let x = 0; x < w; x++) { let acc = 0;
+      for (let y = -r; y <= r; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+      for (let y = 0; y < h; y++) { a[y * w + x] = acc * inv; acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x]; } }
+  }
+  return a;
+}
+/* inflate({w,h,draw(ctx),scale,T,back,step,blur,prof,center}) -> {geo, front, halfW, halfH} */
+function inflate(o) {
+  const { w, h } = o, step = o.step || 3, scale = o.scale, T = o.T, back = o.back ?? 0.8, prof = o.prof ?? 0.5;
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const cx2 = cv.getContext('2d'); cx2.fillStyle = cx2.strokeStyle = '#fff'; o.draw(cx2);
+  const px = cx2.getImageData(0, 0, w, h).data, N = w * h;
+  const fin = new Float64Array(N), fout = new Float64Array(N), mask = new Uint8Array(N);
+  let x0 = w, x1 = 0, y0 = h, y1 = 0;
+  for (let i = 0; i < N; i++) { const m = px[i * 4 + 3] > 127; mask[i] = m; fin[i] = m ? 1e20 : 0; fout[i] = m ? 0 : 1e20;
+    if (m) { const x = i % w, y = (i / w) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } }
+  edt(fin, w, h); edt(fout, w, h);
+  const S = new Float32Array(N);
+  for (let i = 0; i < N; i++) S[i] = mask[i] ? Math.sqrt(fin[i]) - 0.5 : -(Math.sqrt(fout[i]) - 0.5);
+  boxBlur(S, w, h, o.blur ?? 6);
+  let Dmax = 0; for (let i = 0; i < N; i++) if (S[i] > Dmax) Dmax = S[i];
+  const smp = (x, y) => { x = Math.min(w - 1.001, Math.max(0, x)); y = Math.min(h - 1.001, Math.max(0, y));
+    const i = x | 0, j = y | 0, fx = x - i, fy = y - j, k = j * w + i;
+    return (S[k] * (1 - fx) + S[k + 1] * fx) * (1 - fy) + (S[k + w] * (1 - fx) + S[k + w + 1] * fx) * fy; };
+  const grad = (x, y) => [(smp(x + 1, y) - smp(x - 1, y)) / 2, (smp(x, y + 1) - smp(x, y - 1)) / 2];
+  const [cx, cy] = o.center || [(x0 + x1) / 2, (y0 + y1) / 2];
+  const nx = Math.floor((w - 1) / step), ny = Math.floor((h - 1) / step), G = (nx + 1) * (ny + 1);
+  const gv = new Float32Array(G); for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) gv[j * (nx + 1) + i] = smp(i * step, j * step);
+  const need = new Uint8Array(G), cells = [];
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const a = j * (nx + 1) + i, b = a + 1, d = a + nx + 1, c = d + 1;
+    if (gv[a] > 0 || gv[b] > 0 || gv[c] > 0 || gv[d] > 0) { need[a] = need[b] = need[c] = need[d] = 1; cells.push(a, b, c, d); }
+  }
+  const idx = new Int32Array(G).fill(-1), P = [], Nn = [];
+  let front = 0, nv = 0;
+  const pts = [];
+  for (let k = 0; k < G; k++) if (need[k]) {
+    let x = (k % (nx + 1)) * step, y = ((k / (nx + 1)) | 0) * step, s = gv[k];
+    if (s <= 0.02) { for (let it = 0; it < 5; it++) { s = smp(x, y); const [gx, gy] = grad(x, y), gg = gx * gx + gy * gy + 1e-9; x -= s * gx / gg; y -= s * gy / gg; } s = 0; }
+    let [gx, gy] = grad(x, y); const gl = Math.hypot(gx, gy) + 1e-9; gx /= gl; gy /= gl;
+    const u = clamp01(s / Dmax), q = u * (2 - u), hgt = T * Math.pow(q, prof);
+    const dhdu = q > 1e-6 ? T * prof * Math.pow(q, prof - 1) * (2 - 2 * u) : 1e6;
+    const slope = dhdu / Dmax / scale;                          // world units / world unit
+    idx[k] = nv++; pts.push([(x - cx) * scale, -(y - cy) * scale, hgt, gx, -gy, slope]);
+    if (hgt > front) front = hgt;
+  }
+  for (const [X, Y, Z, gx, gy, sl] of pts) { P.push(X, Y, Z); const l = Math.hypot(sl * gx, sl * gy, 1); Nn.push(-sl * gx / l, -sl * gy / l, 1 / l); }
+  for (const [X, Y, Z, gx, gy, sl] of pts) { P.push(X, Y, -Z * back); const sb = sl * back, l = Math.hypot(sb * gx, sb * gy, 1); Nn.push(-sb * gx / l, -sb * gy / l, -1 / l); }
+  const I = [];
+  for (let c = 0; c < cells.length; c += 4) {
+    const a = idx[cells[c]], b = idx[cells[c + 1]], cc = idx[cells[c + 2]], d = idx[cells[c + 3]];
+    I.push(a, cc, b, a, d, cc);
+    I.push(a + nv, b + nv, cc + nv, a + nv, cc + nv, d + nv);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(Nn, 3));
+  geo.setIndex(I); geo.computeBoundingSphere();
+  return { geo, front, halfW: (x1 - x0) / 2 * scale, halfH: (y1 - y0) / 2 * scale };
+}
+
+/* ------------------------------------------------------------- renderer */
+const glc = document.createElement('canvas'); glc.width = W; glc.height = H;
+const renderer = new THREE.WebGLRenderer({ canvas: glc, antialias: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(1); renderer.setSize(W, H, false);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.94;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.VSMShadowMap;
+const out = document.getElementById('c'), octx = out.getContext('2d');
+const scene = new THREE.Scene();
+const BG = '#f1e8ff';
+scene.background = new THREE.Color(BG);
+const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 200);
+
+/* ------------------------------------------------ studio environment */
+{
+  const env = new THREE.Scene();
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), new THREE.ShaderMaterial({ side: THREE.BackSide,
+    vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }',
+    fragmentShader: 'varying vec3 vP; void main(){ float y = normalize(vP).y; vec3 top = vec3(1.0,0.97,1.0), mid = vec3(0.86,0.8,0.98), bot = vec3(0.95,0.78,0.86);'
+      + ' vec3 c = y > 0. ? mix(mid, top, pow(y, .7)) : mix(mid, bot, pow(-y, .6)); gl_FragColor = vec4(c*0.9, 1.); }' }));
+  env.add(sky);
+  const box = (x, y, z, w, h, I, col = '#ffffff') => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(I), side: THREE.DoubleSide }));
+    m.position.set(x, y, z); m.lookAt(0, 0, 0); env.add(m); };
+  box(-18, 22, 20, 18, 12, 5);       // key softbox, top-left front
+  box(24, 10, 12, 8, 16, 2.2, '#e8ecff'); // cool strip, right
+  box(6, 14, -26, 20, 8, 2.6, '#ffe8f2'); // warm back rim
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromScene(env, 0.03).texture;
+}
+const hemi = new THREE.HemisphereLight('#ffffff', '#f3c9df', 0.45); scene.add(hemi);
+const key = new THREE.DirectionalLight('#fff4ec', 2.1); key.position.set(-4, 16, 3.5);
+key.castShadow = true; key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -11, right: 11, top: 11, bottom: -11, near: 1, far: 40 });
+key.shadow.radius = 14; key.shadow.blurSamples = 20; key.shadow.bias = -0.0004;
+scene.add(key); scene.add(key.target);
+const fill = new THREE.DirectionalLight('#e4e6ff', 0.55); fill.position.set(8, 4, 6); scene.add(fill);
+
+/* ------------------------------------------------------- cyclorama */
+{
+  const prof = [];                                   // (z, y) profile: floor -> cove -> wall
+  for (let z = 30; z > -7; z -= 1) prof.push([z, 0]);
+  const R = 5; for (let k = 0; k <= 16; k++) { const a = k / 16 * PI / 2; prof.push([-7 - Math.sin(a) * R, R - Math.cos(a) * R]); }
+  for (let y = R + 1; y <= 40; y += 2) prof.push([-7 - R, y]);
+  const P = [], I = [], X = [-40, 40];
+  prof.forEach(([z, y]) => X.forEach(x => P.push(x, y, z)));
+  for (let i = 0; i < prof.length - 1; i++) { const a = i * 2; I.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setIndex(I); g.computeVertexNormals();
+  const cyc = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: '#efe3ff', roughness: 0.95, metalness: 0, envMapIntensity: 0.9 }));
+  cyc.receiveShadow = true; scene.add(cyc);
+}
+
+/* ----------------------------------------------------- puffy material */
+function puffy(col, o = {}) {
+  const m = new THREE.MeshPhysicalMaterial({ color: col, roughness: o.rough ?? 0.44, metalness: 0,
+    clearcoat: o.cc ?? 0.35, clearcoatRoughness: 0.3, sheen: 0.6, sheenRoughness: 0.55, sheenColor: new THREE.Color('#ffffff'),
+    envMapIntensity: o.env ?? 0.85, transparent: !!o.transparent });
+  m.userData.uWob = { value: new THREE.Vector3(0, 3, 0) };
+  m.userData.uSSS = { value: o.sss ?? 0.16 };
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uWob = m.userData.uWob; sh.uniforms.uSSS = m.userData.uSSS;
+    sh.vertexShader = 'uniform vec3 uWob;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      transformed.x += uWob.x * sin(transformed.y * uWob.y + uWob.z);
+      transformed.y += uWob.x * 0.7 * sin(transformed.x * uWob.y * 0.9 + uWob.z * 1.37);`);
+    sh.fragmentShader = 'uniform float uSSS;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', `
+      { vec3 Vd = normalize(vViewPosition); float nv = clamp(dot(normalize(normal), Vd), 0., 1.);
+        float fr = pow(1.0 - nv, 2.2);
+        // fake subsurface: light scattered inside the soft plastic lifts the shadow side and glows at grazing angles
+        outgoingLight += diffuseColor.rgb * uSSS * (0.55 + 1.3 * fr); }
+      #include <opaque_fragment>`);
+  };
+  return m;
+}
+function mkMesh(geo, mat) { const m = new THREE.Mesh(geo, mat); m.castShadow = true; return m; }
+
+/* ------------------------------------------------ contact blob shadows */
+const blobTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
+  const g = x.createRadialGradient(128, 128, 0, 128, 128, 128); g.addColorStop(0, 'rgba(84,52,150,0.55)'); g.addColorStop(0.45, 'rgba(84,52,150,0.25)'); g.addColorStop(1, 'rgba(84,52,150,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 256, 256); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+const blobGeo = new THREE.PlaneGeometry(1, 1).rotateX(-PI / 2);
+function mkBlob() { const b = new THREE.Mesh(blobGeo, new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, toneMapped: false }));
+  b.renderOrder = 1; scene.add(b); return b; }
+function setBlob(b, x, y, z, size, vis) {       // y = object bottom height above the floor
+  const k = 1 / (1 + 0.55 * Math.max(0, y)); b.position.set(x, 0.012, z); b.scale.set(size * (1.1 + 0.25 * y), 1, size * 0.55 * (1.1 + 0.25 * y));
+  b.material.opacity = vis * k; b.visible = vis > 0.001;
+}
+
+/* ------------------------------------------------------------ shapes */
+const FONT = "600 FS 'Fredoka'";
+const COL = { bubble: '#9a7cff', heart: '#ff76a4', star: '#ffc23c', check: '#4fd49c', button: '#ff7d6b', ok: '#ffffff', cursor: '#ffffff', title: '#6e4ff2' };
+const things = {};
+let titleGlyphs = [], confetti = [], ring, SIM = null;
+const ICON_SCALE = 2.2 / 512;
+
+function buildShapes() {
+  const sc = ICON_SCALE;
+  // chat bubble with tail
+  const bub = inflate({ w: 580, h: 520, scale: sc, T: 0.5, blur: 8, draw: c => {
+    c.beginPath(); c.roundRect(40, 50, 500, 330, 130); c.fill();
+    c.beginPath(); c.moveTo(130, 330); c.quadraticCurveTo(130, 420, 80, 470); c.quadraticCurveTo(190, 450, 250, 360); c.fill(); } });
+  // heart
+  const heart = inflate({ w: 512, h: 512, scale: sc, T: 0.55, blur: 7, draw: c => {
+    c.beginPath(); c.moveTo(256, 455); c.bezierCurveTo(120, 360, 40, 270, 50, 180); c.bezierCurveTo(60, 95, 140, 55, 200, 65);
+    c.bezierCurveTo(235, 72, 252, 100, 256, 128); c.bezierCurveTo(260, 100, 277, 72, 312, 65); c.bezierCurveTo(372, 55, 452, 95, 462, 180);
+    c.bezierCurveTo(472, 270, 392, 360, 256, 455); c.fill(); } });
+  // rounded five-point star
+  const star = inflate({ w: 512, h: 512, scale: sc, T: 0.5, blur: 8, draw: c => {
+    c.beginPath(); for (let k = 0; k < 10; k++) { const a = -PI / 2 + k * PI / 5, r = k % 2 ? 92 : 196; c.lineTo(256 + Math.cos(a) * r, 270 + Math.sin(a) * r); }
+    c.closePath(); c.lineJoin = 'round'; c.lineWidth = 64; c.fill(); c.stroke(); } });
+  // check mark
+  const check = inflate({ w: 512, h: 512, scale: sc, T: 0.42, blur: 5, draw: c => {
+    c.beginPath(); c.moveTo(108, 272); c.lineTo(212, 372); c.lineTo(408, 142); c.lineCap = c.lineJoin = 'round'; c.lineWidth = 98; c.stroke(); } });
+  // OK pill button + letters
+  const btn = inflate({ w: 1100, h: 460, scale: 5.0 / 1020, T: 0.62, blur: 10, prof: 0.42, draw: c => { c.beginPath(); c.roundRect(40, 40, 1020, 380, 190); c.fill(); } });
+  const ok = inflate({ w: 700, h: 420, scale: 5.0 / 1020, T: 0.2, blur: 4, step: 2, draw: c => {
+    c.font = FONT.replace('FS', '300px'); c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('OK', 350, 222); } });
+  // cursor arrow (tip at origin)
+  const cur = inflate({ w: 420, h: 520, scale: 1.7 / 420, T: 0.2, blur: 5, center: [96, 64], draw: c => {
+    c.beginPath(); [[96, 64], [96, 402], [182, 330], [238, 452], [296, 426], [242, 306], [352, 300]].forEach(([x, y]) => c.lineTo(x, y));
+    c.closePath(); c.lineJoin = 'round'; c.lineWidth = 36; c.fill(); c.stroke(); } });
+
+  const mk = (name, sh, col, o) => {
+    const g = new THREE.Group(), inner = new THREE.Group(), mat = puffy(col, o), mesh = mkMesh(sh.geo, mat);
+    inner.add(mesh); g.add(inner); scene.add(g);
+    return things[name] = { g, inner, mesh, mat, sh, blob: mkBlob() };
+  };
+  mk('bubble', bub, COL.bubble); mk('heart', heart, COL.heart); mk('star', star, COL.star); mk('check', check, COL.check);
+  mk('button', btn, COL.button, { sss: 0.14 }); mk('cursor', cur, COL.cursor, { sss: 0.05, rough: 0.35 });
+  // typing dots on the bubble
+  const dotGeo = new THREE.SphereGeometry(0.17, 32, 20), dotMat = puffy('#ffffff', { sss: 0.06 });
+  things.bubble.dots = [-0.52, 0, 0.52].map(x => { const d = mkMesh(dotGeo, dotMat); d.position.set(x, 0.18, bub.front * 0.92); d.scale.set(1, 1, 0.55); things.bubble.inner.add(d); return d; });
+  // OK letters sit on the button's front
+  const okMat = puffy(COL.ok, { sss: 0.07 });
+  things.button.letters = [];
+  { // split O and K so they can pop separately: build each from the same canvas layout
+    const mkL = (ch, x) => { const L = inflate({ w: 420, h: 420, scale: 5.0 / 1020, T: 0.2, blur: 4, step: 2, center: [210, 222], draw: c => {
+        c.font = FONT.replace('FS', '300px'); c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(ch, 210, 222); } });
+      const m = mkMesh(L.geo, okMat); m.userData.x = x; things.button.inner.add(m); things.button.letters.push(m); };
+    mkL('O', -0.62); mkL('K', 0.66);
+  }
+  ok.geo.dispose();
+  // title glyphs
+  const txt = 'Say it with a squish.', FS = 220, tsc = 1 / 218;
+  const mc = document.createElement('canvas').getContext('2d'); mc.font = FONT.replace('FS', FS + 'px');
+  const total = mc.measureText(txt).width; let xadv = 0;
+  const tmat = puffy(COL.title, { sss: 0.2, rough: 0.4 });
+  [...txt].forEach((ch, i) => {
+    const adv = mc.measureText(txt.slice(0, i + 1)).width - mc.measureText(txt.slice(0, i)).width;
+    if (ch !== ' ') {
+      const pad = 40, cw = Math.ceil(adv + pad * 2), chh = 330;
+      const L = inflate({ w: cw, h: chh, scale: tsc, T: 0.19, blur: 3, step: 2, center: [pad + adv / 2, 200], draw: c => {
+        c.font = FONT.replace('FS', FS + 'px'); c.textBaseline = 'alphabetic'; c.fillText(ch, pad, 250); } });
+      const g = new THREE.Group(), inner = new THREE.Group(), m = mkMesh(L.geo, tmat); inner.add(m); g.add(inner); scene.add(g);
+      titleGlyphs.push({ g, inner, x: (xadv + adv / 2 - total / 2) * tsc, i: titleGlyphs.length, ch });
+    }
+    xadv += adv;
+  });
+  // ring pulse
+  ring = new THREE.Mesh(new THREE.TorusGeometry(1, 0.035, 16, 128), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, toneMapped: false }));
+  scene.add(ring);
+  // confetti: puffy minis
+  const rng = mulberry32(52);
+  const mini = [heart.geo, star.geo, new THREE.SphereGeometry(1, 32, 20), new THREE.CapsuleGeometry(0.55, 1.1, 10, 24), new THREE.TorusGeometry(0.8, 0.42, 20, 40), bub.geo];
+  const miniScale = [0.2, 0.2, 0.2, 0.17, 0.2, 0.17];
+  const pal = ['#ff86ad', '#ffc94f', '#62d9a6', '#a58fff', '#7fc8ff', '#ff9f7a', '#ffffff'];
+  const mats = pal.map(c => puffy(c, { sss: 0.15 }));
+  for (let k = 0; k < 44; k++) {
+    const type = k % mini.length, s = miniScale[type] * (0.8 + 0.5 * rng());
+    const m = mkMesh(mini[type], mats[(k * 3 + (rng() * 2 | 0)) % pal.length]);
+    const g = new THREE.Group(), inner = new THREE.Group(); inner.add(m); g.add(inner); scene.add(g);
+    const a = (rng() * 2 - 1) * 1.25, sp = 4.2 + rng() * 3.6;
+    confetti.push({ g, inner, s, r: s * (type === 3 ? 1.1 : 1.0), t0: RELEASE + 0.02 + rng() * 0.08,
+      p0: [Math.sin(a) * 0.8, 2.5 + Math.cos(a) * 0.5, 0.6], v0: [Math.sin(a) * sp * 1.15, Math.cos(a) * sp + 1.2, 0.1 + rng() * 1.3],
+      w0: [rng() * 8 - 4, rng() * 8 - 4, rng() * 8 - 4], rot0: [rng() * TAU, rng() * TAU, rng() * TAU] });
+  }
+  simulateConfetti();
+}
+
+/* fixed-step confetti sim with floor bounces, sampled at 240 Hz */
+function simulateConfetti() {
+  const dt = 1 / 240, g = -9.0;
+  SIM = confetti.map(c => {
+    const n = Math.ceil((DUR - c.t0) / dt) + 2, out = new Float32Array(n * 7);
+    let [x, y, z] = c.p0, [vx, vy, vz] = c.v0, [ax, ay, az] = c.w0, [rx, ry, rz] = c.rot0, sq = 0, sqv = 0;
+    const bounces = [];
+    for (let i = 0; i < n; i++) {
+      out.set([x, y, z, rx, ry, rz, sq], i * 7);
+      vy += g * dt; vx *= 1 - 0.25 * dt; vz *= 1 - 0.25 * dt;
+      x += vx * dt; y += vy * dt; z += vz * dt; rx += ax * dt; ry += ay * dt; rz += az * dt;
+      if (y < c.r && vy < 0) {
+        const imp = -vy; y = c.r; vy = imp * 0.48; vx *= 0.75; vz *= 0.75; ax *= 0.6; ay *= 0.6; az *= 0.6;
+        if (imp < 0.6) vy = 0; else bounces.push({ t: c.t0 + i * dt, imp });
+        sqv -= imp * 1.6;
+      }
+      if (y <= c.r + 1e-4 && Math.abs(vy) < 1e-6) { vx *= 1 - 3 * dt; vz *= 1 - 3 * dt; ax *= 1 - 4 * dt; ay *= 1 - 4 * dt; az *= 1 - 4 * dt; }
+      sqv += (-160 * sq - 9 * sqv) * dt; sq += sqv * dt;     // squash spring
+    }
+    c.bounces = bounces; return out;
+  });
+}
+
+/* --------------------------------------------------------- layout */
+const ICONS = [
+  { n: 'bubble', home: [-4.8, 2.75, 0], corner: [-6.1, 4.65, -0.8], t0: POP[0], ph: 0.0 },
+  { n: 'heart', home: [-1.6, 2.25, 0.3], corner: [-6.4, 1.05, 0.6], t0: POP[1], ph: 1.7 },
+  { n: 'star', home: [1.6, 2.75, 0], corner: [6.15, 4.7, -0.8], t0: POP[2], ph: 3.1 },
+  { n: 'check', home: [4.8, 2.25, 0.3], corner: [6.35, 1.1, 0.6], t0: POP[3], ph: 4.4 },
+];
+function bumpX(t, tc, D) {           // mover: anticipation, rush in, bounce off
+  if (t < tc - 0.62) return 0;
+  if (t < tc) return D * backIn((t - (tc - 0.62)) / 0.62, 1.3);
+  const u = t - tc; return D * Math.exp(-3.2 * u) * Math.cos(6.5 * u);
+}
+const pushX = (t, tc, D) => t < tc ? 0 : D * Math.exp(-4.5 * (t - tc)) * Math.sin(8 * (t - tc));
+const hit = (t, tc, a = 0.3) => jig(t - tc, a, 6, 19);
+
+function setScene(t) {
+  // camera: slow push-in with a gentle drift
+  const cz = lerp(17.8, 16.2, easeInOut(t / DUR)), cx = 0.35 * Math.sin(t * 0.35) - 0.2;
+  camera.position.set(cx, 6.2 + 0.1 * Math.sin(t * 0.5), cz); camera.lookAt(cx * 0.4, 2.35, 0);
+
+  // ---- icons
+  const k = easeInOut((t - SPREAD) / 0.9);
+  for (const ic of ICONS) {
+    const T = things[ic.n], tl = t - ic.t0;
+    let [x, y, z] = ic.home.map((h, i) => lerp(h, ic.corner[i], k));
+    y += Math.sin(PI * k) * 0.7 + 0.1 * Math.sin(TAU * 0.42 * t + ic.ph);
+    y -= (1 - easeOut(tl / 0.55)) * 0.7;
+    let sx = 1, sy = 1, wob = 0;
+    if (ic.n === 'heart') { x += bumpX(t, BUMP1, -0.8); const h = hit(t, BUMP1); sx -= h; sy += h * 0.6; wob += Math.abs(h) * 0.25; }
+    if (ic.n === 'bubble') { x += pushX(t, BUMP1, -0.32); const h = hit(t, BUMP1, 0.24); sx -= h; sy += h * 0.6; wob += Math.abs(h) * 0.2; }
+    if (ic.n === 'star') { x += bumpX(t, BUMP2, 1.08); const h = hit(t, BUMP2); sx -= h; sy += h * 0.6; wob += Math.abs(h) * 0.25; }
+    if (ic.n === 'check') { x += pushX(t, BUMP2, 0.32); const h = hit(t, BUMP2, 0.24); sx -= h; sy += h * 0.6; wob += Math.abs(h) * 0.2; }
+    const s = 1.25 * popS(tl) * lerp(1, 0.5, k) * (1 + 0.035 * Math.sin(TAU * 0.8 * t + ic.ph)), j = jig(tl, 0.22, 4.5, 15) + jig(t - SPREAD - 0.9, 0.12, 5, 14);
+    const zinf = 0.2 + 0.8 * easeOut((tl - 0.08) / 0.45);
+    T.g.position.set(x, y, z); T.g.visible = tl > 0;
+    T.g.rotation.set(0.05 * Math.sin(t * 0.9 + ic.ph), 0.2 * Math.sin(TAU * 0.23 * t + ic.ph) + (ic.home[0] < 0 ? 0.12 : -0.12) * k,
+      0.06 * Math.sin(TAU * 0.31 * t + 2 * ic.ph) + (1 - easeOut(tl / 0.7)) * (ic.ph % 2 > 1 ? 0.5 : -0.5));
+    T.inner.scale.set(Math.max(1e-3, s * sx * (1 - 0.6 * j)), Math.max(1e-3, s * sy * (1 + j)), Math.max(1e-3, s * zinf * (1 - 0.4 * j)));
+    T.mat.userData.uWob.value.set(wob * 0.35 + Math.abs(j) * 0.12, 2.6, t * 14 + ic.ph);
+    setBlob(T.blob, x, y - T.sh.halfH * s, z, T.sh.halfW * 2.2 * s, clamp01(tl * 3));
+  }
+  // typing dots
+  things.bubble.dots.forEach((d, i) => { const u = t * 2.4 - i * 0.28; const b = Math.max(0, Math.sin(TAU * u)) ** 2;
+    d.position.y = 0.18 + 0.1 * b; const pp = popS(t - POP[0] - 0.35 - i * 0.1); d.scale.set(pp * (1 - 0.1 * b), pp * (1 + 0.14 * b), pp * 0.55); });
+
+  // ---- button
+  const B = things.button, tb = t - BTN;
+  let bx = 0, by = 2.45, bs = 1, bz = 0;
+  const lift = easeInOut((t - LIFT) / 0.75);
+  by = lerp(by, 4.45, lift) + 0.06 * Math.sin(TAU * 0.4 * (t - BTN)) * sstep(BTN, BTN + 1, t); bs = lerp(1, 0.72, lift);
+  const sxy = popS(tb, 4.2, 10), infl = tb <= 0.15 ? 0 : 1 - Math.exp(-4.2 * (tb - 0.15)) * Math.cos(10.5 * (tb - 0.15));
+  // press: anticipation squash while the cursor dips, then release spring
+  const press = sstep(PRESS - 0.1, PRESS + 0.06, t) * (1 - sstep(RELEASE - 0.02, RELEASE + 0.04, t));
+  const rel = jig(t - RELEASE, 0.32, 5, 15);
+  const zsc = Math.max(0.04, (0.05 + 0.95 * infl) * (1 - 0.5 * press) * (1 + rel)), xysc = sxy * (1 + 0.07 * press - 0.12 * rel);
+  B.g.position.set(bx, by, bz); B.g.visible = tb > 0;
+  B.g.rotation.set(-0.06 + 0.04 * Math.sin(t * 0.8), 0.12 * Math.sin(t * 0.55) * sstep(BTN, BTN + 1.5, t) * (1 - 0.5 * press), 0.02 * Math.sin(t * 0.7));
+  B.inner.scale.set(Math.max(1e-3, xysc * bs * (1 + 0.5 * rel)), Math.max(1e-3, xysc * bs * (1 - 0.3 * press + 0.2 * rel)), zsc * bs);
+  B.mat.userData.uWob.value.set(0.05 * Math.exp(-2.5 * Math.max(0, tb - 0.1)) * (tb > 0 ? 1 : 0) + Math.abs(rel) * 0.08, 1.4, t * 12);
+  B.letters.forEach((L, i) => { const tl = tb - 0.5 - i * 0.14, p = popS(tl, 5, 13);
+    L.visible = tl > 0; L.position.set(L.userData.x, 0.02 + 0.25 * (1 - easeOut(tl / 0.4)), B.sh.front * 0.9);
+    const jj = jig(tl, 0.2, 5, 16); L.scale.set(Math.max(1e-3, p * (1 - 0.5 * jj)), Math.max(1e-3, p * (1 + jj)), Math.max(1e-3, p * (1 / Math.max(0.3, 1 - 0.5 * press)) * (1 - 0.5 * press))); });
+  setBlob(B.blob, bx, by - 0.95 * bs * sxy, bz, 5.6 * bs * sxy, clamp01(tb * 2));
+
+  // ---- cursor
+  const C = things.cursor;
+  const cin = easeOut((t - 4.5) / 0.8), cout = easeIn((t - 6.0) / 0.6);
+  const dip = sstep(PRESS - 0.16, PRESS, t) * (1 - sstep(RELEASE, RELEASE + 0.2, t)), antic = Math.sin(PI * clamp01((t - (PRESS - 0.42)) / 0.28)) * (t < PRESS ? 1 : 0);
+  let cxp = lerp(8.4, 0.75, cin) + lerp(0, 7.5, cout), cyp = lerp(-1.4, 2.45, cin) + 0.9 * Math.sin(PI * cin) * (1 - cin) + lerp(0, -3.2, cout);
+  let czp = 1.45 + 0.35 * antic - 0.62 * dip;
+  C.g.visible = t > 4.5 && t < 6.7;
+  C.g.position.set(cxp + 0.04 * Math.sin(t * 3), cyp + 0.04 * Math.cos(t * 2.6), czp);
+  C.g.rotation.set(-0.15 - 0.25 * dip, -0.18, 0.18 * (1 - cin) - 0.08 * antic + 0.3 * cout);
+  const cs = 1 - 0.1 * dip + jig(t - RELEASE, 0.1, 6, 16);
+  C.inner.scale.set(cs, cs * (1 - 0.06 * dip), 1);
+  setBlob(C.blob, cxp + 0.4, cyp - 1.0, czp, 1.2, C.g.visible ? 0.7 : 0);
+
+  // ---- ring pulse
+  { const u = clamp01((t - RELEASE) / 0.8); ring.visible = t > RELEASE && u < 1;
+    ring.position.set(0, by, 0.3); ring.scale.set(2.7 + 2.2 * easeOut(u), 1.05 + 1.6 * easeOut(u), 1); ring.material.opacity = 0.6 * (1 - u) ** 1.4; }
+
+  // ---- confetti
+  confetti.forEach((c, i) => {
+    const tl = t - c.t0; c.g.visible = tl > 0;
+    if (tl <= 0) return;
+    const f = tl * 240, a = Math.min(SIM[i].length / 7 - 2, Math.floor(f)), fr = Math.min(1, f - a), S = SIM[i];
+    const v = k => lerp(S[a * 7 + k], S[(a + 1) * 7 + k], fr);
+    const shrink = 1 - sstep(OUT - 0.1, OUT + 0.5, t) * 0.0;
+    const s = c.s * popS(tl, 7, 15) * shrink, sq = v(6);
+    c.g.position.set(v(0), v(1), v(2)); c.inner.rotation.set(v(3), v(4), v(5));
+    c.g.scale.set(s * (1 - 0.5 * sq), s * (1 + sq), s * (1 - 0.5 * sq));
+  });
+
+  // ---- title
+  const wave = t - WAVE;
+  titleGlyphs.forEach(G => {
+    const tl = t - TITLE - G.i * 0.05, p = popS(tl, 5.5, 14), jj = jig(tl, 0.26, 5, 16);
+    const wv = wave > 0 ? Math.exp(-3.4 * Math.max(0, wave - G.i * 0.045)) * Math.sin(Math.max(0, wave - G.i * 0.045) * 16) * 0.2 : 0;
+    G.g.visible = tl > 0;
+    G.g.position.set(G.x, 2.15 + 0.55 * (1 - easeOut(tl / 0.45)) + 0.05 * Math.sin(TAU * 0.5 * t - G.i * 0.45), 1.3);
+    G.g.rotation.set(0.04 * Math.sin(t + G.i), 0.1 * Math.sin(t * 0.8 + G.i * 0.6), (1 - easeOut(tl / 0.5)) * (G.i % 2 ? 0.35 : -0.35));
+    G.inner.scale.set(Math.max(1e-3, p * (1 - 0.55 * jj + 0.5 * wv)), Math.max(1e-3, p * (1 + jj - wv)), Math.max(1e-3, p * (0.35 + 0.65 * easeOut((tl - 0.05) / 0.4))));
+  });
+  key.target.position.set(0, 1.5, 0);
+}
+
+/* ------------------------------------------------------ 2D overlay */
+const vign = (() => { const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  const g = x.createRadialGradient(W / 2, H * 0.45, H * 0.35, W / 2, H * 0.5, H * 1.05); g.addColorStop(0, 'rgba(120,80,190,0)'); g.addColorStop(1, 'rgba(120,80,190,0.16)');
+  x.fillStyle = g; x.fillRect(0, 0, W, H); return c; })();
+const SUB_TXT = 'Puffy reactions, now in Pillo chat';
+function overlay(t) {
+  octx.drawImage(vign, 0, 0);
+  const a = sstep(SUB, SUB + 0.5, t);
+  if (a > 0) {
+    octx.save(); octx.globalAlpha = a; octx.font = FONT.replace('FS', '46px'); octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    const y = 968 + 14 * (1 - easeOut((t - SUB) / 0.5)), w = octx.measureText(SUB_TXT).width + 70;
+    octx.fillStyle = 'rgba(255,255,255,0.72)'; octx.beginPath(); octx.roundRect(W / 2 - w / 2, y - 38, w, 76, 38); octx.fill();
+    octx.fillStyle = '#6a4fd8'; octx.fillText(SUB_TXT, W / 2, y + 2); octx.restore();
+  }
+  const f = Math.max(1 - sstep(0, 0.35, t), sstep(OUT, DUR - 0.05, t));
+  if (f > 0) { octx.fillStyle = BG; octx.globalAlpha = f; octx.fillRect(0, 0, W, H); octx.globalAlpha = 1; }
+}
+
+window.ready = (async () => {
+  await document.fonts.load(FONT.replace('FS', '220px'), 'Say it with a squish.OK' + SUB_TXT);
+  await document.fonts.ready;
+  buildShapes();
+  setScene(0); renderer.render(scene, camera);
+  for (const tt of [2, 5.5, 7]) { setScene(tt); renderer.compile(scene, camera); renderer.render(scene, camera); }
+})();
+
+window.draw = ({ t }) => {
+  setScene(t); renderer.render(scene, camera);
+  octx.drawImage(glc, 0, 0); overlay(t);
+  return out.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+
+window.events = () => [
+  ...POP.map((t, i) => ({ k: 'pop', t, i })),
+  { k: 'bump', t: BUMP1, pan: -0.4 }, { k: 'bump', t: BUMP2, pan: 0.4 },
+  { k: 'swoosh', t: SPREAD },
+  { k: 'inflate', t: BTN + 0.1 },
+  { k: 'pop', t: BTN + 0.5, i: 4 }, { k: 'pop', t: BTN + 0.64, i: 5 },
+  { k: 'slide', t: 4.5 },
+  { k: 'press', t: PRESS }, { k: 'release', t: RELEASE },
+  ...confetti.flatMap((c, i) => c.bounces.filter(b => b.imp > 1.2).map(b => ({ k: 'boing', t: b.t, imp: b.imp, pan: Math.max(-1, Math.min(1, SIM[i][0] / 7)) }))),
+  ...titleGlyphs.map(G => ({ k: 'letter', t: TITLE + G.i * 0.05, i: G.i })),
+  { k: 'wave', t: WAVE },
+  { k: 'out', t: OUT },
+];
+</script>
+</body>
+</html>
