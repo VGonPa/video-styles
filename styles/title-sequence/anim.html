@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── title-sequence · "Cut-Paper Titles": a 1950s–60s style film-title opener for an invented film ─────────────
+// 120 BPM jazz grid (beat = 0.5 s). Scene A: three angled paper bars slam in on the off-beats and carry
+// "HALCYON PICTURES PRESENTS", then pull out → "A FILM BY OTTO BRENNAN" beside a falling red slab.
+// A red panel wipes the frame → a black paper strip slices in, lifts step by step into a staircase (cast credits),
+// winds itself into a turning spiral (music credit), collapses into a keyhole → figure/ground flips →
+// we zoom through the keyhole onto the title card "THE SPIRAL STAIR" → black shutters close.
+// All shapes are hand-cut: static seeded ragged edges, soft layer shadows, per-letter wobble, gate weave on twos.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eBack = (u, s = 1.9) => { u = clamp(u); const c3 = s + 1; return 1 + c3 * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const deg = d => d * Math.PI / 180;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const STEP = 12;                                             // hand-made wobble rate (letters, gate weave)
+const stepIx = t => Math.floor(t * STEP + 1e-4);
+
+const RED = '#cf2e1d', ORANGE = '#ec7f22', BLACK = '#161311', PAPER = '#efe7d4';
+const DISPLAY = '"Anton"', SANS = '"Oswald"';
+
+// ── 1-D value noise (static, for ragged edges) ──
+function noise1(seed) { const r = rng(seed), g = Array.from({ length: 512 }, r);
+  return x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return lerp(g[((i % 512) + 512) % 512], g[(((i + 1) % 512) + 512) % 512], u) * 2 - 1; }; }
+// ragged polygon: subdivide every ~9 px, push each sample along the edge normal by two octaves of noise
+function roughPoly(pts, seed, amp = 2.2, stepLen = 9) {
+  const n1 = noise1(seed), n2 = noise1(seed + 7), p = new Path2D(); let arc = 0, first = true;
+  for (let k = 0; k < pts.length; k++) {
+    const [ax, ay] = pts[k], [bx, by] = pts[(k + 1) % pts.length]; const L = Math.hypot(bx - ax, by - ay); const nx = -(by - ay) / L, ny = (bx - ax) / L;
+    const m = Math.max(1, Math.round(L / stepLen));
+    for (let i = 0; i < m; i++) { const u = i / m, a = arc + u * L; const o = amp * (n1(a / 46) + .3 * n2(a / 9));
+      const x = ax + (bx - ax) * u + nx * o, y = ay + (by - ay) * u + ny * o; first ? p.moveTo(x, y) : p.lineTo(x, y); first = false; }
+    arc += L;
+  }
+  p.closePath(); return p;
+}
+const rectPts = (w, h) => [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]];
+const roughRect = (w, h, seed, amp) => roughPoly(rectPts(w, h), seed, amp);
+function keyholePts(r) { const a = .62, pts = [], n = 70;
+  for (let i = 0; i <= n; i++) { const th = Math.PI / 2 + a + (TAU - 2 * a) * i / n; pts.push([Math.cos(th) * r, Math.sin(th) * r]); }
+  pts.push([r * .62, r * 2.45], [-r * .62, r * 2.45]); return pts; }
+
+// ── paper layers: flat colour + faint drop shadow (the cut sheet floats a few mm above the one below) ──
+function paper(path, color, sh = 1, fillRule) {
+  ctx.save(); ctx.shadowColor = `rgba(0,0,0,${.34 * sh})`; ctx.shadowBlur = 9; ctx.shadowOffsetX = 3; ctx.shadowOffsetY = 5;
+  ctx.fillStyle = color; fillRule ? ctx.fill(path, fillRule) : ctx.fill(path); ctx.restore();
+}
+
+// ── hand-cut lettering: each glyph rendered alone, slightly rotated / stretched, then blurred + noise-thresholded ──
+let NZ; const NS = 512;
+function buildNoise() {   // tileable 2-octave value noise: 16 px wobble (scissor path) + faint 4 px tooth
+  const r = rng(77); NZ = new Float32Array(NS * NS);
+  const oct = (cell, amp) => { const G = NS / cell, g = Array.from({ length: G * G }, r);
+    for (let y = 0; y < NS; y++) for (let x = 0; x < NS; x++) { const fx = x / cell, fy = y / cell, ix = Math.floor(fx), iy = Math.floor(fy), ux = fx - ix, uy = fy - iy;
+      const sx = ux * ux * (3 - 2 * ux), sy = uy * uy * (3 - 2 * uy), q = (i, j) => g[((iy + j) % G) * G + ((ix + i) % G)];
+      NZ[y * NS + x] += amp * lerp(lerp(q(0, 0), q(1, 0), sx), lerp(q(0, 1), q(1, 1), sx), sy); } };
+  oct(16, .8); oct(4, .2); }
+function makeText(str, fam, size, color, seed, track = 0) {
+  const r = rng(seed), glyphs = []; let x = 0; const jf = size < 80 ? .35 : 1; const m = mk(10, 10).getContext('2d'); m.font = `${size}px ${fam}`;
+  const pad = Math.ceil(size * .25), gh = Math.ceil(size * 1.5), base = Math.ceil(size * 1.12);
+  for (const ch of str) {
+    const adv = m.measureText(ch).width;
+    if (ch !== ' ') {
+      const gw = Math.ceil(adv + pad * 2), a = mk(gw, gh), ax = a.getContext('2d');
+      ax.translate(gw / 2, base); ax.rotate(deg((r() - .5) * 5 * jf)); ax.scale(1 + (r() - .5) * .06 * jf, 1 + (r() - .5) * .1 * jf);
+      ax.font = `${size}px ${fam}`; ax.fillStyle = '#000'; ax.textAlign = 'center'; ax.fillText(ch, 0, (r() - .5) * size * .05 * jf);
+      const b = mk(gw, gh), bx = b.getContext('2d'); bx.filter = `blur(${Math.max(1, size / 70).toFixed(2)}px)`; bx.drawImage(a, 0, 0);
+      const id = bx.getImageData(0, 0, gw, gh), d = id.data, ox = Math.floor(r() * NS), oy = Math.floor(r() * NS);
+      const [cr, cg, cb] = [1, 3, 5].map(i => parseInt(color.substr(i, 2), 16));
+      for (let y = 0; y < gh; y++) for (let xx = 0; xx < gw; xx++) { const i = (y * gw + xx) * 4, al = d[i + 3] / 255;
+        const nz = NZ[((y + oy) % NS) * NS + ((xx + ox) % NS)]; const v = clamp((al + (nz - .5) * .5 - .5) * 9 + .5);
+        d[i] = cr; d[i + 1] = cg; d[i + 2] = cb; d[i + 3] = v * 255; }
+      bx.putImageData(id, 0, 0); glyphs.push({ cv: b, x: x + adv / 2, w: gw, base, rj: r() });
+    }
+    x += adv + track;
+  }
+  return { glyphs, width: x - track, size };
+}
+// draw a word: letters cut in one by one (pop + settle), wobble on twos, optional staggered cut-out
+function drawWord(T, x, y, t, tin, o = {}) {
+  const { stag = .035, align = 'left', tout = 99, stagOut = .02, shadow = .8, dur = .14 } = o;
+  const x0 = align === 'center' ? x - T.width / 2 : align === 'right' ? x - T.width : x;
+  const si = stepIx(t), n = T.glyphs.length;
+  T.glyphs.forEach((g, i) => {
+    const ti = tin + i * stag, to = tout + (o.outRev ? (n - 1 - i) : i) * stagOut; if (t < ti || t > to + .1) return;
+    const k = seg(t, ti, ti + dur), ko = seg(t, to, to + .1);
+    const sc = lerp(1.35, 1, eBack(k, 2.4)) * (1 - eIn(ko)); if (sc <= .01) return;
+    const jr = rng(si * 131 + i * 17 + (T.size | 0)); const jx = (jr() - .5) * 1.6, jy = (jr() - .5) * 1.6, ja = (jr() - .5) * deg(.8);
+    ctx.save(); ctx.translate(x0 + g.x + jx, y + jy - (1 - eOut(k)) * T.size * .12); ctx.rotate(ja + (1 - k) * deg((g.rj - .5) * 14)); ctx.scale(sc, sc);
+    if (shadow) { ctx.shadowColor = `rgba(0,0,0,${.3 * shadow})`; ctx.shadowBlur = 5; ctx.shadowOffsetX = 2; ctx.shadowOffsetY = 3; }
+    ctx.drawImage(g.cv, -g.w / 2, -g.base); ctx.restore();
+  });
+}
+
+// ── timeline (seconds, on a 120 BPM grid) ──
+const B = .5;
+const TL = {
+  barW: .25, barR: .5, barO: .75, halcyon: 1.0, presents: 1.45, barsOut: 1.85,
+  slab: 2.05, filmBy: 2.2, name: 2.3, aOut: 3.1, wipe: 3.2,
+  line: 3.55, lift0: 4.0, liftStep: .25, starring: 4.25, mara: 4.35, julian: 4.7, castOut: 5.6,
+  morph: 5.7, music: 6.35, marchetti: 6.45, musicOut: 7.2, collapse: 7.0, key: 7.1, flip: 7.5, zoom: 7.6, zoomEnd: 8.1,
+  title: 8.15, redBar: 8.75, release: 8.85, shut: 9.45, shutEnd: 9.85,
+};
+const NLIFT = 7;
+
+// ── shapes (built in ready) ──
+let S = {}, TX = {}, GRAIN;
+function build() {
+  buildNoise();
+  S.barW = roughRect(2900, 200, 11, 2.6); S.barR = roughRect(2900, 118, 12, 2.4); S.barO = roughRect(2900, 42, 13, 2);
+  S.slab = roughRect(150, 1700, 14, 3.2); S.wipe = roughRect(3200, 2600, 15, 4); S.wipeO = roughRect(3200, 60, 16, 3);
+  S.key = roughPoly(keyholePts(100), 17, 2.2, 6); S.full = new Path2D(); S.full.rect(-40000, -40000, 80000, 80000);
+  S.keyInv = new Path2D(); S.keyInv.addPath(S.full); S.keyInv.addPath(S.key);
+  S.redBar = roughRect(1240, 40, 18, 2.4); S.shutT = roughRect(3000, 1100, 19, 3.5); S.shutB = roughRect(3000, 1100, 20, 3.5);
+  S.ember = roughPoly(Array.from({ length: 24 }, (_, i) => [Math.cos(i / 24 * TAU) * 34, Math.sin(i / 24 * TAU) * 34]), 21, 2.4, 6);
+  TX.halcyon = makeText('HALCYON PICTURES', DISPLAY, 128, BLACK, 101, 6);
+  TX.presents = makeText('P R E S E N T S', SANS, 58, PAPER, 102, 4);
+  TX.filmBy = makeText('A  FILM  BY', SANS, 54, PAPER, 103, 6);
+  TX.name = makeText('OTTO BRENNAN', DISPLAY, 190, PAPER, 104, 4);
+  TX.starring = makeText('S T A R R I N G', SANS, 42, BLACK, 105, 3);
+  TX.mara = makeText('MARA VOSS', DISPLAY, 112, PAPER, 106, 3);
+  TX.julian = makeText('JULIAN CRANE', DISPLAY, 112, PAPER, 107, 3);
+  TX.music = makeText('M U S I C   B Y', SANS, 42, BLACK, 108, 3);
+  TX.marchetti = makeText('LEO MARCHETTI', DISPLAY, 104, PAPER, 109, 3);
+  TX.the = makeText('T H E', SANS, 64, BLACK, 110, 10);
+  TX.title = makeText('SPIRAL STAIR', DISPLAY, 250, BLACK, 111, 8);
+  TX.release = makeText('A  HALCYON  PICTURES  RELEASE', SANS, 38, BLACK, 112, 5);
+  // paper grain: fine tooth + low mottling + a few fibres, composited with soft-light
+  GRAIN = mk(W, H); const g = GRAIN.getContext('2d'), id = g.createImageData(W, H), d = id.data, r = rng(5);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 4;
+    const v = 128 + (r() - .5) * 46 + (NZ[((y >> 1) % NS) * NS + ((x >> 1) % NS)] - .5) * 36; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
+  g.putImageData(id, 0, 0);
+  for (let i = 0; i < 900; i++) { g.strokeStyle = r() < .5 ? 'rgba(255,255,255,.18)' : 'rgba(0,0,0,.16)'; g.lineWidth = .8;
+    const x = r() * W, y = r() * H, a = r() * TAU, l = 6 + r() * 22; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a + .6) * l * .5, y + Math.sin(a + .6) * l * .5, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+}
+
+// ── the paper strip: line → staircase → spiral ──
+const TREADS = [230, 170, 170, 170, 170, 170, 170, 470], RISE = 80, X0 = -50, YB = 862, NP = 520, STRIP_W = 40;
+const STAIR = (() => { const segs = []; let x = X0; TREADS.forEach((T, k) => { segs.push({ len: T, k, tread: true, x0: x }); x += T; if (k < NLIFT) segs.push({ len: RISE, k, tread: false, x0: x }); });
+  const L = segs.reduce((s, q) => s + q.len, 0), out = [];
+  for (let i = 0; i < NP; i++) { let a = i / (NP - 1) * L; let s = segs[0];
+    for (const q of segs) { s = q; if (a <= q.len) break; a -= q.len; }
+    out.push(s.tread ? { x: s.x0 + a, lv: s.k } : { x: s.x0, lv: s.k + a / s.len }); }
+  return out; })();
+const NW1 = noise1(31), NW2 = noise1(32);
+const liftAmt = (t, j) => eBack(seg(t, TL.lift0 + j * TL.liftStep, TL.lift0 + j * TL.liftStep + .2), 2.2);
+function stripPoints(t) {
+  const lifts = Array.from({ length: NLIFT }, (_, j) => liftAmt(t, j));
+  const lifted = lv => { const f = Math.floor(lv); let s = 0; for (let j = 0; j < Math.min(f, NLIFT); j++) s += lifts[j]; if (f < NLIFT) s += (lv - f) * lifts[f]; return s; };
+  const cx = 1310, cy = 540, rot = -1.7 * Math.max(0, t - TL.morph) - 4.5 * eIn(seg(t, TL.collapse, TL.collapse + .4));
+  const sc = 1 - eIn(seg(t, TL.collapse, TL.collapse + .38));
+  // morph in polar coordinates around the spiral's eye, so the strip visibly coils up instead of cross-fading
+  let prevA = null, off = 0;
+  return STAIR.map((p, i) => { const a = i / (NP - 1);
+    const sx = p.x, sy = YB - RISE * lifted(p.lv);
+    let ang = Math.atan2(sy - cy, sx - cx); if (prevA === null) off = Math.round((deg(150) + rot - ang) / TAU) * TAU; else { while (ang + off - prevA > Math.PI) off -= TAU; while (ang + off - prevA < -Math.PI) off += TAU; } ang += off; prevA = ang;
+    const ti = TL.morph + .25 * (1 - a), u = eInOut(seg(t, ti, ti + .62));
+    if (u <= 0) return [sx, sy];
+    const th = deg(150) + TAU * 3.15 * a + rot, rr = (32 + 440 * Math.pow(1 - a, .95)) * sc;
+    const r0 = Math.hypot(sx - cx, sy - cy), A = lerp(ang, th, u), Rr = lerp(r0, rr, u);
+    return [cx + Math.cos(A) * Rr, cy + Math.sin(A) * Rr]; });
+}
+function drawStrip(t) {
+  let P = stripPoints(t); const rev = seg(t, TL.line, TL.line + .32), nShow = Math.round(eOut(rev) * NP); if (nShow < 2) return;
+  P = P.slice(0, nShow); const n = P.length, dir = [];
+  for (let i = 0; i < n - 1; i++) { const dx = P[i + 1][0] - P[i][0], dy = P[i + 1][1] - P[i][1], l = Math.hypot(dx, dy); dir.push(l > .01 ? [dx / l, dy / l] : null); }
+  for (let i = 0; i < dir.length; i++) if (!dir[i]) dir[i] = i ? dir[i - 1] : [1, 0];
+  for (let i = dir.length - 1; i >= 0; i--) if (!dir[i]) dir[i] = dir[i + 1];
+  const sc = 1 - eIn(seg(t, TL.collapse, TL.collapse + .38)), w = STRIP_W / 2 * Math.max(.35, sc);
+  const Lp = [], Rp = [];
+  for (let i = 0; i < n; i++) { const a = dir[Math.max(0, i - 1)], b = dir[Math.min(dir.length - 1, i)];
+    const n1 = [-a[1], a[0]], n2 = [-b[1], b[0]]; let mx = n1[0] + n2[0], my = n1[1] + n2[1]; const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml;
+    const mi = 1 / Math.max(.4, mx * n2[0] + my * n2[1]); const s = i / (NP - 1) * 2300;
+    const wl = (w + 2.2 * (NW1(s / 30) + .4 * NW2(s / 6))) * mi, wr = (w + 2.2 * (NW2(s / 30 + 50) + .4 * NW1(s / 6 + 90))) * mi;
+    Lp.push([P[i][0] + mx * wl, P[i][1] + my * wl]); Rp.push([P[i][0] - mx * wr, P[i][1] - my * wr]); }
+  const p = new Path2D(); Lp.forEach(([x, y], i) => i ? p.lineTo(x, y) : p.moveTo(x, y)); for (let i = n - 1; i >= 0; i--) p.lineTo(Rp[i][0], Rp[i][1]); p.closePath();
+  paper(p, BLACK, 1.1);
+}
+
+// ── scenes ──
+function barMove(t, tin, tout, from, to) {   // slide along the bar's own axis: snap in with overshoot, anticipate then fly out
+  const ki = eBack(seg(t, tin, tin + .3), 1.6); let d = lerp(from, 0, ki);
+  const kA = seg(t, tout, tout + .1), kO = seg(t, tout + .1, tout + .4); d += -Math.sign(to) * 50 * Math.sin(kA * Math.PI / 2) * (1 - kO) + to * eIn(kO);
+  return d;
+}
+function sceneA(t) {
+  ctx.fillStyle = BLACK; ctx.fillRect(-60, -60, W + 120, H + 120);
+  // A2: red slab falls (behind the bars), then the director credit
+  if (t >= TL.slab - .05) {
+    ctx.save(); ctx.translate(430, 540); ctx.rotate(deg(11));
+    const k = eBack(seg(t, TL.slab, TL.slab + .32), 1.4); ctx.translate(0, lerp(-1800, 0, k)); paper(S.slab, RED);
+    ctx.translate(0, 270); ctx.scale(lerp(0, 1, eBack(seg(t, TL.slab + .3, TL.slab + .5), 2.5)) + 1e-4, 1); paper(S.ember, ORANGE); ctx.restore();
+    drawWord(TX.filmBy, 610, 470, t, TL.filmBy, { stag: .03, tout: TL.aOut, stagOut: .01 });
+    drawWord(TX.name, 600, 700, t, TL.name, { stag: .03, tout: TL.aOut, stagOut: .01 });
+  }
+  // A1: three angled bars on the off-beats, carrying the presenter credit
+  if (t < TL.barsOut + .5) {
+    ctx.save(); ctx.translate(960, 540); ctx.rotate(deg(-7));
+    const bars = [[S.barO, ORANGE, 190, TL.barO, -2900, 3000], [S.barR, RED, 40, TL.barR, 2900, -3000], [S.barW, PAPER, -150, TL.barW, -2900, 3000]];
+    const outT = [TL.barsOut + .1, TL.barsOut + .05, TL.barsOut];
+    bars.forEach(([p, col, y, tin, from, to], i) => { if (t < tin) return;
+      const d = barMove(t, tin, outT[i], from, to); ctx.save(); ctx.translate(d, y); paper(p, col, col === PAPER ? .6 : 1);
+      if (col === PAPER) drawWord(TX.halcyon, 0, 48, t, TL.halcyon, { align: 'center', stag: .035, shadow: .4 });
+      if (col === RED) drawWord(TX.presents, 0, 22, t, TL.presents, { align: 'center', stag: .03, shadow: .6 });
+      ctx.restore(); });
+    ctx.restore();
+  }
+}
+function sceneB(t) {
+  ctx.fillStyle = RED; ctx.fillRect(-60, -60, W + 120, H + 120);
+  drawWord(TX.starring, 1010, 736, t, TL.starring, { stag: .02, tout: TL.castOut, stagOut: .012, shadow: .5 });
+  drawWord(TX.mara, 1004, 862, t, TL.mara, { stag: .03, tout: TL.castOut + .05, stagOut: .012 });
+  drawWord(TX.julian, 1004, 984, t, TL.julian, { stag: .03, tout: TL.castOut + .1, stagOut: .012 });
+  drawWord(TX.music, 120, 470, t, TL.music, { stag: .02, tout: TL.musicOut, stagOut: .01, shadow: .5 });
+  drawWord(TX.marchetti, 114, 600, t, TL.marchetti, { stag: .025, tout: TL.musicOut + .05, stagOut: .01 });
+  drawStrip(t);
+  if (t >= TL.key) {   // the keyhole grows out of the collapsing spiral's eye
+    const k = eBack(seg(t, TL.key, TL.key + .36), 2.2), m = eInOut(seg(t, TL.key, TL.flip));
+    ctx.save(); ctx.translate(lerp(1310, 960, m), lerp(540, 470, m)); ctx.scale(k * 1.3 + 1e-4, k * 1.3 + 1e-4); paper(S.key, BLACK, 1.2); ctx.restore();
+  }
+}
+function sceneKey(t) {   // figure/ground flip: black sheet with a keyhole cut out of it, then we fly through
+  const z = seg(t, TL.zoom, TL.zoomEnd), zs = 1.3 * Math.pow(26, eIn(z)), m = eInOut(seg(t, TL.zoom, TL.zoomEnd));
+  sceneTitle(t);
+  ctx.save(); ctx.translate(lerp(960, 960, m), lerp(470, 560, m)); ctx.scale(zs, zs); paper(S.keyInv, BLACK, 1.2, 'evenodd'); ctx.restore();
+}
+function sceneTitle(t) {
+  ctx.fillStyle = PAPER; ctx.fillRect(-60, -60, W + 120, H + 120);
+  drawWord(TX.the, 960, 360, t, TL.title - .1, { align: 'center', stag: .05, shadow: .5 });
+  drawWord(TX.title, 960, 640, t, TL.title, { align: 'center', stag: .055, dur: .16 });
+  if (t >= TL.redBar) { ctx.save(); ctx.translate(lerp(-800, 960, eBack(seg(t, TL.redBar, TL.redBar + .3), 1.4)), 700); ctx.rotate(deg(-1.2)); paper(S.redBar, RED, .8); ctx.restore(); }
+  drawWord(TX.release, 960, 800, t, TL.release, { align: 'center', stag: .01, shadow: .4 });
+}
+function shutters(t) {
+  const k = eInOut(seg(t, TL.shut, TL.shutEnd)); if (k <= 0) return;
+  ctx.save(); ctx.translate(960, lerp(-620, 540 - 548, eBack(seg(t, TL.shut, TL.shutEnd), .7))); ctx.rotate(deg(-7)); paper(S.shutT, BLACK, 1.3); ctx.restore();
+  ctx.save(); ctx.translate(960, lerp(H + 620, 540 + 548, eBack(seg(t, TL.shut + .06, TL.shutEnd), .7))); ctx.rotate(deg(-7)); paper(S.shutB, BLACK, 1.3); ctx.restore();
+}
+
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = BLACK; ctx.fillRect(0, 0, W, H);
+  const si = stepIx(t), wr = rng(900 + si); ctx.save(); ctx.translate((wr() - .5) * 2.2, (wr() - .5) * 2.2);   // gate weave
+  if (t < TL.wipe + .45) sceneA(t);
+  if (t >= TL.wipe) {   // red panel wipe (angled, led by an orange strip) reveals scene B beneath it
+    const k = eInOut(seg(t, TL.wipe, TL.wipe + .42));
+    ctx.save(); ctx.beginPath(); ctx.save(); ctx.translate(lerp(3700, 960, k), 540); ctx.rotate(deg(10)); ctx.rect(-1600, -1300, 3200, 2600); ctx.restore(); ctx.clip();
+    if (t < TL.flip) sceneB(t); else if (t < TL.zoomEnd) sceneKey(t); else sceneTitle(t);
+    ctx.restore();
+    if (k < 1) { ctx.save(); ctx.translate(lerp(3700, 960, k), 540); ctx.rotate(deg(10)); ctx.translate(-1600, 0); ctx.save(); ctx.rotate(deg(90)); ctx.scale(1, 1.4); paper(S.wipeO, ORANGE); ctx.restore(); ctx.restore(); }
+  }
+  shutters(t);
+  ctx.restore();
+  ctx.globalCompositeOperation = 'soft-light'; ctx.globalAlpha = .55; ctx.drawImage(GRAIN, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  const vg = ctx.createRadialGradient(960, 540, 500, 960, 540, 1250); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.2)'); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  const fade = Math.max(1 - seg(t, 0, .2), seg(t, 9.86, 10)); if (fade > 0) { ctx.fillStyle = `rgba(10,8,7,${fade})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = (async () => {
+  await Promise.all([`100px ${DISPLAY}`, `600 100px ${SANS}`].map(f => document.fonts.load(f, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')));
+  await document.fonts.ready; build(); render(0);
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+// audio cue list (read by events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [];
+  [TL.barW, TL.barR, TL.barO].forEach((t, i) => ev.push({ t, k: 'slam', v: 1 - i * .15 }));
+  const letters = (T, t0, stag) => T.glyphs.forEach((_, i) => ev.push({ t: t0 + i * stag, k: 'snip' }));
+  letters(TX.halcyon, TL.halcyon, .035); letters(TX.presents, TL.presents, .03); letters(TX.filmBy, TL.filmBy, .03); letters(TX.name, TL.name, .03);
+  letters(TX.mara, TL.mara, .03); letters(TX.julian, TL.julian, .03); letters(TX.marchetti, TL.marchetti, .025); letters(TX.title, TL.title, .055);
+  ev.push({ t: TL.barsOut + .08, k: 'whoosh', d: .45 }, { t: TL.slab, k: 'slam', v: .9 }, { t: TL.wipe, k: 'whoosh', d: .5 }, { t: TL.line, k: 'rip', d: .32 });
+  for (let j = 0; j < NLIFT; j++) ev.push({ t: TL.lift0 + j * TL.liftStep, k: 'bongo', v: j });
+  ev.push({ t: TL.morph, k: 'whoosh', d: 1.0 }, { t: TL.collapse, k: 'whoosh', d: .45 }, { t: TL.flip, k: 'stab', v: .8 }, { t: TL.zoom, k: 'whoosh', d: .5 },
+    { t: TL.title, k: 'stab', v: 1 }, { t: TL.redBar, k: 'slam', v: .6 }, { t: TL.shut, k: 'whoosh', d: .45 }, { t: TL.shutEnd - .05, k: 'slam', v: 1 });
+  return ev.sort((a, b) => a.t - b.t);
+};
+</script>
+</body></html>
