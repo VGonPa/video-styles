@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Technical Cutaway</title>
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#e9edf2;overflow:hidden}canvas{display:block}</style>
+<!-- three.js r159 (MIT), vendored: no CDN at render time -->
+<script src="vendor/three.min.js"></script>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* ======================================================================
+ * Technical Cutaway: an invented scooter hub motor ("HX-10") as a clean
+ * studio 3D explainer. Procedural geometry only. Story:
+ *   rotate in -> housing turns translucent -> exploded view along the
+ *   axle -> colour-coded callouts -> coils fire in 3 phases and the
+ *   magnet ring chases the field -> reassemble -> wheel spins -> fade.
+ * Per frame: three.js PBR render (soft shadow, PMREM studio env) over a
+ * precomputed 2D backdrop, then a 2D overlay (callouts, flow arrows, type).
+ * Deterministic: every frame is a pure function of t (no RNG at all).
+ * ====================================================================== */
+const W = 1920, H = 1080, PI = Math.PI, TAU = 2 * PI;
+const clamp01 = x => Math.min(1, Math.max(0, x)), lerp = (a, b, u) => a + (b - a) * u;
+const sstep = (a, b, x) => { const u = clamp01((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+const easeInOut = x => { x = clamp01(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const easeOut = x => 1 - Math.pow(1 - clamp01(x), 3);
+const easeOutQ = x => 1 - Math.pow(1 - clamp01(x), 5);
+const backOut = (x, s = 1.4) => { x = clamp01(x) - 1; return 1 + (s + 1) * x * x * x + s * x * x; };
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+
+/* --------------------------------------------------------------- timeline */
+const T_GHOST = 1.75, T_EX = 2.95, T_LAB = 4.2, T_EN = 5.9, T_RE = 7.2, T_END = 8.3, T_FADE = 9.4;
+const STEPS = [[T_GHOST, 'Look inside'], [T_EX, 'Take apart'], [T_LAB, 'Name the parts'], [T_EN, 'Energize'], [T_RE, 'Reassemble']];
+
+/* rotor angle = integral of a smooth speed profile (rad/s), fixed-step so it is t-deterministic */
+const omega = t => 0.35 * sstep(T_LAB, T_LAB + 0.8, t) + 2.1 * sstep(T_EN, T_EN + 0.6, t) * (1 - 0.55 * sstep(T_RE - 0.1, T_RE + 0.5, t))
+  + 5.5 * sstep(T_RE + 1.1, T_END + 0.9, t);
+const rotorAngle = t => { let a = 0; const n = Math.ceil(t * 240); const h = t / Math.max(1, n); for (let i = 0; i < n; i++) a += omega((i + 0.5) * h) * h; return a; };
+const energy = t => sstep(T_EN - 0.1, T_EN + 0.35, t) * (1 - sstep(T_RE - 0.15, T_RE + 0.35, t));
+
+/* ------------------------------------------------------------- renderer */
+const glc = document.createElement('canvas'); glc.width = W; glc.height = H;
+const renderer = new THREE.WebGLRenderer({ canvas: glc, antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(1); renderer.setSize(W, H, false);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.VSMShadowMap;
+renderer.setClearColor(0x000000, 0);
+const out = document.getElementById('c'), octx = out.getContext('2d');
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, W / H, 0.5, 200);
+
+/* studio environment for reflections: grey room with three softboxes */
+function makeEnv() {
+  const es = new THREE.Scene();
+  es.add(new THREE.Mesh(new THREE.BoxGeometry(60, 30, 60), new THREE.MeshBasicMaterial({ color: new THREE.Color(0x6d7684), side: THREE.BackSide })));
+  const box = (w, h, pos, rot, c, k) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(k), side: THREE.DoubleSide }));
+    m.position.copy(pos); m.lookAt(0, 0, 0); if (rot) m.rotateZ(rot); es.add(m); };
+  box(26, 10, V3(0, 14, 4), 0, 0xffffff, 3.2);            // big overhead softbox
+  box(6, 18, V3(-22, 2, 10), 0, 0xfff1e0, 2.4);           // warm key strip
+  box(5, 16, V3(22, 3, -8), 0, 0xdbe8ff, 2.0);            // cool rim strip
+  box(40, 6, V3(0, -12, 0), 0, 0xc9ced6, 0.8);            // bounce floor
+  const pm = new THREE.PMREMGenerator(renderer);
+  return pm.fromScene(es, 0.03).texture;
+}
+scene.environment = makeEnv();
+
+/* lights */
+scene.add(new THREE.HemisphereLight(0xffffff, 0xaab3c0, 0.55));
+const key = new THREE.DirectionalLight(0xfff4e8, 2.2); key.position.set(-8, 16, 10); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -13, right: 13, top: 13, bottom: -13, near: 1, far: 50 });
+key.shadow.radius = 14; key.shadow.blurSamples = 20; key.shadow.bias = -0.0004; scene.add(key);
+const rim = new THREE.DirectionalLight(0xd8e6ff, 1.3); rim.position.set(10, 6, -12); scene.add(rim);
+const fill = new THREE.DirectionalLight(0xffffff, 0.45); fill.position.set(6, -2, 14); scene.add(fill);
+
+const FLOOR_Y = -4.75;
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.ShadowMaterial({ color: 0x2a3444, opacity: 0.22 }));
+floor.rotation.x = -PI / 2; floor.position.y = FLOOR_Y; floor.receiveShadow = true; scene.add(floor);
+
+/* ------------------------------------------------------------ materials */
+const COL = { cover: '#c9d1db', bearing: '#e3b34a', stator: '#6f87a8', magN: '#e0494a', magS: '#3f72d9', shell: '#b8c2ce', tire: '#2c3038',
+  steel: '#8d949d', copper: '#c8773a', A: '#f5a524', B: '#2fbf7a', C: '#9a6af0', accent: '#ff5a36', ink: '#1d2633' };
+const std = (c, metal, rough, extra = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: new THREE.Color(c), metalness: metal, roughness: rough, envMapIntensity: 1.0 }, extra));
+const ghostable = [];      // materials that fade to x-ray
+const edgeMats = [];       // their outline lines
+function ghostMat(c, metal, rough, extra) { const m = std(c, metal, rough, Object.assign({ transparent: true, side: THREE.DoubleSide }, extra)); ghostable.push(m); return m; }
+
+/* tire tread bump + colour texture (u = around, v = along profile, tread centred at v=.5) */
+function treadTex() {
+  const cv = document.createElement('canvas'); cv.width = 2048; cv.height = 256; const g = cv.getContext('2d');
+  g.fillStyle = '#808080'; g.fillRect(0, 0, 2048, 256);
+  g.fillStyle = '#303030'; for (const v of [0.43, 0.57]) g.fillRect(0, v * 256 - 3, 2048, 6);
+  g.strokeStyle = '#3a3a3a'; g.lineWidth = 5;
+  for (let i = 0; i < 72; i++) { const x = i * 2048 / 72;
+    g.beginPath(); g.moveTo(x, 0.36 * 256); g.lineTo(x + 14, 0.43 * 256); g.stroke();
+    g.beginPath(); g.moveTo(x + 14, 0.57 * 256); g.lineTo(x, 0.64 * 256); g.stroke();
+    g.beginPath(); g.moveTo(x + 6, 0.46 * 256); g.lineTo(x + 20, 0.54 * 256); g.stroke(); }
+  const t = new THREE.CanvasTexture(cv); t.wrapS = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace; t.anisotropy = 8; return t;
+}
+
+/* --------------------------------------------------------------- geometry */
+const lathe = (pts, seg = 128) => { const g = new THREE.LatheGeometry(pts.map(([r, z]) => new THREE.Vector2(r, z)), seg); g.rotateX(PI / 2); return g; };
+const motor = new THREE.Group(); scene.add(motor);
+const stack = new THREE.Group(); motor.add(stack);
+function withEdges(mesh, thr = 28, col = 0x3f5977) {
+  const lm = new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0, depthWrite: false });
+  const l = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, thr), lm); mesh.add(l); edgeMats.push(lm); return mesh;
+}
+const shade = m => { m.castShadow = true; return m; };   // only the floor receives (soft VSM contact shadow)
+
+/* parts: each is a group positioned along the axle (local z); `spin` groups turn with the rotor */
+const P = {};
+function part(name, z0, dz, spins) { const g = new THREE.Group(); g.position.z = z0; const s = new THREE.Group(); g.add(s); stack.add(g);
+  P[name] = { g, s, z0, dz, spins }; return s; }
+
+/* axle + phase wires (stationary) */
+{
+  const s = part('axle', 0, 0, false);
+  const ax = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 5.6, 40), std(COL.steel, 0.9, 0.28))); ax.rotation.x = PI / 2; s.add(ax);
+  for (const z of [-2.55, -2.35, -2.15, 2.15, 2.35, 2.55]) { const r = shade(new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.018, 6, 40), std('#6c737c', 0.9, 0.4))); r.position.z = z; s.add(r); }
+  P.wires = [];
+  [COL.A, COL.B, COL.C].forEach((c, i) => {
+    const a0 = i * TAU / 3, off = (u) => { const a = a0 + u * 5; return [0.09 * Math.cos(a), 0.09 * Math.sin(a)]; };
+    const pts = [];
+    for (let k = 0; k <= 24; k++) { const u = k / 24; let x, y, z;
+      if (u < 0.6) { z = lerp(-1.3, -7.6, u / 0.6); x = 0; y = 0; }
+      else { const w = (u - 0.6) / 0.4, ang = w * PI / 2; z = -7.6 - 1.6 * Math.sin(ang); y = -1.6 * (1 - Math.cos(ang)) - 2.2 * w * w; x = 0; }
+      const [ox, oy] = off(u); pts.push(V3(x + ox, y + oy, z)); }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const m = shade(new THREE.Mesh(new THREE.TubeGeometry(curve, 160, 0.075, 8), std(c, 0.1, 0.45))); s.add(m);
+    P.wires.push({ curve, c });
+  });
+  const plug = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.8, 24), std('#353b45', 0.2, 0.5)));
+  plug.position.copy(P.wires[0].curve.getPoint(1)).setX(0); plug.position.y -= 0.35; s.add(plug); P.plug = plug;
+}
+
+/* stator: laminated 12-tooth core + 12 wound coils */
+const NT = 12, STEM = 0.18, R_BACK = 1.32, R_SHOE = 2.24, R_TIP = 2.48, SHOE = 0.5;
+{
+  const s = part('stator', 0, 0, false);
+  const sh = new THREE.Shape();
+  const pt = (a, r, tt) => [r * Math.cos(a) - tt * Math.sin(a), r * Math.sin(a) + tt * Math.cos(a)];
+  const pts = [];
+  for (let k = 0; k < NT; k++) {
+    const a = k * TAU / NT;
+    pts.push(pt(a, R_BACK, -STEM), pt(a, R_SHOE, -STEM), pt(a, R_SHOE, -SHOE));
+    for (let j = 0; j <= 6; j++) { const aa = a + lerp(-SHOE, SHOE, j / 6) / R_TIP; pts.push([R_TIP * Math.cos(aa), R_TIP * Math.sin(aa)]); }
+    pts.push(pt(a, R_SHOE, SHOE), pt(a, R_SHOE, STEM), pt(a, R_BACK, STEM));
+    for (let j = 1; j < 6; j++) { const aa = lerp(a + STEM / R_BACK, a + TAU / NT - STEM / R_BACK, j / 6); pts.push([R_BACK * Math.cos(aa), R_BACK * Math.sin(aa)]); }
+  }
+  pts.forEach(([x, y], i) => i ? sh.lineTo(x, y) : sh.moveTo(x, y)); sh.closePath();
+  const hole = (cx, cy, r) => { const p = new THREE.Path(); p.absarc(cx, cy, r, 0, TAU, true); sh.holes.push(p); };
+  hole(0, 0, 0.3);
+  for (let k = 0; k < 6; k++) { const a = k * TAU / 6 + PI / 6; hole(0.82 * Math.cos(a), 0.82 * Math.sin(a), 0.17); }
+  const SL = 10, TH = 0.108, GAP = (1.2 - SL * TH) / (SL - 1);
+  const lg = new THREE.ExtrudeGeometry(sh, { depth: TH, bevelEnabled: false, curveSegments: 24 });
+  for (let i = 0; i < SL; i++) {
+    const m = shade(new THREE.Mesh(lg, std(i % 2 ? COL.stator : '#6a82a2', 0.55, 0.36)));
+    m.position.z = -0.6 + i * (TH + GAP); s.add(m);
+  }
+  // coil: one continuous two-layer winding around a tooth stem (x tangential, y radial, z axial)
+  class Coil extends THREE.Curve {
+    getPoint(u, tg = new THREE.Vector3()) {
+      const layer = u < 0.5 ? 0 : 1, lu = layer ? (u - 0.5) * 2 : u * 2, th = u * 14 * TAU;
+      const r = layer ? lerp(2.14, 1.43, lu) : lerp(1.43, 2.14, lu), off = 0.075 + layer * 0.085;
+      const c = Math.cos(th), sn = Math.sin(th), e = 0.28;
+      return tg.set((STEM + off) * Math.sign(c) * Math.pow(Math.abs(c), e), r, (0.6 + off) * Math.sign(sn) * Math.pow(Math.abs(sn), e));
+    }
+  }
+  const cg = new THREE.TubeGeometry(new Coil(), 1100, 0.043, 6, false);
+  P.coils = [];
+  for (let k = 0; k < NT; k++) {
+    const ph = k % 3, mat = std(COL.copper, 0.85, 0.32, { emissive: new THREE.Color(COL[['A', 'B', 'C'][ph]]), emissiveIntensity: 0 });
+    const m = shade(new THREE.Mesh(cg, mat)); m.rotation.z = k * TAU / NT - PI / 2; s.add(m); P.coils.push({ m, ph, a: k * TAU / NT });
+  }
+}
+
+/* magnet ring: 14 curved N/S tiles on a steel back-iron band (turns with rotor) */
+const NM = 14;
+{
+  const s = part('magnets', 0, 2.9, true);
+  for (let k = 0; k < NM; k++) {
+    const a0 = k * TAU / NM, hw = 0.4 * TAU / NM, sh = new THREE.Shape();
+    sh.absarc(0, 0, 2.84, a0 - hw, a0 + hw, false); sh.absarc(0, 0, 2.6, a0 + hw, a0 - hw, true); sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth: 1.14, bevelEnabled: true, bevelThickness: 0.025, bevelSize: 0.02, bevelSegments: 2, curveSegments: 10 });
+    g.translate(0, 0, -0.57);
+    s.add(shade(new THREE.Mesh(g, std(k % 2 ? COL.magS : COL.magN, 0.3, 0.3))));
+  }
+}
+
+/* bolts on a face */
+function bolts(s, z, dir, n = 6, r = 2.25) {
+  const g = new THREE.CylinderGeometry(0.13, 0.13, 0.1, 6); g.rotateX(PI / 2);
+  const mat = std('#7c848e', 0.9, 0.3);
+  for (let k = 0; k < n; k++) { const a = k * TAU / n + 0.3, m = shade(new THREE.Mesh(g, mat)); m.position.set(r * Math.cos(a), r * Math.sin(a), z + dir * 0.05); s.add(m); }
+}
+/* bearing: races + balls */
+function bearing(s) {
+  const race = std(COL.bearing, 0.85, 0.28, { side: THREE.DoubleSide });
+  s.add(shade(new THREE.Mesh(lathe([[0.52, -0.15], [0.64, -0.15], [0.64, 0.15], [0.52, 0.15]], 64), race)));
+  s.add(shade(new THREE.Mesh(lathe([[0.3, -0.15], [0.42, -0.15], [0.42, 0.15], [0.3, 0.15]], 64), race)));
+  const bg = new THREE.SphereGeometry(0.058, 16, 12), bm = std('#e9edf2', 1.0, 0.12);
+  for (let k = 0; k < 10; k++) { const a = k * TAU / 10, m = shade(new THREE.Mesh(bg, bm)); m.position.set(0.47 * Math.cos(a), 0.47 * Math.sin(a), 0); s.add(m); }
+}
+{ const s = part('bearingL', -1.05, -2.45, true); bearing(s); }
+
+/* left side cover (rotor side, turns with the wheel) */
+{
+  const s = part('cover', 0, -4.7, true);
+  const m = shade(new THREE.Mesh(lathe([[0.64, -0.92], [3.28, -0.92], [3.31, -1.0], [3.2, -1.1], [2.6, -1.16], [1.05, -1.2], [0.94, -1.44], [0.64, -1.44], [0.64, -0.92]]),
+    ghostMat(COL.cover, 0.8, 0.3))); s.add(withEdges(m, 20)); bolts(s, -1.17, -1);
+  P.cover.mesh = m;
+}
+/* rotor shell: drum with integrated right face, bearing inside */
+{
+  const s = part('shell', 0, 5.3, true);
+  const prof = [[3.02, -0.92], [3.3, -0.92], [3.43, -0.94], [3.43, -0.84], [3.3, -0.8], [3.3, 0.82], [3.43, 0.86], [3.43, 0.96], [3.3, 1.0], [3.2, 1.1],
+    [2.6, 1.16], [1.05, 1.2], [0.94, 1.44], [0.64, 1.44], [0.64, 0.95], [2.9, 0.93], [3.02, 0.82], [3.02, -0.92]];
+  const m = shade(new THREE.Mesh(lathe(prof), ghostMat(COL.shell, 0.82, 0.28))); s.add(withEdges(m, 20)); bolts(s, 1.17, 1);
+  const b = new THREE.Group(); b.position.z = 1.1; s.add(b); bearing(b);
+  P.shell.mesh = m;
+}
+/* tire */
+{
+  const s = part('tire', 0, 7.9, true);
+  const pts = []; const N = 72;
+  for (let i = 0; i <= N; i++) { const ph = PI + i / N * TAU, c = Math.cos(ph), sn = Math.sin(ph), e = 0.72;
+    pts.push([3.93 + 0.56 * Math.sign(c) * Math.pow(Math.abs(c), e), 1.02 * Math.sign(sn) * Math.pow(Math.abs(sn), e)]); }
+  const tex = treadTex();
+  const m = shade(new THREE.Mesh(lathe(pts, 180), ghostMat(COL.tire, 0.0, 0.78, { bumpMap: tex, bumpScale: 3.0 })));
+  s.add(withEdges(m, 35, 0x2f4058)); P.tire.mesh = m;
+}
+
+/* dash-dot centre line along the axle */
+const cl = (() => { const g = new THREE.BufferGeometry().setFromPoints([V3(0, 0, -9.5), V3(0, 0, 9.5)]);
+  const l = new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0x3f5977, dashSize: 0.55, gapSize: 0.22, transparent: true, opacity: 0 })); l.computeLineDistances(); stack.add(l); return l; })();
+
+/* explode factors: outer parts leave first, magnets last */
+const ORDER = { tire: 0, cover: 1, shell: 2, bearingL: 3, magnets: 4 };
+function explodeOf(name, t) {
+  const i = ORDER[name]; if (i === undefined) return 0;
+  const e = backOut((t - T_EX - i * 0.13) / 0.95, 1.1);
+  const r = sstep(0, 1, (t - T_RE - (4 - i) * 0.08) / 0.78);
+  return e * (1 - r);
+}
+const exAll = t => sstep(T_EX, T_EX + 1.2, t) * (1 - sstep(T_RE, T_RE + 1.2, t));
+
+/* ---------------------------------------------------------- scene state */
+let rotA = 0;
+function setScene(t) {
+  const intro = backOut(t / 1.9, 0.9);
+  const yaw = 0.62 - 2.7 * (1 - intro) + 0.5 * easeInOut((t - T_EX + 0.1) / 1.7) - 0.14 * easeInOut((t - T_EN + 0.2) / 1.2) - 0.36 * easeInOut((t - T_RE) / 1.4) + 0.025 * t;
+  motor.rotation.y = yaw;
+  motor.position.x = 5.5 * (1 - easeOutQ(t / 1.6)) + 4.3 * easeInOut((t - T_END + 0.4) / 1.2);
+  motor.position.y = 0.25;
+  stack.position.z = -1.45 * exAll(t);
+  rotA = rotorAngle(t);
+  for (const [n, p] of Object.entries(P)) {
+    if (!p || !p.g) continue;
+    p.g.position.z = p.z0 + p.dz * explodeOf(n, t);
+    if (p.spins) p.s.rotation.z = -rotA;
+  }
+  // x-ray: housing fades translucent, returns solid as it is taken apart
+  const gh = sstep(T_GHOST, T_GHOST + 0.8, t) * (1 - sstep(T_EX + 0.35, T_EX + 1.1, t));
+  for (const m of ghostable) { m.opacity = 1 - 0.86 * gh; m.depthWrite = gh < 0.5; }
+  for (const lm of edgeMats) lm.opacity = 0.7 * gh;
+  for (const n of ['cover', 'shell', 'tire']) P[n].mesh.castShadow = gh < 0.6;
+  cl.material.opacity = 0.55 * exAll(t);
+  // coils: 3-phase drive locked to the magnets (7 pole pairs)
+  const en = energy(t), el = 7 * rotA;
+  for (const c of P.coils) { const v = Math.max(0, Math.cos(el - c.ph * TAU / 3 - 3 * c.a)); c.m.material.emissiveIntensity = en * 2.6 * v * v; }
+  const dist = lerp(24, 29, easeInOut((t - T_EX + 0.1) / 1.6)) - 5 * easeInOut((t - T_RE) / 1.4) + (1 - easeOutQ(t / 2)) * 2.5 - 0.8 * sstep(T_END - 0.5, 10, t);
+  camera.position.set(0, 3.4 * dist / 21, dist); camera.lookAt(0, -0.15, 0);
+  scene.updateMatrixWorld(true);
+}
+
+/* ------------------------------------------------------------- 2D layers */
+const bg = document.createElement('canvas'); bg.width = W; bg.height = H;
+function makeBackdrop() {
+  const g = bg.getContext('2d');
+  const rg = g.createRadialGradient(W * 0.52, H * 0.42, 60, W * 0.52, H * 0.5, W * 0.72);
+  rg.addColorStop(0, '#f7f9fb'); rg.addColorStop(0.55, '#e7ebf0'); rg.addColorStop(1, '#c9d0d9');
+  g.fillStyle = rg; g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(40,60,90,0.10)';                    // faint engineering dot grid
+  for (let y = 30; y < H; y += 40) for (let x = 30; x < W; x += 40) g.fillRect(x - 1, y - 1, 2, 2);
+}
+const proj = (x, y, z) => { const v = stack.localToWorld(V3(x, y, z)).project(camera); return [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H]; };
+const projW = v => { const p = v.clone().project(camera); return [(p.x + 1) / 2 * W, (1 - p.y) / 2 * H]; };
+
+const FONT = "'Inter Tight'", MONO = "'IBM Plex Mono'";
+function title(t) {
+  const a = sstep(0.25, 0.9, t) * (1 - sstep(T_LAB - 0.5, T_LAB - 0.1, t));
+  if (a <= 0) return;
+  octx.save(); octx.globalAlpha = a; octx.textBaseline = 'alphabetic';
+  const x = 96, y = 118;
+  octx.fillStyle = COL.accent; octx.fillRect(x, y - 24, 36, 5);
+  octx.font = `500 21px ${MONO}`; octx.fillStyle = '#50607a'; octx.fillText('FIG. 3  ·  CUTAWAY VIEW', x + 50, y - 16);
+  octx.font = `700 60px ${FONT}`; octx.fillStyle = COL.ink;
+  const tt = 'Inside a Hub Motor', n = Math.round(tt.length * sstep(0.35, 1.25, t)); octx.fillText(tt.slice(0, n), x - 3, y + 50);
+  octx.globalAlpha = a * sstep(1.0, 1.5, t); octx.font = `400 25px ${FONT}`; octx.fillStyle = '#56647a';
+  octx.fillText('Model HX-10  ·  36 V scooter wheel, 350 W', x, y + 92);
+  octx.restore();
+}
+function steps(t) {
+  const a = sstep(T_GHOST - 0.4, T_GHOST, t) * (1 - sstep(T_END - 0.3, T_END + 0.2, t));
+  if (a <= 0) return;
+  octx.save(); octx.globalAlpha = a;
+  let x = 96; const y = 1000;
+  STEPS.forEach(([ts, name], i) => {
+    const on = sstep(ts - 0.15, ts + 0.2, t) * (i < 4 ? 1 - sstep(STEPS[i + 1][0] - 0.15, STEPS[i + 1][0] + 0.2, t) : 1), done = t > ts;
+    octx.font = `500 19px ${MONO}`; octx.fillStyle = on > 0.5 ? COL.accent : done ? '#50607a' : '#9aa6b6';
+    const num = String(i + 1).padStart(2, '0'); octx.fillText(num, x, y);
+    octx.font = `${on > 0.5 ? 650 : 500} 22px ${FONT}`; octx.fillStyle = on > 0.5 ? COL.ink : done ? '#56647a' : '#9aa6b6';
+    const nx = x + 34; octx.fillText(name, nx, y); const w = octx.measureText(name).width;
+    octx.fillStyle = 'rgba(80,96,122,0.25)'; octx.fillRect(x, y + 14, nx + w - x, 3);
+    const prog = i < 4 ? clamp01((t - ts) / (STEPS[i + 1][0] - ts)) : clamp01((t - ts) / (T_END - ts));
+    octx.fillStyle = COL.accent; octx.fillRect(x, y + 14, (nx + w - x) * prog, 3);
+    x = nx + w + 44;
+  });
+  octx.restore();
+}
+
+/* callouts: [part, local anchor (x, y, z-in-part), side, number, name, sub, colour, dx] */
+const LABELS = [
+  ['cover', [0, 3.3, -1.0], -1, 'Side cover', 'die-cast aluminium', COL.cover, -40],
+  ['bearingL', [0, -0.64, 0], 1, 'Bearing', 'lets the shell turn', COL.bearing, -30],
+  ['stator', [0, 2.48, 0.3], -1, 'Stator', '12 coils, fixed in place', COL.stator, 30],
+  ['magnets', [0, -2.84, 0], 1, 'Magnet ring', '14 poles, N and S', COL.magN, -30],
+  ['shell', [0, 3.43, 0.9], -1, 'Rotor shell', 'carries the magnets', COL.shell, 40],
+  ['tire', [0, -4.4, 0.4], 1, 'Tire', '10 x 2.5 in, pneumatic', COL.tire, 60],
+];
+function callouts(t) {
+  octx.save(); octx.lineCap = 'round';
+  LABELS.forEach(([pn, [lx, ly, lz], side, name, sub, col, dx], i) => {
+    const t0 = T_LAB + i * 0.2, grow = easeOut((t - t0) / 0.45), txt = easeOut((t - t0 - 0.25) / 0.4);
+    const back = sstep(T_RE - 0.45 + (5 - i) * 0.04, T_RE - 0.05 + (5 - i) * 0.04, t);
+    const g = grow * (1 - back), ta = txt * (1 - sstep(T_RE - 0.5, T_RE - 0.2, t));
+    if (g <= 0.001) return;
+    const p = P[pn], z = p.g.position.z + lz;
+    const [ax, ay] = proj(lx, ly, z);
+    const ey = side < 0 ? Math.min(ay - 80, 250) : Math.max(ay + 80, 830), dir = dx < 0 ? -1 : 1;
+    const ex = ax + dx, hx = ex + 36 * dir;
+    // leader: dot -> elbow -> short horizontal
+    const L1 = Math.hypot(ex - ax, ey - ay), L2 = Math.abs(hx - ex), Lt = L1 + L2, d = Lt * g;
+    octx.strokeStyle = COL.ink; octx.lineWidth = 2.2; octx.globalAlpha = 0.9;
+    octx.beginPath(); octx.moveTo(ax, ay);
+    if (d <= L1) octx.lineTo(lerp(ax, ex, d / L1), lerp(ay, ey, d / L1)); else { octx.lineTo(ex, ey); octx.lineTo(ex + dir * (d - L1), ey); }
+    octx.stroke();
+    octx.globalAlpha = 1; octx.fillStyle = '#ffffff'; octx.beginPath(); octx.arc(ax, ay, 7 * Math.min(1, g * 3), 0, TAU); octx.fill();
+    octx.fillStyle = COL.ink; octx.beginPath(); octx.arc(ax, ay, 3.6 * Math.min(1, g * 3), 0, TAU); octx.fill();
+    if (ta <= 0) return;
+    octx.globalAlpha = ta; const sh = (1 - ta) * 10 * dir;
+    octx.font = `650 31px ${FONT}`; const w1 = octx.measureText(name).width; octx.font = `500 18px ${MONO}`; const w2 = octx.measureText(sub).width;
+    const bw = 44 + Math.max(w1, w2) + 18, tx = dir > 0 ? hx + 10 : hx - 10 - bw;
+    octx.fillStyle = 'rgba(248,250,252,0.86)'; octx.beginPath(); octx.roundRect(tx - 6, ey - 26, bw + 6, 66, 8); octx.fill();
+    // number badge in the part colour
+    octx.fillStyle = col; octx.beginPath(); octx.arc(tx + 16, ey, 16, 0, TAU); octx.fill();
+    octx.strokeStyle = 'rgba(29,38,51,0.35)'; octx.lineWidth = 1.5; octx.stroke();
+    octx.fillStyle = (pn === 'tire' || pn === 'stator' || pn === 'magnets') ? '#ffffff' : COL.ink;
+    octx.font = `600 18px ${MONO}`; octx.textAlign = 'center'; octx.fillText(String(i + 1), tx + 16, ey + 6.5); octx.textAlign = 'left';
+    octx.fillStyle = COL.ink; octx.font = `650 31px ${FONT}`; octx.fillText(name, tx + 44 + sh, ey + 3);
+    octx.fillStyle = '#56647a'; octx.font = `500 18px ${MONO}`; octx.fillText(sub, tx + 44 + sh, ey + 30);
+  });
+  octx.restore();
+}
+/* arc arrow along a projected circle (stack frame, plane z) */
+function arcArrow(r, z, a0, a1, width, col, alpha) {
+  const n = 40, pts = [];
+  for (let i = 0; i <= n; i++) { const a = lerp(a0, a1, i / n); pts.push(proj(r * Math.cos(a), r * Math.sin(a), z)); }
+  octx.save(); octx.globalAlpha = alpha; octx.lineCap = 'round'; octx.lineJoin = 'round';
+  for (let i = 0; i < n - 2; i++) { const u = i / n; octx.strokeStyle = col; octx.lineWidth = width * (0.25 + 0.75 * u);
+    octx.beginPath(); octx.moveTo(...pts[i]); octx.lineTo(...pts[i + 1]); octx.stroke(); }
+  const [bx, by] = pts[n - 3], [tx, ty] = pts[n], ang = Math.atan2(ty - by, tx - bx), s = width * 2.4;
+  octx.fillStyle = col; octx.beginPath(); octx.moveTo(tx + Math.cos(ang) * s * 0.4, ty + Math.sin(ang) * s * 0.4);
+  octx.lineTo(bx + Math.cos(ang + PI / 2) * s * 0.6, by + Math.sin(ang + PI / 2) * s * 0.6);
+  octx.lineTo(bx - Math.cos(ang + PI / 2) * s * 0.6, by - Math.sin(ang + PI / 2) * s * 0.6); octx.closePath(); octx.fill();
+  octx.restore();
+}
+function flow(t) {
+  const en = energy(t); if (en <= 0.01) return;
+  // rotating field: three chasing arcs around the stator
+  const fa = -rotA * 1.0;
+  for (let k = 0; k < 3; k++) { const a0 = fa + k * TAU / 3; arcArrow(3.05, P.stator.g.position.z + 0.1, -a0, -a0 - 1.2, 9, COL.accent, 0.92 * en); }
+  // current: dashes flowing along the three phase wires, brightness following each phase
+  const el = 7 * rotA;
+  P.wires.forEach((w, i) => {
+    const lv = 0.35 + 0.65 * Math.max(0, Math.cos(el - i * TAU / 3));
+    octx.save(); octx.globalAlpha = en * lv;
+    for (let j = 0; j < 9; j++) {
+      const u = ((j / 9 + t * 0.55) % 1);
+      if (u < 0.05) continue;
+      const q = 1 - u, p0 = stack.localToWorld(w.curve.getPoint(Math.min(1, q + 0.02)).clone()), p1 = stack.localToWorld(w.curve.getPoint(q).clone());
+      const [x0, y0] = projW(p0), [x1, y1] = projW(p1); const ang = Math.atan2(y1 - y0, x1 - x0);
+      octx.fillStyle = w.c; octx.strokeStyle = '#ffffff'; octx.lineWidth = 2;
+      octx.beginPath(); octx.moveTo(x1 + 11 * Math.cos(ang), y1 + 11 * Math.sin(ang));
+      octx.lineTo(x1 + 9 * Math.cos(ang + 2.4), y1 + 9 * Math.sin(ang + 2.4)); octx.lineTo(x1 + 9 * Math.cos(ang - 2.4), y1 + 9 * Math.sin(ang - 2.4));
+      octx.closePath(); octx.stroke(); octx.fill();
+    }
+    octx.restore();
+  });
+  // caption + phase legend
+  const ca = sstep(T_EN + 0.2, T_EN + 0.6, t) * (1 - sstep(T_RE - 0.3, T_RE, t));
+  if (ca > 0) {
+    octx.save(); octx.globalAlpha = ca; octx.textAlign = 'center';
+    octx.font = `650 38px ${FONT}`; octx.fillStyle = COL.ink; octx.fillText('Coils fire in turn. The magnets chase the field.', W / 2, 112);
+    const lx = W / 2 - 150; ['A', 'B', 'C'].forEach((ph, i) => {
+      const x = lx + i * 110, el2 = Math.max(0, Math.cos(el - i * TAU / 3));
+      octx.fillStyle = COL[ph]; octx.globalAlpha = ca * (0.45 + 0.55 * el2); octx.fillRect(x - 34, 138, 18, 18);
+      octx.globalAlpha = ca; octx.fillStyle = '#50607a'; octx.font = `500 18px ${MONO}`; octx.textAlign = 'left'; octx.fillText('PHASE ' + ph, x - 10, 154); });
+    octx.restore();
+  }
+}
+function ending(t) {
+  const a = sstep(T_END, T_END + 0.5, t); if (a <= 0) return;
+  // spin arrow round the tire's visible face
+  const z = P.tire.g.position.z + 1.1, fa = -rotA * 0.25;
+  arcArrow(4.75, z, -fa + 1.9, -fa + 0.5, 8, COL.accent, 0.85 * sstep(T_END + 0.1, T_END + 0.6, t));
+  octx.save();
+  const a1 = easeOut((t - T_END - 0.1) / 0.5), a2 = easeOut((t - T_END - 0.45) / 0.5), x = 110, y = 500;
+  octx.globalAlpha = a1; octx.fillStyle = COL.accent; octx.fillRect(x, y - 92, 44 * a1, 6);
+  octx.fillStyle = COL.ink; octx.font = `700 66px ${FONT}`; octx.fillText('The axle never turns.', x - 3 + (1 - a1) * -20, y);
+  octx.globalAlpha = a2; octx.fillStyle = '#56647a'; octx.font = `400 38px ${FONT}`; octx.fillText('Everything around it does.', x + (1 - a2) * -20, y + 58);
+  octx.restore();
+}
+
+window.ready = (async () => {
+  await document.fonts.load(`700 60px ${FONT}`, 'Inside a Hub Motor');
+  await document.fonts.load(`500 20px ${MONO}`, 'FIG. 3 PHASE ABC 0123456789');
+  await document.fonts.ready;
+  makeBackdrop();
+  setScene(0); renderer.render(scene, camera); renderer.getContext().finish();
+})();
+
+window.draw = ({ t }) => {
+  setScene(t); renderer.render(scene, camera);
+  const fin = 1 - sstep(T_FADE, 9.95, t), fadeIn = sstep(0, 0.45, t);
+  octx.globalAlpha = 1; octx.drawImage(bg, 0, 0);
+  octx.globalAlpha = fin * fadeIn; octx.drawImage(glc, 0, 0); octx.globalAlpha = 1;
+  // overlay drawn onto a temporary layer so the whole overlay fades together at the end
+  octx.save(); octx.globalAlpha = 1;
+  if (fin > 0) { callouts(t); flow(t); ending(t); }
+  title(t); steps(t);
+  octx.restore();
+  if (fin < 1) { octx.globalAlpha = 1 - fin; octx.drawImage(bg, 0, 0); octx.globalAlpha = 1; }
+  return out.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+
+window.events = () => [
+  { k: 'whoosh', t: 0.05 },
+  { k: 'ghost', t: T_GHOST },
+  ...Object.entries(ORDER).map(([n, i]) => ({ k: 'slide', t: T_EX + i * 0.13, i })),
+  ...LABELS.map((l, i) => ({ k: 'tick', t: T_LAB + i * 0.2 + 0.25, i })),
+  { k: 'hum', t: T_EN - 0.1, d: T_RE + 0.4 - T_EN },
+  ...Object.entries(ORDER).map(([n, i]) => ({ k: 'clunk', t: T_RE + (4 - i) * 0.08 + 0.74, i })),
+  { k: 'spin', t: T_RE + 1.1 },
+  { k: 'end', t: T_END },
+];
+</script>
+</body>
+</html>
