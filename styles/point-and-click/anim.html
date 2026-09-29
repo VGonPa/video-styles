@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── Point-and-Click Adventure · "The Damp Anchor" ─────────────────────────────────────────
+// Early-90s painted-pixel adventure game. Everything is drawn on a 320×200 virtual screen and
+// enlarged 5× with nearest neighbour (1600×1000, centred in the 1920×1080 frame like a monitor).
+// Backgrounds are "painted" as continuous values on colour ramps, then ordered-dithered (4×4
+// Bayer) into a fixed palette, like hand-dithered VGA art. Scene area 320×148, inventory strip
+// (items only, no verb bar) 320×52. Speech floats above each speaker in their own colour.
+// Harbour tavern at dusk (iris in) → CUT → tavern interior: parrot exchange, damp map, the fish
+// lever, secret passage → iris out/in → moonlit beach, "YOU ARE HERE" → iris out to black.
+const W = 1920, H = 1080, VW = 320, VH = 200, SC = 5, OX = 160, OY = 40, SH = 148, DUR = 10;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled = false;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').imageSmoothingEnabled = false; return c; };
+const VC = mk(VW, VH), V = VC.getContext('2d', { willReadFrequently: true });
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, f) => a + (b - a) * f;
+const eio = x => x < 0.5 ? 2 * x * x : 1 - 2 * (1 - x) * (1 - x);
+const eob = x => { const c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const R = Math.round, F = Math.floor;
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash = (x, y, s = 0) => { let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(s | 0, 2147483647); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; };
+const sm = x => x * x * (3 - 2 * x);
+function vn(x, y, s = 0) { const xi = F(x), yi = F(y), fx = sm(x - xi), fy = sm(y - yi);
+  return lerp(lerp(hash(xi, yi, s), hash(xi + 1, yi, s), fx), lerp(hash(xi, yi + 1, s), hash(xi + 1, yi + 1, s), fx), fy); }
+const fbm = (x, y, s, o = 3) => { let a = 0, w = 0.5, n = 0; for (let i = 0; i < o; i++) { a += w * vn(x, y, s + i * 17); n += w; x *= 2.03; y *= 2.03; w *= 0.5; } return a / n; };
+
+// ── palette: colour ramps (dark → light). Painted values dither between neighbouring entries ──
+const RAMPS = {
+  sky:     ['#0e0a24', '#1c1240', '#2e1856', '#471f66', '#66266e', '#8a2f6e', '#b03d66', '#d4545a', '#ec7a4c', '#f8a64c', '#fcd070'],
+  night:   ['#04050e', '#080c1e', '#0d1430', '#131d42', '#1a2854', '#233668', '#2e467c', '#3d5a92', '#5474aa', '#7896c4', '#a8c0e0', '#dce8f8'],
+  sea:     ['#050818', '#08102a', '#0c1a3c', '#12264e', '#183460', '#1f4474', '#2a5888', '#3c709e', '#5a8cb4', '#86b0cc'],
+  wood:    ['#0e0605', '#1a0c08', '#28130c', '#381b10', '#4a2414', '#5e2e18', '#74391c', '#8c4722', '#a6582a', '#c06e34', '#d88a44', '#eca858', '#f8c878'],
+  stone:   ['#0a0a12', '#12121c', '#1c1c2a', '#272738', '#343448', '#434358', '#55556a', '#6a6a80', '#828298', '#9e9eb2'],
+  plaster: ['#1e1420', '#2e1e2c', '#43293a', '#5a3648', '#744656', '#8e5a64', '#aa7272', '#c48e84', '#dcae9c', '#eed0b8'],
+  glow:    ['#2a0e06', '#4a1a08', '#6e2a0a', '#96400e', '#bc5a14', '#dc7a1e', '#f09c2e', '#f8bc4a', '#fcd670', '#fdeaa0', '#fff8dc'],
+  green:   ['#06120a', '#0c2212', '#14341a', '#1c4a22', '#26622a', '#327c32', '#44983a', '#5cb444', '#80cc58', '#b0e478'],
+  red:     ['#1a0406', '#34080c', '#520e12', '#741618', '#98221e', '#bc3424', '#de4e2c', '#f47a40'],
+  sand:    ['#0a0c1c', '#12162a', '#1a203a', '#242c4a', '#2e385a', '#3a466a', '#48567c', '#58688e', '#6c7ea2', '#8496b6', '#a2b2cc'],
+  moon:    ['#8aa4cc', '#aac0e0', '#c8d8f0', '#e2ecfa', '#fbfdff'],
+};
+const rgb = h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16));
+const RN = Object.keys(RAMPS), RID = {}; RN.forEach((k, i) => RID[k] = i);
+const RRGB = RN.map(k => RAMPS[k].map(rgb));
+const col = (r, i) => RAMPS[r][clamp(R(i), 0, RAMPS[r].length - 1)];
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
+
+// ── painter: per-pixel (ramp, value) buffer → ordered dither ──
+const MK = mk(VW, VH), M = MK.getContext('2d', { willReadFrequently: true });
+class Paint {
+  constructor(w, h) { this.w = w; this.h = h; this.r = new Int16Array(w * h).fill(-1); this.v = new Float32Array(w * h); }
+  set(x, y, r, v) { x = R(x); y = R(y); if (x < 0 || y < 0 || x >= this.w || y >= this.h) return; const i = y * this.w + x; this.r[i] = RID[r]; this.v[i] = v; }
+  rect(x0, y0, w, h, r, f) { for (let y = R(y0); y < R(y0 + h); y++) for (let x = R(x0); x < R(x0 + w); x++) this.set(x, y, r, typeof f === 'function' ? f(x, y) : f); }
+  shape(path, r, f) {
+    M.clearRect(0, 0, VW, VH); M.fillStyle = '#fff'; M.beginPath(); path(M); M.fill();
+    const d = M.getImageData(0, 0, this.w, this.h).data;
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) if (d[(y * VW + x) * 4 + 3] > 127) this.set(x, y, r, typeof f === 'function' ? f(x, y) : f);
+  }
+  line(x0, y0, x1, y1, r, v) { const n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))); for (let k = 0; k <= n; k++) { const f = n ? k / n : 0; this.set(lerp(x0, x1, f), lerp(y0, y1, f), r, v); } }
+  light(cx, cy, rad, amt, only) { const ids = only ? only.map(k => RID[k]) : null;
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) { const i = y * this.w + x; if (this.r[i] < 0 || (ids && !ids.includes(this.r[i]))) continue;
+      const d = Math.hypot(x - cx, (y - cy) * 1.1) / rad; if (d < 1) this.v[i] += amt * (1 - d) * (1 - d); } }
+  canvas() {
+    const c = mk(this.w, this.h), x = c.getContext('2d'), id = x.createImageData(this.w, this.h), d = id.data;
+    for (let y = 0; y < this.h; y++) for (let X = 0; X < this.w; X++) { const i = y * this.w + X, r = this.r[i]; if (r < 0) continue;
+      const rp = RRGB[r], v = clamp(this.v[i], 0, rp.length - 1); let k = F(v); if (v - k > BAYER[(y & 3) * 4 + (X & 3)]) k++; k = Math.min(k, rp.length - 1);
+      const c3 = rp[k]; d[i * 4] = c3[0]; d[i * 4 + 1] = c3[1]; d[i * 4 + 2] = c3[2]; d[i * 4 + 3] = 255; }
+    x.putImageData(id, 0, 0); return c;
+  }
+}
+const poly = pts => c => { c.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]); c.closePath(); };
+const ell = (cx, cy, rx, ry) => c => c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+const fill = (x, y, w, h, c) => { V.fillStyle = c; V.fillRect(R(x), R(y), w, h); };
+
+// ── text: Tiny5 at 8 px, thresholded to hard pixels, doubled, with a 1-px dark outline ──
+const TXC = {};
+function textImg(s, c, sc = 2) {
+  const key = s + '|' + c + '|' + sc; if (TXC[key]) return TXC[key];
+  const b = mk(4, 4).getContext('2d'); b.font = '8px Tiny5'; const w = Math.ceil(b.measureText(s).width) + 1, h = 10;
+  const mask = (hex) => { const cc = mk(w, h), x = cc.getContext('2d'); x.font = '8px Tiny5'; x.textBaseline = 'top'; x.fillStyle = '#fff'; x.fillText(s, 0, 0);
+    const d = x.getImageData(0, 0, w, h), [r, g, bb] = rgb(hex); for (let i = 0; i < d.data.length; i += 4) { const on = d.data[i + 3] > 110; d.data[i] = r; d.data[i + 1] = g; d.data[i + 2] = bb; d.data[i + 3] = on ? 255 : 0; }
+    x.putImageData(d, 0, 0); return cc; };
+  const fg = mask(c), bk = mask('#0a0610'), o = mk(w * sc + 2, h * sc + 2), x = o.getContext('2d'); x.imageSmoothingEnabled = false;
+  for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]) x.drawImage(bk, 1 + dx, 1 + dy, w * sc, h * sc);
+  x.drawImage(fg, 1, 1, w * sc, h * sc); o.tw = w * sc; return TXC[key] = o;
+}
+// speech above a speaker: lines centred on cx, last line's bottom at y; clamped to the scene
+function say(lines, cx, y, c) {
+  const imgs = lines.map(s => textImg(s, c)), lh = 15, top = clamp(y - lines.length * lh, 2, SH);
+  imgs.forEach((im, i) => { const x = clamp(R(cx - im.tw / 2), 3, VW - im.width - 3); V.drawImage(im, x, top + i * lh); });
+}
+const COL = { hero: '#fcfcf4', parrot: '#7ce860', label: '#f8d470', sign: '#fcd670' };
+
+// ═════════════════════════════════ BACKGROUNDS ═════════════════════════════════
+// Scene A: the harbour tavern at dusk
+function buildExt() {
+  const P = new Paint(VW, SH);
+  P.rect(0, 0, VW, 106, 'sky', (x, y) => { let v = 0.4 + y / 104 * 8.4; const c = fbm(x / 70, y / 7, 11, 3); v -= Math.max(0, c - 0.5) * 7 * (y < 86 ? 1 : 0.3);
+    v += 2.4 * Math.exp(-((x - 72) ** 2) / 2600 - ((y - 104) ** 2) / 260); return v; });
+  // lit cloud bellies
+  P.rect(0, 20, VW, 70, 'sky', (x, y) => { const c = fbm(x / 70, y / 7, 11, 3), c2 = fbm(x / 70, (y + 1.5) / 7, 11, 3); const base = 0.4 + y / 104 * 8.4;
+    if (c > 0.5 && c2 <= 0.5 + 0.02) return base + 1.6; return base - Math.max(0, c - 0.5) * 7; });
+  // distant headland
+  for (let x = 0; x < 175; x++) { const hy = R(95 - 7 * vn(x / 38, 0, 3) - 3 * vn(x / 11, 1, 5)); P.rect(x, hy, 1, 106 - hy, 'sky', (X, Y) => 1.4 + (Y - hy) * 0.05 + (Y === hy ? 1.2 : 0)); }
+  // sea with the sunset's reflection
+  P.rect(0, 102, VW, 46, 'sea', (x, y) => 2.4 + (y - 102) * 0.03 + 0.8 * Math.sin(y * 1.9 + fbm(x / 18, y / 2, 7) * 6));
+  for (let y = 103; y < 148; y++) for (let x = 20; x < 130; x++) { const refl = Math.exp(-((x - 72) ** 2) / (120 + (y - 102) * 30)); const s = vn(x / 6, y * 1.3, 9);
+    if (refl * s > 0.34) P.set(x, y, 'sky', 6.5 + refl * 3); }
+  // moored sloop
+  P.shape(poly([[4, 104], [100, 104], [92, 118], [14, 118]]), 'wood', (x, y) => 1.2 + (y === 104 || y === 105 ? 2.4 : 0) + (x < 20 ? 0.8 : 0));
+  P.rect(8, 100, 88, 4, 'wood', (x, y) => y === 100 ? 2.6 : 1.4);
+  P.rect(52, 14, 2, 88, 'wood', (x, y) => x === 52 ? 2.6 : 1.1);
+  P.rect(30, 34, 46, 3, 'wood', 1.3); P.shape(poly([[30, 37], [76, 37], [70, 44], [36, 44]]), 'plaster', (x, y) => 4 + (y === 37 ? 2 : 0) - (x > 60 ? 1 : 0));
+  P.line(53, 14, 4, 102, 'wood', 0.6); P.line(53, 14, 100, 102, 'wood', 0.6); P.line(53, 22, 100, 98, 'wood', 0.6);
+  for (let x = 14; x < 92; x++) if (hash(x, 3, 3) > 0.35) P.set(x, 119 + (x % 3 === 0 ? 1 : 0), 'sea', 1);
+  // tavern roof (slate)
+  P.shape(poly([[148, 40], [238, 2], [328, 40]]), 'stone', (x, y) => 2.2 + ((y >> 2) % 2) * 0.7 + fbm(x / 3 + (y >> 2) * 7, y, 21, 2) * 1.4 - (y > 36 ? 1.2 : 0) + Math.max(0, 1 - Math.abs(x - 238 + (y - 2) * 2.4) / 3) * 1.5);
+  P.rect(286, 4, 16, 22, 'stone', (x, y) => 3 + (x === 286 ? 1.8 : 0) + ((y % 5 === 0) ? -1 : 0) + fbm(x / 2, y / 2, 4, 2)); P.rect(284, 2, 20, 3, 'stone', 4.2);
+  // plaster wall + timber frame
+  P.rect(156, 38, 164, 86, 'plaster', (x, y) => 3.6 + fbm(x / 6, y / 6, 31, 3) * 1.6 - (y - 38) * 0.012 - (x > 300 ? 0.8 : 0));
+  const beam = (x, y, w, h) => P.rect(x, y, w, h, 'wood', (X, Y) => 1.8 + fbm(X / 2, Y / 8, 40, 2) * 1.2 + (Y === y ? 1.4 : 0) + (X === x ? 0.8 : 0));
+  beam(156, 38, 164, 3); beam(156, 78, 164, 3); beam(156, 120, 164, 4); beam(156, 38, 4, 86); beam(210, 38, 3, 86); beam(262, 38, 3, 86); beam(316, 38, 4, 86);
+  P.line(160, 81, 210, 119, 'wood', 2); P.line(161, 81, 211, 119, 'wood', 2.4); P.line(265, 81, 316, 119, 'wood', 2); P.line(266, 81, 317, 119, 'wood', 2.4);
+  // window glow
+  P.rect(166, 50, 32, 24, 'wood', 1); P.rect(168, 52, 28, 20, 'glow', (x, y) => 5.4 + fbm(x / 4, y / 4, 50, 2) * 2 - (y - 52) * 0.05);
+  P.rect(181, 52, 2, 20, 'wood', 1.6); P.rect(168, 61, 28, 2, 'wood', 1.6); P.rect(164, 74, 36, 3, 'wood', 3.6);
+  // sign board (text drawn at runtime)
+  P.rect(204, 43, 72, 14, 'wood', (x, y) => (x === 204 || x === 275 || y === 43 || y === 56) ? 1.4 : 4.4 + fbm(x / 9, y / 2, 60, 2) * 1.5);
+  // doorway (interior glow, the door itself is drawn at runtime)
+  P.rect(222, 80, 32, 44, 'wood', (x, y) => 1.2 + (x === 222 || y === 80 ? 1.4 : 0));
+  P.rect(225, 83, 26, 41, 'glow', (x, y) => 2.2 + (y - 83) * 0.06 + 2.4 * Math.exp(-((x - 238) ** 2) / 60));
+  // lantern bracket
+  P.rect(258, 69, 10, 2, 'stone', 1.4); P.rect(265, 71, 2, 2, 'stone', 1.4);
+  // pier deck
+  const rows = [122, 125, 129, 134, 140, 147];
+  P.rect(0, 122, VW, 26, 'wood', (x, y) => { const k = rows.findIndex((r, i) => y >= r && y < (rows[i + 1] || 149)); const r0 = rows[k];
+    let v = 3.0 + (y - 122) * 0.06 + fbm(x / 14, y, 70 + k, 2) * 1.4; if (y === r0) v -= 1.6; if (y === 122) v += 2.4;
+    if ((x + k * 37) % 46 === 0) v -= 1.8; return v; });
+  // crates + bollard
+  const crate = (x, y, w, h) => { P.rect(x, y, w, h, 'wood', (X, Y) => 3.4 + fbm(X / 2, Y / 6, 80, 2) + ((X - x) % 7 === 0 ? -1.3 : 0) + (Y === y ? 2 : 0) + (X === x ? 1.2 : 0)); P.line(x, y, x + w - 1, y + h - 1, 'wood', 2.4); };
+  crate(126, 106, 18, 18); crate(142, 112, 14, 12); crate(130, 94, 12, 12);
+  P.rect(104, 112, 7, 12, 'stone', (x, y) => 2.6 + (x === 104 ? 2 : 0) + (y === 112 ? 1.4 : 0)); P.rect(102, 110, 11, 3, 'stone', 3.4);
+  // lights
+  P.light(263, 80, 44, 2.6, ['plaster', 'wood', 'stone']); P.light(182, 62, 36, 1.6, ['plaster', 'wood']); P.light(238, 128, 26, 2.2, ['wood']); P.light(182, 126, 22, 1.2, ['wood']);
+  return P.canvas();
+}
+const EXT_GLINTS = (() => { const r = rng(7), g = []; for (let i = 0; i < 70; i++) { const y = 103 + F(r() * 17), x = F(r() * 156); if (hash(x, y, 2) < 0.4 || (x > 2 && x < 102 && y > 99 && y < 121) || (x > 98 && y > 108)) continue; g.push({ x, y, l: 2 + F(r() * 5), p: r() * 6 }); } return g; })();
+
+// Scene B: inside the tavern
+function buildInt() {
+  const P = new Paint(VW, SH);
+  P.rect(0, 0, VW, 124, 'wood', (x, y) => { let v = 2.6 + fbm(x / 3, y / 26, 101, 3) * 1.4 - ((x - 160) / 180) ** 2 * 1.6 - Math.max(0, 40 - y) * 0.02; if (x % 13 === 0) v -= 1.2; if (x % 13 === 1) v += 0.5; return v; });
+  // ceiling beam + posts
+  P.rect(0, 0, VW, 9, 'wood', (x, y) => 1.4 + fbm(x / 4, y, 102, 2) + (y === 8 ? 1.6 : 0));
+  const post = x0 => P.rect(x0, 0, 7, 124, 'wood', (x, y) => 2.2 + (x === x0 ? 1.6 : 0) + (x === x0 + 6 ? -1 : 0) + fbm(x, y / 10, 103, 2));
+  post(52); post(236);
+  // skirting + floor
+  P.rect(0, 119, VW, 5, 'wood', (x, y) => 1.4 + (y === 119 ? 1.2 : 0));
+  const rows = [124, 126, 129, 133, 138, 144];
+  P.rect(0, 124, VW, 24, 'wood', (x, y) => { const k = rows.findIndex((r, i) => y >= r && y < (rows[i + 1] || 149)); let v = 2.8 + (y - 124) * 0.05 + fbm(x / 16, y, 110 + k, 2) * 1.3;
+    if (y === rows[k]) v -= 1.5; if ((x + k * 29) % 52 === 0) v -= 1.4; return v; });
+  // entrance: dusk outside, open door panel
+  P.rect(12, 62, 32, 58, 'wood', 1);
+  P.rect(14, 64, 28, 56, 'sky', (x, y) => 2.6 + (y - 64) * 0.1);
+  P.rect(14, 100, 28, 12, 'sea', (x, y) => 2.8 + 0.8 * Math.sin(y * 2 + x * 0.4));
+  P.rect(14, 112, 28, 8, 'wood', (x, y) => 3.2 + (y === 112 ? 1.6 : 0));
+  P.shape(poly([[44, 62], [52, 66], [52, 118], [44, 120]]), 'wood', (x, y) => 2.6 + (x === 44 ? 1.2 : 0) + ((y - 62) % 11 === 0 ? -1 : 0));
+  // porthole
+  P.shape(ell(76, 56, 12, 12), 'glow', (x, y) => 3.2 + ((y - 56) < -(x - 76) ? 1.4 : 0));
+  P.shape(ell(76, 56, 9, 9), 'night', (x, y) => 3 + (y - 47) * 0.22 + (Math.hypot(x - 80, y - 51) < 2.2 ? 5 : 0));
+  for (let a = 0; a < 8; a++) P.set(76 + Math.cos(a * 0.785) * 10.6, 56 + Math.sin(a * 0.785) * 10.6, 'glow', 7);
+  // chalk slate
+  P.rect(100, 44, 30, 20, 'wood', 1.6); P.rect(102, 46, 26, 16, 'stone', (x, y) => 1.6 + fbm(x / 3, y / 3, 120, 2));
+  // bar shelf + bottles
+  const bot = rng(31);
+  for (const sy of [44, 68]) { P.rect(246, sy, 74, 3, 'wood', (x, y) => y === sy ? 5.2 : 2.4);
+    for (let x = 250; x < 314; x += 7 + F(bot() * 3)) { const r = ['green', 'glow', 'red', 'green', 'sea'][F(bot() * 5)], h = 10 + F(bot() * 5), base = r === 'glow' ? 2 : 2.5;
+      P.rect(x, sy - h + 3, 5, h - 3, r, (X, Y) => base + (X === x + 1 ? 3 : 0) + (X === x + 4 ? -1 : 0)); P.rect(x + 1, sy - h, 3, 3, r, base + 0.6); P.rect(x + 1, sy - h - 1, 3, 1, 'wood', 4); } }
+  // bar counter
+  P.rect(238, 96, 82, 5, 'wood', (x, y) => y === 96 ? 8.5 : 6 - (y - 96) * 0.8 + fbm(x / 8, y, 130, 2));
+  P.rect(242, 101, 78, 33, 'wood', (x, y) => { let v = 3.2 + fbm(x / 3, y / 12, 131, 2); const px = (x - 244) % 19, py = y - 105;
+    if (px >= 2 && px <= 15 && py >= 0 && py <= 22) { v -= 1.2; if (px === 2 || py === 0) v -= 0.8; if (px === 15 || py === 22) v += 1.4; } if (y >= 130) v -= 1.2; return v; });
+  // parrot perch
+  P.rect(282, 84, 2, 12, 'wood', (x, y) => x === 282 ? 5 : 3); P.rect(272, 84, 22, 2, 'wood', (x, y) => y === 84 ? 6.5 : 3.6);
+  P.rect(278, 94, 10, 2, 'wood', 4);
+  // barrel
+  P.shape(poly([[104, 101], [126, 101], [128, 112], [126, 124], [104, 124], [102, 112]]), 'wood', (x, y) => 3.6 + 2 * Math.cos((x - 115) / 13 * 1.5) + ((x - 102) % 5 === 0 ? -0.8 : 0) + fbm(x, y / 6, 140, 2));
+  for (const hy of [104, 112, 120]) P.rect(103, hy, 24, 2, 'stone', (x, y) => 3.2 + 2 * Math.cos((x - 115) / 13 * 1.5) + (y === hy ? 1 : 0));
+  P.shape(ell(115, 101, 11, 2.5), 'wood', (x, y) => 5.4 + fbm(x / 3, y, 141, 2));
+  // fish plaque
+  P.shape(poly([[143, 86], [148, 83], [174, 83], [179, 86], [179, 98], [174, 101], [148, 101], [143, 98]]), 'wood', (x, y) => 5 + (y === 83 || x === 143 ? 2 : 0) + (y === 101 || x === 179 ? -2 : 0) + fbm(x / 6, y / 2, 150, 2));
+  // secret passage (revealed behind the shelf): stone frame, dark tunnel, moonlight at the far end
+  P.rect(182, 56, 52, 68, 'stone', (x, y) => { const bx = (x + ((y / 7 | 0) % 2) * 5) % 10, by = y % 7; return 3.4 + fbm(x / 2, y / 2, 160, 2) * 1.4 + (bx === 0 || by === 0 ? -1.6 : 0) + (by === 1 ? 0.6 : 0); });
+  P.rect(188, 62, 40, 62, 'stone', (x, y) => 0.8 + (x < 192 ? 0.8 : 0) + (y > 112 ? 0.6 : 0));
+  P.shape(poly([[200, 76], [214, 76], [216, 122], [198, 122]]), 'night', (x, y) => 3 + 5 * Math.exp(-((x - 207) ** 2) / 40) * clamp((y - 76) / 20) + (y > 116 ? 1 : 0));
+  P.rect(188, 118, 40, 6, 'stone', (x, y) => 1.4 + (y - 118) * 0.3);
+  // hanging lantern
+  for (let y = 9; y < 18; y++) P.set(150 + (y % 2), y, 'stone', 3);
+  for (let k = 0; k < 4; k++) P.rect(149 - k, 15 + k, 3 + 2 * k, 1, 'stone', 3.6 - k * 0.3);
+  P.rect(144, 19, 13, 12, 'glow', (x, y) => (x === 144 || x === 156) ? 2.2 : (y === 19 ? 3 : 6.6 - Math.abs(x - 150) * 0.25 + (y - 19) * 0.04));
+  P.rect(143, 31, 15, 2, 'stone', (x, y) => y === 31 ? 4 : 2.4); P.rect(146, 33, 9, 1, 'stone', 2);
+  // candle on the bar
+  P.rect(254, 88, 4, 8, 'plaster', (x, y) => x === 254 ? 9 : 7.4); P.rect(251, 95, 10, 1, 'stone', 5);
+  // lights
+  P.light(150, 26, 110, 3.0, ['wood', 'stone', 'plaster']); P.light(256, 86, 46, 2.2, ['wood', 'stone']); P.light(30, 112, 34, 1.2, ['wood']);
+  return P.canvas();
+}
+
+// Scene C: moonlit beach
+function buildBeach() {
+  const P = new Paint(VW, SH);
+  const MX = 238, MY = 30;
+  P.rect(0, 0, VW, 90, 'night', (x, y) => { const d = Math.hypot(x - MX, (y - MY) * 1.15); let v = 1.2 + y / 86 * 3.4 + 3.4 * Math.exp(-d / 26);
+    const c = fbm(x / 60, y / 5, 201, 3); if (c > 0.56) v += (c - 0.56) * 14 * Math.exp(-d / 90) - 0.4; return v; });
+  const st = rng(5); for (let i = 0; i < 90; i++) { const x = F(st() * VW), y = F(st() * 76); if (Math.hypot(x - MX, y - MY) > 30) P.set(x, y, 'night', 8 + st() * 3.5); }
+  P.shape(ell(MX, MY, 12, 12), 'moon', (x, y) => 2.8 - (fbm(x / 4, y / 4, 210, 2) > 0.58 ? 1.4 : 0) + ((x - MX) * 0.06) - (Math.hypot(x - MX, y - MY) > 10.5 ? 1 : 0));
+  // sea + far wreck
+  P.rect(0, 84, VW, 34, 'sea', (x, y) => 2.2 + (y - 84) * 0.06 + 0.9 * Math.sin(y * 2.3 + fbm(x / 20, y / 2, 220) * 6) + 2.4 * Math.exp(-((x - MX) ** 2) / 900) * 0.6);
+  P.rect(0, 84, VW, 1, 'night', (x) => 6 + 2 * Math.exp(-((x - MX) ** 2) / 900));
+  P.shape(poly([[100, 84], [104, 79], [126, 78], [132, 84]]), 'night', 1.2); P.line(112, 79, 106, 60, 'night', 1.4); P.line(111, 79, 105, 60, 'night', 1.4); P.line(106, 66, 118, 70, 'night', 1.4); P.line(120, 78, 124, 67, 'night', 1.4);
+  // sand
+  for (let x = 0; x < VW; x++) { const ys = R(111 + 3 * Math.sin(x / 31) + 2 * vn(x / 17, 0, 230));
+    P.rect(x, ys, 1, SH - ys, 'sand', (X, Y) => 6.6 - (Y - ys) * 0.09 + fbm(X / 5, Y / 2, 231, 2) * 1.3 + (Y - ys < 3 ? -1.8 : 0) + 1.2 * Math.exp(-((X - MX) ** 2) / 3000)); }
+  // cliff with the passage exit
+  const cliff = [[0, 6], [16, 10], [30, 26], [44, 40], [52, 62], [60, 84], [70, 102], [76, 124], [84, 148], [0, 148]];
+  P.shape(poly(cliff), 'stone', (x, y) => { const n = fbm(x / 7, y / 3, 240, 3); let v = 1.2 + n * 1.6 + 0.6 * Math.sin((y - x * 0.45) / 2.6 + fbm(x / 12, y / 12, 241) * 5) - (fbm(x / 3, y / 5, 242, 2) > 0.66 ? 1.1 : 0);
+    let edge = 99; for (let i = 0; i < 8; i++) { const [ax, ay] = cliff[i], [bx, by] = cliff[i + 1], t = clamp(((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)); edge = Math.min(edge, Math.hypot(x - ax - t * (bx - ax), y - ay - t * (by - ay))); }
+    if (edge < 6) v += (6 - edge) * 0.55 * (0.6 + n); return v; });
+  P.shape(c => { c.moveTo(22, 136); c.lineTo(22, 106); c.ellipse(37, 106, 15, 14, 0, Math.PI, 0); c.lineTo(52, 136); c.closePath(); }, 'glow', (x, y) => 1 + 2.6 * Math.exp(-((x - 37) ** 2) / 50 - ((y - 116) ** 2) / 300));
+  P.rect(20, 136, 36, 3, 'sand', 3.4);
+  // palm
+  const tr = [];
+  for (let i = 0; i <= 40; i++) { const f = i / 40; tr.push([lerp(314, 294, f) - 9 * Math.sin(f * 2.4), lerp(150, 50, f)]); }
+  tr.forEach(([x, y], i) => P.rect(x - 3, y, 6, 3, 'night', (X, Y) => 1.2 + (X < x - 1 ? 1.6 : 0) + ((i % 3 === 0) && Y === R(y) ? -0.8 : 0)));
+  const [tx, ty] = tr[40];
+  for (const [ang, len] of [[-2.75, 32], [-2.2, 26], [-0.5, 30], [-1.15, 22], [0.2, 26], [2.75, 24], [-1.7, 16]]) {
+    let px = tx, py = ty;
+    for (let s = 1; s <= len; s++) { const f = s / len, x = tx + Math.cos(ang) * s, y = ty + Math.sin(ang) * s + f * f * 20, dx = x - px, dy = y - py, dl = Math.hypot(dx, dy) || 1; px = x; py = y;
+      P.set(x, y, 'night', 1.5); P.set(x, y + 1, 'night', 1.2);
+      const L = 2 + 7 * Math.sin(Math.PI * Math.min(1, f * 1.15));
+      for (const sd of [-1, 1]) { const lx = (dx * 0.5 - sd * dy) / dl, ly = (dy * 0.5 + sd * dx) / dl, n = Math.hypot(lx, ly + 0.9), ux = lx / n, uy = (ly + 0.9) / n;
+        if (s % 2 === 0) for (let k = 1; k < L; k++) P.set(x + ux * k, y + uy * k, 'night', 0.8 + (k < 2 ? 0.4 : 0) + (sd > 0 && dx > 0 ? 0.9 : 0)); } }
+  }
+  // foreground rocks
+  P.shape(ell(170, 146, 16, 6), 'stone', (x, y) => 1.6 + (y < 143 ? 2 : 0) + (x > 176 ? 0.8 : 0)); P.shape(ell(250, 147, 10, 4), 'stone', (x, y) => 1.4 + (y < 145 ? 1.8 : 0));
+  return P.canvas();
+}
+const STARS = (() => { const r = rng(55), s = []; for (let i = 0; i < 14; i++) s.push({ x: F(r() * 200) + 60, y: F(r() * 60) + 2, p: r() * 6 }); return s; })();
+const shoreY = x => R(111 + 3 * Math.sin(x / 31) + 2 * vn(x / 17, 0, 230));
+
+// ── inventory strip (items only) ──
+function buildStrip() {
+  const P = new Paint(VW, 52);
+  P.rect(0, 0, VW, 52, 'wood', (x, y) => 1.4 + fbm(x / 20, y / 3, 300, 3) * 1.6 + (y === 1 ? 3.4 : 0) + (y === 2 ? 1.2 : 0) - (y === 3 ? 0.8 : 0));
+  P.rect(0, 0, VW, 1, 'wood', 0);
+  for (let i = 0; i < 8; i++) { const x0 = 14 + i * 37; P.rect(x0, 19, 33, 30, 'wood', (x, y) => (y === 19 || x === x0) ? 0.2 : (y === 48 || x === x0 + 32) ? 4 : 0.9 + fbm(x / 4, y / 4, 310 + i, 2) * 0.8); }
+  return P.canvas();
+}
+const SLOT = i => [14 + i * 37 + 17, 19 + 15];
+
+// ═════════════════════════════════ SPRITES ═════════════════════════════════
+// ── hero: jointed pose skeleton (head profile, neck, torso, elbows, knees, hands, boots) ──
+const HERO_BASE = { 1: '#120a12', 2: '#eaa878', 3: '#b8704c', 4: '#3a1a12', 5: '#c83632', 6: '#7a1a22', 7: '#2c7e7a', 8: '#1a4c54', 9: '#48a898',
+  10: '#ece4cc', 11: '#5e4e74', 12: '#3a3050', 13: '#3c2418', 14: '#d8a238', 15: '#120a12', 16: '#8a3a2a' };
+const mixHex = (a, b, f) => { const A = rgb(a), B = rgb(b); return '#' + A.map((v, i) => R(lerp(v, B[i], f)).toString(16).padStart(2, '0')).join(''); };
+const tintPal = (base, tint, f, dark = 1) => { const o = {}; for (const k in base) { const m = rgb(mixHex(base[k], tint, f)).map(v => R(v * dark)); o[k] = '#' + m.map(v => v.toString(16).padStart(2, '0')).join(''); } return o; };
+const PAL_EXT = tintPal(HERO_BASE, '#d0507a', 0.16, 0.92), PAL_INT = tintPal(HERO_BASE, '#f0a050', 0.10, 0.98), PAL_BEACH = tintPal(HERO_BASE, '#3a5aa8', 0.42, 0.82);
+const HEAD = [
+  '...cccccc...',
+  '..cccccccc..',
+  '.cccccccccc.',
+  '.dddddddddd.',
+  '.hhhhsssss..',
+  '.hhhsssses..',
+  '.hhSsssssss.',
+  '.hhSssssss..',
+  '..hSsssssm..',
+  '...Sssssss..',
+  '....SSsss...'];
+const HCH = { c: 5, d: 6, h: 4, s: 2, S: 3, e: 15, m: 16 };
+const GW = 48, GH = 64, GOX = 22, GOY = 60;
+// arm/leg angles: 0 = straight down, + = forward (towards facing direction)
+function ik(sx, sy, tx, ty, l1, l2) {
+  let dx = tx - sx, dy = ty - sy, d = Math.hypot(dx, dy); const dm = l1 + l2 - 0.05; if (d > dm) { dx *= dm / d; dy *= dm / d; d = dm; }
+  const base = Math.atan2(dx, dy), a1 = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+  const s = base - a1, ex = sx + Math.sin(s) * l1, ey = sy + Math.cos(s) * l1; return { s, f: Math.atan2(sx + dx - ex, sy + dy - ey) };
+}
+const L_TH = 11, L_SH = 10, A_UP = 8, A_LO = 7;
+function walkPose(p) {
+  const w = 2 * Math.PI * p, leg = ph => ({ a: 0.38 * Math.sin(ph), k: 0.1 + 0.62 * Math.max(0, Math.sin(ph + 1.5)) });
+  return { ln: leg(w), lf: leg(w + Math.PI), an: { s: -0.42 * Math.sin(w), f: -0.42 * Math.sin(w) + 0.45 }, af: { s: 0.42 * Math.sin(w), f: 0.42 * Math.sin(w) + 0.45 }, lean: 1 };
+}
+const standPose = () => ({ ln: { a: 0.1, k: 0.1 }, lf: { a: -0.08, k: 0.05 }, an: { s: 0.08, f: 0.28 }, af: { s: -0.05, f: 0.2 }, lean: 0 });
+function heroCanvas(pose, pal) {
+  const g = new Uint8Array(GW * GH);
+  const set = (x, y, v) => { x = R(x) + GOX; y = R(y) + GOY; if (x >= 0 && y >= 0 && x < GW && y < GH) g[y * GW + x] = v; };
+  const brush = (x, y, th, v) => { const o = F((th - 1) / 2); for (let j = 0; j < th; j++) for (let i = 0; i < th; i++) set(x - o + i, y - o + j, v); };
+  const line = (ax, ay, bx, by, th, v) => { const n = Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay))) * 2 + 1; for (let k = 0; k <= n; k++) brush(lerp(ax, bx, k / n), lerp(ay, by, k / n), th, v); };
+  // legs → ground offset so the lowest boot sits on the baseline
+  const legJ = l => { const hx = 0, hy = -22, kx = hx + Math.sin(l.a) * L_TH, ky = hy + Math.cos(l.a) * L_TH, sa = l.a - l.k; return { hx, hy, kx, ky, ax: kx + Math.sin(sa) * L_SH, ay: ky + Math.cos(sa) * L_SH, sa }; };
+  const LN = legJ(pose.ln), LF = legJ(pose.lf), dy = -Math.max(LN.ay, LF.ay) - 2 + (pose.dy || 0);
+  const drawLeg = (J, near) => { const c = near ? 11 : 12;
+    if (near) { line(J.hx, J.hy + dy, J.kx, J.ky + dy, 5, 1); line(J.kx, J.ky + dy, J.ax, J.ay + dy, 5, 1); }
+    line(J.hx, J.hy + dy, J.kx, J.ky + dy, 3, c); line(J.kx, J.ky + dy, J.ax, J.ay + dy, 3, c);
+    line(J.ax - Math.sin(J.sa) * 2, J.ay - Math.cos(J.sa) * 2 + dy, J.ax, J.ay + dy, 3, 13);
+    for (let i = -1; i <= 3; i++) { set(J.ax + i, J.ay + dy + 1, 13); set(J.ax + i, J.ay + dy + 2, 13); } };
+  const lean = pose.lean || 0, shx = lean, shy = -33 + dy;
+  const armJ = a => { const ex = shx + Math.sin(a.s) * A_UP, ey = shy + Math.cos(a.s) * A_UP; return { ex, ey, hx: ex + Math.sin(a.f) * A_LO, hy: ey + Math.cos(a.f) * A_LO, f: a.f }; };
+  const drawArm = (a, near) => { const J = armJ(a), c = near ? 9 : 8, hc = near ? 2 : 3;
+    if (near) { line(shx, shy, J.ex, J.ey, 5, 1); line(J.ex, J.ey, J.hx, J.hy, 5, 1); }
+    line(shx, shy, J.ex, J.ey, 3, c); line(J.ex, J.ey, J.hx, J.hy, 3, c);
+    const hx = J.hx + Math.sin(J.f) * 1.5, hy = J.hy + Math.cos(J.f) * 1.5; if (near) brush(hx, hy, 4, 1); brush(hx, hy, 2, hc); set(J.hx, J.hy, near ? 10 : 12); };
+  drawArm(pose.af, false); drawLeg(LF, false); drawLeg(LN, true);
+  // torso: coat with shirt front and belt
+  for (let y = -36; y <= -15; y++) { const f = (y + 36) / 21, lx = R(lean * (1 - f) - 4 - (f > 0.72 ? (f - 0.72) * 5 : 0)) + (y === -36 ? 1 : 0), rx = R(lean * (1 - f) + 3 + (f > 0.75 ? 1 : 0)) - (y === -36 ? 1 : 0);
+    for (let x = lx; x <= rx; x++) { let v = x === lx ? 8 : 7; if (y <= -24 && x >= rx - 1) v = 10; if (y === -23 || y === -22) v = x === rx - 1 ? 14 : 13; if (y > -22 && x === rx) v = 8; set(x, y + dy, v); } }
+  set(lean - 1, -37 + dy, 3); set(lean, -37 + dy, 2); set(lean - 1, -38 + dy, 3); set(lean, -38 + dy, 2);
+  HEAD.forEach((row, j) => [...row].forEach((ch, i) => { let v = HCH[ch]; if (!v) return; if (ch === 'm' && pose.talk) v = 1; set(lean - 6 + i, -49 + j + dy + (pose.hd || 0), v); }));
+  if (pose.talk) set(lean + 3, -41 + dy + (pose.hd || 0), 16);
+  drawArm(pose.an, true);
+  // outline
+  const o = g.slice(); for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) { const i = y * GW + x; if (g[i]) continue;
+    if ((x > 0 && g[i - 1]) || (x < GW - 1 && g[i + 1]) || (y > 0 && g[i - GW]) || (y < GH - 1 && g[i + GW])) o[i] = 1; }
+  const c = mk(GW, GH), x = c.getContext('2d'), id = x.createImageData(GW, GH);
+  for (let i = 0; i < o.length; i++) if (o[i]) { const [r, gg, b] = rgb(pal[o[i]]); id.data[i * 4] = r; id.data[i * 4 + 1] = gg; id.data[i * 4 + 2] = b; id.data[i * 4 + 3] = 255; }
+  x.putImageData(id, 0, 0);
+  const na = armJ(pose.an); c.hand = [na.hx + Math.sin(na.f) * 1.5, na.hy + Math.cos(na.f) * 1.5];
+  return c;
+}
+const drawHero = (pose, x, y, pal) => { const c = heroCanvas(pose, pal); V.drawImage(c, R(x) - GOX, R(y) - GOY); return c; };
+
+// ── parrot (faces left, towards the hero) ──
+const PARROT = [
+  '.........RRRRR........',
+  '.......RRRRRRRRG......',
+  '......RRRRRRRRRGG.....',
+  '.....RRRRRRRRRGGGG....',
+  '....WWWWRRRRRGGGGGG...',
+  '...PWWkkWWRRGGGGGGG...',
+  '..PPWWkkWWGGGGGGGGGg..',
+  '.PPPPWWWWGGGGGGGGGGg..',
+  'PPPPPPWWGGGGGGGGGGGg..',
+  'PPPpPPPGGGGGGGGGGGGg..',
+  'PP.ppPPGGGGLGGGGGGgg..',
+  'P..pppGGGGLLGGGGGGgg..',
+  'P...pGGGGLLLGGGGGBgg..',
+  '.....GGGLLLLGGGGBBgg..',
+  '.....GGGLLLLGGGBBBgg..',
+  '.....GGLLLLLGGBBBbgg..',
+  '.....GGLLLLLGBBBBbbg..',
+  '.....GGLLLLLGBBBBbbg..',
+  '.....GLLLLLLBBBBbbbg..',
+  '......LLLLLLBBBBbbg...',
+  '......LLLLLYBBBbbbg...',
+  '.......LLLYYBBbbb.....',
+  '........LYYYbbbb......',
+  '........OOO.OOO.......',
+  '.........YBBBb........',
+  '.........BBBBb........',
+  '.........BBBbb........',
+  '..........BBbb........',
+  '..........BBb.........',
+  '..........Bbb.........',
+  '...........Bb.........',
+  '...........b..........'];
+const PCOL = { G: '#3cae3c', g: '#1e6e2c', L: '#86d858', R: '#d8342c', Y: '#f4d03c', B: '#2e6ad0', b: '#1c3c84', W: '#f0ece0', k: '#101010', P: '#ece0c0', p: '#9a8c70', O: '#b08058', r: '#5a0e14', o: '#140a10' };
+function parrotCanvas(open, bob, blink, flip) {
+  const w = 24, h = 34, g = Array.from({ length: h }, () => new Array(w).fill(''));
+  PARROT.forEach((row, j) => [...row].forEach((ch, i) => { if (ch === '.') return; const head = j <= 12, lower = ch === 'p';
+    let x = i + 1 - (head ? bob : 0), y = j + 1; if (lower && open) y += 2; if (ch === 'k' && blink) ch = 'W'; g[y][x] = ch; }));
+  if (open) for (let y = 10; y <= 12; y++) for (let x = 3 - bob; x <= 6 - bob; x++) if (!g[y][x] || g[y][x] === 'G') g[y][x] = 'r';
+  const o = g.map(r => r.slice()); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (!g[y][x] && ((x > 0 && g[y][x - 1]) || (x < w - 1 && g[y][x + 1]) || (y > 0 && g[y - 1][x]) || (y < h - 1 && g[y + 1][x]))) o[y][x] = 'o';
+  const c = mk(w, h), x = c.getContext('2d'); o.forEach((r, j) => r.forEach((ch, i) => { if (!ch) return; x.fillStyle = PCOL[ch]; x.fillRect(flip ? w - 1 - i : i, j, 1, 1); })); return c;
+}
+
+// ── inventory items ──
+function itemIcon(kind) {
+  const c = mk(26, 22), x = c.getContext('2d'), r = (X, Y, w, h, cc) => { x.fillStyle = cc; x.fillRect(X, Y, w, h); };
+  if (kind === 'spoon') { for (let i = 0; i < 11; i++) { r(4 + i, 17 - i, 2, 2, '#8c8ca4'); r(4 + i, 17 - i, 1, 1, '#d8d8e8'); } r(15, 2, 6, 5, '#b8b8cc'); r(16, 1, 4, 7, '#b8b8cc'); r(16, 2, 2, 2, '#f4f4ff'); r(20, 4, 1, 3, '#6a6a80'); }
+  if (kind === 'sock') { const st = y => ((y >> 1) % 2 ? '#ece4cc' : '#c83632');
+    for (let y = 2; y < 14; y++) r(7, y, 7, 1, st(y)); for (let y = 12; y < 19; y++) { const x0 = y > 16 ? 8 : 7, x1 = y === 12 ? 16 : y < 16 ? 20 : y < 18 ? 21 : 19; r(x0, y, x1 - x0, 1, st(y)); }
+    r(7, 2, 7, 2, '#7a1a22'); r(18, 13, 3, 5, '#7a1a22'); r(7, 15, 3, 3, '#7a1a22'); r(13, 4, 1, 9, '#9a3030'); }
+  if (kind === 'card') { r(2, 4, 22, 15, '#e8dcc0'); r(3, 5, 20, 8, '#5a86c0'); r(3, 13, 20, 5, '#2e5a8c'); r(11, 6, 3, 9, '#ece4cc'); r(11, 8, 3, 2, '#c83632'); r(11, 11, 3, 2, '#c83632'); r(10, 5, 5, 1, '#3a3050'); r(14, 6, 6, 1, '#fcd670'); r(19, 5, 3, 3, '#c83632'); r(2, 18, 22, 1, '#a89870'); }
+  if (kind === 'map') { r(2, 3, 22, 16, '#d8c68a'); r(2, 3, 22, 1, '#f0e2aa'); r(2, 18, 22, 1, '#8a7440'); r(9, 3, 1, 16, '#b09c60'); r(16, 3, 1, 16, '#b09c60');
+    for (let i = 0; i < 6; i++) r(4 + i * 2, 13 - (i % 3), 1, 1, '#9a2a22'); r(17, 8, 1, 1, '#c83632'); r(19, 8, 1, 1, '#c83632'); r(18, 9, 1, 1, '#c83632'); r(17, 10, 1, 1, '#c83632'); r(19, 10, 1, 1, '#c83632');
+    for (let y = 11; y < 19; y++) for (let X = 2; X < 12; X++) if (((X + y) % 2 === 0) && Math.hypot(X - 5, y - 16) < 5) r(X, y, 1, 1, '#6a8ab0'); r(5, 19, 1, 2, '#6a8ab0'); }
+  // outline
+  const d = x.getImageData(0, 0, 26, 22), a = d.data, o = new Uint8ClampedArray(a); for (let y = 0; y < 22; y++) for (let X = 0; X < 26; X++) { const i = (y * 26 + X) * 4; if (a[i + 3]) continue;
+    const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([u, v]) => { const xx = X + u, yy = y + v; return xx >= 0 && yy >= 0 && xx < 26 && yy < 22 && a[(yy * 26 + xx) * 4 + 3]; }); if (nb) { o[i] = 16; o[i + 1] = 8; o[i + 2] = 10; o[i + 3] = 255; } }
+  x.putImageData(new ImageData(o, 26, 22), 0, 0); return c;
+}
+</script>
+<script src="scene.js"></script>
+</body></html>
