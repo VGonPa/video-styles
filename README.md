@@ -4,7 +4,7 @@ Short HTML canvas films demonstrate different animation styles. Each example is 
 
 Watch the [complete catalog reel](catalog/catalog.mp4) (116 styles in shuffled order, ~22 min), or browse by use case or visual family, or open a style below to see its translated video, animated preview, and HTML source.
 
-This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The examples retain references to irticalen where they are part of the original scene. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
+This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The first 20 styles were originally developed there; their clips have since been re-made with new subjects in the same styles, and each style page credits its origin. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
 
 <!-- styles:start -->
 **By use case:** [Explainers](categories/use-cases/explainer.md) (33) · [Tutorials & Training](categories/use-cases/tutorial.md) (8) · [Product & Launches](categories/use-cases/product.md) (18) · [Social & Short-Form](categories/use-cases/social.md) (51) · [Storytelling & Brand](categories/use-cases/story.md) (59) · [Data & Results](categories/use-cases/data.md) (8) · [News & Current Affairs](categories/use-cases/news.md) (7) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (34)
