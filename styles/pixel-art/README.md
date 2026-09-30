@@ -4,7 +4,7 @@
 
 <a href="pixel-art.mp4"><img src="preview.gif" alt="Pixel Art" width="640"></a>
 
-**Feel:** 16-bit platform game  
+**Feel:** 16-bit video game level  
 **Best for:** Progress, milestones, and game-like scenes  
 **Visual family:** [Games](../../categories/families/games.md)  
 **Use cases:** [Social & Short-Form](../../categories/use-cases/social.md), [Storytelling & Brand](../../categories/use-cases/story.md), [Data & Results](../../categories/use-cases/data.md)
