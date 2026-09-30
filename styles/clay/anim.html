@@ -3,19 +3,17 @@
 <body style="margin:0;background:#000"><canvas id="c" width="1920" height="1080"></canvas>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-//  CLAY / DOUGH stop-motion imitation — 10 s showcase clip. window.draw({t}) → JPEG base64
-//  Table with warm light: turquoise dough ball falls, bounces and gets crushed, turns into a speech bubble;
-//  cream clay letters bounce in one by one: "Speak now!". The bubble returns to a ball and rolls away;
-//  dark clay ball arrives → irticalen logo; three tiny balls fall and are pressed against the diamond; letters come.
-//  All movement 12 fps (two frames), tiny skew + fingerprint texture shifting with each step,
-//  slight stop-motion flicker in light. At the end the light dims.
+//  CLAY stop-motion — "The tiny gardener", 10 s. window.draw({t}) → JPEG base64
+//  Warm tabletop set. A plasticine gardener presses a seed into a terracotta pot, waters it,
+//  steps back; the sprout grows in replacement steps into a huge sunflower that bends down to face
+//  them; both bow, clay letters bounce onto the table. Everything moves on 12 fps steps; the
+//  fingerprint texture and a 1–2 px jitter shift with each step; the studio lamp flickers slightly.
 // ─────────────────────────────────────────────────────────────────────────────
 const W = 1920, H = 1080, FLOOR = 800;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
 const lerp = (a, b, t) => a + (b - a) * t;
 const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eIn = x => { x = clamp(x); return x * x; };
 const eOut = x => 1 - Math.pow(1 - clamp(x), 2);
 const eInOut = x => { x = clamp(x); return x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; };
 const eBack = (x, s = 1.8) => { x = clamp(x); const c = s + 1; return 1 + c * Math.pow(x - 1, 3) + s * Math.pow(x - 1, 2); };
@@ -23,7 +21,9 @@ function rng(seed) { let s = seed >>> 0 || 1; return () => { s = (s * 1664525 + 
 const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) >>> 0; h = ((h ^ (h >>> 13)) * 1274126177) >>> 0; return h / 4294967296; };
 const mk = (w = W, h = H) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; };
 const FONT = "'Fredoka', sans-serif";
-const CLAY = { teal: '#2f8e88', cream: '#f2e2c2', char: '#35302f', red: '#d6452f', mustard: '#e7a83a' };
+const CLAY = { teal: '#2f8e88', cream: '#f2e2c2', char: '#35302f', red: '#d6452f', mustard: '#e7a83a',
+  skin: '#e9ad88', hair: '#6a3f2a', straw: '#e9c46f', tin: '#6f9fb8', pot: '#c4643a', potRim: '#cf7147',
+  stem: '#5f9a3c', leaf: '#6aa845', petal: '#f3b933', petalB: '#de8f25', disc: '#6b3f22', drop: '#8fd0e6' };
 
 // ── set: endless background + table + warm light pool (once) ───────────────────────
 const BG = mk(), FP = mk(512, 512);
@@ -31,32 +31,30 @@ function buildSet() {
   const c = BG.getContext('2d');
   const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#cfae90'); g.addColorStop(.5, '#ecd5b6'); g.addColorStop(.6, '#e9c9a2'); g.addColorStop(.7, '#dfb487'); g.addColorStop(1, '#cf9f72');
   c.fillStyle = g; c.fillRect(0, 0, W, H);
-  const l = c.createRadialGradient(860, 520, 80, 900, 600, 1100); l.addColorStop(0, 'rgba(255,236,200,0.55)'); l.addColorStop(.5, 'rgba(255,220,170,0.12)'); l.addColorStop(1, 'rgba(60,30,10,0.45)');
+  const l = c.createRadialGradient(900, 520, 80, 940, 600, 1100); l.addColorStop(0, 'rgba(255,236,200,0.55)'); l.addColorStop(.5, 'rgba(255,220,170,0.12)'); l.addColorStop(1, 'rgba(60,30,10,0.45)');
   c.fillStyle = l; c.fillRect(0, 0, W, H);
-  // paper background texture + slight roughness on table surface
   const id = c.getImageData(0, 0, W, H), d = id.data, r = rng(2);
   for (let i = 0; i < d.length; i += 4) { const y = (i / 4 / W) | 0, k = y > 700 ? 9 : 5, n = (r() - .5) * k; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
   c.putImageData(id, 0, 0);
-  // fingerprint/toolmark texture (dough surface)
+  // fingerprint / tool-mark texture for every clay surface
   const f = FP.getContext('2d'), fr = rng(8); f.lineCap = 'round';
-  for (let k = 0; k < 7; k++) {
+  for (let k = 0; k < 8; k++) {
     const cx = fr() * 512, cy = fr() * 512, rot = fr() * 3, e = .55 + fr() * .3;
     for (let rr = 6; rr < 70; rr += 3.2) {
       const a0 = fr() * 6, a1 = a0 + 2 + fr() * 3;
       f.save(); f.translate(cx, cy); f.rotate(rot); f.scale(1, e);
-      f.strokeStyle = 'rgba(0,0,0,0.10)'; f.lineWidth = 1.1; f.beginPath(); f.arc(0, 0, rr, a0, a1); f.stroke();
-      f.strokeStyle = 'rgba(255,255,255,0.10)'; f.beginPath(); f.arc(0, -1.2, rr, a0, a1); f.stroke(); f.restore();
+      f.strokeStyle = 'rgba(0,0,0,0.12)'; f.lineWidth = 1.1; f.beginPath(); f.arc(0, 0, rr, a0, a1); f.stroke();
+      f.strokeStyle = 'rgba(255,255,255,0.11)'; f.beginPath(); f.arc(0, -1.2, rr, a0, a1); f.stroke(); f.restore();
     }
   }
-  for (let i = 0; i < 260; i++) { const x = fr() * 512, y = fr() * 512, rr = 1 + fr() * 3.5;       // small indentations
+  for (let i = 0; i < 260; i++) { const x = fr() * 512, y = fr() * 512, rr = 1 + fr() * 3.5;
     f.fillStyle = 'rgba(0,0,0,0.10)'; f.beginPath(); f.arc(x, y, rr, 0, 7); f.fill(); f.fillStyle = 'rgba(255,255,255,0.12)'; f.beginPath(); f.arc(x - .8, y - .8, rr * .7, 0, 7); f.fill(); }
-  for (let i = 0; i < 40; i++) { const x = fr() * 512, y = fr() * 512, a = fr() * 6, l = 10 + fr() * 30;   // tool rubbing
+  for (let i = 0; i < 40; i++) { const x = fr() * 512, y = fr() * 512, a = fr() * 6, l = 10 + fr() * 30;
     f.strokeStyle = 'rgba(0,0,0,0.07)'; f.lineWidth = 1.5; f.beginPath(); f.moveTo(x, y); f.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); f.stroke(); }
 }
 let FPAT = null;
 
-// ── clay renderer: mask → inner shadow + inner light + glow + texture ─────────────────
-// maskFn(c) paints the mask black at the local coordinate (bbox top-left = pad).
+// ── clay renderer: mask → inner shadow + inner light + glare + fingerprint texture ─────
 function clay(mask, bw, bh, color, o = {}) {
   const k = o.k ?? 1, pad = Math.round(40 * k + 20);
   const cw = bw + pad * 2, ch = bh + pad * 2;
@@ -66,214 +64,371 @@ function clay(mask, bw, bh, color, o = {}) {
   c.drawImage(M, 0, 0); c.globalCompositeOperation = 'source-in'; c.fillStyle = color; c.fillRect(0, 0, cw, ch);
   c.globalCompositeOperation = 'source-atop';
   const inner = (col, dx, dy, blur) => { c.save(); c.shadowColor = col; c.shadowBlur = blur; c.shadowOffsetX = 10000 + dx; c.shadowOffsetY = dy; c.drawImage(INV, -10000, 0); c.restore(); };
-  inner('rgba(40,15,5,0.62)', 10 * k, 16 * k, 26 * k);           // lower-right roundness of torso
-  inner('rgba(40,15,5,0.35)', 3 * k, 5 * k, 6 * k);              // tight shadow near the edge
-  inner(`rgba(255,244,225,${o.lit ?? .55})`, -7 * k, -10 * k, 18 * k);       // upper-left light
-  inner(`rgba(255,246,232,${o.rim ?? .35})`, -2 * k, -3 * k, 3.5 * k);          // subtle flare on edge lip
-  // glare (dough semi-matte)
+  inner('rgba(40,15,5,0.62)', 10 * k, 16 * k, 26 * k);
+  inner('rgba(40,15,5,0.35)', 3 * k, 5 * k, 6 * k);
+  inner(`rgba(255,244,225,${o.lit ?? .55})`, -7 * k, -10 * k, 18 * k);
+  inner(`rgba(255,246,232,${o.rim ?? .35})`, -2 * k, -3 * k, 3.5 * k);
   if (o.spec !== false) {
     const sx = pad + bw * (o.sx ?? .3), sy = pad + bh * (o.sy ?? .26), sr = Math.min(bw, bh) * (o.sr ?? .22);
-    const g = c.createRadialGradient(sx, sy, 0, sx, sy, sr), sa = o.sa ?? (o.sr > .25 ? .22 : .42); g.addColorStop(0, `rgba(255,250,240,${sa})`); g.addColorStop(.35, `rgba(255,250,240,${sa * .33})`); g.addColorStop(1, 'rgba(255,250,240,0)');
+    const g = c.createRadialGradient(sx, sy, 0, sx, sy, sr), sa = o.sa ?? .3; g.addColorStop(0, `rgba(255,250,240,${sa})`); g.addColorStop(.35, `rgba(255,250,240,${sa * .33})`); g.addColorStop(1, 'rgba(255,250,240,0)');
     c.fillStyle = g; c.fillRect(0, 0, cw, ch);
   }
-  // textures: fingerprint (shifts a little with each step → boil)
-  c.save(); c.globalAlpha = o.tex ?? 1; const tx = o.tx || 0, ty = o.ty || 0;
-  c.translate(tx, ty); c.rotate(o.trot || 0); c.fillStyle = FPAT; c.fillRect(-cw * 2, -ch * 2, cw * 5, ch * 5); c.restore();
-  // table bounce light on bottom edge
+  c.save(); c.globalAlpha = o.tex ?? 1; c.translate(o.tx || 0, o.ty || 0); c.rotate(o.trot || 0); c.fillStyle = FPAT; c.fillRect(-cw * 2, -ch * 2, cw * 5, ch * 5); c.restore();
   const b = c.createLinearGradient(0, pad + bh * .7, 0, pad + bh); b.addColorStop(0, 'rgba(255,200,150,0)'); b.addColorStop(1, 'rgba(255,190,140,0.12)'); c.fillStyle = b; c.fillRect(0, 0, cw, ch);
   return { O, M, pad, cw, ch };
 }
-// place in scene: contact shadow + background shadow + body (from squash/stretch base center)
-function place(cl, x, y, o = {}) {     // x,y = bbox top-left (stage), o.sx/o.sy scale, o.rot
-  const { O, M, pad, cw, ch } = cl, sx = o.sx ?? 1, sy = o.sy ?? 1, bx = x + (cw - 2 * pad) / 2, by = y + (ch - 2 * pad) * (o.pivotY ?? 1);
-  const alpha = o.alpha ?? 1;
+function place(cl, x, y, o = {}) {
+  const { O, M, pad } = cl, alpha = o.alpha ?? 1;
   if (o.shadow !== false) {
-    // soft shadow falling on the background
-    ctx.save(); ctx.globalAlpha = .28 * alpha; ctx.filter = `blur(${o.sb ?? 18}px)`; ctx.translate(bx + 26, by + 6); ctx.scale(sx, sy); ctx.rotate(o.rot || 0); ctx.translate(-bx, -by);
-    ctx.drawImage(M, x - pad, y - pad); ctx.restore();
+    const [dx, dy] = o.so ?? [22, 6];
+    ctx.save(); ctx.globalAlpha = (o.sa ?? .26) * alpha; ctx.filter = `blur(${o.sb ?? 14}px)`; ctx.drawImage(M, x - pad + dx, y - pad + dy); ctx.restore();
   }
-  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(bx, by); ctx.rotate(o.rot || 0); ctx.scale(sx, sy); ctx.translate(-bx, -by); ctx.drawImage(O, x - pad, y - pad); ctx.restore();
+  ctx.save(); ctx.globalAlpha = alpha; ctx.drawImage(O, x - pad, y - pad); ctx.restore();
 }
-function contact(x, y, w, a = .45) {   // contact shadow on table
-  if (a <= 0) return; ctx.save(); ctx.globalAlpha = a; ctx.filter = 'blur(9px)'; ctx.fillStyle = '#2a1508';
+function contact(x, y, w, a = .45) {
+  if (a <= 0 || w <= 0) return; ctx.save(); ctx.globalAlpha = a; ctx.filter = 'blur(9px)'; ctx.fillStyle = '#2a1508';
   ctx.beginPath(); ctx.ellipse(x + 6, y + 2, w * .5, Math.max(4, w * .07), 0, 0, 7); ctx.fill(); ctx.restore();
 }
+// one clay piece drawn in world coordinates: fn(c) paints the mask; bb = [x0,y0,x1,y1] world box that contains it
+let STEP = 0;
+function part(fn, bb, color, seed, o = {}) {
+  const bx = Math.floor(bb[0]), by = Math.floor(bb[1]), bw = Math.ceil(bb[2] - bb[0]), bh = Math.ceil(bb[3] - bb[1]);
+  const k = o.k ?? clamp(Math.min(bw, bh) / 180, .3, 1.3);
+  const cl = clay(m => { m.translate(-bx, -by); m.fillStyle = '#000'; m.strokeStyle = '#000'; m.lineCap = 'round'; m.lineJoin = 'round'; fn(m); }, bw, bh, color,
+    { k, tx: hash(seed, STEP) * 7, ty: hash(seed + 3, STEP) * 7, trot: seed * .7, sx: o.spx, sy: o.spy, sr: o.spr, sa: o.sa, spec: o.spec, tex: o.tex, lit: o.lit, rim: o.rim });
+  const js = o.js ?? seed, jx = (hash(js + 11, STEP) - .5) * 1.8, jy = (hash(js + 13, STEP) - .5) * 1.1;
+  place(cl, bx + jx, by + jy, { shadow: o.shadow, sb: o.sb, sa: o.shA, so: o.so });
+}
+const box = (pts, m) => { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return [x0 - m, y0 - m, x1 + m, y1 + m]; };
+function capsule(c, a, b, ra, rb) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+  c.beginPath(); c.moveTo(a[0] + nx * ra, a[1] + ny * ra); c.lineTo(b[0] + nx * rb, b[1] + ny * rb); c.lineTo(b[0] - nx * rb, b[1] - ny * rb); c.lineTo(a[0] - nx * ra, a[1] - ny * ra); c.closePath(); c.fill();
+  c.beginPath(); c.arc(a[0], a[1], ra, 0, 7); c.fill(); c.beginPath(); c.arc(b[0], b[1], rb, 0, 7); c.fill();
+}
+// carved line into the clay: light lip below, dark groove on top (path must start with beginPath)
+function carve(path, w = 3, a = .45) {
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.translate(1, 1.4); ctx.strokeStyle = 'rgba(255,238,215,0.35)'; ctx.lineWidth = w; path(ctx); ctx.stroke();
+  ctx.translate(-1, -1.4); ctx.strokeStyle = `rgba(35,14,4,${a})`; ctx.lineWidth = w; path(ctx); ctx.stroke(); ctx.restore();
+}
+function bead(x, y, r, col = '#241a16') {       // glossy clay eye / button
+  ctx.save(); ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,250,240,0.85)'; ctx.beginPath(); ctx.arc(x - r * .35, y - r * .38, r * .3, 0, 7); ctx.fill(); ctx.restore();
+}
+const rot = ([x, y], a) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
+const add = (p, q, s = 1) => [p[0] + q[0] * s, p[1] + q[1] * s];
+const dir = a => [Math.cos(a), Math.sin(a)];
+// two-bone IK; pick() scores the two elbow solutions
+function ik(a, b, l1, l2, pick) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], th = Math.atan2(dy, dx), d = clamp(Math.hypot(dx, dy), Math.abs(l1 - l2) + 1, l1 + l2 - .5);
+  const al = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+  const e1 = [a[0] + l1 * Math.cos(th + al), a[1] + l1 * Math.sin(th + al)], e2 = [a[0] + l1 * Math.cos(th - al), a[1] + l1 * Math.sin(th - al)];
+  return [pick(e1) >= pick(e2) ? e1 : e2, [a[0] + d * Math.cos(th), a[1] + d * Math.sin(th)]];
+}
+// keyframe track: [[t, value, ease?], ...]; value = number or array
+function tr(t, keys, ease = eInOut) {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) if (t < keys[i][0]) {
+    const [t0, a] = keys[i - 1], [t1, b, e] = keys[i], u = (e || ease)(seg(t, t0, t1));
+    return Array.isArray(a) ? a.map((x, j) => lerp(x, b[j], u)) : lerp(a, b, u);
+  }
+  return keys[keys.length - 1][1];
+}
 
-// ── shape points: circle, balloon, logo bubble, diamond → resampling with arc length ──
-const N = 160;
-function resample(poly, n = N) {
-  const L = [0]; for (let i = 1; i <= poly.length; i++) { const a = poly[i - 1], b = poly[i % poly.length]; L.push(L[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
-  const tot = L[L.length - 1], out = []; let j = 0;
-  for (let k = 0; k < n; k++) { const s = k / n * tot; while (L[j + 1] < s) j++; const a = poly[j], b = poly[(j + 1) % poly.length], u = (s - L[j]) / (L[j + 1] - L[j] || 1); out.push([lerp(a[0], b[0], u), lerp(a[1], b[1], u)]); }
+// ── timeline ──────────────────────────────────────────────────────────────────────
+const POUR = [2.72, 3.4];
+const TR = {
+  hx: [[0, 850], [4.05, 850], [4.35, 815], [4.65, 772], [4.95, 712], [5.25, 655], [7.45, 655], [7.75, 648], [8.05, 648], [8.35, 655]],
+  hy: [[0, 590], [.7, 585], [.82, 592], [1.2, 618], [1.9, 618], [2.05, 612], [3.45, 612], [3.75, 596], [4.05, 594], [4.2, 588], [4.35, 596], [4.5, 588], [4.65, 596], [4.8, 588], [4.95, 596], [5.1, 588], [5.25, 594],
+    [6.2, 594], [6.28, 604], [6.38, 566], [6.48, 598], [6.58, 592], [7.45, 592], [7.75, 606], [8.05, 606], [8.35, 592]],
+  lean: [[0, .04], [.7, -.07], [1.2, .5], [1.9, .5], [2.05, .3], [2.45, .15], [3.45, .15], [3.75, .08], [4.05, .04], [5.25, .02], [5.6, -.1], [6.2, -.12], [6.38, -.04], [6.6, -.06], [7.3, 0], [7.45, -.06],
+    [7.75, .85], [8.05, .85], [8.3, -.08], [8.45, 0]],
+  head: [[0, .28], [.7, .18], [1.2, .32], [2.05, .2], [2.45, .12], [3.45, .14], [3.75, .15], [5.25, .28], [5.45, .1], [5.8, -.28], [6.2, -.38], [6.4, -.3], [7.0, -.14], [7.45, -.12], [7.75, .3], [8.05, .3], [8.35, -.05], [8.5, 0]],
+  fF: [[0, [885, 778]], [4.35, [885, 778]], [4.5, [845, 754]], [4.65, [800, 778]], [4.95, [800, 778]], [5.1, [745, 754]], [5.25, [690, 778]]],
+  fB: [[0, [818, 778]], [4.05, [818, 778]], [4.2, [775, 754]], [4.35, [730, 778]], [4.65, [730, 778]], [4.8, [675, 754]], [4.95, [620, 778]]],
+  hF: [[0, [930, 500]], [.7, [918, 478]], [1.2, [1022, 620]], [1.35, [1026, 634]], [1.48, [1020, 608]], [1.6, [1026, 632]], [1.72, [1020, 608]], [1.84, [1026, 632]], [2.05, [990, 590]],
+    [3.75, [905, 662]], [4.35, [870, 665]], [4.65, [830, 662]], [4.95, [768, 665]], [5.25, [705, 665]], [6.22, [705, 648]], [6.38, [712, 444]], [6.6, [716, 452]], [7.0, [700, 662]], [7.45, [700, 662]],
+    [7.75, [724, 598]], [8.05, [724, 598]], [8.35, [700, 662]], [8.6, [742, 404]]],
+  hB: [[0, [820, 634]], [2.1, [820, 636]], [2.28, [905, 575]], [2.45, [1005, 500]], [3.45, [1005, 500]], [3.6, [915, 520]], [3.75, [820, 636]], [4.35, [785, 636]], [4.65, [745, 634]], [4.95, [680, 636]], [5.25, [625, 636]],
+    [7.45, [625, 636]], [7.75, [695, 652]], [8.05, [695, 652]], [8.35, [625, 636]]],
+  can: [[0, 0], [2.45, 0], [2.68, .62], [3.38, .62], [3.58, 0]],
+};
+// sunflower growth: stem fraction held between replacement steps (true stop-motion)
+const GROW = [[3.8, .06], [4.05, .13], [4.3, .22], [4.55, .34], [4.8, .46], [5.05, .58], [5.3, .7], [5.5, .82], [5.7, 1]];
+const growAt = t => { let g = 0; for (const [t0, v] of GROW) if (t >= t0) g = v; return g; };
+const LEAVES = [   // u on stem, side (+1 right), size, appear, full
+  [.07, 1, .5, 4.05, 4.3], [.07, -1, .5, 4.05, 4.3], [.3, 1, 1, 4.55, 5.05], [.5, -1, 1.05, 4.8, 5.3], [.68, 1, .9, 5.3, 5.7]];
+const PETALS = 14, PETAL_T = i => 5.86 + i * .034;
+const BEND = [6.55, 7.3], NOD = [7.8, 8.35];
+const TITLE = [['The', CLAY.char], ['tiny', CLAY.char], ['gardener.', '#4f8a34']], TSZ = 124, TBASE = 986, T_IN = 7.85, T_STAG = .025;
+const B0 = [1040, 634];
+function drops() {  // water drops: [t0, dx, dur]
+  const r = rng(31), out = [];
+  for (let s = POUR[0]; s < POUR[1]; s += 1 / 12) for (let j = 0; j < 3; j++) out.push([s + r() * .04, (r() - .5) * 36, .2 + r() * .07]);
   return out;
 }
-function smooth(p, it = 2) { for (let k = 0; k < it; k++) p = p.map((q, i) => { const a = p[(i - 1 + p.length) % p.length], b = p[(i + 1) % p.length]; return [(a[0] + 2 * q[0] + b[0]) / 4, (a[1] + 2 * q[1] + b[1]) / 4]; }); return p; }
-function rotateStart(p, target) { let bi = 0, bd = 1e9; p.forEach((q, i) => { const d = Math.hypot(q[0] - target[0], q[1] - target[1]); if (d < bd) { bd = d; bi = i; } }); return p.slice(bi).concat(p.slice(0, bi)); }
-const circlePts = (cx, cy, r) => Array.from({ length: N }, (_, i) => { const a = -Math.PI / 2 + i / N * Math.PI * 2; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
-function roundRectPoly(x, y, w, h, r, tail) {   // clockwise, starting from top middle
-  const P = [], arc = (cx, cy, a0, a1) => { for (let i = 0; i <= 10; i++) { const a = lerp(a0, a1, i / 10); P.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } };
-  P.push([x + w / 2, y]); arc(x + w - r, y + r, -Math.PI / 2, 0); arc(x + w - r, y + h - r, 0, Math.PI / 2);
-  P.push(...tail); arc(x + r, y + h - r, Math.PI / 2, Math.PI); arc(x + r, y + r, Math.PI, Math.PI * 1.5);
+const DROPS = drops();
+
+// ── gardener rig (profile facing right) ────────────────────────────────────────────
+function pose(tq) {
+  const P = {}; for (const k in TR) P[k] = tr(tq, TR[k]);
+  P.sup = Math.min(seg(tq, 2.15, 2.45), 1 - seg(tq, 3.45, 3.7));     // front hand supports the can
+  P.lift = 14 * Math.sin(seg(tq, 8.7, 9.25) * Math.PI);                   // tips the hat at the end
+  if (tq > 8.6) P.hF = [742, 404 - P.lift];
   return P;
 }
-const B1 = { x: 530, y: 250, w: 860, h: 400 };
-const bubble1 = smooth(rotateStart(resample(roundRectPoly(B1.x, B1.y, B1.w, B1.h, 140, [[B1.x + 330, B1.y + B1.h], [B1.x + 205, FLOOR + 16], [B1.x + 190, B1.y + B1.h]])), [B1.x + B1.w / 2, B1.y]), 3);
-const LG = { x: 330, y: 432, k: 4.0 };
-const LP = (px, py) => [LG.x + px * LG.k, LG.y + py * LG.k];
-const logoB = smooth(rotateStart(resample([[0, 0], [92, 0], [92, 70], [40, 70], [14, 94], [14, 70], [0, 70]].map(p => LP(...p))), LP(46, 0)), 4);
-const DIAC = [22, 46, 70].map(x => LP(x, 35));
-const diamondPts = (cx, cy, r) => smooth(resample([[cx, cy - r], [cx + r, cy], [cx, cy + r], [cx - r, cy]]), 2);
+const canFrame = (grip, r) => p => add(grip, rot(p, r));
+function rigArms(P) {
+  const hip = [P.hx, P.hy], up = [Math.sin(P.lean), -Math.cos(P.lean)], fw = [Math.cos(P.lean), Math.sin(P.lean)];
+  const tl = (x, y) => add(add(hip, fw, x), up, -y);
+  const S = tl(4, -116), SB = tl(-2, -112), elbow = p => p[1] - p[0] * .6;
+  const [eB, wB] = ik(SB, P.hB, 86, 80, elbow), dB = Math.atan2(wB[1] - eB[1], wB[0] - eB[0]), gripB = add(wB, dir(dB), 12), canGrip = add(gripB, [0, 2]);
+  const hFt = P.sup > 0 ? P.hF.map((v, i) => lerp(v, canFrame(canGrip, P.can)([36, 98])[i], P.sup)) : P.hF;
+  const [eF, wF] = ik(S, hFt, 86, 80, elbow), dF = Math.atan2(wF[1] - eF[1], wF[0] - eF[0]), palmF = add(wF, dir(dF), 12);
+  return { hip, tl, S, SB, eB, wB, dB, gripB, canGrip, eF, wF, dF, palmF };
+}
+function drawCan(grip, r, seed) {
+  const T = canFrame(grip, r);
+  const pts = [[-48, 18], [48, 18], [48, 108], [-48, 108], [112, 10], [0, -8]].map(T);
+  part(c => {
+    c.save(); c.translate(grip[0], grip[1]); c.rotate(r);
+    c.beginPath(); c.roundRect(-46, 22, 92, 84, 16); c.fill();
+    c.lineWidth = 11; c.beginPath(); c.moveTo(-32, 26); c.quadraticCurveTo(0, -24, 32, 26); c.stroke();          // top handle
+    c.lineWidth = 12; c.beginPath(); c.moveTo(38, 94); c.lineTo(99, 17); c.stroke();                             // spout
+    c.beginPath(); c.ellipse(104, 12, 13, 8, -.8, 0, 7); c.fill();                                                  // rose
+    c.restore();
+  }, box(pts, 12), CLAY.tin, seed, { spx: .35, spy: .45, spr: .25, js: 100, sb: 10, shA: .2 });
+  carve(c => { c.save(); c.translate(grip[0], grip[1]); c.rotate(r); c.beginPath(); c.moveTo(-40, 44); c.lineTo(40, 44); c.restore(); }, 2.5, .3);
+}
+function gardener(tq) {
+  const P = pose(tq), A = rigArms(P), { hip, tl, S, SB } = A, lean = P.lean;
+  const N = tl(6, -130), ha = lean * .4 + P.head, Hc = add(N, rot([6, -48], ha));
+  const foot = f => [f[0], Math.min(f[1], P.hy + 192)];     // feet leave the table if the hip rises beyond reach (hop)
+  const knee = p => p[0];
+  const [kB, ankB] = ik(tl(-8, -4), foot(P.fB), 98, 98, knee), [kF, ankF] = ik(tl(8, -4), foot(P.fF), 98, 98, knee);
+  const r = P.can, sh = { js: 100, sb: 10, shA: .18, so: [14, 5] };
+  const canFront = A.gripB[0] > S[0] - 10;
 
-function blobPath(c, pts, ox, oy) {   // smooth closed curve (quadratic from midpoints)
-  c.beginPath(); const n = pts.length; const mid = i => [(pts[i][0] + pts[(i + 1) % n][0]) / 2 - ox, (pts[i][1] + pts[(i + 1) % n][1]) / 2 - oy];
-  let m = mid(n - 1); c.moveTo(m[0], m[1]);
-  for (let i = 0; i < n; i++) { const p = pts[i], q = mid(i); c.quadraticCurveTo(p[0] - ox, p[1] - oy, q[0], q[1]); }
-  c.closePath();
+  contact(ankB[0] + 14, FLOOR, 70, .42 * clamp(1 - (FLOOR - 22 - ankB[1]) / 60)); contact(ankF[0] + 14, FLOOR, 70, .42 * clamp(1 - (FLOOR - 22 - ankF[1]) / 60));
+  if (!canFront) drawCan(A.canGrip, r, 60);
+  const arm = (Sh, e, w, palm, d, seed) => {
+    part(c => { capsule(c, Sh, e, 13.5, 12.5); capsule(c, e, w, 12.5, 11); }, box([Sh, e, w], 16), CLAY.skin, seed, { ...sh, spr: .4 });              // bare arm
+    const sl = add(Sh, [e[0] - Sh[0], e[1] - Sh[1]], .62);
+    part(c => capsule(c, Sh, sl, 17, 16), box([Sh, sl], 20), CLAY.red, seed + 1, sh);                                                             // short sleeve
+    const th = add(palm, dir(d - 1.15), 15);                                                                                         // hand: palm + thumb
+    part(c => { c.beginPath(); c.ellipse(palm[0], palm[1], 17, 15, d, 0, 7); c.fill(); capsule(c, palm, th, 7.5, 7); }, box([palm, th], 22), CLAY.skin, seed + 2, { ...sh, k: .4 });
+    const fl = i => { const a = add(palm, dir(d), 3 + i * 5.5); return [add(a, dir(d + 1.57), -2), add(a, dir(d + 1.57), 11)]; };
+    carve(c => { c.beginPath(); for (const i of [0, 1]) { const [p, q] = fl(i); c.moveTo(p[0], p[1]); c.lineTo(q[0], q[1]); } }, 2, .35);
+  };
+  const leg = (h, k, a, seed) => {
+    part(c => { capsule(c, h, k, 22, 19); capsule(c, k, a, 19, 17); }, box([h, k, a], 26), '#2a7d78', seed, sh);
+    part(c => { c.beginPath(); c.roundRect(a[0] - 24, a[1] - 8, 66, 30, [16, 20, 6, 6]); c.fill(); }, [a[0] - 34, a[1] - 18, a[0] + 52, a[1] + 32], CLAY.char, seed + 1, { ...sh, lit: .75, rim: .5, k: .45 });
+    carve(c => { c.beginPath(); c.moveTo(k[0] + 8, k[1] - 6); c.quadraticCurveTo(k[0] + 16, k[1], k[0] + 8, k[1] + 7); }, 2.2, .3);   // knee crease
+  };
+  arm(SB, A.eB, A.wB, A.gripB, A.dB, 10);
+  leg(tl(-8, -4), kB, ankB, 20);
+  // torso: red shirt bean
+  const tp = [tl(-44, 10), tl(46, 10), tl(-44, -134), tl(48, -134)];
+  part(c => { c.save(); c.translate(hip[0], hip[1]); c.rotate(lean); c.beginPath(); c.ellipse(0, -40, 40, 48, 0, 0, 7); c.fill(); c.beginPath(); c.ellipse(3, -92, 42, 40, 0, 0, 7); c.fill(); c.restore(); }, box(tp, 8), CLAY.red, 30, { ...sh, spx: .45, spy: .2 });
+  // overalls: seat + bib + strap
+  part(c => { c.save(); c.translate(hip[0], hip[1]); c.rotate(lean); c.beginPath(); c.ellipse(1, -34, 43, 44, 0, 0, 7); c.fill(); c.beginPath(); c.roundRect(-2, -104, 40, 70, 8); c.fill();
+    c.lineWidth = 10; c.beginPath(); c.moveTo(8, -100); c.quadraticCurveTo(-8, -124, -30, -114); c.stroke(); c.restore(); }, box(tp, 14), CLAY.teal, 31, { ...sh, spx: .55, spy: .45 });
+  carve(c => { c.save(); c.translate(hip[0], hip[1]); c.rotate(lean); c.beginPath(); c.moveTo(6, -84); c.lineTo(6, -64); c.lineTo(30, -64); c.lineTo(30, -84); c.restore(); }, 2.2, .35);
+  { const b1 = tl(34, -98); bead(b1[0], b1[1], 5, CLAY.mustard); }
+  leg(tl(8, -4), kF, ankF, 40);
+  // neck + head (hair, skull, jaw, nose), ear, face, straw hat
+  const hl = (x, y) => add(Hc, rot([x, y], ha));
+  part(c => capsule(c, N, hl(-4, 34), 13, 13), box([N, hl(-4, 34)], 18), CLAY.skin, 49, sh);
+  part(c => { c.save(); c.translate(Hc[0], Hc[1]); c.rotate(ha); c.beginPath(); c.ellipse(-14, -10, 40, 36, 0, 0, 7); c.fill(); c.restore(); }, box([hl(-60, -50), hl(30, 30)], 6), CLAY.hair, 50, { ...sh, k: .5 });
+  part(c => { c.save(); c.translate(Hc[0], Hc[1]); c.rotate(ha); c.beginPath(); c.ellipse(0, 0, 42, 42, 0, 0, 7); c.fill(); c.beginPath(); c.ellipse(9, 18, 33, 26, 0, 0, 7); c.fill();
+    c.beginPath(); c.ellipse(41, 6, 12, 11, 0, 0, 7); c.fill(); c.restore(); }, box([hl(-46, -46), hl(56, 48)], 4), CLAY.skin, 51, { ...sh, spx: .45, spy: .3, spr: .3 });
+  part(c => { const e = hl(-12, 6); c.beginPath(); c.ellipse(e[0], e[1], 10, 13, ha, 0, 7); c.fill(); }, box([hl(-12, 6)], 18), CLAY.skin, 52, { ...sh, k: .3, shA: .12 });
+  carve(c => { const e = hl(-12, 6); c.beginPath(); c.arc(e[0], e[1], 5, ha - 1.2, ha + 1.8); }, 2, .35);
+  const happy = (tq > 7.62 && tq < 8.2) || tq > 8.6, eye = hl(20, -6);
+  if (happy) carve(c => { c.beginPath(); c.arc(eye[0], eye[1] + 3, 6, Math.PI + ha + .3, ha - .3); }, 3, .7);
+  else bead(eye[0], eye[1], 5.5);
+  carve(c => { const a = hl(12, -20), b = hl(28, -19); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); }, 3, .45);
+  { const ck = hl(22, 14); ctx.save(); ctx.fillStyle = 'rgba(230,110,95,0.35)'; ctx.filter = 'blur(3px)'; ctx.beginPath(); ctx.arc(ck[0], ck[1], 9, 0, 7); ctx.fill(); ctx.restore(); }
+  if (tq > 6.3 && tq < 6.9) { const m = hl(30, 26); ctx.save(); ctx.fillStyle = '#4a1f16'; ctx.beginPath(); ctx.ellipse(m[0], m[1], 5, 7, ha, 0, 7); ctx.fill(); ctx.restore(); }   // surprised "o"
+  else carve(c => { const a = hl(20, 22), b = hl(36, 22), m = hl(29, 30); c.beginPath(); c.moveTo(a[0], a[1]); c.quadraticCurveTo(m[0], m[1], b[0], b[1]); }, 3, .6);
+  const hlh = (x, y) => hl(x, y - P.lift);
+  part(c => { c.save(); c.translate(Hc[0], Hc[1]); c.rotate(ha); c.translate(0, -P.lift); c.beginPath(); c.ellipse(-6, -40, 36, 28, 0, Math.PI, 0); c.lineTo(30, -32); c.lineTo(-42, -32); c.closePath(); c.fill(); c.restore(); }, box([hlh(-50, -76), hlh(40, -26)], 4), CLAY.straw, 53, { ...sh, k: .5 });
+  part(c => { c.save(); c.translate(Hc[0], Hc[1]); c.rotate(ha); c.translate(0, -P.lift); c.beginPath(); c.roundRect(-42, -44, 72, 12, 5); c.fill(); c.restore(); }, box([hlh(-46, -48), hlh(34, -28)], 4), CLAY.red, 54, { ...sh, k: .3, spec: false });
+  part(c => { c.save(); c.translate(Hc[0], Hc[1]); c.rotate(ha); c.translate(0, -P.lift); c.beginPath(); c.ellipse(-2, -30, 72, 12, 0, 0, 7); c.fill(); c.restore(); }, box([hlh(-76, -44), hlh(72, -16)], 4), CLAY.straw, 55, { ...sh, k: .4, spy: .3 });
+  carve(c => { c.save(); c.translate(Hc[0], Hc[1]); c.rotate(ha); c.translate(0, -P.lift); c.beginPath(); for (let i = -3; i <= 3; i++) { c.moveTo(-6 + i * 9, -64 + Math.abs(i) * 2); c.lineTo(-6 + i * 10, -46); } c.restore(); }, 1.5, .18);
+  if (canFront) drawCan(A.canGrip, r, 60);
+  // seed pinched in the front hand until planted
+  arm(S, A.eF, A.wF, A.palmF, A.dF, 80);
+  if (tq < 1.4) { const s = add(A.palmF, dir(A.dF - 1.5), 16); part(c => { c.beginPath(); c.ellipse(s[0], s[1], 12, 8, A.dF + .4, 0, 7); c.fill(); }, box([s], 18), '#caa05a', 70, { k: .3, sb: 4, shA: .2, so: [4, 3] });
+    carve(c => { c.beginPath(); c.moveTo(s[0] - 6, s[1] + 1); c.lineTo(s[0] + 6, s[1] - 1); }, 1.4, .3); }
+  return A;
 }
-function morph(A, B, u, wobSeed, wob = 0) {
-  return A.map((a, i) => { const b = B[i], w = wob ? Math.sin(i * .31 + wobSeed) * wob + Math.sin(i * .83 + wobSeed * 1.7) * wob * .5 : 0;
-    const x = lerp(a[0], b[0], u), y = lerp(a[1], b[1], u), cx = (a[0] + b[0]) / 2; return [x + w * .3, y + w]; });
+
+// ── pot, soil, water ──────────────────────────────────────────────────────────────
+function pot(tq) {
+  contact(1040, FLOOR, 230, .5);
+  part(c => { c.beginPath(); c.moveTo(935, 650); c.lineTo(1145, 650); c.lineTo(1120, FLOOR - 4); c.quadraticCurveTo(1040, FLOOR + 6, 960, FLOOR - 4); c.closePath(); c.fill(); }, [925, 640, 1155, FLOOR + 8], CLAY.pot, 200, { spx: .3, spy: .3, spr: .35 });
+  part(c => { c.beginPath(); c.roundRect(918, 616, 244, 42, 16); c.fill(); }, [912, 610, 1168, 662], CLAY.potRim, 201, { spx: .25, spy: .25, spr: .3, k: .7 });
+  const wet = seg(tq, POUR[0] + .15, POUR[1] + .2);
+  const soilC = `rgb(${lerp(90, 62, wet) | 0},${lerp(56, 38, wet) | 0},${lerp(36, 24, wet) | 0})`;
+  part(c => { c.beginPath(); c.ellipse(1040, 628, 106, 15, 0, 0, 7); c.fill(); c.beginPath(); c.ellipse(1040, 624, 70, 12, 0, 0, 7); c.fill(); }, [930, 606, 1150, 646], soilC, 202, { k: .35, shadow: false, lit: .3 });
+  const r = rng(5); ctx.save();
+  for (let i = 0; i < 14; i++) { const x = 950 + r() * 180, y = 620 + r() * 14; ctx.fillStyle = `rgba(${r() < .5 ? '40,22,12' : '140,95,62'},0.55)`; ctx.beginPath(); ctx.arc(x, y, 1.5 + r() * 2.5, 0, 7); ctx.fill(); }
+  ctx.restore();
+  if (tq >= 1.42 && tq < 3.9) { ctx.save(); ctx.fillStyle = 'rgba(28,14,6,0.7)'; ctx.beginPath(); ctx.ellipse(1036, 626, 13, 5, 0, 0, 7); ctx.fill(); ctx.restore(); }   // planting hole
+  carve(c => { c.beginPath(); c.moveTo(930, 654); c.lineTo(1150, 654); }, 2.5, .25);
 }
-function bbox(p) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of p) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }; }
-// keystone per step (12 fps): minor irregularity to shape points
-function lumpy(p, step, seed, amt = 2.2) { const cx = p.reduce((s, q) => s + q[0], 0) / p.length, cy = p.reduce((s, q) => s + q[1], 0) / p.length;
-  const ph = hash(seed, step) * 6.28, ph2 = hash(seed + 7, step) * 6.28;
-  return p.map((q, i) => { const a = Math.atan2(q[1] - cy, q[0] - cx), d = Math.sin(a * 3 + ph) * amt + Math.sin(a * 5 + ph2) * amt * .6; return [q[0] + Math.cos(a) * d, q[1] + Math.sin(a) * d]; }); }
-function drawBlob(pts, color, step, seed, o = {}) {
-  const bb = bbox(pts);
-  const cl = clay(c => { c.fillStyle = '#000'; blobPath(c, pts, bb.x, bb.y); c.fill(); }, bb.w, bb.h, color,
-    { k: o.k ?? clamp(Math.min(bb.w, bb.h) / 180, .45, 1.6), tx: hash(seed, step) * 6 + (o.tx || 0), ty: hash(seed + 3, step) * 6, trot: o.trot || 0, sx: o.spx, sy: o.spy, sr: o.spr, tex: o.tex, lit: o.lit, rim: o.rim });
-  const jx = (hash(seed + 11, step) - .5) * 2.2, jy = (hash(seed + 13, step) - .5) * 1.4;
-  place(cl, bb.x + jx, bb.y + jy, { sx: o.sx, sy: o.sy, rot: (hash(seed + 17, step) - .5) * .008, shadow: o.shadow, sb: o.sb });
-  return bb;
+function water(tq, tip) {
+  for (const [t0, dx, dur] of DROPS) {
+    if (tq < t0) continue;
+    const u = (tq - t0) / dur; if (u > 1.25) continue;
+    let x = tip[0] + dx * .3 + dx * u + 14 * u, y = lerp(tip[1], 626, u * u), rx = 6, ry = 9;
+    if (u >= 1) { y = 626; rx = 11; ry = 3.5; }                       // splash on landing
+    ctx.save(); ctx.fillStyle = CLAY.drop; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.beginPath(); ctx.arc(x - 2, y - 3, 2, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(30,70,90,0.35)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, 7); ctx.stroke(); ctx.restore();
+  }
 }
-// single letter (dough)
+
+// ── sunflower ─────────────────────────────────────────────────────────────────────
+function stemCurve(b) {
+  const E = [lerp(1060, 950, b), lerp(262, 410, b)], C = [lerp(1030, 1240, b), lerp(420, 150, b)];
+  return u => [(1 - u) * (1 - u) * B0[0] + 2 * (1 - u) * u * C[0] + u * u * E[0], (1 - u) * (1 - u) * B0[1] + 2 * (1 - u) * u * C[1] + u * u * E[1]];
+}
+function leafAt(c, base, ang, len, wid) {
+  const d = dir(ang), n = dir(ang + 1.57), tip = add(base, d, len), mid = add(base, d, len * .45), m1 = add(mid, n, wid), m2 = add(mid, n, -wid);
+  c.beginPath(); c.moveTo(base[0], base[1]); c.quadraticCurveTo(m1[0], m1[1], tip[0], tip[1]); c.quadraticCurveTo(m2[0], m2[1], base[0], base[1]); c.fill();
+}
+function sunflower(tq) {
+  const g = growAt(tq); if (g <= 0) return;
+  const bend = eBack(seg(tq, BEND[0], BEND[1]), 1.4), nod = Math.sin(seg(tq, NOD[0], NOD[1]) * Math.PI);
+  const cur = stemCurve(bend), pts = []; for (let i = 0; i <= 36; i++) pts.push(cur(g * i / 36));
+  const w = lerp(9, 25, g), pop = GROW.some(([t0]) => tq >= t0 && tq < t0 + 1 / 12) ? 1.04 : 1;
+  const tang = u => { const a = cur(Math.max(0, u - .01)), b = cur(Math.min(1, u + .01)); return Math.atan2(b[1] - a[1], b[0] - a[0]); };
+  LEAVES.forEach(([u, side, size, a0, a1], i) => {
+    if (tq < a0 || u > g) return;
+    const s = size * (tq >= a1 ? 1 : .4 + .6 * Math.floor(seg(tq, a0, a1) * 3) / 3) * pop;
+    const base = cur(u), ang = tang(u) + side * (1.05 - bend * .15) + (side > 0 ? .15 : -.15) * nod, len = 110 * s, wid = 34 * s;
+    const tip = add(base, dir(ang), len);
+    part(c => leafAt(c, base, ang, len, wid), box([base, tip], wid + 10), i % 2 ? CLAY.leaf : '#62a040', 300 + i, { k: .45, sb: 10, shA: .2 });
+    carve(c => { const m = add(base, dir(ang), len * .82); c.beginPath(); c.moveTo(base[0], base[1]); c.lineTo(m[0], m[1]); }, 2, .3);
+  });
+  part(c => { c.lineWidth = w; c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (const p of pts) c.lineTo(p[0], p[1]); c.stroke(); }, box(pts, w), CLAY.stem, 320, { k: .5, spx: .2, sb: 12, shA: .22 });
+  const tip = pts[pts.length - 1];
+  if (g < 1) {           // growing tip: two folded leaflets
+    const a = tang(g);
+    part(c => { leafAt(c, tip, a - .7, 30, 10); leafAt(c, tip, a + .7, 30, 10); }, box([tip], 38), CLAY.leaf, 330, { k: .3, shadow: false });
+    return;
+  }
+  const Hc = add(tip, [-4 * nod, 18 * nod]), hr = lerp(0, -.7, bend) - nod * .2, sx = lerp(1, .84, bend);
+  const disc = eBack(seg(tq, 5.84, 6.05), 2);
+  const HL = (x, y) => { const q = rot([x * sx, y], hr); return [Hc[0] + q[0], Hc[1] + q[1]]; };
+  if (tq < 5.84) {       // bud
+    const br = 34 * eBack(seg(tq, 5.7, 5.8), 2);
+    part(c => { c.beginPath(); c.arc(Hc[0], Hc[1], br, 0, 7); c.fill(); for (let i = 0; i < 6; i++) leafAt(c, Hc, -Math.PI / 2 + (i - 2.5) * .5, br * 1.35, br * .35); }, box([Hc], 52), CLAY.stem, 340, { k: .4 });
+    return;
+  }
+  const petA = (i, ring) => (i + (ring ? .5 : 0)) / PETALS * Math.PI * 2 - Math.PI / 2;
+  const bs = eBack(seg(tq, PETAL_T(0), PETAL_T(PETALS - 1) + .15), 1.4);     // back ring: one merged darker mask
+  if (bs > 0) part(c => { c.save(); c.translate(Hc[0], Hc[1]); c.rotate(hr); c.scale(sx, 1);
+    for (let i = 0; i < PETALS; i++) { c.save(); c.rotate(petA(i, 1)); c.beginPath(); c.ellipse(60 + 60 * bs, 0, 62 * bs, 19 * bs, 0, 0, 7); c.fill(); c.restore(); }
+    c.restore(); }, [Hc[0] - 200, Hc[1] - 200, Hc[0] + 200, Hc[1] + 200], CLAY.petalB, 350, { k: .5, sb: 16, shA: .24, spec: false, lit: .4 });
+  for (let i = 0; i < PETALS; i++) {
+    const s = eBack(seg(tq, PETAL_T(i), PETAL_T(i) + .16), 2.2); if (s <= 0) continue;
+    const a = petA(i, 0), c0 = HL(Math.cos(a) * (58 + 50 * s), Math.sin(a) * (58 + 50 * s));
+    part(c => { c.save(); c.translate(Hc[0], Hc[1]); c.rotate(hr); c.scale(sx, 1); c.rotate(a); c.beginPath(); c.ellipse(58 + 50 * s, 0, 54 * s, 21 * s, 0, 0, 7); c.fill(); c.restore(); },
+      box([c0], 62), CLAY.petal, 360 + i, { k: .4, sb: 8, shA: .16, js: 350 });
+    const q0 = HL(Math.cos(a) * 70, Math.sin(a) * 70), q1 = HL(Math.cos(a) * (58 + 80 * s), Math.sin(a) * (58 + 80 * s));
+    if (s > .6) carve(c => { c.beginPath(); c.moveTo(q0[0], q0[1]); c.lineTo(q1[0], q1[1]); }, 1.6, .18);
+  }
+  const dr = 66 * disc;     // disc with seed dimples and a face
+  part(c => { c.save(); c.translate(Hc[0], Hc[1]); c.rotate(hr); c.scale(sx, 1); c.beginPath(); c.arc(0, 0, dr, 0, 7); c.fill(); c.restore(); }, [Hc[0] - 80, Hc[1] - 80, Hc[0] + 80, Hc[1] + 80], CLAY.disc, 380, { k: .6, js: 350, sb: 10, shA: .25, lit: .45 });
+  if (disc > .8) {
+    ctx.save();
+    for (let i = 0; i < 70; i++) { const rr = Math.sqrt(i / 70) * dr * .86, a = i * 2.39996, p = HL(Math.cos(a) * rr, Math.sin(a) * rr);
+      ctx.fillStyle = 'rgba(25,10,4,0.45)'; ctx.beginPath(); ctx.arc(p[0], p[1], 2.6, 0, 7); ctx.fill(); ctx.fillStyle = 'rgba(255,220,170,0.18)'; ctx.beginPath(); ctx.arc(p[0] - 1, p[1] - 1, 1.4, 0, 7); ctx.fill(); }
+    ctx.restore();
+    const look = lerp(0, -12, bend);
+    if (tq >= 6.4) {
+      const blink = tq > 7.12 && tq < 7.22, happy = (tq > 7.9 && tq < 8.3) || tq > 8.6;
+      for (const e of [HL(-22 + look, -12), HL(16 + look, -12)]) {
+        ctx.save(); ctx.fillStyle = CLAY.cream; ctx.beginPath(); ctx.ellipse(e[0], e[1], 12 * sx, 14, hr, 0, 7); ctx.fill(); ctx.restore();
+        if (blink || happy) carve(c => { c.beginPath(); c.arc(e[0], e[1] + 3, 8, Math.PI + hr + .35, hr - .35); }, 3.2, .8);
+        else bead(e[0] + look * .25 - 2, e[1] + 2, 6.5);
+      }
+      carve(c => { const a = HL(-24 + look, 22), b = HL(20 + look, 22), m = HL(-2 + look, 42); c.beginPath(); c.moveTo(a[0], a[1]); c.quadraticCurveTo(m[0], m[1], b[0], b[1]); }, 4, .75);
+      for (const cx of [-40, 34]) { const p = HL(cx + look, 12); ctx.save(); ctx.fillStyle = 'rgba(235,110,90,0.35)'; ctx.filter = 'blur(3px)'; ctx.beginPath(); ctx.arc(p[0], p[1], 9, 0, 7); ctx.fill(); ctx.restore(); }
+    }
+  }
+}
+
+// ── title: clay letters bounce onto the table ─────────────────────────────────────
 const LETTER_CACHE = {};
 function letterClay(ch, size, color, step, seed) {
-  const key = ch + size + color + (step % 3);          // texture scrolls between 3 states
+  const key = ch + size + color + (step % 3);
   if (LETTER_CACHE[key]) return LETTER_CACHE[key];
   const f = `700 ${size}px ${FONT}`; ctx.font = f; const w = ctx.measureText(ch).width, h = size * 1.05;
   const cl = clay(c => { c.font = f; c.textBaseline = 'alphabetic'; c.fillStyle = '#000'; c.fillText(ch, 0, size * .8); }, w, h, color,
-    { k: size / 240, sx: .3, sy: .25, sr: .3, tx: (step % 3) * 17 + seed * 31, ty: seed * 13, tex: 1, lit: color === CLAY.char ? .8 : .55, rim: color === CLAY.char ? .55 : .35 });
+    { k: size / 240, sx: .3, sy: .25, sr: .3, sa: .35, tx: (step % 3) * 17 + seed * 31, ty: seed * 13, tex: 1, lit: color === CLAY.char ? .8 : .55, rim: color === CLAY.char ? .55 : .35 });
   cl.w = w; return (LETTER_CACHE[key] = cl);
 }
+const GAP = 7, SPACE = 44;
+function titleLayout() {
+  ctx.font = `700 ${TSZ}px ${FONT}`; const out = []; let x = 0, n = 0;
+  TITLE.forEach(([word, col]) => { for (const ch of word) { const w = ctx.measureText(ch).width; out.push({ ch, col, x, w, i: n++ }); x += w + GAP; } x += SPACE; });
+  const tw = x - SPACE - GAP, x0 = 960 - tw / 2; out.forEach(o => o.x += x0); return out;
+}
+let LAYOUT = null;
+function title(tq) {
+  for (const L of LAYOUT) {
+    const t0 = T_IN + L.i * T_STAG, pin = seg(tq, t0, t0 + .34); if (pin <= 0) continue;
+    const cl = letterClay(L.ch, TSZ, L.col, STEP, L.i);
+    const upv = pin < .6 ? Math.sin(seg(pin, 0, .6) * Math.PI) : 0, land = pin >= .6 ? Math.sin(seg(pin, .6, 1) * Math.PI) * .2 : 0;
+    const sc = pin < .15 ? pin / .15 : 1, sx = sc * (1 + land * .45), sy = sc * (1 - land + upv * .1);
+    contact(L.x + L.w / 2, TBASE + 6, L.w * .95 * sc, .32 * sc * (1 - upv));
+    const bx = L.x + L.w / 2, by = TBASE;      // scale around each letter's own bottom centre
+    ctx.save(); ctx.translate(bx, by - upv * 80); ctx.scale(sx, sy); ctx.translate(-bx, -by);
+    place(cl, L.x + (hash(L.i + 5, STEP) - .5) * 2, TBASE - TSZ * .8 + (hash(L.i + 9, STEP) - .5) * 1.5, { sb: 10, sa: .2, so: [10, 5] });
+    ctx.restore();
+  }
+}
 
-// ── timeline (12 fps) ──────────────────────── ─────────────────────────
-const TEXT1 = 'Speak now!', T1 = { size: 150, base: 510 };
-const WORD2 = 'irticalen.', T2 = { size: 190, base: 700, x: 760 };
+// ── frame ─────────────────────────────────────────────────────────────────────────
 function renderFrame(t) {
-  const step = Math.floor(t * 12), tq = step / 12;
+  const step = Math.floor(t * 12), tq = step / 12; STEP = step;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.filter = 'none'; ctx.globalCompositeOperation = 'source-over';
-  // In scene 2, the stop-motion camera slowly approaches (12 fps steps)
-  const z = 1 + .13 * eInOut(seg(tq, 5.6, 9.3)); ctx.setTransform(z, 0, 0, z, 820 * (1 - z), 700 * (1 - z));
+  // stop-motion camera: starts close on the gardener, pulls back as the flower grows
+  const z = 1 + .25 * (1 - eInOut(seg(tq, 4.1, 6.0))), ax = 880, ay = 640; ctx.setTransform(z, 0, 0, z, ax * (1 - z), ay * (1 - z));
   ctx.drawImage(BG, 0, 0);
-
-  // ── scene 1: turquoise ball → balloon → letters ──
-  if (tq < 6.0) {
-    const R = 92, X0 = 700;
-    let pts = null, cxB = X0, cyB = FLOOR - R, sx = 1, sy = 1, showBall = false, contactW = 0, contactA = 0;
-    if (tq >= .25 && tq < 1.4) {                          // drop + two bounces
-      showBall = true; let y, sq = 0;
-      if (tq < .75) { y = lerp(-160, FLOOR - R, eIn(seg(tq, .25, .75))); sy = 1.12; sx = .9; }
-      else if (tq < .92) { y = FLOOR - R; sq = Math.sin(seg(tq, .75, .92) * Math.PI) * .32; }
-      else if (tq < 1.17) { const u = seg(tq, .92, 1.17); y = FLOOR - R - Math.sin(u * Math.PI) * 170; sy = 1.06; sx = .95; }
-      else { y = FLOOR - R; sq = Math.sin(seg(tq, 1.17, 1.33) * Math.PI) * .16; }
-      if (sq) { sy = 1 - sq; sx = 1 + sq * .8; }
-      cyB = y; contactW = R * 2 * sx * clamp(1 - (FLOOR - R - y) / 400, .3, 1); contactA = .5 * clamp(1 - (FLOOR - R - y) / 500, 0, 1);
-      const X = lerp(X0 - 140, X0, eOut(seg(tq, .25, 1.2)));
-      const p = circlePts(X, y, R);
-      contact(X, FLOOR, contactW, contactA);
-      const bb = bbox(p);
-      const cl = clay(c => { c.fillStyle = '#000'; c.beginPath(); c.ellipse(R, R, R, R, 0, 0, 7); c.fill(); }, R * 2, R * 2, CLAY.teal, { k: 1, tx: hash(1, step) * 8, ty: hash(2, step) * 8, trot: -tq * 3.2 });
-      place(cl, bb.x, bb.y, { sx, sy, pivotY: 1 });
-    }
-    // ball → balloon (anticipation: first pressed, then lifted up by spreading); after 4.6 s it becomes a ball again
-    const mIn = tq >= 1.4 ? eBack(seg(tq, 1.5, 2.15), 1.6) : 0;
-    const mOut = eInOut(seg(tq, 4.65, 5.2));
-    const roll = seg(tq, 5.25, 5.95);
-    if (tq >= 1.4) {
-      const base = circlePts(X0, FLOOR - R, R);
-      let u = mIn * (1 - mOut);
-      let p = morph(base, bubble1, u, step * .7, (1 - Math.abs(u - .5) * 2) * 5);
-      if (tq < 1.5) { const s = Math.sin(seg(tq, 1.4, 1.5) * Math.PI) * .18; p = p.map(([x, y]) => [X0 + (x - X0) * (1 + s * .7), FLOOR - (FLOOR - y) * (1 - s)]); }
-      // speech bubble breathes in stop-motion steps
-      const talk = tq > 2.2 && tq < 4.7 ? Math.max(0, Math.sin((tq - 2.2) * 7.5)) * .012 : 0;
-      if (talk) { const c0 = bbox(p); p = p.map(([x, y]) => [x, FLOOR - (FLOOR - y) * (1 + talk)]); }
-      if (roll > 0) { const dx = eIn(roll) * 1500; p = p.map(([x, y]) => [x + dx, y]); }
-      p = lumpy(p, step, 5, 1.6);
-      const bb = bbox(p);
-      contact(u > .5 ? B1.x + 205 : bb.x + bb.w * .5, u > .5 ? bb.y + bb.h : FLOOR, u > .5 ? 80 : Math.min(bb.w * 1.05, 230), .5);
-      drawBlob(p, CLAY.teal, step, 5, { k: lerp(1, 1.5, u), spx: u > .5 ? .22 : .3, spy: u > .5 ? .18 : .26, spr: u > .5 ? .2 : .22, trot: -roll * 9, tx: -roll * 900, sb: 22 });
-      // letters
-      ctx.font = `700 ${T1.size}px ${FONT}`; const ws = [...TEXT1].map(ch => ctx.measureText(ch).width), tw = ws.reduce((a, b) => a + b, 0);
-      let x = B1.x + B1.w / 2 - tw / 2 - 6;
-      [...TEXT1].forEach((ch, i) => {
-        const w = ws[i]; if (ch === ' ') { x += w; return; }
-        const t0 = 2.2 + i * .13, pin = seg(tq, t0, t0 + .33), pout = seg(tq, 4.42 + i * .015, 4.66 + i * .015);
-        if (pin <= 0 || pout >= 1) { x += w; return; }
-        const cl = letterClay(ch, T1.size, i % 5 === 3 ? CLAY.mustard : CLAY.cream, step, i);
-        // bounce: launches from base, extends in air, crushes on landing
-        const up = pin < .6 ? Math.sin(seg(pin, 0, .6) * Math.PI) : 0;
-        const land = pin >= .6 ? Math.sin(seg(pin, .6, 1) * Math.PI) * .22 : 0;
-        const sc = pin < .15 ? pin / .15 : 1, k = (1 - eIn(pout)) * sc;
-        const ly = T1.base - T1.size * .8 - up * 70, pull = eIn(pout) * (B1.x + B1.w / 2 - x - w / 2) * .6;
-        place(cl, x + pull + (hash(i, step) - .5) * 2, ly + (hash(i + 50, step) - .5) * 2, { sx: k * (1 + land * .7 - up * .08), sy: k * (1 - land + up * .12), shadow: true, sb: 8, rot: (hash(i + 90, step) - .5) * .04 });
-        x += w;
-      });
-    }
-  }
-  // ── scene 2: dark ball comes rolling → logo balloon; diamonds; text ──
-  if (tq >= 5.5) {
-    const R = 86, cx0 = LG.x + 46 * LG.k;
-    const rin = eOut(seg(tq, 5.5, 6.3));
-    const X = lerp(-250, cx0, rin);
-    const settle = seg(tq, 6.3, 6.5), sq = Math.sin(settle * Math.PI) * .14;
-    const base = circlePts(X, FLOOR - R, R);
-    const mu = tq >= 6.5 ? eBack(seg(tq, 6.55, 7.2), 1.5) : 0;
-    let p = morph(base, logoB, mu, step * .5, (1 - Math.abs(mu - .5) * 2) * 8);
-    if (sq) p = p.map(([x, y]) => [X + (x - X) * (1 + sq * .8), FLOOR - (FLOOR - y) * (1 - sq)]);
-    p = lumpy(p, step, 9, 1.4);
-    const bb = bbox(p);
-    contact(mu > .5 ? LP(14, 94)[0] + 4 : X, mu > .5 ? bb.y + bb.h : FLOOR, mu > .5 ? 70 : R * 2.1, .5);
-    drawBlob(p, CLAY.char, step, 9, { k: lerp(1, 1.3, mu), trot: -(1 - rin) * 8, tx: -(1 - rin) * 500, sb: 20, spx: .3, spy: .22, spr: .3, lit: .75, rim: .5 });
-    // diamonds: tiny balls fall, pressed
-    [[CLAY.cream, 7.05], [CLAY.red, 7.25], [CLAY.cream, 7.45]].forEach(([col, t0], i) => {
-      const [dx, dy] = DIAC[i], r = 36;
-      if (tq < t0) return;
-      const fall = seg(tq, t0, t0 + .25), press = seg(tq, t0 + .25, t0 + .5);
-      const y = lerp(-80, dy, eIn(fall)), d = eBack(press, 2.2);
-      let q = morph(circlePts(dx, y, r * .75), diamondPts(dx, dy, 44), d, i, 0);
-      const s = press > 0 && press < .5 ? Math.sin(press * 2 * Math.PI) * .2 : 0;
-      if (s) q = q.map(([x, yy]) => [dx + (x - dx) * (1 + s), dy + (yy - dy) * (1 - s)]);
-      drawBlob(lumpy(q, step, 20 + i, .8), col, step, 20 + i, { k: .55, shadow: fall < 1, sb: 6, spr: .3 });
-    });
-    // text: dark paste letters jump in sequence
-    ctx.font = `700 ${T2.size}px ${FONT}`; let x = T2.x;
-    [...WORD2].forEach((ch, i) => {
-      const w = ctx.measureText(ch).width, t0 = 7.75 + i * .1, pin = seg(tq, t0, t0 + .33);
-      if (pin > 0) {
-        const cl = letterClay(ch, T2.size, CLAY.char, step, i + 20);
-        const up = pin < .6 ? Math.sin(seg(pin, 0, .6) * Math.PI) : 0, land = pin >= .6 ? Math.sin(seg(pin, .6, 1) * Math.PI) * .2 : 0;
-        const sc = pin < .15 ? pin / .15 : 1;
-        contact(x + w / 2, FLOOR, w * .9 * sc, .35 * sc * (1 - up));
-        place(cl, x + (hash(i + 5, step) - .5) * 2, T2.base - T2.size * .8 - up * 90 + (FLOOR - T2.base), { sx: sc * (1 + land * .6), sy: sc * (1 - land + up * .1), sb: 12, rot: (hash(i + 70, step) - .5) * .05 });
-      }
-      x += w;
-    });
-  }
+  pot(tq);
+  sunflower(tq);
+  const A = gardener(tq);
+  if (tq >= POUR[0] && tq < POUR[1] + .4) water(tq, canFrame(A.canGrip, .62)([108, 14]));
+  title(tq);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // stop-motion flicker + in/out (light on/off)
-  const flick = 1 + (hash(3, step) - .5) * .03;
-  const lamp = Math.min(eOut(seg(t, 0, .35)), 1 - eInOut(seg(t, 9.4, 10)));
+  const flick = 1 + (hash(3, step) - .5) * .03;          // stop-motion flicker + lamp on/off
+  const lamp = Math.min(eOut(seg(t, 0, .35)), 1 - eInOut(seg(t, 9.45, 10)));
   const dark = 1 - lamp * flick;
   if (dark > 0) { ctx.fillStyle = `rgba(20,10,4,${clamp(dark)})`; ctx.fillRect(0, 0, W, H); }
   else { ctx.fillStyle = `rgba(255,240,215,${clamp(-dark * 2)})`; ctx.globalCompositeOperation = 'soft-light'; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over'; }
-  // vignetting (lens)
   const v = ctx.createRadialGradient(960, 540, 600, 960, 540, 1250); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(30,12,2,0.35)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
 }
 
+// sound cues for audio.py
+window.events = () => {
+  const e = [{ t: .05, k: 'lamp' }, { t: .72, k: 'squish', f: 260, v: .5 }, { t: 1.42, k: 'plop', f: 380 }, { t: 1.6, k: 'pat' }, { t: 1.84, k: 'pat' },
+    { t: 2.2, k: 'clink' }, { t: POUR[0], k: 'pour', d: POUR[1] - POUR[0] + .2 }, { t: 3.6, k: 'clink', v: .6 }];
+  for (const tt of [4.35, 4.65, 4.95, 5.25]) e.push({ t: tt, k: 'step' });
+  GROW.forEach(([t0], i) => e.push({ t: t0, k: 'squish', f: 180 + i * 30, v: .7 }));
+  e.push({ t: 5.7, k: 'plop', f: 560, v: .7 });
+  for (let i = 0; i < PETALS; i++) e.push({ t: PETAL_T(i), k: 'pop', f: 420 + (i % 7) * 60, v: .45 });
+  e.push({ t: 6.28, k: 'boing' }, { t: 6.55, k: 'stretch', d: .8 }, { t: 7.62, k: 'squish', f: 160, v: .8 }, { t: 7.95, k: 'squish', f: 220, v: .6 });
+  LAYOUT.forEach(L => e.push({ t: T_IN + L.i * T_STAG + .2, k: 'pop', f: 330 + (L.i % 5) * 55, v: .38 }));
+  e.push({ t: 8.7, k: 'chime' });
+  return e;
+};
 window.draw = function (job) { renderFrame(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
-window.ready = document.fonts.load(`700 132px ${FONT}`, 'Speak now! irticalen.').then(() => document.fonts.ready).then(() => {
-  buildSet(); FPAT = ctx.createPattern(FP, 'repeat'); renderFrame(0);
+window.ready = document.fonts.load(`700 124px ${FONT}`, 'The tiny gardener.').then(() => document.fonts.ready).then(() => {
+  buildSet(); FPAT = ctx.createPattern(FP, 'repeat'); LAYOUT = titleLayout(); renderFrame(0);
 });
 </script></body></html>
