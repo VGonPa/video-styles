@@ -58,6 +58,9 @@ def check_pages(s, problems):
     for page in pages:
         if not page.is_file() or target not in page.read_text():
             problems.append(f"not listed in {page.relative_to(ROOT)}")
+    style_page = ROOT / "styles" / s["slug"] / "README.md"
+    if not style_page.is_file() or f"# {s['name']}\n" not in style_page.read_text():
+        problems.append("missing or stale styles/<slug>/README.md")
 
 
 def main():
