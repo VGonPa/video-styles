@@ -16,6 +16,14 @@ def link(kind, key, prefix):
     return f"[{group['title']}]({prefix}categories/{folder}/{key}.md)"
 
 
+def credits(s, prefix, sep=" · "):
+    parts = []
+    for c in s.get("credits", []):
+        name = f'<a href="{c["url"]}">{c["name"]}</a>' if "url" in c else c["name"]
+        parts.append(f'{c["role"]} {name}')
+    return sep.join(parts)
+
+
 def gallery(styles, prefix):
     rows = []
     for i in range(0, len(styles), COLUMNS):
@@ -25,19 +33,20 @@ def gallery(styles, prefix):
             cells.append(
                 f'<td width="25%" align="center"><a href="{base}/{s["slug"]}.mp4">'
                 f'<img src="{base}/preview.gif" alt="{s["name"]}" width="100%"></a><br>'
-                f'<b>{s["number"]:02d} · {s["name"]}</b><br>'
-                f'<a href="{base}/{s["slug"]}.mp4">video</a> · <a href="{base}">source</a></td>')
+                f'<b>{s["name"]}</b><br>'
+                + (f'<sub>{credits(s, prefix, "<br>")}</sub><br>' if s.get("credits") else "")
+                + f'<a href="{base}/{s["slug"]}.mp4">video</a> · <a href="{base}">source</a></td>')
         rows.append("<tr>\n" + "\n".join(cells) + "\n</tr>")
     return "<table>\n" + "\n".join(rows) + "\n</table>"
 
 
 def table(styles, prefix):
-    lines = ["| # | Style | Feel | Best for | Family | Use cases |",
-             "|---|---|---|---|---|---|"]
+    lines = ["| Style | Feel | Best for | Family | Use cases |",
+             "|---|---|---|---|---|"]
     for s in styles:
         uses = ", ".join(link("use_cases", u, prefix) for u in s["use_cases"])
         lines.append(
-            f"| {s['number']:02d} | [{s['name']}]({prefix}styles/{s['slug']}/) | {s['feel']} "
+            f"| [{s['name']}]({prefix}styles/{s['slug']}/) | {s['feel']} "
             f"| {s['best_for']} | {link('families', s['family'], prefix)} | {uses} |")
     return "\n".join(lines)
 
@@ -57,8 +66,8 @@ def nav(prefix):
 def write_page(kind, key):
     group = MANIFEST[kind][key]
     field = "use_cases" if kind == "use_cases" else "family"
-    styles = [s for s in MANIFEST["styles"]
-              if (key in s[field] if kind == "use_cases" else s[field] == key)]
+    styles = manifest.alphabetical([s for s in MANIFEST["styles"]
+                                    if (key in s[field] if kind == "use_cases" else s[field] == key)])
     folder = "use-cases" if kind == "use_cases" else "families"
     label = "Use case" if kind == "use_cases" else "Visual family"
     body = (f"# {group['title']}\n\n{label} · {group['description']}\n\n"
@@ -69,16 +78,38 @@ def write_page(kind, key):
     path.write_text(body)
 
 
+def write_style_page(s):
+    """styles/<slug>/README.md: what GitHub shows when someone opens the style's folder."""
+    folder = ROOT / "styles" / s["slug"]
+    uses = ", ".join(link("use_cases", u, "../../") for u in s["use_cases"])
+    files = [f"[`anim.html`](anim.html)"]
+    if (folder / "build.sh").is_file():
+        files.append("rebuild with `./build.sh`")
+    lines = [f"# {s['name']}", "", "[← All styles](../../README.md)", "",
+             f'<a href="{s["slug"]}.mp4"><img src="preview.gif" alt="{s["name"]}" width="640"></a>', "",
+             f"**Feel:** {s['feel']}  ", f"**Best for:** {s['best_for']}  ",
+             f"**Visual family:** {link('families', s['family'], '../../')}  ",
+             f"**Use cases:** {uses}", ""]
+    if s.get("credits"):
+        lines += ["**Credits:** " + credits(s, "../../"), ""]
+    lines += [f"▶ [Watch the clip]({s['slug']}.mp4) · Source: " + " · ".join(files), ""]
+    (folder / "README.md").write_text("\n".join(lines))
+
+
 def validate():
     for s in MANIFEST["styles"]:
         assert s["family"] in MANIFEST["families"], s["slug"]
         assert all(u in MANIFEST["use_cases"] for u in s["use_cases"]), s["slug"]
         assert (ROOT / "styles" / s["slug"] / "preview.gif").is_file(), s["slug"]
+        for c in s.get("credits", []):
+            assert {"role", "name"} <= c.keys() <= {"role", "name", "url"}, s["slug"]
 
 
 def main():
     validate()
     styles = MANIFEST["styles"]
+    for s in styles:
+        write_style_page(s)
     for kind in ("use_cases", "families"):
         for key in MANIFEST[kind]:
             if any(key in (s["use_cases"] if kind == "use_cases" else [s["family"]]) for s in styles):
@@ -88,7 +119,9 @@ def main():
     text = readme.read_text()
     head, rest = text.split(START)
     _, tail = rest.split(END)
-    block = f"{START}\n{nav('')}\n\n{gallery(styles, '')}\n\n{table(styles, '')}\n{END}"
+    # The main gallery is shuffled so no family or era clusters; category pages are alphabetical.
+    order = manifest.shuffled(styles)
+    block = f"{START}\n{nav('')}\n\n{gallery(order, '')}\n\n{table(order, '')}\n{END}"
     readme.write_text(head + block + tail)
     print(f"README + {len(MANIFEST['use_cases']) + len(MANIFEST['families'])} category pages, "
           f"{len(styles)} styles")
