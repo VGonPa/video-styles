@@ -1,0 +1,14 @@
+# Bauhaus
+
+[← All styles](../../README.md)
+
+<a href="bauhaus.mp4"><img src="preview.gif" alt="Bauhaus" width="640"></a>
+
+**Feel:** Poster grid and basic shapes  
+**Best for:** Steps, principles, and bold messages  
+**Visual family:** [Art Movements](../../categories/families/art-movements.md)  
+**Use cases:** [Social & Short-Form](../../categories/use-cases/social.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md), [Explainers](../../categories/use-cases/explainer.md)
+
+**Credits:** Originally developed by <a href="https://github.com/yasinozmeen/animasyon-stil-katalogu">Yasin Özmen</a>
+
+▶ [Watch the clip](bauhaus.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

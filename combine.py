@@ -14,8 +14,10 @@ ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "_catalog_build"
 OUTPUT = ROOT / "catalog" / "catalog.mp4"
 MANIFEST = manifest.load()
-STYLES = [(s["slug"], s["name"], MANIFEST["families"][s["family"]]["title"].upper())
-          for s in MANIFEST["styles"]]
+# Shuffled (stably) so the reel mixes families and eras instead of following creation order.
+STYLES = [(s["slug"], s["name"], MANIFEST["families"][s["family"]]["title"].upper(),
+           " · ".join(manifest.credit_text(c) for c in s.get("credits", [])))
+          for s in manifest.shuffled(MANIFEST["styles"])]
 
 
 def run(*args):
@@ -59,21 +61,21 @@ def main():
     BUILD.mkdir(exist_ok=True)
     OUTPUT.parent.mkdir(exist_ok=True)
     entries = []
-    for number, (slug, title, group) in enumerate(STYLES, 1):
+    for number, (slug, title, group, credit) in enumerate(STYLES, 1):
         clip = ROOT / "styles" / slug / (slug + ".mp4")
         if not clip.is_file():
             sys.exit("Missing clip: " + str(clip))
-        label = f"{number:02d}  ·  {title}"
-        png = BUILD / f"card-{number:02d}.png"
-        mp4 = BUILD / f"card-{number:02d}.mp4"
-        card((group, label, ""), png)
+        png = BUILD / f"card-{number:03d}.png"
+        mp4 = BUILD / f"card-{number:03d}.mp4"
+        card((group, title, credit), png)
         encode_card(png, mp4, 1.4)
         entries.extend((mp4, clip))
         print(f"{number:02d}/{len(STYLES)} {title}", flush=True)
 
     png = BUILD / "end.png"
     mp4 = BUILD / "end.mp4"
-    card(("ANIMATION STYLE CATALOG", "irticalen", "English adaptation · Original by Yasin Özmen"), png)
+    card(("ANIMATION STYLE CATALOG", f"{len(STYLES)} styles",
+          "Built on Yasin Özmen's original catalog"), png)
     encode_card(png, mp4, 3)
     entries.append(mp4)
 
