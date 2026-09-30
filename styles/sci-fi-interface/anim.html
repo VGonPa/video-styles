@@ -4,65 +4,73 @@
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 //  hud — a cold, neon-free sci-fi interface. window.draw({t}) → JPEG base64
-//  Story: rings are set → radar scan analyzes a conversation, tags it
-//  locks → audio ring “opens” to timeline → scan head
-//  marks pause/filler words → FLUENCY 87 → interface retracts.
+//  Story: the HUD boots → head-on docking reticle, the ARGO RING port drifts
+//  off-axis while three warnings flash → stepped RCS corrections pull it onto
+//  the crosshair, warnings resolve to green → the port turns edge-on and the
+//  view becomes a side schematic → contact, four clamps lock →
+//  DOCKING COMPLETE → the interface powers down to a dot.
 // ─────────────────────────────────────────────────────────────────────────────
-const W = 1920, H = 1080, CX = 960, CY = 540, DUR = 9.0;
-const cv = document.getElementById('c'); const ctx = cv.getContext('2d');
+const W = 1920, H = 1080, CX = 960, CY = 540, DUR = 9.8;
+const cv = document.getElementById('c'); const mctx = cv.getContext('2d');
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const LAYER = mk(W, H); const ctx = LAYER.getContext('2d');
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
 const seg = (t, a, b) => clamp((t - a) / (b - a));
 const lerp = (a, b, p) => a + (b - a) * p;
 const eOut = x => 1 - Math.pow(1 - x, 3), eIn = x => x * x * x, eIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-const eOut5 = x => 1 - Math.pow(1 - x, 5);
 const eBack = x => x <= 0 ? 0 : x >= 1 ? 1 : 1 + 2.4 * Math.pow(x - 1, 3) + 1.4 * Math.pow(x - 1, 2);
 const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
 const TAU = Math.PI * 2, D2R = Math.PI / 180;
 const ICE = [160, 208, 226], WH = '#eef6fa';
 const ice = a => `rgba(${ICE[0]},${ICE[1]},${ICE[2]},${a})`, wh = a => `rgba(238,246,250,${a})`;
+const amb = a => `rgba(232,172,96,${a})`, grn = a => `rgba(128,222,168,${a})`;
 const DISP = "'Chakra Petch', sans-serif", MONO = "'Martian Mono', monospace";
 function F(size, w, fam, ls = 0) { ctx.font = `${w} ${size}px ${fam}`; ctx.letterSpacing = ls + 'px'; }
 
-// ── timeline ───────────────────────────── ─────────────────────────────
-const T = { ring0: 0.15, scan0: 1.15, scan1: 4.05, done: 4.1, un0: 4.45, un1: 5.35, head0: 5.55, head1: 7.15, res: 7.2, out0: 8.1, end: 8.95 };
-const R1 = 118, R2 = 180, R3 = 292, R4 = 332, R5 = 396;
-const NB = 120;
-// speech adverb: three pause spaces
-const PAUSES = [{ i: 30, w: 3, lab: '0,6 sec' }, { i: 65, w: 4, lab: '1,1 sec' }, { i: 97, w: 2, lab: '0,4 sec' }];
-const FILLERS = [{ i: 46, lab: '“um”' }, { i: 81, lab: '“well”' }];
-const AMP = []; for (let i = 0; i < NB; i++) {
-  let a = 0.35 + 0.45 * Math.abs(Math.sin(i * 0.53)) * (0.6 + 0.4 * hash(i)) + 0.2 * hash(i * 3.1);
-  for (const p of PAUSES) { const d = Math.abs(i - p.i); if (d <= p.w) a = 0.04 + 0.03 * hash(i); else if (d <= p.w + 2) a *= 0.55; }
-  if (i < 2 || i > NB - 3) a *= 0.4; AMP.push(clamp(a, 0.03, 1)); }
-const CALL = [
-  { deg: -40, lab: 'SPEECH RATE', val: '142', unit: 'wpm' },
-  { deg: 35, lab: 'PAUSES', val: '0,7', unit: 'sec avg.' },
-  { deg: 145, lab: 'FILLER WORDS', val: '2', unit: 'total' },
-  { deg: 220, lab: 'AUDIO LEVEL', val: '-14', unit: 'dB' },
+// ── timeline ─────────────────────────────────────────────────────────────────
+const T = { ring0: 0.2, pan0: 0.9, app0: 0.9, app1: 4.9, ok: 4.55, fold0: 4.9, fold1: 5.5, side0: 5.3, fin0: 5.85, contact: 6.6,
+  clamp0: 6.75, done: 7.4, off0: 8.85, off1: 9.5, end: 9.8 };
+const RCS = [1.5, 2.2, 2.9, 3.5, 4.0];                    // thruster pulses: each starts one correction step
+const OFFK = [1, 0.74, 0.47, 0.22, -0.07, 0], ROLLK = [14, 10.5, 6.2, 2.8, 0.9, 0];
+const stepped = (t, K) => { let v = K[0]; for (let i = 0; i < RCS.length; i++) v = lerp(v, K[i + 1], eOut(seg(t, RCS[i], RCS[i] + 0.55))); return v; };
+const offF = t => stepped(t, OFFK), rollD = t => stepped(t, ROLLK);
+const WARN = [ // status rows: warnings that resolve to green
+  { lab: 'CLOSING RATE', on: 1.7, ok: 2.95 },
+  { lab: 'LATERAL OFFSET', on: 1.95, ok: 4.15 },
+  { lab: 'ROLL ALIGNMENT', on: 2.2, ok: 4.4 },
 ];
-const sweepAng = t => -Math.PI / 2 + TAU * eIO(seg(t, T.scan0, T.scan1));
-const passT = deg => { // the moment the scan crosses that angle
-  const f = (((deg + 90) % 360) + 360) % 360 / 360; let lo = 0, hi = 1; for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; eIO(m) < f ? lo = m : hi = m; }
-  return T.scan0 + lo * (T.scan1 - T.scan0); };
-CALL.forEach(c => c.t = passT(c.deg));
-const L0 = TAU * R2, LF = 1400, YTL = 650;
-const headX = t => lerp(CX - LF / 2, CX + LF / 2, eIO(seg(t, T.head0, T.head1)));
-const barX = i => CX - LF / 2 + (i + 0.5) / NB * LF;
-PAUSES.forEach(p => p.t = lerp(T.head0, T.head1, invIO((barX(p.i) - (CX - LF / 2)) / LF)));
-FILLERS.forEach(p => p.t = lerp(T.head0, T.head1, invIO((barX(p.i) - (CX - LF / 2)) / LF)));
-function invIO(f) { let lo = 0, hi = 1; for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; eIO(m) < f ? lo = m : hi = m; } return lo; }
+const CLAMPS = ['A', 'B', 'C', 'D'].map((n, i) => ({ n, t: T.clamp0 + i * 0.15, deg: 45 + i * 90 }));
+function range(t) {
+  if (t < T.fin0) return lerp(240, 12, eIO(seg(t, T.app0, T.app1))) - 2.6 * seg(t, T.app1, T.fin0);
+  return lerp(9.4, 0, eOut(seg(t, T.fin0, T.contact)) * 0.35 + 0.65 * seg(t, T.fin0, T.contact) ** 1.6);
+}
+function rate(t) {
+  if (t < 1.5) return 1.92;
+  if (t < 2.95) return lerp(1.92, 0.38, eIO(seg(t, 1.5, 2.95)));
+  if (t < T.contact) return lerp(0.38, 0.06, seg(t, 2.95, T.contact));
+  return 0;
+}
+const blink = t => (Math.floor(t * 4) % 2 === 0) ? 1 : 0.35;
 
-window.SFX = [];
-[0.15, 0.27, 0.39, 0.51, 0.63].forEach(t => SFX.push({ t, k: 'tick' }));
-CALL.forEach(c => SFX.push({ t: c.t + 0.28, k: 'blip' }));
-SFX.push({ t: T.done, k: 'ping' }, { t: T.un0, k: 'low' });
-[...PAUSES, ...FILLERS].forEach(p => SFX.push({ t: p.t, k: 'mark' }));
-SFX.push({ t: T.res + 0.05, k: 'chime' }, { t: T.out0, k: 'tick' });
+// sound events for audio.py
+window.events = () => {
+  const E = [];
+  [0.2, 0.32, 0.44, 0.56, 0.68].forEach(t => E.push({ t, k: 'tick' }));
+  [1.0, 1.1, 1.2, 1.3].forEach(t => E.push({ t, k: 'blip' }));
+  WARN.forEach(w => { E.push({ t: w.on, k: 'warn' }); E.push({ t: w.ok, k: 'ok' }); });
+  for (let t = 2.45; t < 4.4; t += 0.5) E.push({ t, k: 'beep' });
+  RCS.forEach(t => E.push({ t, k: 'rcs' }));
+  E.push({ t: T.ok, k: 'ping' }, { t: T.fold0, k: 'sweep' }, { t: T.side0, k: 'scan' }, { t: T.contact, k: 'thud' });
+  CLAMPS.forEach(c => E.push({ t: c.t, k: 'clunk' }));
+  E.push({ t: T.done, k: 'chime' }, { t: T.off0, k: 'down' });
+  return E.sort((a, b) => a.t - b.t);
+};
 
-// ── auxiliary drawings ──────────────────────────── ────────────────────────────
-function arc(r, a0, a1, lw, col) { if (a1 <= a0) return; ctx.beginPath(); ctx.arc(CX, CY, r, a0, a1); ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.stroke(); }
+// ── helpers ──────────────────────────────────────────────────────────────────
+function arcAt(x, y, r, a0, a1, lw, col) { if (a1 <= a0) return; ctx.beginPath(); ctx.arc(x, y, r, a0, a1); ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.stroke(); }
+const arc = (r, a0, a1, lw, col) => arcAt(CX, CY, r, a0, a1, lw, col);
 function line(x0, y0, x1, y1, lw, col) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.stroke(); }
+function rect(x, y, w, h, lw, col) { ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.strokeRect(x, y, w, h); }
 const GLY = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 function decode(str, p, t, seed = 0) {
   if (p >= 1) return str; if (p <= 0) return '';
@@ -70,25 +78,28 @@ function decode(str, p, t, seed = 0) {
   for (let i = 0; i < shown; i++) { const lock = p > 0.3 + 0.7 * i / n;
     out += lock || str[i] === ' ' ? str[i] : GLY[Math.floor(hash(i * 13 + Math.floor(t * 24) * 7 + seed) * GLY.length)]; }
   return out; }
-// ring draw-in / retract: 0..1 apparent arc fraction, retract deletes counterclockwise
 function ringVis(t, tin, tout) { return { a: eOut(seg(t, tin, tin + 0.55)), e: eIO(seg(t, tout, tout + 0.45)) }; }
+function warnTri(x, y, s, col) { if (s <= 0) return; ctx.beginPath(); ctx.moveTo(x, y - s); ctx.lineTo(x + s * 0.95, y + s * 0.7); ctx.lineTo(x - s * 0.95, y + s * 0.7); ctx.closePath();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke(); line(x, y - s * 0.4, x, y + s * 0.2, 1.5, col); ctx.fillStyle = col; ctx.fillRect(x - 1, y + s * 0.35, 2, 2); }
+function check(x, y, s, col, p = 1) { if (p <= 0) return; ctx.beginPath(); ctx.moveTo(x - s, y); const q = Math.min(1, p * 2);
+  ctx.lineTo(lerp(x - s, x - s * 0.35, q), y + s * 0.6 * q);
+  if (p > 0.5) ctx.lineTo(lerp(x - s * 0.35, x + s, (p - 0.5) * 2), lerp(y + s * 0.6, y - s * 0.7, (p - 0.5) * 2)); ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.stroke(); }
 
-// ── static layer: dot grid + vignette ───────────────────────────────────
+// ── static layer: dot grid + vignette ───────────────────────────────────────
 let BG;
 function prep() {
   BG = mk(W, H); const g = BG.getContext('2d');
   g.fillStyle = '#05090c'; g.fillRect(0, 0, W, H);
   const r = g.createRadialGradient(CX, CY, 50, CX, CY, 1100); r.addColorStop(0, 'rgba(40,70,85,0.28)'); r.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = r; g.fillRect(0, 0, W, H);
-  for (let y = 36; y < H; y += 48) for (let x = 24; x < W; x += 48) { g.fillStyle = `rgba(160,208,226,${0.07})`; g.fillRect(x - 1, y - 1, 2, 2); }
+  for (let y = 36; y < H; y += 48) for (let x = 24; x < W; x += 48) { g.fillStyle = 'rgba(160,208,226,0.07)'; g.fillRect(x - 1, y - 1, 2, 2); }
   const v = g.createRadialGradient(CX, CY, 400, CX, CY, 1150); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.55)');
   g.fillStyle = v; g.fillRect(0, 0, W, H);
 }
 
-// ── frame UI (corners, title, timecode) ───────────────────────
+// ── frame UI (corners, title, timecode, status line) ─────────────────────────
 function frameUI(t) {
-  const pin = eBack(seg(t, 0.45, 0.95)), pout = eIn(seg(t, T.out0 + 0.35, T.end - 0.1));
-  const off = (1 - pin) * 60 + pout * 50, a = clamp(pin * 1.2) * (1 - pout);
+  const pin = eBack(seg(t, 0.45, 0.95)); const off = (1 - pin) * 60, a = clamp(pin * 1.2);
   if (a <= 0) return;
   const x0 = 150 - off, y0 = 110 - off, x1 = W - 150 + off, y1 = H - 110 + off, L = 46;
   ctx.globalAlpha = a;
@@ -96,212 +107,302 @@ function frameUI(t) {
     ctx.beginPath(); ctx.moveTo(x, y + sy * L); ctx.lineTo(x, y); ctx.lineTo(x + sx * L, y); ctx.lineWidth = 2; ctx.strokeStyle = ice(0.8); ctx.stroke(); }
   const pt = seg(t, 0.7, 1.2);
   F(20, 600, DISP, 5); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = wh(0.95);
-  const h1 = decode('VOICE ANALYSIS', pt, t, 1); ctx.fillText(h1, 196, 158);
-  const w1 = ctx.measureText('VOICE ANALYSIS').width;
-  F(14, 300, MONO, 2); ctx.fillStyle = ice(0.7); ctx.fillText(decode('SESSION 027 · TOPIC: DESCRIBE A CITY BY ITS SMELL', pt, t, 2), 196 + w1 + 22, 157);
+  ctx.fillText(decode('DOCKING APPROACH', pt, t, 1), 196, 158);
+  const w1 = ctx.measureText('DOCKING APPROACH').width;
+  F(14, 300, MONO, 2); ctx.fillStyle = ice(0.7); ctx.fillText(decode('KESTREL-7 TO ARGO RING', pt, t, 2), 196 + w1 + 22, 157);
   ctx.textAlign = 'right'; F(15, 400, MONO, 2); ctx.fillStyle = ice(0.8);
   const tc = Math.max(0, t - 0.7); const fr = Math.floor((tc % 1) * 30);
-  if (pt > 0) ctx.fillText(`T+00:0${Math.floor(tc)}:${String(fr).padStart(2, '0')}`, W - 196, 157);
-  // bottom line: status
-  ctx.textAlign = 'left'; F(14, 300, MONO, 3); ctx.fillStyle = ice(0.6);
-  const st = t < T.scan0 ? 'SYSTEM INITIALIZING' : t < T.done ? 'RADIAL SCAN' : t < T.head0 ? 'MAPPING TO TIMELINE' : t < T.res ? 'LINEAR SCAN' : 'ANALYSIS COMPLETE';
-  if (pt > 0) ctx.fillText(decode(st, seg(t, 0.8, 1.3), t, 3), 196, H - 146);
-  // bottom right: small dipsticks
+  if (pt > 0) ctx.fillText(`MET 214:06:0${Math.floor(tc)}:${String(fr).padStart(2, '0')}`, W - 196, 157);
+  ctx.textAlign = 'left'; F(14, 300, MONO, 3);
+  const steps = [[0, 'SYSTEM INITIALIZING'], [T.app0 + 0.2, 'AUTO ALIGN · RCS ACTIVE'], [T.ok, 'ALIGNMENT NOMINAL'], [T.fin0, 'FINAL APPROACH'],
+    [T.contact, 'CLAMPS ENGAGING'], [T.done, 'HARD DOCK'], [T.off0, 'POWERING DOWN']];
+  const [stT, st] = steps.filter(s => s[0] <= t).pop();
+  ctx.fillStyle = (t >= T.ok && t < T.fin0) || (t >= T.done && t < T.off0) ? grn(0.85) : ice(0.6);
+  if (pt > 0) ctx.fillText(decode(st, seg(t, Math.max(stT, 0.8), Math.max(stT, 0.8) + 0.45), t, 3), 196, H - 146);
   for (let k = 0; k < 16; k++) { const lv = 0.5 + 0.5 * Math.sin(t * 7 + k * 0.9) * hash(k + Math.floor(t * 12)); ctx.fillStyle = ice(0.25 + 0.55 * lv);
     const h = 4 + 16 * lv; ctx.fillRect(W - 196 - (16 - k) * 7, H - 146 - h, 3, h); }
   ctx.globalAlpha = 1;
 }
 
-// ── stage A: radial analysis ───────────────────────── ──────────────────────────
-function sceneA(t, un) {           // un: unfolding progress (fading for elements outside the ring)
-  const fade = 1 - eOut(seg(t, T.un0 - 0.15, T.un0 + 0.35));
+// ── left panel: range, rate, offset, roll, RCS ───────────────────────────────
+function leftPanel(t) {
+  const a = seg(t, 0.95, 1.35); if (a <= 0) return;
+  const x = 196; ctx.save(); ctx.globalAlpha = a; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const colFor = (w, t) => t < w.on ? WH : t < w.ok ? amb(0.6 + 0.4 * blink(t)) : grn(0.95);
+  // range
+  { const p = seg(t, 1.0, 1.4), y = 290; F(14, 300, MONO, 3); ctx.fillStyle = ice(0.8); ctx.fillText(decode('RANGE TO PORT', p, t, 11), x, y);
+    F(72, 500, DISP, 0); ctx.fillStyle = WH; const txt = decode(range(t).toFixed(1), p, t, 12); ctx.fillText(txt, x - 4, y + 74);
+    const vw = ctx.measureText(txt).width; F(22, 500, DISP, 1); ctx.fillStyle = ice(0.8); ctx.fillText(' m', x + vw, y + 74);
+    const lw = 300, ly = y + 100, f = clamp(Math.log10(range(t) + 1) / Math.log10(251));   // log-scale range ladder
+    ctx.fillStyle = ice(0.18); ctx.fillRect(x, ly, lw, 3); ctx.fillStyle = WH; ctx.fillRect(x, ly, lw * f * eOut(p), 3);
+    for (let k = 0; k <= 10; k++) ctx.fillRect(x + lw * k / 10 - 0.5, ly - 6, 1, 4); }
+  // closing rate
+  { const w = WARN[0], y = 470, p = seg(t, 1.1, 1.5); F(14, 300, MONO, 3); ctx.fillStyle = ice(0.8); ctx.fillText(decode('CLOSING RATE', p, t, 13), x, y);
+    F(40, 500, DISP, 0); ctx.fillStyle = colFor(w, t); const v = decode((rate(t) > 0.004 ? '-' : '') + rate(t).toFixed(2), p, t, 14); ctx.fillText(v, x - 2, y + 46);
+    const vw = ctx.measureText(v).width; F(16, 500, DISP, 1); ctx.fillStyle = ice(0.8); ctx.fillText(' m/s', x + vw, y + 46); }
+  // lateral offset
+  { const w = WARN[1], y = 580, p = seg(t, 1.2, 1.6), f = offF(t); F(14, 300, MONO, 3); ctx.fillStyle = ice(0.8); ctx.fillText(decode('LATERAL OFFSET', p, t, 15), x, y);
+    const sg = v => (v >= -0.005 ? '+' : '-') + Math.abs(v).toFixed(2);
+    F(30, 500, DISP, 0); ctx.fillStyle = colFor(w, t); ctx.fillText(decode(`X ${sg(1.4 * f)}   Y ${sg(-0.9 * f)}`, p, t, 16), x - 1, y + 40); }
+  // roll
+  { const w = WARN[2], y = 680, p = seg(t, 1.3, 1.7); F(14, 300, MONO, 3); ctx.fillStyle = ice(0.8); ctx.fillText(decode('ROLL ERROR', p, t, 17), x, y);
+    const r = rollD(t); F(30, 500, DISP, 0); ctx.fillStyle = colFor(w, t); ctx.fillText(decode((r >= -0.05 ? '+' : '-') + Math.abs(r).toFixed(1) + '°', p, t, 18), x - 1, y + 40); }
+  // RCS thruster bars: flare at each pulse
+  { const y = 800, p = seg(t, 1.35, 1.75); F(12, 300, MONO, 3); ctx.fillStyle = ice(0.7); ctx.fillText(decode('RCS', p, t, 19), x, y);
+    for (let k = 0; k < 12; k++) { let lv = 0.08;
+      for (const r of RCS) { const d = t - r; if (d > 0 && d < 0.5) lv = Math.max(lv, (1 - d / 0.5) * (0.4 + 0.6 * hash(k * 7 + r * 10))); }
+      if (t > T.fin0 && t < T.contact) lv = Math.max(lv, 0.15 + 0.1 * hash(k + Math.floor(t * 15)));
+      const bx = x + 50 + k * 20, h = 26 * lv * p + 2; ctx.fillStyle = lv > 0.12 ? wh(0.9) : ice(0.3); ctx.fillRect(bx, y - h, 12, h); } }
+  ctx.restore();
+}
+
+// ── right panel: proximity radar → clamp diagram, status list ────────────────
+const RX = 1572, RY = 385, RR = 118;
+function rightPanel(t) {
+  const a = seg(t, 0.95, 1.35); if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a; const x0 = 1420, x1 = W - 196;
+  // radar
+  const ra = 1 - eIO(seg(t, T.fold0, T.fold0 + 0.4));
+  if (ra > 0) {
+    ctx.globalAlpha = a * ra; const d = eOut(seg(t, 0.95, 1.5));
+    F(14, 300, MONO, 3); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.8); ctx.fillText(decode('PROXIMITY', seg(t, 1.0, 1.4), t, 31), x0, 244);
+    ctx.textAlign = 'right'; ctx.fillText(decode('CONTACTS 03', seg(t, 1.0, 1.4), t, 32), x1, 244);
+    for (const f of [1, 0.66, 0.33]) arcAt(RX, RY, RR * f, -Math.PI / 2, -Math.PI / 2 + TAU * d, 1, ice(f === 1 ? 0.6 : 0.25));
+    line(RX - RR * d, RY, RX + RR * d, RY, 1, ice(0.2)); line(RX, RY - RR * d, RX, RY + RR * d, 1, ice(0.2));
+    const sw = -Math.PI / 2 + (t - 1.0) * 2.6;
+    if (t > 1.0) { const g = ctx.createConicGradient(sw - 1.1, RX, RY); g.addColorStop(0, ice(0)); g.addColorStop(1.1 / TAU, ice(0.22)); g.addColorStop(1.1 / TAU + 0.001, ice(0)); g.addColorStop(1, ice(0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(RX, RY, RR, 0, TAU); ctx.fill(); line(RX, RY, RX + Math.cos(sw) * RR, RY + Math.sin(sw) * RR, 1.5, wh(0.85)); }
+    const rr = clamp(range(t) / 260); // the station blip closes in with range
+    const blips = [{ ang: -70, r: 0.12 + 0.8 * rr, lab: 'ARGO' }, { ang: 150, r: 0.72, lab: '' }, { ang: 35, r: 0.55, lab: '' }];
+    for (const b of blips) { const ang = b.ang * D2R, bx = RX + Math.cos(ang) * RR * b.r, by = RY + Math.sin(ang) * RR * b.r;
+      const since = (((sw - ang) % TAU) + TAU) % TAU, br = t > 1.0 ? 0.25 + 0.75 * Math.exp(-since * 1.3) : 0;
+      ctx.fillStyle = b.lab ? wh(br) : ice(br * 0.8); ctx.fillRect(bx - 3, by - 3, 6, 6);
+      if (b.lab) { F(11, 400, MONO, 1); ctx.textAlign = 'left'; ctx.fillStyle = ice(0.8 * clamp(br + 0.3)); ctx.fillText(b.lab, bx + 8, by + 4); } }
+    ctx.fillStyle = WH; ctx.beginPath(); ctx.moveTo(RX, RY - 6); ctx.lineTo(RX + 5, RY + 5); ctx.lineTo(RX - 5, RY + 5); ctx.closePath(); ctx.fill();
+  }
+  // clamp diagram (front view of the collar, four clamps)
+  const ca = eOut(seg(t, T.fold0 + 0.3, T.fold0 + 0.8));
+  if (ca > 0) {
+    ctx.globalAlpha = a * ca; F(14, 300, MONO, 3); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.8);
+    ctx.fillText(decode('CAPTURE CLAMPS', seg(t, T.fold0 + 0.3, T.fold0 + 0.7), t, 33), x0, 244);
+    const nL = CLAMPS.filter(c => t >= c.t + 0.1).length; ctx.textAlign = 'right'; ctx.fillStyle = nL === 4 ? grn(0.95) : ice(0.8); ctx.fillText(`${nL}/4`, x1, 244);
+    arcAt(RX, RY, 70, -Math.PI / 2, -Math.PI / 2 + TAU * ca, 1.5, ice(0.7)); arcAt(RX, RY, 52, 0, TAU * ca, 1, ice(0.3));
+    for (const c of CLAMPS) { const ang = (c.deg - 90) * D2R, lp = eBack(seg(t, c.t, c.t + 0.22)), locked = t >= c.t + 0.1;
+      const r0 = lerp(112, 78, lp); ctx.save(); ctx.translate(RX + Math.cos(ang) * r0, RY + Math.sin(ang) * r0); ctx.rotate(ang);
+      ctx.fillStyle = locked ? grn(0.9) : ice(0.15); ctx.fillRect(-4, -14, 22, 28); rect(-4, -14, 22, 28, 1.5, locked ? grn(1) : ice(0.8)); ctx.restore();
+      F(13, 400, MONO, 1); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = locked ? grn(1) : ice(0.7);
+      ctx.fillText(c.n, RX + Math.cos(ang) * 124, RY + Math.sin(ang) * 124);
+      if (t > c.t && t < c.t + 0.5) { const q = seg(t, c.t, c.t + 0.5); arcAt(RX + Math.cos(ang) * 80, RY + Math.sin(ang) * 80, 10 + 30 * eOut(q), 0, TAU, 1, grn(0.7 * (1 - q))); } }
+    ctx.textBaseline = 'alphabetic';
+  }
+  ctx.globalAlpha = a;
+  // status list
+  const rows = [...WARN, { lab: 'CAPTURE LATCH' }, { lab: 'HARD SEAL' }];
+  rows.forEach((r, k) => {
+    const y = 590 + k * 46, p = seg(t, 1.2 + k * 0.08, 1.6 + k * 0.08); if (p <= 0) return;
+    line(x0, y + 14, lerp(x0, x1, eOut(p)), y + 14, 1, ice(0.15));
+    F(13, 300, MONO, 2); ctx.textAlign = 'left'; ctx.fillStyle = ice(0.8); ctx.fillText(decode(r.lab, p, t, 40 + k), x0 + 30, y);
+    let s = 'NOMINAL', col = ice(0.55), mode = 'dot', t0 = 0;
+    if (r.on !== undefined) { if (t >= r.ok) { s = 'OK'; col = grn(1); mode = 'ok'; t0 = r.ok; } else if (t >= r.on) { s = 'CAUTION'; col = amb(0.55 + 0.45 * blink(t)); mode = 'warn'; t0 = r.on; } }
+    else if (k === 3) { if (t >= T.contact) { s = 'CAPTURED'; col = grn(1); mode = 'ok'; t0 = T.contact; } else if (t >= T.ok) { s = 'READY'; col = wh(0.9); t0 = T.ok; } else s = 'STANDBY'; }
+    else { if (t >= T.done - 0.05) { s = 'CONFIRMED'; col = grn(1); mode = 'ok'; t0 = T.done - 0.05; } else s = 'STANDBY'; }
+    const since = t0 ? t - t0 : 1;
+    ctx.textAlign = 'right'; F(14, 400, MONO, 2); ctx.fillStyle = col; ctx.fillText(decode(s, Math.min(p, seg(since, 0, 0.3)), t, 50 + k), x1, y);
+    if (mode === 'warn') warnTri(x0 + 10, y - 6, 9 * eBack(seg(since, 0, 0.25)), col);
+    else if (mode === 'ok') { check(x0 + 10, y - 5, 8, col, seg(since, 0, 0.25)); if (since < 0.4) { ctx.fillStyle = grn(0.14 * (1 - since / 0.4)); ctx.fillRect(x0, y - 22, x1 - x0, 34); } }
+    else { ctx.fillStyle = col; ctx.fillRect(x0 + 7, y - 9, 6, 6); }
+  });
+  ctx.restore();
+}
+
+// ── head-on view: reticle rings + ARGO RING docking port ─────────────────────
+const R1 = 118, R3 = 292, R4 = 332, R5 = 396;
+const portR = rg => 5200 / (rg + 20);
+function reticle(t) {
+  const tout = T.fold0 - 0.05, fade = 1 - eOut(seg(t, T.fold0 + 0.1, T.fold0 + 0.5));
   if (fade <= 0) return;
-  ctx.save(); ctx.globalAlpha = fade;
-  const rot = t * 0.1;
-  // thin inner ring
-  { const v = ringVis(t, T.ring0, T.un0 - 0.2); arc(R1, -Math.PI / 2 + TAU * v.e, -Math.PI / 2 + TAU * v.a, 1.5, ice(0.7)); }
-  // tick ring (R3) — rotating
-  { const v = ringVis(t, T.ring0 + 0.12, T.un0 - 0.25); const n = 180;
+  ctx.save(); ctx.globalAlpha = fade; const rot = t * 0.1;
+  { const v = ringVis(t, T.ring0, tout); arc(R1, -Math.PI / 2 + TAU * v.e, -Math.PI / 2 + TAU * v.a, 1.5, ice(0.7)); }
+  { const v = ringVis(t, T.ring0 + 0.12, tout - 0.05); const n = 180;
     for (let k = 0; k < n; k++) { const f = k / n; if (v.a <= 0 || f > v.a || f < v.e) continue; const ang = -Math.PI / 2 + TAU * f + rot * 0.6;
       const L = k % 15 === 0 ? 16 : k % 5 === 0 ? 10 : 5; const c = Math.cos(ang), s = Math.sin(ang);
       line(CX + c * R3, CY + s * R3, CX + c * (R3 + L), CY + s * (R3 + L), k % 15 === 0 ? 2 : 1, ice(k % 15 === 0 ? 0.9 : 0.45)); } }
-  // broken ring (R4) — in reverse direction
-  { const v = ringVis(t, T.ring0 + 0.24, T.un0 - 0.3); const n = 12;
+  { const v = ringVis(t, T.ring0 + 0.24, tout - 0.1); const n = 12;
     for (let k = 0; k < n; k++) { const f0 = k / n, f1 = f0 + 0.058; const a0 = Math.max(f0, v.e), a1 = Math.min(f1, v.a); if (a1 <= a0) continue;
       arc(R4, -Math.PI / 2 + TAU * a0 - rot, -Math.PI / 2 + TAU * a1 - rot, 1.5, ice(0.6)); } }
-  // outer rating scale (R5)
-  { const v = ringVis(t, T.ring0 + 0.36, T.un0 - 0.35); arc(R5, -Math.PI / 2 + TAU * v.e, -Math.PI / 2 + TAU * v.a, 1, ice(0.3));
+  { const v = ringVis(t, T.ring0 + 0.36, tout - 0.15); arc(R5, -Math.PI / 2 + TAU * v.e, -Math.PI / 2 + TAU * v.a, 1, ice(0.3));
     F(12, 300, MONO, 1); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (let d = 0; d < 360; d += 30) { const f = d / 360; if (v.a <= 0 || f > v.a || f < v.e) continue; const ang = -Math.PI / 2 + d * D2R;
-      if (CALL.some(c => Math.abs(((c.deg - (d - 90)) % 360 + 540) % 360 - 180) < 14)) continue;
       ctx.fillStyle = ice(0.55); ctx.fillText(String(d).padStart(3, '0'), CX + Math.cos(ang) * (R5 + 20), CY + Math.sin(ang) * (R5 + 20)); } }
-  // segmented level springs (left + right)
-  { const v = seg(t, 0.7, 1.1); const vo = seg(t, T.un0 - 0.35, T.un0);
-    for (const side of [0, 1]) { const base = side ? 0 : Math.PI; const lvl = 0.35 + 0.55 * Math.abs(Math.sin(t * (side ? 3.1 : 2.3) + side));
+  // roll scale (top): a caret follows the roll error
+  { const v = seg(t, 0.8, 1.2) * (1 - seg(t, tout - 0.3, tout)); if (v > 0) { ctx.globalAlpha = fade * v;
+      for (let d = -30; d <= 30; d += 5) { const ang = -Math.PI / 2 + d * D2R; const L = d % 15 === 0 ? 12 : 6;
+        line(CX + Math.cos(ang) * (R4 + 12), CY + Math.sin(ang) * (R4 + 12), CX + Math.cos(ang) * (R4 + 12 + L), CY + Math.sin(ang) * (R4 + 12 + L), 1, ice(0.6)); }
+      const ra = -Math.PI / 2 + rollD(t) * 2 * D2R, col = t < WARN[2].on ? WH : t >= WARN[2].ok ? grn(1) : amb(0.6 + 0.4 * blink(t));
+      const px = CX + Math.cos(ra) * (R4 + 8), py = CY + Math.sin(ra) * (R4 + 8);
+      ctx.save(); ctx.translate(px, py); ctx.rotate(ra + Math.PI / 2); ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-7, 12); ctx.lineTo(7, 12); ctx.closePath(); ctx.fill(); ctx.restore();
+      ctx.globalAlpha = fade; } }
+  // level arcs (left/right): RCS authority
+  { const v = seg(t, 0.7, 1.1); const vo = seg(t, tout - 0.35, tout);
+    for (const side of [0, 1]) { const base = side ? 0 : Math.PI; let lvl = 0.25; for (const r of RCS) { const d = t - r; if (d > 0 && d < 0.6) lvl = Math.max(lvl, 0.9 * (1 - d / 0.6)); }
       for (let k = 0; k < 18; k++) { const f = k / 17; if (v <= 0 || f > v || f < vo) continue; const a0 = base - 22 * D2R + f * 44 * D2R;
         arc(362, a0, a0 + 1.6 * D2R, 8, f < lvl ? ice(0.85) : ice(0.18)); } } }
-  // plus sign
-  { const p = eOut(seg(t, 0.3, 0.85)), q = eIO(seg(t, T.un0 - 0.4, T.un0)); const r0 = R1 + 12, r1 = lerp(r0, R5 + 70, p * (1 - q));
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) line(CX + dx * r0, CY + dy * r0, CX + dx * r1, CY + dy * r1, 1, ice(0.35)); }
-  // radar signature (conical gradient) + scanline
-  if (t > T.scan0 && t < T.scan1 + 0.3) {
-    const sw = sweepAng(t), fa = 1 - seg(t, T.scan1, T.scan1 + 0.3);
-    const g = ctx.createConicGradient(sw - 0.9, CX, CY); g.addColorStop(0, ice(0)); g.addColorStop(0.9 / TAU, ice(0.13 * fa)); g.addColorStop(0.9 / TAU + 0.001, ice(0)); g.addColorStop(1, ice(0));
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(CX, CY, R4, 0, TAU); ctx.arc(CX, CY, R1, 0, TAU, true); ctx.fill();
-    line(CX + Math.cos(sw) * R1, CY + Math.sin(sw) * R1, CX + Math.cos(sw) * R4, CY + Math.sin(sw) * R4, 1.5, wh(0.9 * fa)); }
-  // ring completed "ping"
-  if (t > T.done && t < T.done + 0.6) { const p = eOut(seg(t, T.done, T.done + 0.6)); arc(lerp(R1, R5 + 40, p), 0, TAU, 1.2, wh(0.6 * (1 - p))); }
-  // center counter
-  { const a = seg(t, T.scan0 - 0.2, T.scan0 + 0.1) * (1 - seg(t, T.un0 - 0.2, T.un0 + 0.1));
-    if (a > 0) { ctx.globalAlpha = fade * a; const pct = Math.round(100 * seg(t, T.scan0, T.scan1));
-      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      F(62, 500, DISP, 0); ctx.fillStyle = WH; ctx.fillText('%' + pct, CX, CY + 18);
-      F(13, 300, MONO, 3); ctx.fillStyle = ice(0.75); ctx.fillText(t < T.done ? 'TARANIYOR' : 'TAMAM', CX, CY + 48);
+  // crosshair
+  { const p = eOut(seg(t, 0.3, 0.85)), q = eIO(seg(t, tout - 0.4, tout)); const r0 = 22, r1 = lerp(r0, R1 - 8, p * (1 - q));
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) line(CX + dx * r0, CY + dy * r0, CX + dx * r1, CY + dy * r1, 1.2, ice(0.55)); }
+  // aligned ping
+  if (t > T.ok && t < T.ok + 0.7) { const p = eOut(seg(t, T.ok, T.ok + 0.7)); arc(lerp(R1, R5 + 40, p), 0, TAU, 1.4, grn(0.7 * (1 - p))); }
+  // centre tag: ALIGNMENT ERROR → ALIGNED
+  { const on = WARN[1].on, ok = WARN[2].ok; const y = CY + 238;
+    if (t > on && t < T.fold0) { const p = seg(t, on, on + 0.3), okd = t >= ok; const col = okd ? grn(1) : amb(0.55 + 0.45 * blink(t));
+      const s = okd ? 'ALIGNED' : 'ALIGNMENT ERROR'; F(15, 400, MONO, 4); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const w = ctx.measureText(s).width + 56, bw = w * eBack(p); ctx.globalAlpha = fade * clamp(p * 2) * (1 - seg(t, T.fold0 - 0.25, T.fold0));
+      ctx.fillStyle = okd ? grn(0.12) : amb(0.08); ctx.fillRect(CX - bw / 2, y - 17, bw, 34); rect(CX - bw / 2, y - 17, bw, 34, 1.5, col);
+      ctx.fillStyle = col; ctx.fillText(decode(s, seg(t, okd ? ok : on, (okd ? ok : on) + 0.35), t, 60), CX + 10, y + 1);
+      if (!okd) warnTri(CX - w / 2 + 18, y, 8, col); else check(CX - w / 2 + 18, y - 1, 7, col, seg(t, ok, ok + 0.25));
       ctx.globalAlpha = fade; } }
-  // call tags
-  for (const c of CALL) callout(c, t);
   ctx.restore();
 }
-function callout(c, t) {
-  const p = seg(t, c.t, c.t + 0.35), q = eIO(seg(t, T.un0 - 0.45 + c.deg / 2000, T.un0 - 0.1));
-  if (p <= 0) return;
-  const ang = c.deg * D2R, cs = Math.cos(ang), sec = Math.sin(ang), right = cs > 0;
-  const sx = CX + cs * (R4 + 14), sy = CY + sec * (R4 + 14), ex = sx + cs * 64, ey = sy + sec * 64, hx = ex + (right ? 1 : -1) * 250;
-  const p1 = eOut(seg(p, 0, 0.45)), p2 = eOut(seg(p, 0.35, 1)); const vis = 1 - q;
-  if (vis <= 0) return; ctx.save(); ctx.globalAlpha *= vis;
-  ctx.fillStyle = WH; ctx.beginPath(); ctx.arc(sx, sy, 3.2 * eBack(seg(p, 0, 0.5)), 0, TAU); ctx.fill();
-  line(sx, sy, lerp(sx, ex, p1), lerp(sy, ey, p1), 1.2, ice(0.8));
-  if (p2 > 0) { line(ex, ey, lerp(ex, hx, p2), ey, 1.2, ice(0.8)); line(lerp(ex, hx, p2), ey - 5, lerp(ex, hx, p2), ey + 5, 1.2, ice(0.8)); }
-  const tp = seg(t, c.t + 0.15, c.t + 0.7);
-  ctx.textAlign = right ? 'left' : 'right'; ctx.textBaseline = 'alphabetic';
-  const tx = right ? ex + 12 : ex - 12;
-  F(14, 300, MONO, 3); ctx.fillStyle = ice(0.85); ctx.fillText(decode(c.lab, tp, t, c.deg), tx, ey + 26);
-  const vp = seg(t, c.t + 0.3, c.t + 0.75);
-  if (vp > 0) { F(42, 500, DISP, 0); ctx.fillStyle = WH; const v = decode(c.val, vp, t, c.deg + 5);
-    const unitW = (() => { F(15, 500, DISP, 1); return ctx.measureText(' ' + c.unit).width + 6; })();
-    F(42, 500, DISP, 0); const vw = ctx.measureText(v).width;
-    if (right) { ctx.fillText(v, tx, ey - 12); F(15, 500, DISP, 1); ctx.fillStyle = ice(0.8); ctx.fillText(' ' + c.unit, tx + vw, ey - 12); }
-    else { F(15, 500, DISP, 1); ctx.fillStyle = ice(0.8); ctx.fillText(' ' + c.unit, tx, ey - 12); F(42, 500, DISP, 0); ctx.fillStyle = WH; ctx.fillText(v, tx - unitW, ey - 12); } }
+// the port: collar + petals + standoff cross; during the fold it turns edge-on and slides into the side view
+function port(t) {
+  if (t < T.pan0) return;
+  const a0 = eOut(seg(t, T.pan0, T.pan0 + 0.5)); const fp = eIO(seg(t, T.fold0, T.fold1));
+  if (fp >= 1) return;
+  const f = offF(t), r0 = portR(range(Math.min(t, T.app1)));
+  const px = lerp(CX + 150 * f, PORTX + 12, fp), py = lerp(CY - 95 * f, AXY, fp), r = lerp(r0, 80, fp), sx = Math.cos(fp * Math.PI / 2);
+  const roll = rollD(t) * D2R, pa = a0 * (1 - seg(fp, 0.75, 1));
+  ctx.save(); ctx.beginPath(); ctx.rect(560, 0, 800, H); ctx.clip();   // keep the station structure off the side panels
+  ctx.globalAlpha = pa; ctx.translate(px, py); ctx.rotate(roll);
+  // station structure behind the port (head-on only): truss arms, end modules, octagonal plate
+  const ta = 1 - seg(fp, 0, 0.4);
+  if (ta > 0) { ctx.globalAlpha = pa * ta; const L = r * 2.7, h = r * 0.38;
+    for (const s of [-1, 1]) { line(s * r * 1.05, -h, s * L, -h, 1, ice(0.28)); line(s * r * 1.05, h, s * L, h, 1, ice(0.28));
+      for (let k = 0; k < 5; k++) { const xa = s * (r * 1.05 + (L - r * 1.05) * k / 5), xb = s * (r * 1.05 + (L - r * 1.05) * (k + 1) / 5);
+        line(xa, -h, xb, h, 0.8, ice(0.16)); line(xa, h, xa, -h, 0.8, ice(0.2)); }
+      const mx = s > 0 ? L : -L - r * 0.5; rect(mx, -r * 1.3, r * 0.5, r * 2.6, 1, ice(0.3));
+      for (let k = 1; k < 6; k++) line(mx, -r * 1.3 + r * 2.6 * k / 6, mx + r * 0.5, -r * 1.3 + r * 2.6 * k / 6, 0.8, ice(0.16)); }
+    ctx.beginPath(); for (let k = 0; k < 8; k++) { const an = (k + 0.5) / 8 * TAU; ctx.lineTo(Math.cos(an) * r * 1.5, Math.sin(an) * r * 1.5); } ctx.closePath();
+    ctx.strokeStyle = ice(0.35); ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = pa; }
+  ctx.scale(Math.max(sx, 0.02), 1);
+  ctx.fillStyle = 'rgba(5,9,12,0.85)'; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.lineWidth = 2 / Math.max(sx, 0.3); ctx.strokeStyle = wh(0.9); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  ctx.lineWidth = 1; ctx.strokeStyle = ice(0.6); ctx.beginPath(); ctx.arc(0, 0, r * 0.72, 0, TAU); ctx.stroke();
+  for (let k = 0; k < 8; k++) { ctx.save(); ctx.rotate(k / 8 * TAU); ctx.fillStyle = ice(0.5); ctx.fillRect(r * 0.76, -r * 0.05, r * 0.18, r * 0.1); ctx.restore(); }
+  const cr = r * 0.34; ctx.lineWidth = 2; ctx.strokeStyle = WH; ctx.beginPath(); ctx.moveTo(-cr, 0); ctx.lineTo(cr, 0); ctx.moveTo(0, -cr); ctx.lineTo(0, cr * 0.6); ctx.stroke();
+  ctx.fillStyle = WH; ctx.fillRect(-3, -3, 6, 6);
+  ctx.restore();
+  // alignment brackets + offset vector + callout (head-on only)
+  const ba = a0 * (1 - seg(fp, 0, 0.3)); if (ba <= 0) return;
+  ctx.save(); ctx.globalAlpha = ba;
+  const al = t < WARN[1].on ? 0 : t < WARN[2].ok ? 1 : 2, col = al === 0 ? ice(0.8) : al === 1 ? amb(0.55 + 0.45 * blink(t)) : grn(1);
+  const b = r * 1.18 + 10, L = Math.min(34, b * 0.4);
+  for (const [sx2, sy2] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { ctx.beginPath(); ctx.moveTo(px + sx2 * b, py + sy2 * (b - L)); ctx.lineTo(px + sx2 * b, py + sy2 * b); ctx.lineTo(px + sx2 * (b - L), py + sy2 * b);
+    ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.stroke(); }
+  if (Math.hypot(px - CX, py - CY) > 12 && al) { ctx.setLineDash([4, 5]); line(CX, CY, px, py, 1, col); ctx.setLineDash([]); }
+  const cx0 = px + b * 0.72, cy0 = py - b * 0.72, cx1 = cx0 + 60, cy1 = cy0 - 60, lp = eOut(seg(t, T.pan0 + 0.3, T.pan0 + 0.8));
+  line(cx0, cy0, lerp(cx0, cx1, lp), lerp(cy0, cy1, lp), 1.2, ice(0.8)); line(cx1, cy1, lerp(cx1, cx1 + 180, seg(lp, 0.4, 1)), cy1, 1.2, ice(0.8));
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; const tp = seg(t, T.pan0 + 0.5, T.pan0 + 1.0);
+  F(20, 600, DISP, 3); ctx.fillStyle = WH; ctx.fillText(decode('ARGO RING', tp, t, 70), cx1 + 6, cy1 - 10);
+  F(12, 300, MONO, 2); ctx.fillStyle = ice(0.8); ctx.fillText(decode('BERTH 04', tp, t, 71), cx1 + 6, cy1 + 20);
   ctx.restore();
 }
 
-// ── sound loop ↔ timeline (unfolding that preserves arc length) ─────────────
-function spectrum(t) {
-  const p = eIO(seg(t, T.un0, T.un1));                    // curvature 1/R → 0
-  const pp = eIO(seg(t, T.un0 + 0.35, T.un1 + 0.15));     // extension + sliding down
-  const inA = seg(t, 0.4, 0.95);
-  const outP = seg(t, T.out0, T.out0 + 0.7);
-  const kap = (1 - p) / R2, ytop = lerp(CY - R2, YTL, pp), sc = lerp(1, LF / L0, pp);
-  const sw = sweepAng(t), sweeping = t < T.scan1 + 0.05;
-  const hx = headX(t);
-  // baseline
-  const pts = [];
-  for (let k = 0; k <= 240; k++) { const s = (k / 240 - 0.5) * L0 * sc; pts.push(pos(s, kap, ytop, sc)); }
-  const baseA = inA * (1 - outP);
-  if (baseA > 0) { ctx.beginPath(); const lim = 1 - eIO(outP);
-    let first = true; for (let k = 0; k <= 240; k++) { const f = Math.abs(k / 240 - 0.5) * 2; if (f > lim) continue; const [x, y] = pts[k]; first ? ctx.moveTo(x, y) : ctx.lineTo(x, y); first = false; }
-    // arc drawing clockwise at the entrance in the ring
-    ctx.lineWidth = 1.2; ctx.strokeStyle = ice(0.55 * (t < 1 ? inA : 1)); if (t > 0.4) ctx.stroke(); }
-  for (let i = 0; i < NB; i++) {
-    const s = ((i + 0.5) / NB - 0.5) * L0 * sc; const [x, y, nx, ny] = pos(s, kap, ytop, sc);
-    // in ring: appears where the scan occurs
-    const angA = Math.PI / 2 + TAU * (i + 0.5) / NB;   // bottom → left → top → right
-    const rel = ((angA + Math.PI / 2) % TAU + TAU) % TAU;           // clockwise from top
-    const swept = sweeping ? clamp(((sw + Math.PI / 2) - rel) / 0.25) : 1;
-    let live = AMP[i] * (0.72 + 0.28 * Math.sin(t * 5.5 + i * 0.8)); live = lerp(live, AMP[i], p);
-    const di = 1 - Math.abs(i / NB - 0.5) * 2; const shrink = 1 - eIO(seg(outP, di * 0.5, di * 0.5 + 0.5));
-    const len = (6 + lerp(70, 92, pp) * live) * swept * shrink, inw = lerp(0.12, 1, p);
-    if (len <= 0.5) continue;
-    const scanned = t > T.head0 && x < hx;
-    const col = scanned ? wh(0.92) : ice(t > T.un1 ? 0.5 : 0.8);
-    ctx.lineWidth = lerp(3, 5, pp); ctx.strokeStyle = col; ctx.lineCap = 'butt';
-    ctx.beginPath(); ctx.moveTo(x - nx * len * inw, y - ny * len * inw); ctx.lineTo(x + nx * len, y + ny * len); ctx.stroke();
-  }
+// ── side schematic: ship nose + station collar, clamps ──────────────────────
+const PORTX = 1030, AXY = 600, PXM = 15;          // px per metre in the side view
+function scanClip(x0, x1, p, fn) { // reveal x0 → x1 behind a scan line
+  if (p <= 0) return; const xs = lerp(x0, x1, p); ctx.save(); ctx.beginPath(); ctx.rect(Math.min(x0, xs), 0, Math.abs(xs - x0), H); ctx.clip(); fn(); ctx.restore();
+  if (p < 1) { line(xs, AXY - 290, xs, AXY + 290, 1.5, wh(0.9)); ctx.fillStyle = ice(0.07); ctx.fillRect(x1 > x0 ? xs - 40 : xs, AXY - 290, 40, 580); } }
+function station() {
+  const x = PORTX, y = AXY;
+  ctx.fillStyle = 'rgba(160,208,226,0.05)'; ctx.fillRect(x, y - 80, 24, 160); rect(x, y - 80, 24, 160, 2, wh(0.9));
+  rect(x + 24, y - 96, 104, 192, 1.5, ice(0.75)); for (let k = 1; k < 4; k++) line(x + 24 + k * 26, y - 96, x + 24 + k * 26, y + 96, 1, ice(0.25));
+  const hx = x + 128, hw = 190, ht = 190;
+  ctx.save(); ctx.beginPath(); ctx.rect(hx, y - ht, hw, ht * 2); ctx.rect(hx, y - 96, 24, 192); ctx.clip('evenodd');
+  for (let k = -30; k < 12; k++) line(hx + k * 18, y - ht, hx + k * 18 + 480, y + ht, 0.8, ice(0.12)); ctx.restore();
+  ctx.strokeStyle = ice(0.8); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(hx, y - 96); ctx.lineTo(hx, y - ht); ctx.lineTo(hx + hw, y - ht);
+  ctx.moveTo(hx, y + 96); ctx.lineTo(hx, y + ht); ctx.lineTo(hx + hw, y + ht); ctx.stroke();
+  F(12, 300, MONO, 2); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.75); ctx.fillText('ARGO RING', hx + 40, y - ht + 28); ctx.fillText('BERTH 04', hx + 40, y - ht + 48);
 }
-function pos(s, kap, ytop, sc) {
-  const k = kap / sc;    // curvature spreads with elongation
-  if (k < 1e-7) return [CX + s, ytop, 0, -1];
-  const ph = s * k; return [CX + Math.sin(ph) / k, ytop + (1 - Math.cos(ph)) / k, Math.sin(ph), -Math.cos(ph)];
+function clampArm(t, c, sy) { // sy = -1 top, +1 bottom; pivot on the collar, hook closes over the ship flange
+  const px = PORTX + 12, py = AXY + sy * 92, lp = eBack(seg(t, c.t, c.t + 0.22)), locked = t >= c.t + 0.1;
+  const an = lerp(62, 0, lp) * D2R, dx = -Math.cos(an), dy = sy * Math.sin(an), L = 52;
+  const ex = px + dx * L, ey = py + dy * L, hx = -sy * dy * 16, hy = sy * dx * 16;
+  const col = locked ? grn(1) : ice(0.85);
+  ctx.fillStyle = 'rgba(5,9,12,1)'; ctx.fillRect(px - 10, py - 9, 26, 18); rect(px - 10, py - 9, 26, 18, 1.5, ice(0.8));   // actuator housing
+  ctx.lineCap = 'round'; line(px, py, ex, ey, 6, col); line(ex, ey, ex + hx, ey + hy, 6, col); ctx.lineCap = 'butt';
+  ctx.fillStyle = WH; ctx.beginPath(); ctx.arc(px, py, 5, 0, TAU); ctx.fill();
 }
-
-// ── scene B: linear scan ──────────────────────── ─────────────────────────
-function sceneB(t) {
-  if (t < T.un1 - 0.1) return;
-  const outP = seg(t, T.out0, T.out0 + 0.6); const A = 1 - eIn(outP);
-  ctx.save(); ctx.globalAlpha = A;
-  const x0 = CX - LF / 2, x1 = CX + LF / 2, yAx = YTL + 118;
-  // time axis
-  const ap = eOut(seg(t, T.un1 - 0.05, T.un1 + 0.45));
-  line(x0, yAx, lerp(x0, x1, ap), yAx, 1, ice(0.35));
-  F(13, 300, MONO, 2); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  for (let k = 0; k <= 12; k++) { const x = lerp(x0, x1, k / 12); const tk = seg(t, T.un1 + k * 0.03, T.un1 + 0.2 + k * 0.03); if (tk <= 0) continue;
-    line(x, yAx, x, yAx + (k % 3 === 0 ? 12 : 6) * tk, 1, ice(0.5));
-    if (k % 3 === 0) { ctx.fillStyle = ice(0.6 * tk); ctx.fillText(`${k * 5} SN`, x, yAx + 20); } }
-  // scan head
-  if (t > T.head0 - 0.15 && t < T.head1 + 0.35) {
-    const hx = headX(t), a = seg(t, T.head0 - 0.15, T.head0) * (1 - seg(t, T.head1, T.head1 + 0.35));
-    ctx.globalAlpha = A * a; line(hx, YTL - 120, hx, yAx, 1.5, wh(0.95));
-    ctx.fillStyle = WH; ctx.beginPath(); ctx.moveTo(hx - 7, YTL - 132); ctx.lineTo(hx + 7, YTL - 132); ctx.lineTo(hx, YTL - 122); ctx.closePath(); ctx.fill();
-    F(14, 400, MONO, 1); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = wh(0.9);
-    const secs = ((hx - x0) / LF * 60).toFixed(1).replace('.', ','); ctx.fillText(secs + ' sec', hx + 10, YTL - 124);
-    ctx.globalAlpha = A; }
-  // signs
-  for (const p of PAUSES) marker(t, p, 'pause'); for (const f of FILLERS) marker(t, f, 'fill');
-  // counters
-  const cp = eOut(seg(t, T.un1, T.un1 + 0.4));
-  if (cp > 0) { ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    const nP = PAUSES.filter(p => t >= p.t).length, nF = FILLERS.filter(p => t >= p.t).length;
-    [['PAUSES', nP], ['FILLER WORDS', nF]].forEach(([lab, n], k) => { const x = x0 + k * 230, y = YTL - 300 + (1 - cp) * 14;
-      ctx.globalAlpha = A * cp; F(14, 300, MONO, 3); ctx.fillStyle = ice(0.75); ctx.fillText(lab, x, y);
-      F(40, 500, DISP, 0); ctx.fillStyle = WH; ctx.fillText(String(n).padStart(2, '0'), x, y + 44); });
-    ctx.globalAlpha = A; }
-  // result
-  if (t > T.res) {
-    const rp = seg(t, T.res, T.res + 0.7), n = Math.round(87 * eOut(rp)); const a = eOut(seg(t, T.res, T.res + 0.25));
-    const rx = x1; ctx.globalAlpha = A * a; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
-    F(14, 300, MONO, 3); ctx.fillStyle = ice(0.8); ctx.fillText('FLUENCY', rx, YTL - 300);
-    F(112, 500, DISP, 0); ctx.fillStyle = WH; const nw = (() => { F(22, 500, DISP, 0); return ctx.measureText('/100').width; })();
-    F(22, 500, DISP, 0); ctx.fillStyle = ice(0.7); ctx.fillText('/100', rx, YTL - 196);
-    F(112, 500, DISP, 0); ctx.fillStyle = WH; ctx.fillText(String(n), rx - nw - 8, YTL - 196);
-    const gw = 360, gp = eOut(seg(t, T.res + 0.1, T.res + 0.8)) * 0.87;
-    ctx.fillStyle = ice(0.18); ctx.fillRect(rx - gw, YTL - 176, gw, 3); ctx.fillStyle = WH; ctx.fillRect(rx - gw, YTL - 176, gw * gp, 3);
-    for (let k = 0; k <= 10; k++) ctx.fillRect(rx - gw + gw * k / 10 - 0.5, YTL - 182, 1, 3);
-    ctx.globalAlpha = A; }
+function ship(nx) {
+  const y = AXY, brk = 590;
+  ctx.save(); ctx.beginPath(); ctx.rect(brk, 0, W, H); ctx.clip();
+  ctx.fillStyle = 'rgba(160,208,226,0.05)';
+  ctx.beginPath(); ctx.moveTo(nx - 20, y - 64); ctx.lineTo(nx - 120, y - 118); ctx.lineTo(nx - 800, y - 118); ctx.lineTo(nx - 800, y + 118); ctx.lineTo(nx - 120, y + 118); ctx.lineTo(nx - 20, y + 64); ctx.closePath(); ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = ice(0.85); ctx.stroke();
+  ctx.fillStyle = 'rgba(5,9,12,1)'; ctx.fillRect(nx - 20, y - 70, 20, 140); rect(nx - 20, y - 70, 20, 140, 2, wh(0.9));  // docking flange
+  for (let k = 1; k < 8; k++) line(nx - 120 - k * 70, y - 118, nx - 120 - k * 70, y + 118, 1, ice(0.22));
+  line(nx - 120, y - 118, nx - 120, y + 118, 1, ice(0.4));
+  for (let k = 0; k < 3; k++) rect(nx - 196 - k * 34, y - 92, 18, 12, 1, ice(0.6));
+  F(12, 300, MONO, 2); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.75); ctx.fillText('KESTREL-7', nx - 330, y + 96);
+  ctx.restore();
+  ctx.beginPath(); for (let k = 0; k <= 12; k++) ctx.lineTo(brk + (k % 2 ? 7 : -7), y - 130 + k * (260 / 12));   // break line
+  ctx.lineWidth = 1.2; ctx.strokeStyle = ice(0.6); ctx.stroke();
+}
+function sideView(t) {
+  if (t < T.fold0) return;
+  ctx.save(); const rg = range(t), nx = PORTX - rg * PXM;
+  const ap = eOut(seg(t, T.fold0 + 0.1, T.fold0 + 0.6)); ctx.setLineDash([14, 6, 3, 6]); line(lerp(CX, 560, ap), AXY, lerp(CX, 1400, ap), AXY, 1, ice(0.35)); ctx.setLineDash([]);
+  scanClip(PORTX, PORTX + 330, eIO(seg(t, T.side0, T.side0 + 0.5)), station);
+  scanClip(PORTX + 1, 580, eIO(seg(t, T.side0 + 0.15, T.side0 + 0.7)), () => ship(nx));
+  if (t > T.side0 + 0.3) { ctx.globalAlpha = seg(t, T.side0 + 0.3, T.side0 + 0.6); clampArm(t, CLAMPS[0], -1); clampArm(t, CLAMPS[2], 1); ctx.globalAlpha = 1; }
+  // view label + scale bar
+  { const la = seg(t, T.side0 + 0.2, T.side0 + 0.6); if (la > 0) { ctx.globalAlpha = la; const lx = 600, ly = AXY + 200;
+    F(12, 300, MONO, 3); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.75); ctx.fillText(decode('SIDE PROFILE', la, t, 85), lx, ly);
+    const sw = 5 * PXM * eOut(la); line(lx, ly + 18, lx + sw, ly + 18, 1.5, ice(0.8)); line(lx, ly + 12, lx, ly + 24, 1, ice(0.8)); line(lx + sw, ly + 12, lx + sw, ly + 24, 1, ice(0.8));
+    ctx.fillText('5 m', lx + 5 * PXM + 12, ly + 23); ctx.globalAlpha = 1; } }
+  // dimension line nose ↔ port
+  const da = seg(t, T.side0 + 0.5, T.side0 + 0.8) * (1 - seg(t, T.contact - 0.1, T.contact + 0.1));
+  if (da > 0) { ctx.globalAlpha = da; const yd = AXY - 170; line(nx, yd - 12, nx, yd + 12, 1, ice(0.7)); line(PORTX, yd - 12, PORTX, yd + 12, 1, ice(0.7));
+    line(nx, yd, PORTX, yd, 1, ice(0.7)); for (const [xx, s] of [[nx, 1], [PORTX, -1]]) { ctx.fillStyle = ice(0.9); ctx.beginPath(); ctx.moveTo(xx, yd); ctx.lineTo(xx + s * 9, yd - 4); ctx.lineTo(xx + s * 9, yd + 4); ctx.closePath(); ctx.fill(); }
+    F(18, 500, DISP, 1); ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = WH; ctx.fillText(rg.toFixed(1) + ' m', nx - 14, yd + 6); ctx.globalAlpha = 1; }
+  // contact flash + label
+  if (t > T.contact) { const p = seg(t, T.contact, T.contact + 0.5); line(PORTX, AXY - 160 * eOut(p), PORTX, AXY + 160 * eOut(p), 2, wh(1 - p));
+    ctx.fillStyle = wh(0.25 * (1 - p)); ctx.fillRect(PORTX - 30, AXY - 90, 60, 180);
+    const ta = seg(t, T.contact, T.contact + 0.15) * (1 - seg(t, T.done - 0.3, T.done)); if (ta > 0) { ctx.globalAlpha = ta; F(14, 400, MONO, 4); ctx.textAlign = 'center'; ctx.fillStyle = WH;
+      ctx.fillText(decode('CONTACT', seg(t, T.contact, T.contact + 0.3), t, 80), PORTX, AXY - 160); ctx.globalAlpha = 1; } }
   ctx.restore();
 }
-function marker(t, m, kind) {
-  if (t < m.t) return; const p = seg(t, m.t, m.t + 0.35); const x = barX(m.i);
-  const y = YTL - 96, lp = eOut(p);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  if (kind === 'pause') { const w = (m.w * 2 + 1) / NB * LF / 2 * eBack(p);
-    ctx.beginPath(); ctx.moveTo(x - w, y + 8); ctx.lineTo(x - w, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + 8); ctx.lineWidth = 1.2; ctx.strokeStyle = wh(0.9); ctx.stroke();
-    line(x, y, x, y - 10 * lp, 1, wh(0.9));
-    F(15, 400, MONO, 1); ctx.fillStyle = wh(lp); ctx.fillText(decode(m.lab, seg(t, m.t + 0.05, m.t + 0.4), t, m.i), x, y - 18); }
-  else { const s = 7 * eBack(p); ctx.fillStyle = WH; ctx.beginPath(); ctx.moveTo(x, y - s); ctx.lineTo(x + s, y); ctx.lineTo(x, y + s); ctx.lineTo(x - s, y); ctx.closePath(); ctx.fill();
-    line(x, y + 10, x, lerp(y + 10, YTL - 12, lp), 1, ice(0.6));
-    F(20, 500, DISP, 1); ctx.fillStyle = wh(lp); ctx.fillText(m.lab, x, y - 16); }
+function title(t) {
+  if (t < T.done) return; const p = seg(t, T.done, T.done + 0.45), a = eOut(seg(t, T.done, T.done + 0.2));
+  ctx.save(); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  const y = 292; F(60, 600, DISP, 12); ctx.fillStyle = WH; ctx.fillText(decode('DOCKING COMPLETE', p, t, 90), CX + 6, y + (1 - eOut(p)) * 10);
+  const bw = 560 * eOut(seg(t, T.done + 0.1, T.done + 0.55)); ctx.fillStyle = grn(0.95); ctx.fillRect(CX - bw / 2, y + 22, bw, 3);
+  F(14, 300, MONO, 4); ctx.fillStyle = ice(0.85); ctx.fillText(decode('HARD SEAL CONFIRMED · 4/4 CLAMPS LOCKED', seg(t, T.done + 0.2, T.done + 0.6), t, 91), CX + 2, y + 58);
+  ctx.restore();
 }
-// end: center point
-function endDot(t) {
-  const a = t < 1 ? eOut(seg(t, 0, 0.25)) * (1 - seg(t, 0.45, 0.7)) : t > T.out0 + 0.4 ? seg(t, T.out0 + 0.4, T.out0 + 0.6) * (1 - eOut(seg(t, T.out0 + 0.7, T.end))) : 0;
-  if (a <= 0) return; const y = t < 1 ? CY : YTL; ctx.globalAlpha = a; ctx.fillStyle = WH; ctx.beginPath(); ctx.arc(CX, y, 3.5, 0, TAU); ctx.fill();
-  line(CX - 14, y, CX - 6, y, 1, ice(0.8)); line(CX + 6, y, CX + 14, y, 1, ice(0.8)); ctx.globalAlpha = 1;
-}
+function dot(c, a) { if (a <= 0) return; c.globalAlpha = a; c.fillStyle = WH; c.beginPath(); c.arc(CX, CY, 3.5, 0, TAU); c.fill();
+  c.strokeStyle = 'rgba(160,208,226,0.8)'; c.lineWidth = 1; c.beginPath(); c.moveTo(CX - 14, CY); c.lineTo(CX - 6, CY); c.moveTo(CX + 6, CY); c.lineTo(CX + 14, CY); c.stroke(); c.globalAlpha = 1; }
 
 function render(t) {
-  ctx.globalAlpha = 1; ctx.drawImage(BG, 0, 0);
-  ctx.lineCap = 'butt';
-  sceneA(t);
-  spectrum(t);
-  sceneB(t);
-  frameUI(t);
-  endDot(t);
-  // input/output fadeout
-  const fadeIn = 1 - seg(t, 0, 0.35), fadeOut = seg(t, T.end - 0.25, DUR - 0.02);
-  const k = Math.max(fadeIn * 0.85, fadeOut * 0.9); if (k > 0) { ctx.fillStyle = `rgba(3,6,8,${k})`; ctx.fillRect(0, 0, W, H); }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+  if (t < 0.7) dot(ctx, eOut(seg(t, 0.05, 0.3)) * (1 - seg(t, 0.5, 0.7)));
+  port(t); reticle(t); sideView(t); title(t); leftPanel(t); rightPanel(t); frameUI(t);
+  // composite; the power-down squeezes the whole UI into a line, then a dot
+  mctx.globalAlpha = 1; mctx.drawImage(BG, 0, 0);
+  const u = seg(t, T.off0, T.off1);
+  if (u <= 0) mctx.drawImage(LAYER, 0, 0);
+  else {
+    const sy = lerp(1, 0.004, eIn(seg(u, 0, 0.55))), sx = lerp(1, 0, eIn(seg(u, 0.5, 0.9)));
+    if (sx > 0.001) { mctx.save(); mctx.translate(CX, CY); mctx.scale(sx, sy); mctx.globalAlpha = 1 - seg(u, 0.5, 0.85) * 0.6; mctx.drawImage(LAYER, -CX, -CY); mctx.restore(); }
+    mctx.fillStyle = `rgba(3,6,8,${0.75 * eIn(seg(u, 0.3, 1))})`; mctx.fillRect(0, 0, W, H);
+    const la = seg(u, 0.4, 0.55) * (1 - seg(u, 0.85, 0.95)), lw = W * 0.72 * sx;
+    if (la > 0 && lw > 1) { mctx.fillStyle = `rgba(238,246,250,${0.85 * la})`; mctx.fillRect(CX - lw / 2, CY - 1, lw, 2); }
+    dot(mctx, seg(u, 0.82, 0.95) * (1 - seg(t, T.off1 + 0.02, T.end - 0.05)));
+  }
+  const fadeIn = 1 - seg(t, 0, 0.35), fadeOut = seg(t, T.end - 0.1, DUR - 0.02);
+  const k = Math.max(fadeIn * 0.85, fadeOut * 0.95); if (k > 0) { mctx.fillStyle = `rgba(3,6,8,${k})`; mctx.fillRect(0, 0, W, H); }
 }
 window.draw = function (job) { render(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
 window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`500 40px 'Chakra Petch'`, 'FLUENCY0123'), document.fonts.load(`600 40px 'Chakra Petch'`, 'FLUENCY'),
-  document.fonts.load(`300 12px 'Martian Mono'`, 'FLOW0123'), document.fonts.load(`400 12px 'Martian Mono'`, 'FLOW0123')])).then(prep);
+  document.fonts.load(`500 40px 'Chakra Petch'`, 'RANGE0123'), document.fonts.load(`600 40px 'Chakra Petch'`, 'DOCKING'),
+  document.fonts.load(`300 12px 'Martian Mono'`, 'RANGE0123'), document.fonts.load(`400 12px 'Martian Mono'`, 'RANGE0123')])).then(prep);
 </script></body></html>
