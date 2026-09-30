@@ -5,10 +5,10 @@
 </head><body>
 <canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// ── comic book · newspaper comic strip ─────────────────────────────────────
-// Page (newsprint) opens completely → camera enters panel 1: microphone vibrating on stage, "YOUR TURN!"
-// → panel 2: stopwatch, "TICK! TOCK!" → 3rd panel: “POP!” boom, the microphone says its first word
-// → retreat: entire lane + “STAY TUNED!” → darkening.
+// ── comic book · "CAPTAIN CLARITY vs. THE RUNAWAY ROBOT" ────────────────────
+// Newsprint page inks in → camera enters panel 1: a robot vacuum runs amok in the museum (VROOM! BONK!)
+// → panel 2: Captain Clarity swoops over the city (WHOOSH!) → panel 3: the robot leaps, POW! on her palm,
+// its eyes turn happy and it sweeps the dust away → pull back to the whole page, "THE END?" + a second robot peeks → fade.
 // Colors are printed with Ben-Day dots (CMY + ink), the color pattern is slightly offset from the line (print shift).
 const W = 1920, H = 1080, DUR = 10.0;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
@@ -20,7 +20,7 @@ const eOut = u => 1 - Math.pow(1 - u, 3);
 const eBack = (u, s = 2.2) => u <= 0 ? 0 : 1 + (s + 1) * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2);
 function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
-const INK = '#1b1716', PAPER = '#efe2c0', CY = '#2f9fd8', MG = '#e0393e', YE = '#f5c928';
+const INK = '#1b1716', PAPER = '#efe2c0', CY = '#2f9fd8', MG = '#e0393e', YE = '#f5c928', CR = '#fbf6e6';
 const MIS = [5, -4]; // color pattern shift (page unit)
 const PW = 3050, PH = 2130;
 const PAN = { P1: [100, 340, 1350, 740], P2: [1500, 340, 1350, 740], P3: [100, 1130, 1900, 800], P4: [2050, 1130, 800, 800] };
@@ -33,7 +33,6 @@ function pat(x, col, r, cell = 18, ang = 15) {
   if (!PATS[key]) {
     const c = mk(cell, cell), y = c.getContext('2d');
     y.fillStyle = col; y.beginPath(); y.arc(cell / 2, cell / 2, r, 0, Math.PI * 2); y.fill();
-    // quarter dots at corners (scroll grid)
     [[0, 0], [cell, 0], [0, cell], [cell, cell]].forEach(([a, b]) => { y.beginPath(); y.arc(a, b, r * 0.55, 0, Math.PI * 2); y.fill(); });
     const p = x.createPattern(c, 'repeat'); p.setTransform(new DOMMatrix().rotateSelf(ang)); PATS[key] = p;
   }
@@ -57,6 +56,48 @@ function halftoneGrad(x, bx, by, bw, bh, col, rFn, cell = 20, ang = 0.26) {
   x.fill(); x.restore();
 }
 const rectP = (bx, by, bw, bh) => x => { x.beginPath(); x.rect(bx, by, bw, bh); };
+// print colors: [dot color, dot radius, cell, screen angle, flat tint or null]
+const C_SUIT = [CY, 5.6, 12, 15, 'rgba(47,159,216,0.30)'], C_RED = [MG, 5.8, 12, 75, 'rgba(224,57,62,0.45)'],
+  C_GOLD = [YE, 5.8, 12, 45, 'rgba(245,201,40,0.55)'], C_SKIN = [MG, 1.9, 8, 75, 'rgba(240,160,130,0.18)'], C_HAIR = [INK, 0, 0, 0, INK];
+function part(x, pathFn, c, lw = 6) { // paper-white base, offset color, then ink outline
+  x.fillStyle = CR; pathFn(x); x.fill();
+  if (c) { if (c[1]) dots(x, pathFn, c[0], c[1], c[2], c[3]); if (c[4]) flat(x, pathFn, c[4]); }
+  pathFn(x); inkStroke(x, lw);
+}
+
+// ── geometry helpers ──
+function spline(x, P, closed = true, cont = false) { // Catmull-Rom through points
+  const n = P.length, g = i => closed ? P[(i + n) % n] : P[clamp(i, 0, n - 1)];
+  cont ? x.lineTo(P[0][0], P[0][1]) : x.moveTo(P[0][0], P[0][1]);
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const p0 = g(i - 1), p1 = g(i), p2 = g(i + 1), p3 = g(i + 2);
+    x.bezierCurveTo(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6, p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6, p2[0], p2[1]);
+  }
+  if (closed) x.closePath();
+}
+const sp = P => x => { x.beginPath(); spline(x, P); };
+function capsule(a, b, ra, rb) { // tapered capsule between two joints
+  return x => {
+    const th = Math.atan2(b[1] - a[1], b[0] - a[0]), d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-3;
+    const ph = Math.asin(clamp((ra - rb) / d, -0.95, 0.95));
+    x.beginPath(); x.arc(a[0], a[1], ra, th + Math.PI / 2 - ph, th + 3 * Math.PI / 2 + ph);
+    x.arc(b[0], b[1], rb, th - Math.PI / 2 + ph, th + Math.PI / 2 - ph); x.closePath();
+  };
+}
+function tube(P, R) { // smooth tube with varying radius and round caps
+  return x => {
+    const n = P.length, L = [], Rt = [], ang = [];
+    for (let i = 0; i < n; i++) {
+      const a = P[Math.max(i - 1, 0)], b = P[Math.min(i + 1, n - 1)], th = Math.atan2(b[1] - a[1], b[0] - a[0]); ang.push(th);
+      L.push([P[i][0] - Math.sin(th) * R[i], P[i][1] + Math.cos(th) * R[i]]); Rt.push([P[i][0] + Math.sin(th) * R[i], P[i][1] - Math.cos(th) * R[i]]);
+    }
+    x.beginPath(); spline(x, L, false);
+    x.arc(P[n - 1][0], P[n - 1][1], R[n - 1], ang[n - 1] + Math.PI / 2, ang[n - 1] - Math.PI / 2, true);
+    spline(x, Rt.reverse(), false, true);
+    x.arc(P[0][0], P[0][1], R[0], ang[0] - Math.PI / 2, ang[0] + Math.PI / 2, true); x.closePath();
+  };
+}
+const mix = (a, b, u) => [lerp(a[0], b[0], u), lerp(a[1], b[1], u)];
 
 // ── drawing elements ──
 function inkStroke(x, w = 9) { x.strokeStyle = INK; x.lineWidth = w; x.lineJoin = 'round'; x.lineCap = 'round'; x.stroke(); }
@@ -67,9 +108,27 @@ function balloon(x, cx, cy, rw, rh, tail, lines, size, prog, opt = {}) {
     x.beginPath(); x.ellipse(0, 0, rw, rh, 0, 0, Math.PI * 2);
     if (tail) { const [tx, ty, a0, a1] = tail; x.moveTo(Math.cos(a0) * rw * 0.98, Math.sin(a0) * rh * 0.98); x.quadraticCurveTo(tx * 0.45, ty * 0.6, tx, ty); x.lineTo(Math.cos(a1) * rw * 0.98, Math.sin(a1) * rh * 0.98); }
   };
-  x.fillStyle = '#fbf6e6'; path(); x.fill(); path(); inkStroke(x, 8);
-  x.fillStyle = '#fbf6e6'; x.beginPath(); x.ellipse(0, 0, rw - 5, rh - 5, 0, 0, Math.PI * 2); x.fill(); // hide tail seam
+  x.fillStyle = CR; path(); x.fill(); path(); inkStroke(x, 8);
+  x.fillStyle = CR; x.beginPath(); x.ellipse(0, 0, rw - 5, rh - 5, 0, 0, Math.PI * 2); x.fill(); // hide tail seam
   x.fillStyle = INK; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = `${opt.w ?? 400} ${size}px ${HAND}`;
+  lines.forEach((ln, i) => x.fillText(ln, 0, (i - (lines.length - 1) / 2) * size * 1.02 + 4));
+  x.restore();
+}
+function zapBalloon(x, cx, cy, rw, rh, tail, lines, size, prog) { // electric (robot) balloon: zigzag edge + lightning tail
+  const s = eBack(prog, 2.4); if (s <= 0) return;
+  x.save(); x.translate(cx, cy); x.scale(s, s);
+  const edge = k => { const P = []; for (let i = 0; i < 30; i++) { const a = i / 30 * Math.PI * 2, r = (i % 2 ? 0.9 : 1.05) * k; P.push([Math.cos(a) * rw * r, Math.sin(a) * rh * r]); } return P; };
+  const [tx, ty] = tail, ta = Math.atan2(ty / rh, tx / rw), nx = -Math.sin(ta), ny = Math.cos(ta);
+  const b0 = [Math.cos(ta - 0.3) * rw * 0.9, Math.sin(ta - 0.3) * rh * 0.9], b1 = [Math.cos(ta + 0.3) * rw * 0.9, Math.sin(ta + 0.3) * rh * 0.9];
+  const m = mix(b0, [tx, ty], 0.5), m2 = mix(b1, [tx, ty], 0.5);
+  const path = () => {
+    x.beginPath(); edge(1).forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath();
+    x.moveTo(b0[0], b0[1]); x.lineTo(m[0] - nx * 22, m[1] - ny * 22); x.lineTo(m[0] + nx * 10, m[1] + ny * 10); x.lineTo(tx, ty);
+    x.lineTo(m2[0] + nx * 26, m2[1] + ny * 26); x.lineTo(b1[0], b1[1]); x.closePath();
+  };
+  x.fillStyle = CR; path(); x.fill(); path(); inkStroke(x, 7);
+  x.fillStyle = CR; x.beginPath(); edge(0.93).forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath(); x.fill();
+  x.fillStyle = INK; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = `400 ${size}px ${HAND}`;
   lines.forEach((ln, i) => x.fillText(ln, 0, (i - (lines.length - 1) / 2) * size * 1.02 + 4));
   x.restore();
 }
@@ -77,33 +136,10 @@ function caption(x, bx, by, text, size, prog, w) {
   if (prog <= 0) return;
   x.save(); x.font = `400 ${size}px ${HAND}`; const tw = w ?? x.measureText(text).width + 60, th = size + 36;
   const u = eOut(prog); x.translate(bx, by); x.scale(1, u);
-  x.fillStyle = '#fbf6e6'; x.fillRect(0, 0, tw, th);
+  x.fillStyle = CR; x.fillRect(0, 0, tw, th);
   dots(x, rectP(0, 0, tw, th), YE, 8.5, 16, 45); flat(x, rectP(0, 0, tw, th), 'rgba(245,201,40,0.35)');
   x.beginPath(); x.rect(0, 0, tw, th); inkStroke(x, 7);
   x.fillStyle = INK; x.textBaseline = 'middle'; x.fillText(text, 30, th / 2 + 3);
-  x.restore();
-}
-function mic(x, cx, by, sc, t, tremble, squash = 1) {
-  x.save(); x.translate(cx, by); x.rotate(tremble); x.scale(sc / squash ** 0.5, sc * squash);
-  // base + pole
-  x.beginPath(); x.ellipse(0, 0, 110, 22, 0, 0, Math.PI * 2); x.fillStyle = '#fbf6e6'; x.fill(); inkStroke(x, 8);
-  dots(x, xx => { xx.beginPath(); xx.ellipse(20, 4, 100, 18, 0, 0, Math.PI * 2); }, INK, 3.2, 12, 45);
-  x.beginPath(); x.moveTo(-8, -6); x.lineTo(-8, -260); x.lineTo(8, -260); x.lineTo(8, -6); x.closePath(); x.fillStyle = '#fbf6e6'; x.fill(); inkStroke(x, 7);
-  x.beginPath(); x.rect(-18, -170, 36, 26); x.fillStyle = INK; x.fill();
-  // handle
-  x.beginPath(); x.moveTo(-32, -400); x.lineTo(32, -400); x.lineTo(16, -255); x.lineTo(-16, -255); x.closePath(); x.fillStyle = INK; x.fill(); inkStroke(x, 8);
-  x.beginPath(); x.moveTo(-18, -392); x.lineTo(-9, -266); x.strokeStyle = '#fbf6e6'; x.lineWidth = 6; x.stroke();
-  // head (grille)
-  const hp = xx => { xx.beginPath(); xx.arc(0, -470, 86, 0, Math.PI * 2); };
-  x.fillStyle = '#fbf6e6'; hp(x); x.fill();
-  dots(x, xx => { xx.beginPath(); xx.arc(28, -455, 70, 0, Math.PI * 2); }, CY, 5, 14, 15);
-  x.save(); hp(x); x.clip();
-  x.strokeStyle = INK; x.lineWidth = 3.5;
-  for (let i = -100; i <= 100; i += 22) { x.beginPath(); x.moveTo(i - 60, -560); x.lineTo(i + 60, -380); x.stroke(); x.beginPath(); x.moveTo(i + 60, -560); x.lineTo(i - 60, -380); x.stroke(); }
-  x.fillStyle = '#fbf6e6'; x.beginPath(); x.ellipse(-34, -505, 24, 14, -0.6, 0, Math.PI * 2); x.fill();
-  x.restore();
-  hp(x); inkStroke(x, 10);
-  x.beginPath(); x.rect(-40, -398, 80, 16); x.fillStyle = MG; x.fill(); inkStroke(x, 6);
   x.restore();
 }
 function actionLines(x, cx, cy, r0, n, seed, bx, by, bw, bh) {
@@ -152,156 +188,338 @@ function panelFrame(x, [bx, by, bw, bh], prog) {
   inkStroke(x, 10); x.restore();
   return true;
 }
+function star(x, cx, cy, s, rot, col = YE) {
+  if (s <= 0) return;
+  x.save(); x.translate(cx, cy); x.rotate(rot); x.beginPath();
+  for (let j = 0; j < 8; j++) { const a = j * Math.PI / 4, r = j % 2 ? s * 0.3 : s; x.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  x.closePath(); x.fillStyle = col; x.fill(); inkStroke(x, 4); x.restore();
+}
+
+// ── Captain Clarity: jointed figure in profile, facing right ──
+// head outlines in head-radius units, facing +x
+const FACE = [[-0.2, -0.98], [0.45, -0.86], [0.8, -0.47], [0.9, -0.12], [0.94, 0.08], [1.13, 0.33], [0.94, 0.43], [0.98, 0.56], [0.9, 0.64], [0.95, 0.73], [0.8, 0.94], [0.42, 1.02], [0.02, 0.88], [-0.55, 0.55], [-0.92, 0.0], [-0.76, -0.66]];
+const HAIR = [[0.8, -0.5], [0.5, -0.6], [0.12, -0.46], [-0.18, -0.12], [-0.3, 0.38], [-0.58, 0.8], [-0.97, 0.62], [-1.1, 0.0], [-0.97, -0.62], [-0.5, -1.05], [0.15, -1.12], [0.62, -0.94]];
+const MASK = [[0.24, -0.34], [0.6, -0.42], [0.93, -0.32], [0.97, -0.06], [0.62, 0.03], [0.28, 0.0]];
+function head(x, c, R, rot, tail) {
+  // no ctx.scale here: the print offset and dot size must stay in page units
+  x.save(); x.translate(c[0], c[1]); x.rotate(rot);
+  const S = P => P.map(([a, b]) => [a * R, b * R]), E = (ex, ey, rx, ry, a) => xx => { xx.beginPath(); xx.ellipse(ex * R, ey * R, rx * R, ry * R, a, 0, Math.PI * 2); };
+  part(x, tube(S(tail), [0.26, 0.3, 0.27, 0.18, 0.05].map(v => v * R)), C_HAIR, 5); // ponytail
+  part(x, sp(S(FACE)), C_SKIN, 6);
+  part(x, E(-0.02, 0.3, 0.14, 0.21, 0.2), C_SKIN, 4.5); // ear
+  part(x, sp(S(HAIR)), C_HAIR, 6);
+  x.save(); x.beginPath(); spline(x, S(HAIR)); x.clip(); x.strokeStyle = CY; x.lineWidth = 0.09 * R; x.lineCap = 'round'; // blue-black hair shine
+  [[-0.7, -0.5, -0.1, -0.85, 0.35, -0.78], [-0.85, 0.05, -0.55, -0.35, -0.2, -0.45]].forEach(q => { x.beginPath(); x.moveTo(q[0] * R, q[1] * R); x.quadraticCurveTo(q[2] * R, q[3] * R, q[4] * R, q[5] * R); x.stroke(); });
+  x.restore();
+  part(x, E(-0.84, -0.3, 0.13, 0.2, 0.3), C_GOLD, 4); // hair tie
+  part(x, sp(S(MASK)), C_RED, 5);
+  x.fillStyle = CR; x.beginPath(); spline(x, S([[0.5, -0.17], [0.68, -0.26], [0.84, -0.17], [0.68, -0.1]])); x.fill(); inkStroke(x, 3.5);
+  x.fillStyle = INK; x.beginPath(); x.arc(0.74 * R, -0.17 * R, 0.065 * R, 0, Math.PI * 2); x.fill();
+  x.beginPath(); x.moveTo(0.45 * R, -0.5 * R); x.quadraticCurveTo(0.7 * R, -0.62 * R, 0.9 * R, -0.5 * R); inkStroke(x, 5); // brow
+  x.beginPath(); x.moveTo(0.76 * R, 0.64 * R); x.lineTo(0.9 * R, 0.63 * R); x.strokeStyle = MG; x.lineWidth = 6; x.stroke(); // mouth
+  x.beginPath(); x.moveTo(0.72 * R, 0.645 * R); x.lineTo(0.88 * R, 0.645 * R); inkStroke(x, 2.5);
+  x.restore();
+}
+function glove(x, w, ang, s, open) { // gloved hand at wrist w, fingers pointing along ang
+  x.save(); x.translate(w[0], w[1]); x.rotate(ang); x.scale(s, s);
+  part(x, x => { x.beginPath(); x.moveTo(-30, -13); x.lineTo(2, -19); x.lineTo(2, 19); x.lineTo(-30, 13); x.closePath(); }, C_GOLD, 5); // cuff
+  if (open) {
+    const F = [[-12, 30, -0.08], [-4, 35, -0.02], [4.5, 33, 0.04], [12.5, 27, 0.1]];
+    F.forEach(([y, l, a]) => part(x, capsule([26, y], [26 + Math.cos(a) * l, y + Math.sin(a) * l], 5.2, 4.4), C_GOLD, 4.5));
+    part(x, x => { x.beginPath(); x.roundRect(-2, -17, 34, 34, 9); }, C_GOLD, 5);
+    part(x, capsule([10, -14], [28, -34], 6, 4.8), C_GOLD, 4.5); // thumb
+  } else {
+    part(x, x => { x.beginPath(); x.roundRect(-2, -18, 38, 36, 12); }, C_GOLD, 5);
+    x.beginPath(); [-6, 5].forEach(y => { x.moveTo(22, y); x.lineTo(35, y); }); inkStroke(x, 3.5);
+    part(x, capsule([4, -16], [22, -12], 6.5, 5.5), C_GOLD, 4); // thumb over fingers
+  }
+  x.restore();
+}
+function boot(x, knee, ank, toe) {
+  const m = mix(knee, ank, 0.45), th = Math.atan2(ank[1] - knee[1], ank[0] - knee[0]);
+  part(x, capsule(m, ank, 20, 14), C_RED, 6);
+  part(x, capsule(ank, toe, 14.5, 10), C_RED, 6);
+  x.beginPath(); x.moveTo(m[0] - Math.sin(th) * 21, m[1] + Math.cos(th) * 21); x.lineTo(m[0] + Math.sin(th) * 21, m[1] - Math.cos(th) * 21); inkStroke(x, 6);
+}
+function arm(x, S, E, Wr, hang, open) {
+  part(x, tube([S, E, Wr], [17.5, 13.5, 10.5]), C_SUIT, 6);
+  glove(x, Wr, hang, 1, open);
+}
+function hero(x, P) {
+  // P: joints in local units (head radius 36). Order: cape, back arm, back leg, torso, front leg, neck, head, front arm.
+  part(x, sp(P.cape), C_RED, 6);
+  arm(x, P.S2, P.E2, P.W2, P.h2, false);
+  part(x, tube([P.H2, P.K2, P.A2], [28, 18.5, 12.5]), C_SUIT, 6); boot(x, P.K2, P.A2, P.T2);
+  const torso = tube(P.torso, P.torsoR);
+  part(x, torso, C_SUIT, 6);
+  x.save(); torso(x); x.clip(); // belt
+  const [a, b] = P.belt, th = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); x.strokeStyle = CR; x.lineWidth = 22; x.lineCap = 'butt'; x.stroke();
+  x.globalCompositeOperation = 'multiply'; x.strokeStyle = 'rgba(245,201,40,0.95)'; x.stroke(); x.globalCompositeOperation = 'source-over';
+  [-11, 11].forEach(o => { const nx = -Math.sin(th) * o, ny = Math.cos(th) * o; x.beginPath(); x.moveTo(a[0] + nx, a[1] + ny); x.lineTo(b[0] + nx, b[1] + ny); inkStroke(x, 4); });
+  x.restore(); torso(x); inkStroke(x, 6);
+  if (P.emblem) { const [ex, ey] = P.emblem; part(x, x => { x.beginPath(); x.moveTo(ex, ey - 19); x.lineTo(ex + 13, ey); x.lineTo(ex, ey + 19); x.lineTo(ex - 13, ey); x.closePath(); }, C_GOLD, 4); }
+  part(x, tube([P.H1, P.K1, P.A1], [28, 18.5, 12.5]), C_SUIT, 6); boot(x, P.K1, P.A1, P.T1);
+  part(x, capsule(P.N, P.neckTop, 13, 12), C_SKIN, 6);
+  head(x, P.head, 40, P.headRot, P.tail);
+  arm(x, P.S1, P.E1, P.W1, P.h1, P.open1);
+}
+function flyPose(t) {
+  const w = k => Math.sin(t * 11 + k * 1.3) * 9, v = k => Math.sin(t * 13 + k * 1.1) * 0.12;
+  return {
+    cape: [[196, -40], [140, -62], [50, -78], [-60, -84 + w(0)], [-170, -96 + w(1)], [-280, -118 + w(2)], [-345, -130 + w(3)], [-318, -92 + w(3)], [-332, -64 + w(4)], [-240, -48 + w(2)], [-120, -26], [40, -8], [160, -12]],
+    S2: [176, -24], E2: [252, 16], W2: [334, 22], h2: 0.08,
+    H2: [4, -10], K2: [-112, -28], A2: [-190, -84], T2: [-236, -110],
+    torso: [[186, -22], [140, -14], [70, -2], [4, 2]], torsoR: [32, 45, 35, 41], belt: [[40, -62], [22, 62]],
+    H1: [0, 6], K1: [-124, 18], A1: [-238, 26], T1: [-290, 26],
+    N: [190, -24], neckTop: [214, -52], head: [232, -78], headRot: -0.12,
+    tail: [[-0.8, -0.3], [-1.3, -0.42 + v(0)], [-1.85, -0.28 + v(1)], [-2.4, -0.42 + v(2)], [-2.95, -0.3 + v(3)]],
+    S1: [168, -6], E1: [262, -24], W1: [350, -44], h1: -0.22, open1: false,
+  };
+}
+function standPose(t, raise) {
+  const w = k => Math.sin(t * 5 + k * 1.4) * 7, v = k => Math.sin(t * 4 + k) * 0.06, br = Math.sin(t * 3) * 2;
+  const u = eBack(raise, 1.6);
+  return {
+    cape: [[12, -468], [-26, -462], [-72, -400], [-112, -300], [-150, -200 + w(0)], [-182, -118 + w(1)], [-140, -104 + w(2)], [-96, -122 + w(3)], [-56, -112 + w(4)], [-28, -250], [-6, -430]],
+    S2: [-10, -455 + br], E2: [-78, -380], W2: [-44, -304], h2: 0.9,
+    H2: [-16, -288], K2: [-30, -160], A2: [-44, -22], T2: [-2, -12],
+    torso: [[6, -468 + br], [9, -420 + br], [0, -350], [-2, -296]], torsoR: [30, 45, 34, 42], belt: [[-70, -316], [70, -316]], emblem: [28, -418 + br],
+    H1: [16, -288], K1: [44, -160], A1: [52, -22], T1: [96, -12],
+    N: [8, -472 + br], neckTop: [18, -505 + br], head: [22, -538 + br], headRot: 0.02,
+    tail: [[-0.84, -0.3], [-1.2, 0.02 + v(0)], [-1.36, 0.5 + v(1)], [-1.34, 1.0 + v(2)], [-1.2, 1.45 + v(3)]],
+    S1: [22, -452 + br], E1: mix([34, -372], [124, -448], u), W1: mix([46, -292], [220, -452], u), h1: lerp(Math.PI / 2 - 0.1, -Math.PI / 2, u), open1: true,
+  };
+}
+
+// ── the robot vacuum ──
+function robot(x, cx, gy, s, o) {
+  // o: mood 0 (angry red) → 1 (happy), tilt, squash, brush (angle), ant (antenna sway), noShadow
+  const sq = o.squash ?? 1, RX = 150, RY = 52, Hh = 46;
+  x.save(); x.translate(cx, gy);
+  if (!o.noShadow) { x.save(); x.scale(s, s); dots(x, xx => { xx.beginPath(); xx.ellipse(8, 4, RX * 1.05, RY * 0.8, 0, 0, Math.PI * 2); }, INK, 4.2, 12, 45); x.restore(); }
+  x.rotate(o.tilt || 0); x.scale(s / Math.sqrt(sq), s * sq);
+  // side brush (front-left, under the rim)
+  x.save(); x.translate(-RX * 0.72, RY * 0.5); x.scale(1, 0.4); x.rotate(o.brush || 0);
+  for (let k = 0; k < 3; k++) { x.rotate(Math.PI * 2 / 3); x.beginPath(); x.moveTo(0, 0); x.lineTo(46, 6); inkStroke(x, 4); }
+  x.restore();
+  const side = xx => { xx.beginPath(); xx.moveTo(RX, -Hh); xx.lineTo(RX, 0); xx.ellipse(0, 0, RX, RY, 0, 0, Math.PI); xx.lineTo(-RX, -Hh); xx.ellipse(0, -Hh, RX, RY, 0, Math.PI, 0, true); xx.closePath(); };
+  part(x, side, [INK, 3.6, 10, 45, null], 7);
+  x.beginPath(); x.ellipse(0, -Hh + 17, RX - 3, RY, 0, 0.14, Math.PI - 0.14); x.strokeStyle = CR; x.lineWidth = 9; x.stroke(); // bumper stripe
+  const top = xx => { xx.beginPath(); xx.ellipse(0, -Hh, RX, RY, 0, 0, Math.PI * 2); };
+  part(x, top, C_RED, 7);
+  x.beginPath(); x.ellipse(0, -Hh, RX * 0.8, RY * 0.74, 0, 0, Math.PI * 2); inkStroke(x, 3.5);
+  // dome with visor
+  const dome = xx => { xx.beginPath(); xx.moveTo(-68, -Hh); xx.bezierCurveTo(-68, -Hh - 86, 68, -Hh - 86, 68, -Hh); xx.ellipse(0, -Hh, 68, 22, 0, 0, Math.PI); xx.closePath(); };
+  part(x, dome, [CY, 4.6, 11, 15, 'rgba(47,159,216,0.18)'], 7);
+  x.beginPath(); x.moveTo(-42, -Hh - 56); x.quadraticCurveTo(-30, -Hh - 70, -10, -Hh - 72); x.strokeStyle = CR; x.lineWidth = 7; x.lineCap = 'round'; x.stroke();
+  x.beginPath(); x.roundRect(-50, -Hh - 48, 100, 36, 14); x.fillStyle = INK; x.fill();
+  const m = o.mood ?? 0, ey = Math.abs(m - 0.5) * 2, vy = -Hh - 30;
+  [-1, 1].forEach(sd => {
+    x.save(); x.translate(sd * 22, vy); x.scale(1, Math.max(ey, 0.08));
+    if (m < 0.5) { x.rotate(sd * 0.38); x.beginPath(); x.roundRect(-15, -6, 30, 12, 3); x.fillStyle = MG; x.fill(); }
+    else { x.beginPath(); x.arc(0, 7, 12, Math.PI * 1.1, Math.PI * 1.9); x.strokeStyle = YE; x.lineWidth = 6; x.lineCap = 'round'; x.stroke(); }
+    x.restore();
+  });
+  // antenna
+  const aa = o.ant || 0, tip = [30 + Math.sin(aa) * 30, -Hh - 122 + Math.abs(Math.sin(aa)) * 6];
+  x.beginPath(); x.moveTo(22, -Hh - 62); x.quadraticCurveTo(28, -Hh - 96, tip[0], tip[1]); inkStroke(x, 5);
+  x.beginPath(); x.arc(tip[0], tip[1], 11, 0, Math.PI * 2); x.fillStyle = m < 0.5 ? MG : YE; x.fill(); inkStroke(x, 5);
+  x.restore();
+}
+function dustBunny(x, cx, cy, s, seed) {
+  if (s <= 0.03) return;
+  const r = rng(seed), P = []; for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2, rr = (i % 2 ? 0.82 : 1.0) + r() * 0.12; P.push([cx + Math.cos(a) * 40 * s * rr, cy + Math.sin(a) * 27 * s * rr]); }
+  part(x, sp(P), [INK, 2.6, 9, 30, null], 4.5);
+  x.beginPath(); x.arc(cx - 8 * s, cy - 2 * s, 12 * s, Math.PI * 1.1, Math.PI * 1.8); inkStroke(x, 3);
+}
 
 // ── panels ──
+function museumWall(x, by, floorY, cols) {
+  cols.forEach(cx => {
+    part(x, xx => { xx.beginPath(); xx.rect(cx - 55, by - 10, 110, floorY - by + 10); }, null, 6);
+    dots(x, xx => { xx.beginPath(); xx.rect(cx + 18, by - 10, 37, floorY - by + 10); }, CY, 5, 13, 15);
+    for (let k = -30; k <= 30; k += 20) { x.beginPath(); x.moveTo(cx + k, by + 60); x.lineTo(cx + k, floorY - 40); inkStroke(x, 3); }
+    part(x, xx => { xx.beginPath(); xx.rect(cx - 72, floorY - 40, 144, 40); }, C_GOLD, 6);
+    part(x, xx => { xx.beginPath(); xx.rect(cx - 72, by + 20, 144, 40); }, C_GOLD, 6);
+  });
+}
 function panel1(x, t) {
-  const [bx, by, bw, bh] = PAN.P1;
+  const [bx, by, bw, bh] = PAN.P1, fy = by + 560, gy = by + 612;
   x.save(); x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
-  x.fillStyle = '#fbf6e6'; x.fillRect(bx, by, bw, bh);
-  // back wall (blue dots), curtain (red), floor
-  dots(x, rectP(bx, by, bw, bh), CY, 6.5, 18, 15);
-  const curtain = side => xx => { xx.beginPath(); const x0 = side ? bx + bw : bx, dir = side ? -1 : 1; xx.moveTo(x0, by); xx.lineTo(x0 + dir * 260, by); xx.quadraticCurveTo(x0 + dir * 150, by + 380, x0 + dir * 210, by + bh); xx.lineTo(x0, by + bh); xx.closePath(); };
-  [0, 1].forEach(sd => {
-    dots(x, curtain(sd), MG, 8.2, 16, 75); curtain(sd)(x); inkStroke(x, 8);
-    for (let k = 1; k < 4; k++) { const x0 = sd ? bx + bw - k * 60 : bx + k * 60; x.beginPath(); x.moveTo(x0, by); x.quadraticCurveTo(x0 + (sd ? 1 : -1) * 10, by + 400, x0 + (sd ? -1 : 1) * 20, by + bh); inkStroke(x, 4); }
-  });
-  // stage floor
-  const fl = xx => { xx.beginPath(); xx.rect(bx, by + 560, bw, 200); };
-  dots(x, fl, YE, 7, 16, 45); dots(x, fl, MG, 3.4, 16, 75);
-  x.beginPath(); x.moveTo(bx, by + 560); x.lineTo(bx + bw, by + 560); inkStroke(x, 8);
-  // spotlight: sparse black dots in the middle, dense at the edge
-  const lx = bx + 700, ly = by + 640;
-  halftoneGrad(x, bx, by, bw, bh, INK, (px, py) => { const d = Math.hypot((px - lx) / 1.9, (py - ly) * 1.2) / 330; return clamp(d - 0.75, 0, 1) * 7.5; }, 18);
-  x.fillStyle = 'rgba(255,248,220,0.0)';
-  // microphone vibrates
-  const lt = clamp(t, 1.4, 3.35);
-  const tr = Math.sin(lt * 55) * 0.018 + Math.sin(lt * 31) * 0.01;
-  mic(x, lx, by + 650, 0.95, lt, tr);
-  // shiver lines + sweat drops
-  x.save(); x.strokeStyle = INK; x.lineWidth = 5; x.lineCap = 'round';
-  [-1, 1].forEach(sd => { for (let k = 0; k < 3; k++) { const ox = lx + sd * (120 + k * 22), oy = by + 170 + k * 30; x.beginPath(); x.moveTo(ox, oy); x.quadraticCurveTo(ox + sd * 14, oy + 22, ox, oy + 44); x.stroke(); } });
+  x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
+  dots(x, rectP(bx, by, bw, bh), YE, 7, 18, 45); dots(x, rectP(bx, by, bw, bh), MG, 2.2, 18, 75);
+  museumWall(x, by, fy, [bx + 110, bx + 1245]);
+  // painting on the wall
+  const pf = [bx + 780, by + 130, 300, 210];
+  part(x, xx => { xx.beginPath(); xx.rect(pf[0] - 24, pf[1] - 24, pf[2] + 48, pf[3] + 48); }, C_GOLD, 7);
+  part(x, rectP(...pf), [CY, 6, 14, 15, null], 5);
+  part(x, xx => { xx.beginPath(); xx.arc(pf[0] + 220, pf[1] + 70, 36, 0, Math.PI * 2); }, C_RED, 4);
+  const hill = xx => { xx.beginPath(); xx.moveTo(pf[0], pf[1] + pf[3]); xx.lineTo(pf[0], pf[1] + 130); xx.quadraticCurveTo(pf[0] + 90, pf[1] + 80, pf[0] + 190, pf[1] + 150); xx.quadraticCurveTo(pf[0] + 250, pf[1] + 120, pf[0] + pf[2], pf[1] + 140); xx.lineTo(pf[0] + pf[2], pf[1] + pf[3]); xx.closePath(); };
+  x.fillStyle = CR; hill(x); x.fill(); dots(x, hill, YE, 6.5, 13, 45); dots(x, hill, CY, 5, 13, 15); hill(x); inkStroke(x, 4);
+  x.beginPath(); x.rect(...pf); inkStroke(x, 5);
+  // floor
+  const fl = xx => { xx.beginPath(); xx.rect(bx, fy, bw, bh); };
+  x.fillStyle = CR; fl(x); x.fill(); dots(x, fl, MG, 6, 16, 75);
+  for (let k = -6; k < 12; k++) { x.beginPath(); x.moveTo(bx + k * 150, fy); x.lineTo(bx + k * 150 - 200, by + bh); inkStroke(x, 3); }
+  x.beginPath(); x.moveTo(bx, fy); x.lineTo(bx + bw, fy); inkStroke(x, 8);
+  // pedestal + wobbling vase
+  const px = bx + 470, bump = 1.95, k = t - bump;
+  part(x, xx => { xx.beginPath(); xx.rect(px - 72, by + 400, 144, gy - by - 400); }, null, 7);
+  dots(x, xx => { xx.beginPath(); xx.rect(px + 22, by + 400, 50, gy - by - 400); }, CY, 5, 13, 15);
+  part(x, xx => { xx.beginPath(); xx.rect(px - 88, by + 384, 176, 26); }, C_GOLD, 6);
+  const wob = k > 0 ? 0.24 * Math.exp(-k * 2.2) * Math.sin(k * 13) : 0, hop = k > 0 && k < 0.2 ? Math.sin(k / 0.2 * Math.PI) * 14 : 0;
+  const piv = wob > 0 ? 26 : -26; // rocks on the edge of its foot
+  x.save(); x.translate(px + piv, by + 384 - hop); x.rotate(wob); x.translate(-piv, 0);
+  const V = [[-26, 0], [-44, -30], [-60, -90], [-50, -150], [-24, -178], [-30, -206], [-40, -214], [40, -214], [30, -206], [24, -178], [50, -150], [60, -90], [44, -30], [26, 0]];
+  [-1, 1].forEach(sd => { x.beginPath(); x.moveTo(sd * 28, -198); x.bezierCurveTo(sd * 84, -204, sd * 82, -150, sd * 48, -142); inkStroke(x, 8); }); // handles
+  part(x, sp(V), [CY, 5.6, 12, 15, 'rgba(47,159,216,0.25)'], 7);
+  x.save(); x.beginPath(); spline(x, V); x.clip();
+  x.fillStyle = CR; x.fillRect(-70, -122, 140, 32); dots(x, rectP(-70, -122, 140, 32), YE, 5.5, 11, 45);
+  x.beginPath(); for (let i = 0; i < 8; i++) x.lineTo(-64 + i * 18, i % 2 ? -114 : -98); inkStroke(x, 3.5);
+  x.beginPath(); x.moveTo(-70, -122); x.lineTo(70, -122); x.moveTo(-70, -90); x.lineTo(70, -90); inkStroke(x, 4);
+  x.restore(); x.beginPath(); spline(x, V); inkStroke(x, 7);
   x.restore();
-  [[lx - 110, by + 120, -0.5, 1.7], [lx + 115, by + 150, 0.4, 2.15], [lx - 95, by + 200, -0.3, 2.6]].forEach(([dx, dy, a, t0]) => {
-    const u = seg(lt, t0, t0 + 0.5); if (u <= 0 || u >= 1) return;
-    x.save(); x.translate(dx + Math.sin(a) * 60 * u, dy + 40 * u * u - 20 * u); x.rotate(a); x.scale(0.9, 0.9);
-    const dp = xx => { xx.beginPath(); xx.moveTo(0, -26); xx.quadraticCurveTo(18, 4, 0, 14); xx.quadraticCurveTo(-18, 4, 0, -26); };
-    x.fillStyle = '#fbf6e6'; dp(x); x.fill(); dots(x, dp, CY, 4.5, 10, 0); dp(x); inkStroke(x, 4); x.restore();
-  });
-  caption(x, bx + 36, by + 34, 'THAT NIGHT, ON STAGE...', 50, seg(t, 1.35, 1.65));
-  balloon(x, bx + bw - 260, by + 250, 210, 104, [260, -30, -0.35, 0.15], ['YOUR', 'TURN!'], 70, seg(t, 2.15, 2.55), { w: 400 });
+  if (k > 0 && k < 1.2) { // wobble marks
+    x.save(); x.globalAlpha = 1 - seg(k, 0.8, 1.2);
+    [-1, 1].forEach(sd => { for (let j = 0; j < 2; j++) { const a0 = -Math.PI / 2 + sd * 0.42, a1 = -Math.PI / 2 + sd * 0.75; x.beginPath(); x.arc(px, by + 300, 120 + j * 28, Math.min(a0, a1), Math.max(a0, a1)); inkStroke(x, 5); } });
+    x.restore();
+  }
+  // robot run
+  const X0 = bx + bw + 220, Xb = px + 72 + 106;
+  let rx, sq = 1, tilt = 0;
+  if (t < bump) { const u = seg(t, 1.35, bump); rx = lerp(X0, Xb, Math.pow(u, 1.25)); tilt = u > 0 ? 0.06 : 0; }
+  else { const u = seg(t, bump, bump + 0.3); rx = Xb + 80 * eOut(u) + (u >= 1 ? Math.sin(t * 38) * 4 : 0); sq = 1 - 0.22 * Math.exp(-k * 9) * Math.cos(k * 30); tilt = -0.1 * Math.exp(-k * 5) * Math.sin(k * 20) + (u >= 1 ? Math.sin(t * 29) * 0.02 : 0); }
+  // dust trail + speed lines
+  const r = rng(7);
+  for (let i = 0; i < 9; i++) {
+    const tk = 1.4 + i * 0.065, age = t - tk, j1 = r(), j2 = r(); if (age < 0) continue; const life = seg(age, 0, 0.9);
+    const u = seg(tk, 1.35, bump), dx = lerp(X0, Xb, Math.pow(u, 1.25)) + 150 + j1 * 40, dy = gy - 20 - j2 * 40, s = (0.45 + life * 0.6) * (1 - seg(age, 0.6, 1.1));
+    dustBunny(x, dx + age * 60, dy - age * 30, s, 30 + i);
+  }
+  if (t > 1.35 && t < bump + 0.4) {
+    x.save(); x.globalAlpha = t < bump ? 1 : 1 - seg(t, bump, bump + 0.4);
+    for (let i = 0; i < 6; i++) { const yy = gy - 130 + i * 24, x0 = rx + 170 + (i % 3) * 30; x.beginPath(); x.moveTo(x0, yy); x.lineTo(x0 + 180 + (i % 2) * 90, yy); inkStroke(x, 5); }
+    x.restore();
+  }
+  robot(x, rx, gy, 0.72, { mood: 0, tilt, squash: sq, brush: t * 30, ant: Math.sin(t * 24) * 0.5 });
+  sfx(x, 'VROOOM!', bx + 1040, by + 668, 104, -0.04, seg(t, 1.45, 1.8), CY);
+  sfx(x, 'BONK!', bx + 250, by + 470, 110, -0.14, seg(t, bump, bump + 0.3), YE);
+  caption(x, bx + 36, by + 34, 'MEANWHILE, AT THE CITY MUSEUM...', 46, seg(t, 1.3, 1.55));
+  zapBalloon(x, bx + 1010, by + 430, 190, 80, [-200, 60], ['BZZT! BEEP!', 'DUST DETECTED!'], 46, seg(t, 2.25, 2.55));
   x.restore();
+}
+function skyline(x, bx, by, bw, bh, seed, base, hMin, hMax, col, winCol) {
+  const r = rng(seed); let px = bx - 20;
+  while (px < bx + bw) {
+    const w = 90 + r() * 110, h = hMin + r() * (hMax - hMin), top = base - h;
+    const b = xx => { xx.beginPath(); xx.rect(px, top, w, by + bh - top); };
+    x.fillStyle = CR; b(x); x.fill(); dots(x, b, col[0], col[1], col[2], col[3]); b(x); inkStroke(x, 5);
+    if (winCol) for (let wy = top + 22; wy < by + bh - 20; wy += 38) for (let wx = px + 16; wx < px + w - 24; wx += 30) if (r() < 0.55) { x.fillStyle = winCol; x.fillRect(wx + MIS[0], wy + MIS[1], 12, 18); }
+    px += w + 8;
+  }
 }
 function panel2(x, t) {
   const [bx, by, bw, bh] = PAN.P2;
   x.save(); x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
-  x.fillStyle = '#fbf6e6'; x.fillRect(bx, by, bw, bh);
-  const cx = bx + 640, cy = by + 420, lt = clamp(t, 3.55, 5.6);
-  dots(x, rectP(bx, by, bw, bh), YE, 7.5, 18, 45);
-  halftoneGrad(x, bx, by, bw, bh, MG, (px, py) => clamp(Math.hypot(px - cx, py - cy) / 700 - 0.25, 0, 1) * 8.5, 18, 0.26);
-  actionLines(x, cx, cy, 300, 56, 11, bx, by, bw, bh);
-  // tick moments: the clock shakes
-  const ticks = [3.95, 4.45, 4.95];
-  const last = ticks.filter(k => lt >= k).length, since = last ? lt - ticks[last - 1] : 9;
-  const shake = since < 0.14 ? Math.sin(since * 90) * 12 * (1 - since / 0.14) : 0;
-  x.save(); x.translate(cx + shake, cy - Math.abs(shake) * 0.4); x.rotate(shake * 0.004);
-  // stopwatch
-  const bz = xx => { xx.beginPath(); xx.arc(0, 0, 250, 0, Math.PI * 2); };
-  x.beginPath(); x.rect(-30, -330, 60, 70); x.fillStyle = '#fbf6e6'; x.fill(); inkStroke(x, 8);
-  x.beginPath(); x.roundRect(-60, -365, 120, 42, 10); x.fillStyle = MG; x.fill(); inkStroke(x, 8);
-  x.save(); x.rotate(0.75); x.beginPath(); x.roundRect(-22, -300, 44, 50, 8); x.fillStyle = '#fbf6e6'; x.fill(); inkStroke(x, 7); x.restore();
-  x.fillStyle = '#fbf6e6'; bz(x); x.fill(); dots(x, bz, MG, 7.6, 14, 45); bz(x); inkStroke(x, 11);
-  const face = xx => { xx.beginPath(); xx.arc(0, 0, 200, 0, Math.PI * 2); };
-  x.fillStyle = '#fbf6e6'; face(x); x.fill(); face(x); inkStroke(x, 7);
-  for (let i = 0; i < 60; i++) { const a = i / 60 * Math.PI * 2, r0 = i % 5 ? 178 : 160; x.beginPath(); x.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); x.lineTo(Math.cos(a) * 192, Math.sin(a) * 192); inkStroke(x, i % 5 ? 3 : 7); }
-  x.font = `400 44px ${BANG}`; x.fillStyle = INK; x.textAlign = 'center'; x.textBaseline = 'middle';
-  ['60', '15', '30', '45'].forEach((s, i) => { const a = -Math.PI / 2 + i * Math.PI / 2; x.fillText(s, Math.cos(a) * 125, Math.sin(a) * 125 + 3); });
-  // hand: jumps 6° at each tick, with slight rebound
-  const step = last + (since < 0.12 ? 0.25 * Math.sin(since / 0.12 * Math.PI) : 0);
-  x.save(); x.rotate(-Math.PI / 2 + (57 + step) * Math.PI / 30);
-  x.beginPath(); x.moveTo(-30, -6); x.lineTo(172, 0); x.lineTo(-30, 6); x.closePath(); x.fillStyle = MG; x.fill(); inkStroke(x, 4); x.restore();
-  x.beginPath(); x.arc(0, 0, 16, 0, Math.PI * 2); x.fillStyle = INK; x.fill();
-  x.restore();
-  // TICK! TOCK! TICK!
-  [['TICK!', -330, -170, -0.2], ['TOCK!', 330, -60, 0.18], ['TICK!', -300, 190, -0.12]].forEach(([s, dx, dy, rot], i) => {
-    const u = seg(lt, ticks[i], ticks[i] + 0.28); sfx(x, s, cx + dx - 60, cy + dy, 120, rot, u, i === 1 ? CY : YE);
-  });
-  // countdown title word by word
-  const words = ['THREE...', 'TWO...', 'ONE...']; const shown = words.slice(0, ticks.filter(k => lt >= k - 0.05).length).join(' ');
-  if (shown) caption(x, bx + 36, by + 34, shown, 50, 1, 470);
+  x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
+  dots(x, rectP(bx, by, bw, bh), CY, 6.5, 18, 15);
+  halftoneGrad(x, bx, by, bw, bh, YE, (px, py) => clamp(1 - Math.hypot((px - bx - 820) / 1.3, py - by - 330) / 620, 0, 1) * 9, 18, 0.26);
+  skyline(x, bx, by, bw, bh, 4, by + 600, 60, 180, [CY, 7, 14, 15], null);
+  skyline(x, bx, by, bw, bh, 9, by + 700, 20, 140, [INK, 4, 12, 45], YE);
+  const u = seg(t, 3.45, 3.95), lt = Math.max(t, 3.45);
+  const hx = lerp(bx - 520, bx + 520, eBack(u, 1.3)), hy = lerp(by + 470, by + 380, eOut(u)) + (u >= 1 ? Math.sin((lt - 3.95) * 5) * 7 : 0);
+  if (u > 0) {
+    const r = rng(12);
+    for (let i = 0; i < 11; i++) {
+      const yy = hy - 120 + i * 22 + r() * 8, x1 = hx - 300 - r() * 60, len = 260 + r() * 420;
+      x.beginPath(); x.moveTo(x1, yy); x.lineTo(x1 - len, yy); inkStroke(x, i % 3 ? 4 : 7);
+    }
+    x.save(); x.translate(hx, hy); x.rotate(-0.07 + (1 - u) * -0.1); x.scale(0.95, 0.95); hero(x, flyPose(lt)); x.restore();
+  }
+  sfx(x, 'WHOOSH!', bx + 300, by + 610, 116, -0.08, seg(t, 3.55, 3.9), YE);
+  caption(x, bx + 36, by + 34, 'HERE COMES CAPTAIN CLARITY!', 46, seg(t, 3.4, 3.65));
+  balloon(x, bx + 1070, by + 170, 236, 96, [-190, 100, 1.9, 2.4], ['NOT ON', 'MY WATCH!'], 58, seg(t, 4.05, 4.4));
   x.restore();
 }
 function panel3(x, t) {
-  const [bx, by, bw, bh] = PAN.P3;
+  const [bx, by, bw, bh] = PAN.P3, fy = by + 690, gy = by + 745, T0 = 5.85;
   x.save(); x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
-  x.fillStyle = '#fbf6e6'; x.fillRect(bx, by, bw, bh);
-  const lt = clamp(t, 5.7, 8.4), T0 = 6.1;
-  const cx = bx + 500, cy = by + 400;
-  const pop = seg(lt, T0, T0 + 0.35);
-  // background: calm blue before explosion, yellow-red radiance after
+  x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
+  const lt = Math.max(t, 5.3), k = lt - T0, pop = seg(lt, T0, T0 + 0.35);
+  const cx = bx + 800, cy = by + 300;
+  // background: calm museum wall before the POW, yellow-red radiance after
   dots(x, rectP(bx, by, bw, bh), CY, 6, 18, 15);
+  museumWall(x, by, fy, [bx + 1200, bx + 1760]);
   if (pop > 0) {
-    x.save(); x.globalAlpha = 1; const R = lerp(0, 2200, eOut(pop));
-    x.beginPath(); x.arc(cx, cy, R, 0, Math.PI * 2); x.clip();
-    x.fillStyle = '#fbf6e6'; x.fillRect(bx, by, bw, bh);
+    x.save(); x.beginPath(); x.arc(cx, cy, lerp(0, 2400, eOut(pop)), 0, Math.PI * 2); x.clip();
+    x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
     dots(x, rectP(bx, by, bw, bh), YE, 8, 18, 45);
-    halftoneGrad(x, bx, by, bw, bh, MG, (px, py) => clamp(Math.hypot(px - cx, py - cy) / 900 - 0.2, 0, 1) * 9, 18, 0.26);
+    halftoneGrad(x, bx, by, bw, bh, MG, (px, py) => clamp(Math.hypot(px - cx, py - cy) / 1000 - 0.2, 0, 1) * 9, 18, 0.26);
     actionLines(x, cx, cy, 380, 70, 23, bx, by, bw, bh);
     x.restore();
   }
-  // ground
-  const fl = xx => { xx.beginPath(); xx.rect(bx, by + 640, bw, 160); };
-  x.fillStyle = '#fbf6e6'; fl(x); x.fill(); dots(x, fl, MG, 5.5, 16, 75);
-  x.beginPath(); x.moveTo(bx, by + 640); x.lineTo(bx + bw, by + 640); inkStroke(x, 8);
-  // microphone: squashed and stretched in the explosion
-  const k = lt - T0;
-  const sq = k < 0 ? 1 - 0.08 * seg(lt, T0 - 0.25, T0) : 1 + 0.22 * Math.exp(-k * 6) * Math.sin(k * 26) * (k < 0.9 ? 1 : 0);
-  mic(x, bx + 1500, by + 700, 1.12, lt, -0.08 + (k > 0 ? 0.03 * Math.exp(-k * 4) * Math.sin(k * 20) : 0), sq);
-  // POP! burst balloon
+  const fl = xx => { xx.beginPath(); xx.rect(bx, fy, bw, bh); };
+  x.fillStyle = CR; fl(x); x.fill(); dots(x, fl, MG, 5.5, 16, 75);
+  x.beginPath(); x.moveTo(bx, fy); x.lineTo(bx + bw, fy); inkStroke(x, 8);
+  // dust pile (swept away by the calm robot)
+  const sw = seg(lt, 6.5, 7.4), rxSweep = lerp(bx + 930, bx + 1430, eInOut(sw));
+  [[1300, 20, 1.0], [1360, 38, 1.2], [1420, 14, 0.9], [1475, 34, 1.05], [1530, 22, 0.8]].forEach(([dx, dy, s], i) => {
+    const gone = seg(rxSweep, bx + dx - 140, bx + dx - 40); if (gone >= 1) return;
+    dustBunny(x, bx + dx, gy - dy, s * (1 - gone), 50 + i);
+  });
+  // sparkles in the cleaned trail
+  [[980, 60], [1080, 30], [1190, 70], [1290, 40], [1390, 66]].forEach(([dx, dy], i) => {
+    const u = seg(rxSweep, bx + dx + 60, bx + dx + 140); if (u <= 0) return;
+    star(x, bx + dx, gy - dy - 10, eBack(u) * 34 * (0.85 + 0.15 * Math.sin(lt * 9 + i)), lt * 1.5 + i);
+  });
+  // POW burst (behind the characters)
   if (pop > 0) {
     const s = eBack(pop, 2.4), jit = k < 0.25 ? 18 : 0;
     x.save(); x.translate(cx, cy); x.scale(s, s); x.rotate(-0.06);
-    x.fillStyle = YE; burstPath(x, 0, 0, 290, 13, 5, jit); x.fill(); burstPath(x, 0, 0, 290, 13, 5, jit); inkStroke(x, 11);
-    x.fillStyle = MG; burstPath(x, 0, 0, 205, 11, 9, jit); x.fill(); dots(x, xx => burstPath(xx, 0, 0, 205, 11, 9, jit), YE, 4, 14, 45); burstPath(x, 0, 0, 205, 11, 9, jit); inkStroke(x, 7);
+    x.fillStyle = YE; burstPath(x, 0, 0, 230, 13, 5, jit); x.fill(); burstPath(x, 0, 0, 230, 13, 5, jit); inkStroke(x, 11);
+    x.fillStyle = MG; burstPath(x, 0, 0, 165, 11, 9, jit); x.fill(); dots(x, xx => burstPath(xx, 0, 0, 165, 11, 9, jit), YE, 4, 14, 45); burstPath(x, 0, 0, 165, 11, 9, jit); inkStroke(x, 7);
     x.restore();
-    sfx(x, 'POP!', cx + 10, cy + 12, 250, -0.08, seg(lt, T0 + 0.04, T0 + 0.45), YE);
   }
-  // first mention
-  balloon(x, bx + 1010, by + 175, 320, 122, [420, 20, -0.12, 0.22], ['HELLO!', 'I AM READY.'], 76, seg(lt, T0 + 0.55, T0 + 0.9), { w: 400 });
-  // starlets
-  [[bx + 140, by + 110, 0.8], [bx + 1830, by + 380, 1.0], [bx + 960, by + 560, 1.15]].forEach(([sx_, sy, t0], i) => {
-    const u = seg(lt, T0 + t0, T0 + t0 + 0.3); if (u <= 0) return; const s = eBack(u) * 34;
-    x.save(); x.translate(sx_, sy); x.rotate(lt * 2 + i); x.beginPath();
-    for (let j = 0; j < 8; j++) { const a = j * Math.PI / 4, r = j % 2 ? s * 0.35 : s; x.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
-    x.closePath(); x.fillStyle = YE; x.fill(); inkStroke(x, 5); x.restore();
-  });
+  // heroine: raises her palm, small push-back at the impact
+  const push = k > 0 ? -10 * Math.exp(-k * 8) * Math.cos(k * 25) : 0;
+  x.save(); x.translate(bx + 330 + push, gy); x.scale(1.06, 1.06); hero(x, standPose(lt, seg(lt, 5.4, 5.7))); x.restore();
+  // robot: charges, leaps, POW, bounces back, calms, sweeps
+  let rx, ry, tilt = 0, sq = 1, lift = false;
+  const Xc = bx + 1060, Xi = bx + 700, Yi = by + 330, Xl = bx + 930;
+  if (lt < 5.62) { const u = seg(lt, 5.3, 5.62); rx = lerp(bx + bw + 240, Xc, u); ry = gy; tilt = 0.05; }
+  else if (lt < T0) { const u = seg(lt, 5.62, T0); rx = lerp(Xc, Xi, u); ry = lerp(gy, Yi, u) - Math.sin(u * Math.PI) * 60; tilt = -0.5 * u; lift = true; sq = 1 + 0.12 * u; }
+  else if (lt < 6.2) { const u = seg(lt, T0, 6.2); rx = lerp(Xi, Xl, u); ry = lerp(Yi, gy, u * u) - Math.sin(u * Math.PI) * 50; tilt = lerp(-0.5, 0.25, u) + Math.sin(u * 14) * 0.1; sq = 1 - 0.25 * Math.exp(-u * 6); lift = true; }
+  else { const u = seg(lt, 6.2, 6.45); rx = sw > 0 ? rxSweep : Xl; ry = gy; sq = 1 - 0.25 * Math.exp(-u * 5) * Math.cos(u * 18); tilt = sw > 0 ? Math.sin(lt * 12) * 0.03 : 0.25 * Math.exp(-u * 5) * Math.cos(u * 14); }
+  const mood = seg(lt, 6.3, 6.42);
+  if (lift) dots(x, xx => { xx.beginPath(); xx.ellipse(rx, gy + 4, 110, 32, 0, 0, Math.PI * 2); }, INK, 3.4, 12, 45);
+  robot(x, rx, ry, 0.8, { mood, tilt, squash: sq, brush: lt * (sw > 0 && sw < 1 ? 28 : 6), ant: mood < 1 ? Math.sin(lt * 26) * 0.6 : Math.sin(lt * 6) * 0.3, noShadow: lift });
+  // dizzy stars after landing
+  if (lt > 6.1 && lt < 6.45) for (let i = 0; i < 3; i++) { const a = lt * 9 + i * 2.1; star(x, rx + Math.cos(a) * 90, gy - 205 + Math.sin(a) * 20, 18, a); }
+  sfx(x, 'POW!', cx + 10, cy + 14, 210, -0.08, seg(lt, T0 + 0.03, T0 + 0.4), YE);
+  caption(x, bx + 1180, by + 34, 'ONE GENTLE "POW!" LATER...', 46, seg(lt, 6.3, 6.55));
+  balloon(x, bx + 1620, by + 390, 210, 86, [-150, 150, 2.0, 2.45], ['BEEP BOOP!', 'ALL CLEAN!'], 50, seg(lt, 7.0, 7.3));
   x.restore();
 }
 function panel4(x, t) {
   const [bx, by, bw, bh] = PAN.P4;
   x.save(); x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
-  x.fillStyle = '#fbf6e6'; x.fillRect(bx, by, bw, bh);
+  x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
   dots(x, rectP(bx, by, bw, bh), MG, 7.6, 18, 75);
-  actionLines(x, bx + bw / 2, by + bh / 2 - 40, 240, 40, 31, bx, by, bw, bh);
-  const u = seg(t, 8.6, 9.0);
-  // improvised logo: speech bubble + 3 diamonds
-  const ls = eBack(u) * 2.6;
-  if (ls > 0) {
-    x.save(); x.translate(bx + bw / 2 - 46 * ls, by + 150); x.scale(ls, ls);
-    const P = [[0, 0], [92, 0], [92, 70], [40, 70], [14, 94], [14, 70], [0, 70]];
-    x.beginPath(); P.forEach(([a, b], i) => i ? x.lineTo(a, b) : x.moveTo(a, b)); x.closePath(); x.fillStyle = '#fbf6e6'; x.fill(); inkStroke(x, 3.5);
-    [[22, INK], [46, MG], [70, INK]].forEach(([c, col]) => { x.beginPath(); x.moveTo(c, 25); x.lineTo(c + 10, 35); x.lineTo(c, 45); x.lineTo(c - 10, 35); x.closePath(); x.fillStyle = col; x.fill(); });
-    x.restore();
-  }
-  sfx(x, 'STAY', bx + bw / 2, by + 510, 150, -0.05, seg(t, 8.7, 9.05), YE);
-  sfx(x, 'TUNED!', bx + bw / 2 + 10, by + 660, 150, -0.05, seg(t, 8.8, 9.15), YE);
+  actionLines(x, bx + bw / 2, by + 330, 240, 40, 31, bx, by, bw, bh);
+  sfx(x, 'THE', bx + bw / 2, by + 220, 190, -0.05, seg(t, 8.0, 8.3), YE);
+  sfx(x, 'END?', bx + bw / 2 + 10, by + 420, 220, -0.05, seg(t, 8.12, 8.45), YE);
+  // ...a second robot peeks in from the bottom edge
+  const u = seg(t, 8.45, 8.75), blink = t > 8.9 && Math.abs(Math.sin((t - 8.8) * 5)) < 0.12;
+  if (u > 0) robot(x, bx + 600, by + bh + 150 - 200 * eBack(u, 1.8), 0.95, { mood: blink ? 0.5 : 0, tilt: -0.12, ant: Math.sin(t * 8) * 0.4, noShadow: true });
   x.restore();
 }
 function masthead(x, t) {
   const u = seg(t, 0.15, 0.6);
-  sfx(x, 'IRTICALEN', 640, 190, 190, -0.02, u, MG);
-  x.save(); x.globalAlpha = seg(t, 0.4, 0.7); x.fillStyle = INK; x.font = `400 54px ${HAND}`; x.textBaseline = 'middle';
-  x.fillText('IMPROVISED SPEAKING ADVENTURES', 1150, 205);
-  x.font = `400 40px ${HAND}`; x.textAlign = 'right'; x.fillText('PAGE 12', 2850, 205);
+  sfx(x, 'CAPTAIN CLARITY', 800, 180, 180, -0.02, u, MG);
+  x.save(); x.globalAlpha = seg(t, 0.4, 0.7);
+  sfx(x, 'VS. THE RUNAWAY ROBOT!', 1860, 196, 84, -0.02, 1, CY);
+  x.fillStyle = INK; x.font = `400 44px ${HAND}`; x.textBaseline = 'middle'; x.textAlign = 'right'; x.fillText('ISSUE No. 16 · 10¢', 2850, 205);
   x.beginPath(); x.moveTo(100, 290); x.lineTo(2850, 290); inkStroke(x, 5); x.beginPath(); x.moveTo(100, 302); x.lineTo(2850, 302); inkStroke(x, 2);
   x.restore();
 }
@@ -313,7 +531,6 @@ function drawPage(x, t) {
   order.forEach(([k, fn, t0]) => {
     const u = seg(t, t0, t0 + 0.45);
     if (u <= 0) return;
-    const [bx, by, bw, bh] = PAN[k];
     x.save(); x.globalAlpha = clamp(u * 2.5); fn(x, t); x.restore();
     panelFrame(x, PAN[k], u);
   });
@@ -324,8 +541,9 @@ function drawPage(x, t) {
 // ── camera ──
 const FULL = [1475, 1030, 0.52];
 const KEYS = [
-  [0, FULL], [1.0, FULL], [1.55, [775, 710, 1.3]], [3.3, [775, 710, 1.34]], [3.8, [2175, 710, 1.3]], [5.55, [2175, 710, 1.36]],
-  [6.05, [1050, 1530, 0.97]], [8.15, [1050, 1530, 1.02]], [8.8, [1475, 1030, 0.53]], [10, [1475, 1030, 0.55]]
+  // holds stay still (static newsprint dots compress far better); only the closing hold drifts
+  [0, FULL], [0.95, FULL], [1.4, [775, 710, 1.32]], [3.1, [775, 710, 1.32]], [3.55, [2175, 710, 1.32]], [5.0, [2175, 710, 1.32]],
+  [5.45, [1050, 1530, 0.99]], [7.65, [1050, 1530, 0.99]], [8.2, [1475, 1030, 0.53]], [10, [1475, 1030, 0.545]]
 ];
 function cam(t) {
   for (let i = 0; i < KEYS.length - 1; i++) {
@@ -350,7 +568,7 @@ function render(t) {
   if (v > 8) { for (let j = 0; j < 3; j++) renderAt(t - j / 90, 1 / (j + 1)); }
   else renderAt(t, 1);
   // closing: inky black
-  const f = seg(t, 9.45, 9.95);
+  const f = seg(t, 9.5, 9.97);
   if (f > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(20,16,14,${eInOut(f)})`; ctx.fillRect(0, 0, W, H); }
 }
 
@@ -369,15 +587,20 @@ function buildPaper() {
 }
 
 window.ready = (async () => {
-  await Promise.all([`400 100px ${BANG}`, `400 100px ${HAND}`].map(f => document.fonts.load(f, 'IRTICALEN THREE TWO YOUR POP!')));
+  const txt = 'CAPTAIN CLARITY VS. THE RUNAWAY ROBOT! ISSUE No. 16 · 10¢ MEANWHILE, AT CITY MUSEUM... BZZT! BEEP! DUST DETECTED! VROOOM! BONK! WHOOSH! POW! "';
+  await Promise.all([`400 100px ${BANG}`, `400 100px ${HAND}`].map(f => document.fonts.load(f, txt)));
   await document.fonts.ready;
   PAPERC = buildPaper();
   return true;
 })();
 window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
 window.events = () => [
-  ...[0.3, 0.4, 0.5, 0.6].map(t => ({ t, k: 'paper' })), { t: 2.15, k: 'boing' },
-  { t: 3.95, k: 'tick' }, { t: 4.45, k: 'tock' }, { t: 4.95, k: 'tick' }, { t: 6.1, k: 'pop' }, { t: 6.65, k: 'boing' }, { t: 8.7, k: 'ding' }
+  ...[0.3, 0.4, 0.5, 0.6].map(t => ({ t, k: 'paper' })),
+  { t: 1.35, k: 'vroom' }, { t: 1.95, k: 'bonk' }, { t: 2.25, k: 'beep' },
+  { t: 3.45, k: 'whoosh' }, { t: 4.05, k: 'boing' },
+  { t: 5.3, k: 'vroom2' }, { t: 5.85, k: 'pow' }, { t: 6.2, k: 'bonk' }, { t: 6.32, k: 'boop' },
+  { t: 6.5, k: 'sweep' }, { t: 6.9, k: 'sparkle' }, { t: 7.2, k: 'sparkle' }, { t: 7.0, k: 'boing' },
+  { t: 8.0, k: 'ding' }, { t: 8.5, k: 'beepq' }
 ];
 </script>
 </body></html>
