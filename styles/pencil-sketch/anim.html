@@ -3,11 +3,12 @@
 <body style="margin:0;background:#000"><canvas id="c" width="1920" height="1080"></canvas>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-//  CHARMING (graphite sketch) — 10 s showcase clip. window.draw({t}) → JPEG base64
-//  Sketchbook page: first light auxiliary lines (axis, ellipse, box), then dark contour
-//  (two-pass), then scan shadows; lines flicker with 12fps "boil". Handwritten note:
-//  "speak first, think later." The page is turned → the irticalen logo is drawn with charcoal.
-//  Pencil mark is attached to the paper thread (graphite layer × paper thread mask).
+//  PENCIL SKETCH (graphite sketchbook) — 10 s clip "Designing a treehouse". window.draw({t}) → JPEG base64
+//  Sketchbook page: three rough thumbnails in the margin (camera close), the third gets circled,
+//  the camera pulls back and it is developed into a finished drawing: light construction lines,
+//  dark two-pass contours, hatching + stump smudge, rope ladder, a tiny flag that flutters,
+//  handwritten margin notes and a dimension line. Ends with the page corner lifting.
+//  Lines boil at 12 fps; graphite sits only on the paper tooth (graphite layer × tooth mask).
 // ─────────────────────────────────────────────────────────────────────────────
 const W = 1920, H = 1080;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
@@ -23,13 +24,12 @@ const mk = (w = W, h = H) => { const c = document.createElement('canvas'); c.wid
 const HAND = "'Caveat', cursive";
 const PAPER = '#eeebe3';
 
-// ── paper + tooth (once) ────────────────────────── ───────────────────────────
-const PAPERCV = mk(), TOOTH = mk();
+// ── paper + tooth (once) ─────────────────────────────────────────────────────
+const PAPERCV = mk(), TOOTH = mk(), UNDER = mk();
 function buildPaper() {
   const c = PAPERCV.getContext('2d');
   c.fillStyle = PAPER; c.fillRect(0, 0, W, H);
   const id = c.getImageData(0, 0, W, H), d = id.data, r = rng(3);
-  // low frequency cloud + fine tooth
   const low = mk(96, 54), lc = low.getContext('2d'), li = lc.createImageData(96, 54);
   for (let i = 0; i < li.data.length; i += 4) { const v = 128 + (r() - .5) * 60; li.data[i] = li.data[i + 1] = li.data[i + 2] = v; li.data[i + 3] = 255; }
   lc.putImageData(li, 0, 0); const big = mk(), bc = big.getContext('2d'); bc.imageSmoothingQuality = 'high'; bc.drawImage(low, 0, 0, W, H);
@@ -39,178 +39,268 @@ function buildPaper() {
     d[i] += n; d[i + 1] += n; d[i + 2] += n * .9;
   }
   c.putImageData(id, 0, 0);
-  // spine shadow (notebook bound on left) + corner darkening
+  // spine shadow (sketchbook bound on the left) + corner darkening
   const g = c.createLinearGradient(0, 0, 140, 0); g.addColorStop(0, 'rgba(60,55,45,0.22)'); g.addColorStop(1, 'rgba(60,55,45,0)'); c.fillStyle = g; c.fillRect(0, 0, 140, H);
   const v = c.createRadialGradient(1000, 520, 400, 960, 540, 1200); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(50,40,30,0.16)'); c.fillStyle = v; c.fillRect(0, 0, W, H);
-  // dental mask: graphite only adheres to the tops of the paper
+  // tooth mask: graphite only catches on the raised fibres of the paper
   const tc = TOOTH.getContext('2d'), ti = tc.createImageData(W, H), td = ti.data, r2 = rng(11);
   for (let i = 0; i < td.length; i += 4) {
     const k = (i / 4), x = k % W, y = (k / W) | 0;
-    const fib = Math.sin(x * .9 + y * .35) * .5 + .5;           // light directional paper fiber
+    const fib = Math.sin(x * .9 + y * .35) * .5 + .5;
     let a = .42 + r2() * .58 * (.8 + fib * .2) + (bd[i] - 128) / 400;
     td[i] = td[i + 1] = td[i + 2] = 0; td[i + 3] = clamp(a, 0, 1) * 255;
   }
   tc.putImageData(ti, 0, 0);
+  // the next (blank) page under the lifting corner: same paper, a touch darker
+  const u = UNDER.getContext('2d'); u.drawImage(PAPERCV, 0, 0); u.fillStyle = 'rgba(70,60,45,0.06)'; u.fillRect(0, 0, W, H);
 }
 
-// ── stroke generators ──────────────────────── ────────────────────────
-const S1 = [], S2 = [];                  // page 1 and page 2 lines
+// ── stroke generators ────────────────────────────────────────────────────────
+const S = [];
 let SID = 0;
-function mkStroke(list, pts, t0, dur, w, a, opt = {}) { list.push({ id: SID++, pts, t0, dur, w, a, boil: opt.boil ?? 1.1, clip: opt.clip || null, ease: opt.ease || eSin }); }
-function sLine(list, x0, y0, x1, y1, t0, dur, w, a, opt = {}) {   // light spring + overflow at the ends
+function mkStroke(pts, t0, dur, w, a, opt = {}) { const s = { id: SID++, pts, t0, dur, w, a, boil: opt.boil ?? 1.1, clip: opt.clip || null, ease: opt.ease || eSin, dyn: opt.dyn || null, snd: opt.snd ?? 1 }; S.push(s); return s; }
+function sLine(x0, y0, x1, y1, t0, dur, w, a, opt = {}) {   // slight bow + overshoot at the ends
   const r = rng(SID * 7 + 1), over = opt.over ?? 10, bow = (opt.bow ?? 4) * (r() - .5) * 2;
-  const L = Math.hypot(x1 - x0, y1 - y0), ux = (x1 - x0) / L, uy = (y1 - y0) / L;
+  const L = Math.hypot(x1 - x0, y1 - y0) || 1, ux = (x1 - x0) / L, uy = (y1 - y0) / L;
   const ax = x0 - ux * over * r(), ay = y0 - uy * over * r(), bx = x1 + ux * over * r(), by = y1 + uy * over * r();
   const n = Math.max(4, Math.round(L / 7)), pts = [];
   for (let i = 0; i <= n; i++) { const u = i / n, s = Math.sin(u * Math.PI) * bow; pts.push([lerp(ax, bx, u) - uy * s, lerp(ay, by, u) + ux * s]); }
-  mkStroke(list, pts, t0, dur, w, a, opt);
+  return mkStroke(pts, t0, dur, w, a, opt);
 }
-function sArc(list, cx, cy, rx, ry, a0, a1, t0, dur, w, a, opt = {}) {
+function sArc(cx, cy, rx, ry, a0, a1, t0, dur, w, a, opt = {}) {
   const r = rng(SID * 13 + 5), n = Math.max(8, Math.round(Math.abs(a1 - a0) * Math.max(rx, ry) / 7)), pts = [], wob = opt.wob ?? 2;
   const ph = r() * 6;
   for (let i = 0; i <= n; i++) { const u = i / n, ang = lerp(a0, a1, u), e = 1 + Math.sin(u * 5 + ph) * wob / Math.max(rx, ry); pts.push([cx + Math.cos(ang) * rx * e, cy + Math.sin(ang) * ry * e]); }
-  mkStroke(list, pts, t0, dur, w, a, opt);
+  return mkStroke(pts, t0, dur, w, a, opt);
 }
-function sPoly(list, P, t0, dur, w, a, opt = {}) {   // angular polygon, two-pass feeling
+function sPoly(P, t0, dur, w, a, opt = {}) {   // polyline, resampled every ~7 px
   const pts = []; for (let i = 0; i < P.length - 1; i++) { const [x0, y0] = P[i], [x1, y1] = P[i + 1], L = Math.hypot(x1 - x0, y1 - y0), n = Math.max(2, Math.round(L / 7));
     for (let k = 0; k < n; k++) pts.push([lerp(x0, x1, k / n), lerp(y0, y1, k / n)]); }
-  pts.push(P[P.length - 1]); mkStroke(list, pts, t0, dur, w, a, opt);
+  pts.push(P[P.length - 1]); return mkStroke(pts, t0, dur, w, a, opt);
 }
-// hatching: parallel lines within the region are thrown sequentially (like the artist's hand)
-function hatch(list, clip, x0, y0, x1, y1, ang, gap, t0, t1, w, a, opt = {}) {
+function sCurve(P, t0, dur, w, a, opt = {}) {  // smooth Catmull-Rom through points
+  const pts = [], Q = [P[0], ...P, P[P.length - 1]];
+  for (let i = 1; i < Q.length - 2; i++) {
+    const [p0, p1, p2, p3] = [Q[i - 1], Q[i], Q[i + 1], Q[i + 2]], L = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]), n = Math.max(3, Math.round(L / 7));
+    for (let k = 0; k < n; k++) { const u = k / n, u2 = u * u, u3 = u2 * u;
+      pts.push([0, 1].map(j => .5 * (2 * p1[j] + (-p0[j] + p2[j]) * u + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * u2 + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * u3))); }
+  }
+  pts.push(P[P.length - 1]); return mkStroke(pts, t0, dur, w, a, opt);
+}
+function arrow(x0, y0, cx, cy, x1, y1, t0, dur, w, a) {   // curved note arrow + two-stroke head
+  const pts = []; for (let i = 0; i <= 30; i++) { const u = i / 30; pts.push([(1 - u) ** 2 * x0 + 2 * (1 - u) * u * cx + u * u * x1, (1 - u) ** 2 * y0 + 2 * (1 - u) * u * cy + u * u * y1]); }
+  mkStroke(pts, t0, dur, w, a);
+  const ang = Math.atan2(y1 - cy, x1 - cx), hl = 22;
+  sLine(x1, y1, x1 - Math.cos(ang - .45) * hl, y1 - Math.sin(ang - .45) * hl, t0 + dur, .08, w, a, { over: 0, bow: 1 });
+  sLine(x1, y1, x1 - Math.cos(ang + .45) * hl, y1 - Math.sin(ang + .45) * hl, t0 + dur + .06, .08, w, a, { over: 0, bow: 1 });
+}
+// hatching: parallel lines thrown one after another, like the artist's hand
+function hatch(clip, x0, y0, x1, y1, ang, gap, t0, t1, w, a, opt = {}) {
   const r = rng(SID * 31 + 9), ca = Math.cos(ang), sa = Math.sin(ang);
-  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, R = Math.hypot(x1 - x0, y1 - y0) / 2 + 20;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, R = Math.hypot(x1 - x0, y1 - y0) / 2 + 10;
   const lines = []; for (let d = -R; d <= R; d += gap * (0.8 + r() * .4)) lines.push(d);
   lines.forEach((d, i) => {
     const px = cx - sa * d, py = cy + ca * d, jl = R * (0.85 + r() * .3);
     const tt = lerp(t0, t1, i / lines.length);
-    sLine(list, px - ca * jl, py - sa * jl + (r() - .5) * 8, px + ca * jl, py + sa * jl + (r() - .5) * 8, tt, .12 + r() * .06, w * (0.8 + r() * .4), a * (0.75 + r() * .35), { clip, bow: 3, over: 0, boil: opt.boil ?? .7 });
+    sLine(px - ca * jl, py - sa * jl + (r() - .5) * 6, px + ca * jl, py + sa * jl + (r() - .5) * 6, tt, .1 + r() * .05, w * (0.8 + r() * .4), a * (0.75 + r() * .35), { clip, bow: 3, over: 0, boil: opt.boil ?? .7, snd: .5 });
   });
 }
+// clip helpers (each one clips by itself; paths are in page coordinates)
+const clipPoly = P => c => { c.beginPath(); P.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.closePath(); c.clip(); };
+const clipRect = (x, y, w, h) => c => { c.beginPath(); c.rect(x, y, w, h); c.clip(); };
 
-// ── microphone geometry ─────────────────────────── ────────────────────────────
-const MX = 860, TOP = 175, BOT = 595, HW = 135, BELT = 385;
-const stadium = c => { c.beginPath(); c.arc(MX, TOP + HW, HW, Math.PI, 0); c.lineTo(MX + HW, BOT - HW); c.arc(MX, BOT - HW, HW, 0, Math.PI); c.closePath(); };
-const castSh = c => { c.beginPath(); c.ellipse(MX + 90, 950, 300, 52, 0, 0, Math.PI * 2); c.clip(); c.beginPath(); c.rect(0, 0, W, H); for (let i = 0; i <= 72; i++) { const a = -i / 72 * Math.PI * 2; c[i ? 'lineTo' : 'moveTo'](MX + Math.cos(a) * 200, 918 + Math.sin(a) * 58); } c.closePath(); };
-function buildPage1() {
-  const L = S1;
-  // 1) auxiliary lines (2H: open, fast)
-  const g = { w: 1.4, a: .32 };
-  sLine(L, MX, 110, MX, 980, .30, .5, g.w, g.a, { over: 0 });
-  [TOP, BELT, BOT, 905].forEach((y, i) => sLine(L, MX - 330, y, MX + 330, y, .42 + i * .1, .35, g.w, g.a * .9, { over: 20 }));
-  sLine(L, MX - HW, 150, MX - HW, 620, .6, .3, g.w, g.a); sLine(L, MX + HW, 150, MX + HW, 620, .66, .3, g.w, g.a);
-  sArc(L, MX, TOP + HW, HW, HW, Math.PI * .9, Math.PI * 2.1, .75, .4, g.w, g.a);
-  sArc(L, MX, 905, 200, 46, 0, Math.PI * 2, .95, .45, g.w, g.a);
-  sArc(L, MX, BELT, 170, 290, Math.PI * .02, Math.PI * .98, 1.1, .5, g.w, g.a * .8);         // yoke spring
-  sLine(L, MX - 250, 120, MX + 250, 120, 1.2, .3, g.w, g.a * .7); sLine(L, MX + 250, 120, MX + 250, 980, 1.3, .35, g.w, g.a * .6);
-  // 2) contour (HB–2B, two passes)
-  const k = { w: 3.1, a: .92 };
-  const contour = (t0) => {
-    const off = t0 > 2 ? 2.2 : 0;
-    sArc(L, MX + off * .3, TOP + HW, HW, HW, Math.PI, Math.PI * 2, t0, .45, k.w, k.a, { wob: 2.5 });
-    sLine(L, MX + HW, TOP + HW, MX + HW + off * .2, BOT - HW, t0 + .35, .2, k.w, k.a, { over: 4 });
-    sArc(L, MX, BOT - HW, HW, HW, 0, Math.PI, t0 + .5, .45, k.w, k.a, { wob: 2.5 });
-    sLine(L, MX - HW, BOT - HW, MX - HW - off * .2, TOP + HW, t0 + .9, .2, k.w, k.a, { over: 4 });
+// ── page layout ──────────────────────────────────────────────────────────────
+const TH = [{ x: 150, y: 215 }, { x: 150, y: 460 }, { x: 150, y: 705 }], TW = 320, THH = 210;
+const TEXTS = [];
+const note = (txt, x, y, size, t0, t1, rot = 0, a = .92) => TEXTS.push({ txt, x, y, size, t0, t1, rot, a });
+
+function buildThumbs() {
+  note('Treehouse — ideas', 150, 158, 76, .3, 1.0, -.02);
+  { const pts = []; for (let i = 0; i <= 30; i++) { const u = i / 30; pts.push([lerp(148, 640, u), 176 + Math.sin(u * 3) * 4 - u * 8]); } mkStroke(pts, 1.0, .25, 2.4, .6); }
+  const light = { w: 1.3, a: .38 }, k = { w: 2.3, a: .82 };
+  const frame = (T, t0) => { sLine(T.x, T.y, T.x + TW, T.y, t0, .12, light.w, light.a, { over: 8 }); sLine(T.x + TW, T.y, T.x + TW, T.y + THH, t0 + .08, .1, light.w, light.a, { over: 8 });
+    sLine(T.x + TW, T.y + THH, T.x, T.y + THH, t0 + .14, .12, light.w, light.a, { over: 8 }); sLine(T.x, T.y + THH, T.x, T.y, t0 + .22, .1, light.w, light.a, { over: 8 }); };
+  const box = (T, t0, n) => { frame(T, t0); note(String(n), T.x + 14, T.y + 38, 40, t0 + .1, t0 + .25, 0, .7); };
+  // 1 · a box on stilts
+  { const T = TH[0], L = (x, y) => [T.x + x, T.y + y], t = .55; box(T, t, 1);
+    sLine(...L(40, 190), ...L(290, 190), t + .2, .15, 1.6, .5, { over: 6 });
+    sArc(...L(170, 72), 78, 56, Math.PI * .85, Math.PI * 2.2, t + .28, .3, 2, .6, { wob: 6 });
+    sLine(...L(165, 190), ...L(165, 120), t + .3, .1, k.w, k.a); sLine(...L(180, 190), ...L(180, 120), t + .33, .1, k.w, k.a);
+    sPoly([L(118, 150), L(118, 108), L(228, 108), L(228, 150), L(118, 150)], t + .42, .22, k.w, k.a);
+    sPoly([L(108, 110), L(173, 70), L(238, 110)], t + .6, .15, k.w, k.a);
+    sLine(...L(128, 150), ...L(128, 190), t + .72, .06, k.w, k.a, { over: 3 }); sLine(...L(218, 150), ...L(218, 190), t + .76, .06, k.w, k.a, { over: 3 });
+    note('?', T.x + 262, T.y + 72, 50, t + .82, t + .92, .1, .75); }
+  // 2 · a round pod hanging from a branch
+  { const T = TH[1], L = (x, y) => [T.x + x, T.y + y], t = 1.25; box(T, t, 2);
+    sLine(...L(62, 196), ...L(62, 40), t + .2, .12, k.w, k.a, { over: 4 }); sLine(...L(76, 196), ...L(76, 52), t + .22, .12, k.w, k.a, { over: 4 });
+    sCurve([L(70, 50), L(150, 38), L(230, 44), L(290, 60)], t + .3, .18, k.w, k.a);
+    sLine(...L(190, 44), ...L(190, 72), t + .45, .06, 1.8, .7, { over: 2 });
+    sArc(...L(190, 118), 50, 46, 0, Math.PI * 2.05, t + .5, .22, k.w, k.a, { wob: 3 });
+    sArc(...L(190, 112), 13, 13, 0, Math.PI * 2, t + .66, .08, 1.8, .75);
+    sLine(...L(30, 196), ...L(300, 196), t + .7, .12, 1.6, .5, { over: 6 }); }
+  // 3 · a little house on a deck (the keeper)
+  { const T = TH[2], L = (x, y) => [T.x + x, T.y + y], t = 1.95; box(T, t, 3);
+    sLine(...L(30, 196), ...L(300, 196), t + .2, .12, 1.6, .5, { over: 6 });
+    sArc(...L(165, 62), 110, 48, Math.PI * .92, Math.PI * 2.08, t + .26, .26, 2, .6, { wob: 6 });
+    sLine(...L(152, 196), ...L(155, 122), t + .3, .08, k.w, k.a, { over: 3 }); sLine(...L(178, 196), ...L(175, 122), t + .32, .08, k.w, k.a, { over: 3 });
+    sPoly([L(88, 118), L(245, 118), L(245, 126), L(88, 126), L(88, 118)], t + .4, .12, k.w, k.a);
+    sPoly([L(118, 118), L(118, 78), L(212, 78), L(212, 118)], t + .5, .14, k.w, k.a);
+    sPoly([L(106, 80), L(165, 44), L(224, 80)], t + .62, .12, k.w, k.a);
+    sLine(...L(165, 44), ...L(165, 22), t + .72, .05, 1.8, .8, { over: 1 }); sPoly([L(165, 22), L(188, 28), L(165, 34)], t + .76, .05, 1.8, .8);
+    sLine(...L(96, 126), ...L(96, 192), t + .78, .06, 1.6, .7, { over: 2 }); sLine(...L(110, 126), ...L(110, 192), t + .8, .06, 1.6, .7, { over: 2 });
+    for (let i = 0; i < 4; i++) sLine(...L(96, 140 + i * 15), ...L(110, 140 + i * 15), t + .84 + i * .015, .03, 1.4, .7, { over: 1, bow: 1, snd: .3 }); }
+  // pick: a loose double loop around #3, "this one!" and an arrow toward the big drawing
+  { const T = TH[2], cx = T.x + TW / 2, cy = T.y + THH / 2, pts = [];
+    for (let i = 0; i <= 120; i++) { const u = i / 120, a = -2.4 + u * Math.PI * 2 * 1.85, rr = 1 + .035 * Math.sin(u * 9) + u * .03;
+      pts.push([cx + Math.cos(a) * 205 * rr, cy + Math.sin(a) * 138 * rr]); }
+    mkStroke(pts, 2.86, .42, 3, .85, { ease: x => eInOut(x) });
+    note('this one!', 520, 812, 64, 3.2, 3.6, -.06);
+    arrow(640, 832, 740, 856, 850, 760, 3.6, .24, 2.4, .8); }
+}
+
+// ── the developed drawing ────────────────────────────────────────────────────
+const CX = 1080, GY = 960, DY = 600, HX0 = 960, HX1 = 1200, HY = 410, PK = 300;
+const TRUNK = [[1004, 962], [1026, 900], [1036, 800], [1042, 700], [1046, 600], [1116, 600], [1122, 700], [1130, 800], [1142, 900], [1164, 962]];
+const HOUSE = [[938, HY], [CX, PK], [1222, HY], [HX1, HY], [HX1, DY + 26], [HX0, DY + 26], [HX0, HY]];
+const DECK = { x0: 880, x1: 1262, y: DY, th: 26 };
+const LAD = [888, 928];
+const CAN = { x: 1080, y: 322, rx: 360, ry: 220 };
+const canPts = (() => { const P = [], n = 150; for (let i = 0; i <= n; i++) { const a = Math.PI * .08 + i / n * Math.PI * 1.84;
+  const bump = 1 + .075 * Math.abs(Math.sin(a * 5.5)) - .02; P.push([CAN.x + Math.cos(a + Math.PI / 2) * CAN.rx * bump, CAN.y + Math.sin(a + Math.PI / 2) * CAN.ry * bump]); } return P; })();
+// everything behind the house (canopy, branches) is clipped against its silhouette + flag
+const outsideHouse = c => { c.beginPath(); c.rect(0, 0, W, H); HOUSE.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.closePath();
+  c.rect(1072, 190, 70, 112); c.clip('evenodd'); };
+const inCanopy = c => { c.beginPath(); canPts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.closePath(); c.clip(); outsideHouse(c); };
+
+function buildMain() {
+  const g = { w: 1.4, a: .3 };
+  // 1) construction lines (2H: light, fast, overshooting)
+  sLine(CX, 150, CX, 990, 3.3, .45, g.w, g.a, { over: 0 });
+  sLine(620, GY, 1540, GY, 3.4, .4, g.w, g.a, { over: 20 });
+  sLine(760, DY, 1400, DY, 3.5, .35, g.w, g.a, { over: 20 });
+  sLine(860, HY, 1300, HY, 3.58, .3, g.w, g.a * .9, { over: 20 });
+  sLine(HX0, 370, HX0, 650, 3.66, .22, g.w, g.a); sLine(HX1, 370, HX1, 650, 3.7, .22, g.w, g.a);
+  sLine(900, 450, 1115, 272, 3.76, .22, g.w, g.a * .8, { over: 0 }); sLine(1045, 272, 1260, 450, 3.8, .22, g.w, g.a * .8, { over: 0 });
+  sArc(CAN.x, CAN.y, CAN.rx, CAN.ry, 0, Math.PI * 2, 3.86, .5, g.w, g.a * .6, { wob: 4 });
+  sLine(1040, 600, 1022, 965, 4.0, .22, g.w, g.a); sLine(1122, 600, 1146, 965, 4.04, .22, g.w, g.a);
+  sLine(908, 560, 908, 950, 4.1, .25, g.w, g.a * .8);
+  sLine(1420, GY, 1420, DY, 4.12, .2, g.w, g.a * .7, { over: 30 });
+  // 2) contours (HB–2B, dark)
+  const k = { w: 3.0, a: .92 };
+  const trunkPass = (t0, off) => {
+    sCurve([[964 + off, 968], [1004, 958], [1026 + off, 900], [1036, 800], [1042 + off, 700], [1046, 626]], t0, .3, k.w, k.a);
+    sCurve([[1206 - off, 968], [1164, 958], [1142 - off, 900], [1130, 800], [1122 - off, 700], [1116, 626]], t0 + .1, .3, k.w, k.a);
+    sCurve([[1030, 930], [1040, 950], [1048, 968]], t0 + .3, .1, k.w * .8, k.a * .8); sCurve([[1128, 928], [1120, 952], [1124, 968]], t0 + .34, .1, k.w * .8, k.a * .8);
   };
-  contour(1.25); contour(2.35);
-  // middle belt (metal band)
-  sArc(L, MX, BELT - 14, HW, 20, 0, Math.PI, 1.9, .3, k.w, k.a); sArc(L, MX, BELT + 14, HW, 20, 0, Math.PI, 1.98, .3, k.w, k.a);
-  // yoke: two parallel U
-  const yoke = (rx, ry, t0) => sArc(L, MX, BELT, rx, ry, Math.PI * .03, Math.PI * .97, t0, .5, k.w, k.a * .95, { wob: 3 });
-  yoke(172, 292, 2.05); yoke(150, 268, 2.2);
-  [-1, 1].forEach((s, i) => { sArc(L, MX + s * 161, BELT, 24, 24, 0, Math.PI * 2, 2.25 + i * .1, .3, k.w, k.a); sArc(L, MX + s * 161, BELT, 9, 9, 0, Math.PI * 2, 2.4 + i * .1, .2, 2, .7); });
-  // body, bracelet, base
-  sLine(L, MX - 16, 668, MX - 16, 890, 2.5, .25, k.w, k.a, { over: 3 }); sLine(L, MX + 16, 668, MX + 16, 890, 2.56, .25, k.w, k.a, { over: 3 });
-  sArc(L, MX, 712, 24, 7, 0, Math.PI, 2.62, .2, k.w, k.a); sArc(L, MX, 728, 24, 7, 0, Math.PI, 2.66, .2, k.w, k.a);
-  sLine(L, MX - 24, 712, MX - 24, 728, 2.64, .1, k.w, k.a, { over: 2 }); sLine(L, MX + 24, 712, MX + 24, 728, 2.68, .1, k.w, k.a, { over: 2 });
-  sArc(L, MX, 905, 200, 46, Math.PI * 1.02, Math.PI * 2.98, 2.7, .55, k.w, k.a, { wob: 3 });
-  sArc(L, MX, 930, 200, 46, 0, Math.PI, 2.95, .4, k.w, k.a, { wob: 3 });
-  sLine(L, MX - 200, 905, MX - 200, 930, 3.0, .1, k.w, k.a, { over: 2 }); sLine(L, MX + 200, 905, MX + 200, 930, 3.05, .1, k.w, k.a, { over: 2 });
-  // 3) grid rings (light-medium)
-  for (let y = TOP + 34, i = 0; y < BOT - 20; y += 26, i++) {
-    if (Math.abs(y - BELT) < 30) continue;
-    const off = y < TOP + HW ? HW - Math.sqrt(Math.max(0, HW * HW - (TOP + HW - y) ** 2)) : y > BOT - HW ? HW - Math.sqrt(Math.max(0, HW * HW - (y - BOT + HW) ** 2)) : 0;
-    const rx = HW - off - 4; if (rx < 20) continue;
-    sArc(L, MX, y, rx, 12, Math.PI * .04, Math.PI * .96, 2.9 + i * .07, .22, 1.5, .5, { wob: 1.5 });
-  }
-  for (let i = -3; i <= 3; i++) { const x = MX + i * 36; const hh = Math.sqrt(HW * HW - (i * 36) ** 2);
-    sLine(L, x, TOP + HW - hh * .92 + 8, x, BELT - 18, 3.2 + (i + 3) * .05, .2, 1.2, .35, { over: 0, bow: 2 }); sLine(L, x, BELT + 22, x, BOT - HW + hh * .92 - 8, 3.25 + (i + 3) * .05, .2, 1.2, .35, { over: 0, bow: 2 }); }
-  // 4) hatch shadow: light from top left → dark right side
-  const capClip = (xFrom) => c => { stadium(c); c.clip(); c.beginPath(); c.rect(MX + xFrom, 0, 600, H); };
-  hatch(L, capClip(10), MX + 10, TOP, MX + HW, BOT, -1.05, 9, 3.3, 4.2, 1.7, .7);
-  hatch(L, capClip(62), MX + 62, TOP, MX + HW, BOT, .5, 8, 3.9, 4.6, 1.6, .65);
-  hatch(L, capClip(100), MX + 100, TOP, MX + HW, BOT, -1.05, 5, 4.3, 4.8, 1.7, .7);
-  hatch(L, capClip(118), MX + 118, TOP, MX + HW, BOT, .2, 5, 4.6, 5.0, 1.6, .65);
-  // yoke right arm and body
-  const yokeR = c => { c.beginPath(); c.ellipse(MX, BELT, 172, 292, 0, 0, Math.PI); c.ellipse(MX, BELT, 150, 268, 0, Math.PI, 0, true); c.closePath(); c.clip(); c.beginPath(); c.rect(MX + 20, 0, 400, H); };
-  hatch(L, yokeR, MX, BELT, MX + 175, BELT + 300, -1.05, 6, 3.6, 4.3, 1.6, .75);
-  hatch(L, c => { c.beginPath(); c.rect(MX + 2, 668, 14, 222); }, MX, 668, MX + 16, 890, -1.2, 6, 3.8, 4.1, 1.3, .55);
-  // base side + shadow on ground (dense, diagonal)
-  const baseSide = c => { c.beginPath(); c.ellipse(MX, 930, 200, 46, 0, 0, Math.PI); c.lineTo(MX - 200, 905); c.ellipse(MX, 905, 200, 46, 0, Math.PI, 0, true); c.closePath(); };
-  hatch(L, baseSide, MX - 200, 900, MX + 200, 980, -1.1, 6, 3.7, 4.4, 1.6, .7);
-  hatch(L, castSh, MX - 210, 895, MX + 390, 1005, -.35, 6, 4.0, 4.9, 1.6, .75);
-  hatch(L, castSh, MX - 210, 895, MX + 390, 1005, .5, 9, 4.5, 5.1, 1.3, .45);
-  // 5) sound waves (left) + handwritten note (right) + arrow
-  [220, 272, 324].forEach((R, i) => sArc(L, MX - 40, BELT - 20, R, R * 1.05, Math.PI * .83, Math.PI * 1.17, 4.4 + i * .14, .3, 2.4 - i * .3, .8 - i * .15, { wob: 3 }));
-  // arrow: curving from note to capsule
-  { const pts = []; for (let i = 0; i <= 26; i++) { const u = i / 26; const x = lerp(1265, 1030, u), y = 318 - Math.sin(u * Math.PI) * 60 + u * 40; pts.push([x, y]); } mkStroke(L, pts, 5.25, .4, 2.2, .75); }
-  sLine(L, 1030, 358, 1058, 340, 5.6, .1, 2.2, .75, { over: 0 }); sLine(L, 1030, 358, 1062, 368, 5.66, .1, 2.2, .75, { over: 0 });
+  trunkPass(4.25, 0);
+  // deck
+  sLine(DECK.x0, DY, DECK.x1, DY, 4.55, .22, k.w, k.a, { over: 6 });
+  sLine(DECK.x0, DY + DECK.th, DECK.x1, DY + DECK.th, 4.62, .22, k.w, k.a, { over: 6 });
+  sLine(DECK.x0, DY, DECK.x0, DY + DECK.th, 4.7, .05, k.w, k.a, { over: 2 }); sLine(DECK.x1, DY, DECK.x1, DY + DECK.th, 4.74, .05, k.w, k.a, { over: 2 });
+  for (let x = DECK.x0 + 34; x < DECK.x1 - 10; x += 36) sLine(x, DY + 3, x, DY + DECK.th - 3, 4.78 + (x - DECK.x0) / 3000, .04, 1.4, .55, { over: 1, bow: 1, snd: .3 });
+  // house + roof
+  const housePass = (t0, o, w, a) => {
+    sLine(HX0 + o, DY, HX0 + o, HY, t0, .16, w, a, { over: 4 }); sLine(HX1 + o, DY, HX1 + o, HY, t0 + .06, .16, w, a, { over: 4 });
+    sPoly([[938 + o, HY + o], [CX + o, PK], [1222 + o, HY - o]], t0 + .16, .3, w, a);
+    sPoly([[948, HY + 14], [CX, PK + 18], [1212, HY + 14]], t0 + .28, .26, w * .8, a * .85);
+    sLine(938 + o, HY + o, 948, HY + 14, t0 + .45, .04, w, a, { over: 1 }); sLine(1222 + o, HY - o, 1212, HY + 14, t0 + .48, .04, w, a, { over: 1 });
+  };
+  housePass(4.8, 0, k.w, k.a);
+  // door (rounded top) + round window
+  sPoly([[985, DY], [985, 518]], 5.3, .08, k.w, k.a); sArc(1015, 518, 30, 30, Math.PI, Math.PI * 2, 5.36, .12, k.w, k.a, { wob: 1 }); sPoly([[1045, 518], [1045, DY]], 5.46, .08, k.w, k.a);
+  sArc(1030, 562, 4, 4, 0, Math.PI * 2, 5.52, .04, 2.2, .8, { wob: 0 });
+  sArc(1142, 482, 32, 32, 0, Math.PI * 2.08, 5.5, .2, k.w, k.a, { wob: 1.5 });
+  sLine(1142, 452, 1142, 512, 5.66, .06, 2, .75, { over: 0 }); sLine(1112, 482, 1172, 482, 5.7, .06, 2, .75, { over: 0 });
+  // flag pole + fluttering flag
+  sLine(CX, PK + 2, CX, 196, 5.72, .12, 2.6, .9, { over: 3 });
+  mkStroke([[0, 0], [0, 0]], 5.84, .16, 2.4, .88, { dyn: t => {
+    const ph = t * 7.5, P = [];
+    for (let i = 0; i <= 12; i++) { const u = i / 12; P.push([CX + u * 62, 200 + Math.sin(ph - u * 3.2) * 5 * u + u * 6]); }
+    for (let i = 12; i >= 0; i--) { const u = i / 12; P.push([CX + u * 62, 236 - u * 24 + Math.sin(ph - u * 3.2) * 5 * u]); }
+    return P; } });
+  // knee braces + railing
+  sLine(1044, 742, 962, DY + DECK.th, 5.9, .12, k.w * .9, k.a, { over: 3 }); sLine(1054, 742, 978, DY + DECK.th, 5.94, .1, 1.8, .6, { over: 2 });
+  sLine(1121, 742, 1202, DY + DECK.th, 5.98, .12, k.w * .9, k.a, { over: 3 }); sLine(1112, 742, 1186, DY + DECK.th, 6.02, .1, 1.8, .6, { over: 2 });
+  [890, 925, 1225, 1254].forEach((x, i) => sLine(x, 548, x, DY, 6.04 + i * .03, .05, 2.4, .85, { over: 2 }));
+  sLine(884, 550, HX0, 550, 6.12, .07, 2.4, .85, { over: 3 }); sLine(HX1, 550, 1262, 550, 6.16, .07, 2.4, .85, { over: 3 });
+  // rope ladder: two sagging ropes + rungs
+  [0, 1].forEach(j => { const x = LAD[j], P = []; for (let i = 0; i <= 10; i++) { const u = i / 10; P.push([x + Math.sin(u * Math.PI) * 5 + u * 6, DY + DECK.th + u * 312]); } sCurve(P, 6.18 + j * .06, .22, 2.4, .88); });
+  for (let i = 0; i < 7; i++) { const y = DY + DECK.th + 40 + i * 42, u = (y - DY - DECK.th) / 312, dx = Math.sin(u * Math.PI) * 5 + u * 6;
+    sLine(LAD[0] + dx, y + 2, LAD[1] + dx, y - 1, 6.3 + i * .045, .05, 2.6, .85, { over: 3, bow: 2, snd: .4 }); }
+  // branches behind the house, reaching into the canopy
+  sCurve([[962, 470], [900, 420], [840, 360], [770, 330]], 6.2, .2, 2.8, .85, { clip: outsideHouse });
+  sCurve([[900, 420], [880, 360], [872, 300]], 6.3, .1, 2.2, .75, { clip: outsideHouse });
+  sCurve([[1198, 486], [1260, 440], [1330, 380], [1392, 352]], 6.24, .2, 2.8, .85, { clip: outsideHouse });
+  sCurve([[1300, 405], [1320, 330], [1300, 270]], 6.34, .1, 2.2, .75, { clip: outsideHouse });
+  // canopy: scalloped outline, lighter
+  sCurve(canPts.filter((_, i) => i % 3 === 0), 6.3, .55, 2.4, .72, { clip: outsideHouse, boil: 1.3 });
+  // second, looser pass over the key contours (the artist's confident re-stroke)
+  trunkPass(6.5, 3); housePass(6.6, 2.5, 1.7, .5);
+  // 3) texture + tone
+  const body = clipPoly([[HX0, HY + 14], [HX1, HY + 14], [HX1, DY], [HX0, DY]]);
+  const wallNoOpen = c => { body(c); c.beginPath(); c.rect(0, 0, W, H); c.moveTo(985, DY); c.lineTo(985, 518); c.arc(1015, 518, 30, Math.PI, 0); c.lineTo(1045, DY); c.closePath(); c.moveTo(1176, 482); c.arc(1142, 482, 34, 0, Math.PI * 2, true); c.clip('evenodd'); };
+  for (let y = HY + 34, i = 0; y < DY; y += 21, i++) sLine(HX0 + 2, y, HX1 - 2, y + 1, 6.7 + i * .03, .1, 1.3, .42, { clip: wallNoOpen, over: 0, bow: 2, snd: .4 });
+  const trunkR = c => { clipPoly(TRUNK)(c); c.beginPath(); c.rect(1086, 0, 200, H); c.clip(); };
+  hatch(trunkR, 1086, 626, 1164, 962, -1.1, 7, 6.8, 7.15, 1.7, .72);
+  hatch(c => { clipPoly(TRUNK)(c); c.beginPath(); c.rect(1108, 0, 200, H); c.clip(); }, 1108, 626, 1164, 962, .35, 6, 7.0, 7.25, 1.6, .65);
+  for (let i = 0; i < 6; i++) { const x = 1050 + i * 12, P = []; for (let j = 0; j <= 6; j++) P.push([x + Math.sin(j * 1.7 + i) * 4, 650 + j * 48 + (i % 2) * 20]); sCurve(P, 6.75 + i * .04, .12, 1.3, .45, { clip: clipPoly(TRUNK), snd: .4 }); }
+  hatch(clipRect(DECK.x0, DY, DECK.x1 - DECK.x0, DECK.th), DECK.x0, DY, DECK.x1, DY + DECK.th, -1.0, 5, 6.85, 7.2, 1.6, .75);
+  hatch(c => { body(c); c.beginPath(); c.rect(0, HY, W, 34); c.clip(); }, HX0, HY, HX1, HY + 40, -1.05, 5, 6.9, 7.15, 1.6, .7);
+  hatch(c => { body(c); c.beginPath(); c.rect(1168, 0, 100, H); c.clip(); }, 1168, HY, HX1, DY, -1.05, 7, 6.95, 7.2, 1.5, .6);
+  const door = c => { c.beginPath(); c.moveTo(985, DY); c.lineTo(985, 518); c.arc(1015, 518, 30, Math.PI, 0); c.lineTo(1045, DY); c.closePath(); c.clip(); };
+  hatch(door, 985, 488, 1045, DY, -1.1, 5, 6.95, 7.2, 1.7, .8); hatch(door, 985, 488, 1045, DY, .4, 6, 7.1, 7.3, 1.5, .6);
+  const roof = clipPoly([[948, HY + 14], [CX, PK + 18], [1212, HY + 14], [1222, HY], [CX, PK], [938, HY]]);
+  const roofFace = clipPoly([[948, HY + 14], [CX, PK + 18], [1212, HY + 14]]);
+  hatch(c => { roofFace(c); c.beginPath(); c.rect(CX, 0, 300, H); c.clip(); }, CX, PK, 1212, HY + 14, -.66, 7, 7.0, 7.3, 1.5, .62);
+  hatch(roofFace, 948, PK, 1212, HY + 14, .66, 11, 7.05, 7.3, 1.3, .38);
+  hatch(roof, 938, PK, 1222, HY + 14, -.66, 5, 7.15, 7.3, 1.4, .7);
+  // leaves: quick little scallops inside the canopy + a darker band underneath
+  { const r = rng(77); for (let i = 0; i < 70; i++) { const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * .9, x = CAN.x + Math.cos(a) * CAN.rx * rr, y = CAN.y + Math.sin(a) * CAN.ry * rr, s = 9 + r() * 7;
+    sArc(x, y, s, s * .75, Math.PI * (.9 + r() * .2), Math.PI * (2 + r() * .2), 6.9 + r() * .5, .06, 1.4, .5, { clip: inCanopy, wob: 1, snd: .25 }); } }
+  hatch(c => { inCanopy(c); c.beginPath(); c.rect(0, 0, W, H); c.ellipse(CAN.x - 20, CAN.y - 70, CAN.rx * 1.02, CAN.ry * 1.0, 0, 0, Math.PI * 2); c.clip('evenodd'); }, 700, 300, 1460, 560, -1.1, 8, 7.0, 7.45, 1.4, .5);
+  // ground: tufts + cast shadow
+  [[960, 962], [1210, 960], [870, 958], [940, 962], [1290, 961]].forEach(([x, y], i) => { [-.5, 0, .5].forEach((d, j) => sLine(x + j * 7, y, x + j * 7 + d * 16, y - 16 - j * 3, 7.2 + i * .03 + j * .01, .04, 1.6, .7, { over: 0, bow: 1, snd: .3 })); });
+  sLine(640, GY + 1, 1000, GY, 7.1, .15, 2, .6, { over: 8 }); sLine(1170, GY, 1520, GY + 1, 7.14, .15, 2, .6, { over: 8 });
+  const cast = c => { c.beginPath(); c.ellipse(1250, GY + 22, 250, 24, 0, 0, Math.PI * 2); c.clip(); };
+  hatch(cast, 1000, GY, 1500, GY + 46, -.3, 5, 7.2, 7.5, 1.5, .7);
+  // 4) notes in the margin + dimension line
+  note('tiny flag!', 1520, 212, 64, 7.35, 7.7, -.04);
+  arrow(1510, 198, 1330, 150, 1152, 206, 7.6, .22, 2.2, .75);
+  note('cedar planks', 1520, 505, 64, 7.5, 7.95, -.04);
+  arrow(1512, 488, 1380, 470, 1206, 520, 7.8, .2, 2.2, .75);
+  sLine(1420, GY, 1420, DY, 7.6, .15, 2, .75, { over: 0 });
+  sLine(1405, DY, 1435, DY, 7.72, .04, 2, .75, { over: 0 }); sLine(1405, GY, 1435, GY, 7.75, .04, 2, .75, { over: 0 });
+  note('2 m', 1438, 798, 56, 7.72, 7.9, 0);
+  note('rope ladder', 560, 1015, 64, 7.65, 8.05, -.03);
+  arrow(730, 985, 820, 940, 882, 880, 7.98, .16, 2.2, .75);
 }
-const NOTES = [{ txt: 'speak first,', x: 1285, y: 330, size: 112, t0: 4.75, t1: 5.35, rot: -.05 }, { txt: 'think later.', x: 1315, y: 448, size: 112, t0: 5.3, t1: 5.95, rot: -.05 }];
 
-// ── page 2: logo sketch ─────────────────────────── ───────────────────────────
-const LG = { x: 330, y: 330, k: 4.1 };
-const LP = (px, py) => [LG.x + px * LG.k, LG.y + py * LG.k];
-const BUB = [[0, 0], [92, 0], [92, 70], [40, 70], [14, 94], [14, 70], [0, 70], [0, 0]];
-const DIA = [22, 46, 70].map(cx => [[cx, 25], [cx + 10, 35], [cx, 45], [cx - 10, 35], [cx, 25]]);
-function buildPage2() {
-  const L = S2, t = 6.75;
-  // helpers
-  sLine(L, LG.x - 60, LP(0, 0)[1], LG.x + 92 * LG.k + 900, LP(0, 0)[1], t, .3, 1.3, .22, { over: 0 });
-  sLine(L, LG.x - 60, LP(0, 70)[1], LG.x + 92 * LG.k + 900, LP(0, 70)[1], t + .08, .3, 1.3, .22, { over: 0 });
-  sLine(L, LP(46, 0)[0], LG.y - 60, LP(46, 0)[0], LP(0, 100)[1] + 30, t + .16, .3, 1.3, .2, { over: 0 });
-  // balloon contour two passes
-  sPoly(L, BUB.map(p => LP(...p)), t + .2, .7, 2.8, .85, { boil: 1.2 });
-  sPoly(L, BUB.map(p => { const q = LP(...p); return [q[0] + 2.5, q[1] - 1.5]; }), t + .5, .6, 1.8, .55, { boil: 1.2 });
-  DIA.forEach((d, i) => sPoly(L, d.map(p => LP(...p)), t + .7 + i * .1, .25, 2.4, .85));
-  // dark hatching inside balloon (diamonds remain blank paper), middle diamond at separate angle
-  const bubClip = c => { c.beginPath(); BUB.forEach((p, i) => { const q = LP(...p); i ? c.lineTo(...q) : c.moveTo(...q); }); c.closePath();
-    DIA.forEach(d => { d.forEach((p, i) => { const q = LP(...p); i ? c.lineTo(...q) : c.moveTo(...q); }); c.closePath(); }); c.clip('evenodd'); c.beginPath(); c.rect(0, 0, W, H); };
-  const [bx0, by0] = LP(0, 0), [bx1, by1] = LP(92, 94);
-  hatch(L, bubClip, bx0, by0, bx1, by1, -1.05, 9, t + .85, t + 1.45, 1.7, .6);
-  hatch(L, bubClip, bx0, by0, bx1, by1, .45, 10, t + 1.2, t + 1.7, 1.5, .5);
-  const midD = c => { c.beginPath(); DIA[1].forEach((p, i) => { const q = LP(...p); i ? c.lineTo(...q) : c.moveTo(...q); }); c.closePath(); };
-  const [dx0, dy0] = LP(36, 25), [dx1, dy1] = LP(56, 45);
-  hatch(L, midD, dx0, dy0, dx1, dy1, -.3, 5, t + 1.3, t + 1.55, 1.4, .55);
-  // underscore
-  { const pts = []; for (let i = 0; i <= 40; i++) { const u = i / 40; pts.push([lerp(870, 1650, u), 690 + Math.sin(u * 3.2) * 8 - u * 10]); } mkStroke(L, pts, 8.45, .35, 3, .7); }
-}
-const WORD = { txt: 'irticalen.', x: 840, y: 625, size: 280, t0: 7.65, t1: 8.5 };
-
-// finger/stump spread tone: soft graphite under hatching
+// stump smudge: soft graphite tone under the hatching
 function smudge(c, t) {
-  const u = eInOut(seg(t, 4.2, 5.2)); if (u <= 0) return;
-  c.save(); c.globalAlpha = .38 * u;
-  stadium(c); c.clip();
-  const g = c.createLinearGradient(MX - 40, 0, MX + HW, 0); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.55, 'rgba(0,0,0,0.35)'); g.addColorStop(1, 'rgba(0,0,0,0.8)');
-  c.fillStyle = g; c.fillRect(MX - HW, TOP, HW * 2, BOT - TOP); c.restore();
-  c.save(); castSh(c); c.clip(); c.globalAlpha = .7 * u; c.filter = 'blur(14px)'; c.fillStyle = '#000';
-  c.beginPath(); c.ellipse(MX + 110, 952, 250, 36, 0, 0, Math.PI * 2); c.fill(); c.restore();
+  const u = eInOut(seg(t, 7.0, 7.8)); if (u <= 0) return;
+  c.save(); c.globalAlpha = .4 * u; clipPoly(TRUNK)(c);
+  const g = c.createLinearGradient(1050, 0, 1140, 0); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.5, 'rgba(0,0,0,0.35)'); g.addColorStop(1, 'rgba(0,0,0,0.85)');
+  c.fillStyle = g; c.fillRect(1020, 600, 130, 370);
+  const g2 = c.createLinearGradient(0, DY + DECK.th, 0, DY + 110); g2.addColorStop(0, 'rgba(0,0,0,0.7)'); g2.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g2; c.fillRect(1020, DY + DECK.th, 130, 90); c.restore();
+  c.save(); c.globalAlpha = .55 * u; c.filter = 'blur(12px)'; c.fillStyle = '#000'; c.beginPath(); c.ellipse(1240, GY + 20, 210, 16, 0, 0, Math.PI * 2); c.fill(); c.restore();
 }
-// ── drawing ────────────────────────────────── ──────────────────────────────────
+
+// ── drawing ──────────────────────────────────────────────────────────────────
 const G = mk(), gx = G.getContext('2d');           // graphite layer
-const P1 = mk(), P2 = mk();
+const TINT = mk(), tcx = TINT.getContext('2d');
+const P1 = mk(), p1 = P1.getContext('2d');
 function drawStroke(c, s, t, bf) {
   const u = s.ease(seg(t, s.t0, s.t0 + s.dur)); if (u <= 0) return;
-  const n = s.pts.length, m = u * (n - 1), mi = Math.floor(m);
-  // boil: 12 fps, small drift per line + slight ripple throughout
+  const pts = s.dyn ? s.dyn(t) : s.pts;
+  const n = pts.length, m = u * (n - 1), mi = Math.floor(m);
+  // boil: 12 fps, a small drift per line plus a slight ripple along it
   const ph = hash(s.id, bf, 1) * 6.28, ox = (hash(s.id, bf, 2) - .5) * 2 * s.boil, oy = (hash(s.id, bf, 3) - .5) * 2 * s.boil;
-  const P = i => { const p = s.pts[i], w = Math.sin(i * .35 + ph) * s.boil * .6; return [p[0] + ox + w, p[1] + oy - w * .5]; };
+  const P = i => { const p = pts[i], w = Math.sin(i * .35 + ph) * s.boil * .6; return [p[0] + ox + w, p[1] + oy - w * .5]; };
   const path = (i0, i1) => { c.beginPath(); const a = P(i0); c.moveTo(a[0], a[1]); for (let i = i0 + 1; i <= i1; i++) { const p = P(i); c.lineTo(p[0], p[1]); }
     if (i1 === mi && mi < n - 1) { const a2 = P(mi), b2 = P(mi + 1), f = m - mi; c.lineTo(lerp(a2[0], b2[0], f), lerp(a2[1], b2[1], f)); } };
-  if (s.clip) { c.save(); s.clip(c); c.clip(); }
+  if (s.clip) { c.save(); s.clip(c); }
   c.globalAlpha = s.a * .75; c.lineWidth = s.w; path(0, mi); c.stroke();
-  const i0 = Math.floor(mi * .15), i1 = Math.max(i0, Math.floor(mi * .85));            // pressure: middle part dark
+  const i0 = Math.floor(mi * .15), i1 = Math.max(i0, Math.floor(mi * .85));            // pressure: darker middle
   if (i1 > i0) { c.globalAlpha = s.a * .45; c.lineWidth = s.w * .55; path(i0, i1); c.stroke(); }
   if (s.clip) c.restore();
 }
@@ -220,72 +310,82 @@ function writeText(c, N, t, bf) {
   const tw = c.measureText(N.txt).width;
   c.translate(N.x + (hash(N.x, bf, 4) - .5) * 1.6, N.y + (hash(N.y, bf, 5) - .5) * 1.6); c.rotate(N.rot || 0);
   c.beginPath(); c.rect(-10, -N.size, (tw + 20) * eInOut(u), N.size * 1.5); c.clip();
-  c.globalAlpha = .92; c.fillStyle = '#000'; c.fillText(N.txt, 0, 0);
-  c.globalAlpha = .35; c.fillText(N.txt, 1.5, -1);                                     // second pen pass
+  c.globalAlpha = N.a; c.fillStyle = '#000'; c.fillText(N.txt, 0, 0);
+  c.globalAlpha = N.a * .38; c.fillText(N.txt, 1.5, -1);                               // second pencil pass
   c.restore();
 }
-function renderPage(target, list, texts, t, bf) {
-  gx.setTransform(1, 0, 0, 1, 0, 0); gx.globalCompositeOperation = 'source-over'; gx.globalAlpha = 1;
-  gx.clearRect(0, 0, W, H); gx.strokeStyle = '#000'; gx.lineCap = 'round'; gx.lineJoin = 'round';
-  for (const s of list) drawStroke(gx, s, t, bf);
-  for (const N of texts) writeText(gx, N, t, bf);
-  if (list === S1) smudge(gx, t);
+// camera: close on the thumbnail column, drifting down with the drawing, then pulling back to the page
+function view(t) {
+  const back = eInOut(seg(t, 3.2, 4.35));
+  const cy0 = lerp(lerp(300, 560, eInOut(seg(t, 1.05, 1.5))), 800, eInOut(seg(t, 1.75, 2.25)));   // follow the pencil down the column
+  const Z = lerp(2, 1, back) * (1 + .025 * eSin(seg(t, 4.35, 8.9)));               // then a slow lean-in over the finished page
+  let cx = lerp(0, 960, back), cy = lerp(cy0, 540, back);
+  cx = clamp(cx, W / (2 * Z), W - W / (2 * Z)); cy = clamp(cy, H / (2 * Z), H - H / (2 * Z));
+  return [Z, W / 2 - cx * Z, H / 2 - cy * Z];
+}
+function renderPage(t, bf) {
+  const [Z, tx, ty] = view(t);
+  gx.setTransform(1, 0, 0, 1, 0, 0); gx.globalCompositeOperation = 'source-over'; gx.globalAlpha = 1; gx.filter = 'none';
+  gx.clearRect(0, 0, W, H);
+  gx.setTransform(Z, 0, 0, Z, tx, ty); gx.strokeStyle = '#000'; gx.lineCap = 'round'; gx.lineJoin = 'round';
+  for (const s of S) drawStroke(gx, s, t, bf);
+  for (const N of TEXTS) writeText(gx, N, t, bf);
+  smudge(gx, t);
   gx.globalAlpha = 1; gx.globalCompositeOperation = 'destination-in'; gx.drawImage(TOOTH, 0, 0); gx.globalCompositeOperation = 'source-over';
-  const c = target.getContext('2d'); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.drawImage(PAPERCV, 0, 0);
-  // graphite: dark grey, slightly bluish; on paper with multiply
-  c.globalCompositeOperation = 'multiply'; c.globalAlpha = 1;
-  const tint = mk.tint || (mk.tint = mk()); const tc = tint.getContext('2d');
-  tc.globalCompositeOperation = 'source-over'; tc.clearRect(0, 0, W, H); tc.drawImage(G, 0, 0); tc.globalCompositeOperation = 'source-in'; tc.fillStyle = '#1d1e24'; tc.fillRect(0, 0, W, H);
-  c.drawImage(tint, 0, 0); c.globalCompositeOperation = 'source-over';
+  gx.setTransform(1, 0, 0, 1, 0, 0);
+  p1.setTransform(Z, 0, 0, Z, tx, ty); p1.globalAlpha = 1; p1.globalCompositeOperation = 'source-over'; p1.drawImage(PAPERCV, 0, 0); p1.setTransform(1, 0, 0, 1, 0, 0);
+  // graphite: dark, slightly bluish grey, multiplied onto the paper
+  tcx.globalCompositeOperation = 'source-over'; tcx.clearRect(0, 0, W, H); tcx.drawImage(G, 0, 0); tcx.globalCompositeOperation = 'source-in'; tcx.fillStyle = '#1d1e24'; tcx.fillRect(0, 0, W, H);
+  p1.globalCompositeOperation = 'multiply'; p1.drawImage(TINT, 0, 0); p1.globalCompositeOperation = 'source-over';
 }
-let ZOOM = 1;
-function drawP1(c) { c.save(); c.translate(980, 560); c.scale(ZOOM, ZOOM); c.translate(-980, -560); c.drawImage(P1, 0, 0); c.restore(); }
-function renderFrame(t) {
-  const bf = Math.floor(t * 12);                   // 12 fps titreme
-  const flip = eInOut(seg(t, 6.15, 7.0));
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
-  ZOOM = 1 + .05 * eSin(seg(t, 0, 6.2));                              // gaze slowly leaning over the notebook
-  if (flip <= 0) { renderPage(P1, S1, NOTES, t, bf); drawP1(ctx); }
-  else {
-    renderPage(P1, S1, NOTES, Math.min(t, 6.15), bf); renderPage(P2, S2, [WORD], t, bf);
-    if (flip >= 1) ctx.drawImage(P2, 0, 0);
-    else pageTurn(flip);
-  }
-  // input/output
-  const f = Math.min(eOut(seg(t, 0, .45)), 1 - eInOut(seg(t, 9.45, 10)));
-  if (f < 1) { ctx.fillStyle = `rgba(22,21,24,${(1 - f) * (t < 1 ? .9 : 1)})`; ctx.fillRect(0, 0, W, H); }
-}
-// page turning: oblique fold line passes from right to left; folded part (back of page) lies to the left
-function pageTurn(p) {
-  const ang = -.16;                                  // fold line slightly slanted
-  const fx = lerp(W + 260, -420, p);                  // midpoint of line
-  const nx = Math.cos(ang), ny = Math.sin(ang);       // line normal (facing right)
-  const dx = -ny, dy = nx;                            // line direction
-  const halfLeft = c => { c.beginPath(); const L = 3000; c.moveTo(fx + dx * L, H / 2 + dy * L); c.lineTo(fx - dx * L, H / 2 - dy * L); c.lineTo(fx - dx * L - nx * L, H / 2 - dy * L - ny * L); c.lineTo(fx + dx * L - nx * L, H / 2 + dy * L - ny * L); c.closePath(); };
-  ctx.drawImage(P2, 0, 0);
-  // fold shadow to new page (to the right of the line)
-  ctx.save(); const g = ctx.createLinearGradient(fx, H / 2, fx + nx * 120, H / 2 + ny * 120);
-  g.addColorStop(0, 'rgba(30,25,20,0.35)'); g.addColorStop(1, 'rgba(30,25,20,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore();
-  ctx.save(); halfLeft(ctx); ctx.clip(); drawP1(ctx);
-  // folding flap: reflection of the right part of the page relative to the line (reverse side)
-  // reflection matrix: I - 2 n nᵀ around point (fx, H/2) on the line
-  const a = 1 - 2 * nx * nx, b = -2 * nx * ny, d = 1 - 2 * ny * ny;
-  const ex = fx - (a * fx + b * H / 2), ey = H / 2 - (b * fx + d * H / 2);
-  ctx.save(); ctx.transform(a, b, b, d, ex, ey);
-  ctx.beginPath(); ctx.rect(0, 0, W, H);
-  ctx.shadowColor = 'rgba(20,15,10,0.45)'; ctx.shadowBlur = 40; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
-  ctx.fillStyle = '#e4e0d6'; ctx.fill(); ctx.shadowColor = 'transparent';
-  ctx.clip(); ctx.globalAlpha = .07; drawP1(ctx); ctx.globalAlpha = 1;       // graphite leaking from behind (mirror)
-  ctx.restore();
-  // folding light on wing
-  const g2 = ctx.createLinearGradient(fx, H / 2, fx - nx * 160, H / 2 - ny * 160);
-  g2.addColorStop(0, 'rgba(255,255,255,0.0)'); g2.addColorStop(.25, 'rgba(255,255,255,0.35)'); g2.addColorStop(1, 'rgba(120,110,95,0.12)');
+// page corner lift: a fold line sweeps in from the bottom-right corner; the flap is the mirrored corner (paper back)
+function cornerLift(p, t) {
+  const ang = Math.atan2(1, 1.25) + .05 * Math.sin(t * 2.2);         // fold normal, pointing toward the corner
+  const nx = Math.cos(ang), ny = Math.sin(ang), d = 40 + 460 * p;
+  const fx = W - nx * d, fy = H - ny * d;                           // a point on the fold line
+  const side = (c, sgn) => { const L = 4000, dx = -ny, dy = nx; c.beginPath(); c.moveTo(fx + dx * L, fy + dy * L); c.lineTo(fx - dx * L, fy - dy * L);
+    c.lineTo(fx - dx * L + sgn * nx * L, fy - dy * L + sgn * ny * L); c.lineTo(fx + dx * L + sgn * nx * L, fy + dy * L + sgn * ny * L); c.closePath(); };
+  // the page underneath shows where the corner has left
+  ctx.save(); side(ctx, 1); ctx.clip(); ctx.drawImage(UNDER, 0, 0);
+  const g = ctx.createLinearGradient(fx, fy, fx + nx * 140, fy + ny * 140); g.addColorStop(0, 'rgba(30,25,20,0.32)'); g.addColorStop(1, 'rgba(30,25,20,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore();
+  ctx.save(); side(ctx, -1); ctx.clip(); ctx.drawImage(P1, 0, 0);
+  // flap = the corner reflected about the fold line (I - 2 n nᵀ)
+  const a = 1 - 2 * nx * nx, b = -2 * nx * ny, e = 1 - 2 * ny * ny;
+  const ex = fx - (a * fx + b * fy), ey = fy - (b * fx + e * fy);
+  ctx.save(); ctx.transform(a, b, b, e, ex, ey);
+  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip(); side(ctx, 1);
+  ctx.shadowColor = 'rgba(20,15,10,0.42)'; ctx.shadowBlur = 36;
+  ctx.fillStyle = '#e5e1d7'; ctx.fill(); ctx.shadowColor = 'transparent';
+  ctx.clip(); ctx.globalAlpha = .06; ctx.drawImage(P1, 0, 0); ctx.globalAlpha = 1;   // graphite showing through from the front
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const g2 = ctx.createLinearGradient(fx, fy, fx - nx * 220, fy - ny * 220);
+  g2.addColorStop(0, 'rgba(255,255,255,0.0)'); g2.addColorStop(.3, 'rgba(255,255,255,0.3)'); g2.addColorStop(1, 'rgba(120,110,95,0.14)');
   ctx.fillStyle = g2; ctx.fillRect(0, 0, W, H);
   ctx.restore();
+  ctx.restore();
+}
+function renderFrame(t) {
+  const bf = Math.floor(t * 12);                   // 12 fps boil
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
+  renderPage(t, bf);
+  const lift = eInOut(seg(t, 8.9, 9.75));
+  if (lift <= 0) ctx.drawImage(P1, 0, 0); else cornerLift(lift, t);
+  const f = Math.min(eOut(seg(t, 0, .45)), 1 - eInOut(seg(t, 9.55, 10)));
+  if (f < 1) { ctx.fillStyle = `rgba(22,21,24,${(1 - f) * (t < 1 ? .9 : 1)})`; ctx.fillRect(0, 0, W, H); }
 }
 
+// sound events for audio.py (k = kind, t = seconds, d = duration, v = weight)
+window.events = () => {
+  const E = [];
+  const pan = x => +((x / W - .5) * .7).toFixed(2);
+  for (const s of S) { const P = s.dyn ? s.dyn(s.t0) : s.pts; E.push({ k: 'scr', t: +s.t0.toFixed(3), d: +s.dur.toFixed(3), v: +(s.snd * Math.min(1, s.w * s.a / 2.6)).toFixed(3), p: pan(P.reduce((m, q) => m + q[0], 0) / P.length) }); }
+  for (const N of TEXTS) E.push({ k: 'write', t: N.t0, d: +(N.t1 - N.t0).toFixed(3), v: +(N.size / 64).toFixed(3), p: pan(N.x + N.size * N.txt.length * .2) });
+  E.push({ k: 'lift', t: 8.9, d: .85 });
+  return E.sort((a, b) => a.t - b.t);
+};
 window.draw = function (job) { renderFrame(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
-window.ready = Promise.all([document.fonts.load(`700 92px ${HAND}`, 'speak first think later irticalen')]).then(() => document.fonts.ready).then(() => {
-  buildPaper(); buildPage1(); buildPage2(); renderFrame(0);
+window.ready = Promise.all([document.fonts.load(`700 92px ${HAND}`, 'Treehouse ideas this one tiny flag cedar planks rope ladder 2 m 123?! —')]).then(() => document.fonts.ready).then(() => {
+  buildPaper(); buildThumbs(); buildMain(); renderFrame(0);
 });
 </script></body></html>
