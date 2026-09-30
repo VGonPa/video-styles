@@ -3,11 +3,11 @@
 <body><canvas id="c" width="1920" height="1080"></canvas>
 <script src="common.js"></script>
 <script>
-// CHALKBOARD — chalk texture, eraser trace, lecture
+// CHALKBOARD — Lesson 3 · Pythagoras: chalk texture, counted squares, eraser wipe, ladder word problem
 const WHITE = '#f3f0e6', YEL = '#f1d35f', FONT = "'Caveat'";
 const TRAY = 1004;
 
-// ---------- Wood (once) ----------
+// ---------- Board + wood tray (once) ----------
 const board = mk(W, H);
 { const c = board.getContext('2d'), r = rng(11);
   const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#26352e'); g.addColorStop(1, '#1b2621'); c.fillStyle = g; c.fillRect(0, 0, W, H);
@@ -32,7 +32,7 @@ const board = mk(W, H);
   for (let k = 0; k < 90; k++) { c.strokeStyle = `rgba(${r() < .5 ? '30,15,5' : '160,110,70'},${0.08 + r() * 0.12})`; c.lineWidth = .6 + r() * 1.4; const y = TRAY + 8 + r() * (H - TRAY - 10); c.beginPath(); c.moveTo(0, y); for (let x = 0; x <= W; x += 120) c.lineTo(x, y + Math.sin(x * .004 + k) * 2.5); c.stroke(); }
   c.fillStyle = 'rgba(0,0,0,0.45)'; c.fillRect(0, TRAY - 3, W, 5);
   c.fillStyle = 'rgba(255,220,180,0.18)'; c.fillRect(0, TRAY + 2, W, 2);
-  // powder in chalk + two chalks
+  // powder in the tray + two chalks
   for (let i = 0; i < 1400; i++) { c.fillStyle = `rgba(235,235,225,${r() * 0.25})`; c.fillRect(r() * W, TRAY + 6 + r() * 18, 1 + r() * 2, 1 + r() * 1.5); }
   const chalk = (x, y, l, rot, col) => { c.save(); c.translate(x, y); c.rotate(rot); c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.roundRect(-l / 2 + 4, -6, l, 20, 9); c.fill();
     const cg = c.createLinearGradient(0, -10, 0, 10); cg.addColorStop(0, col); cg.addColorStop(.6, col); cg.addColorStop(1, 'rgba(120,110,90,1)'); c.fillStyle = cg; c.beginPath(); c.roundRect(-l / 2, -10, l, 20, 9); c.fill(); c.restore(); };
@@ -41,96 +41,164 @@ const board = mk(W, H);
 // ---------- Chalk grain (alpha mask, once) ----------
 const grain = mk(W, H);
 { const c = grain.getContext('2d'), id = c.createImageData(W, H), d = id.data, r = rng(5);
-  // horizontal directional wood roughness: line-based slow change + dot gaps
+  // horizontal directional roughness: slow row change + dot gaps
   const row = new Float32Array(H); for (let y = 0; y < H; y++) row[y] = 0.82 + 0.18 * Math.sin(y * 0.9) * Math.sin(y * 0.13 + 2);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const q = (y * W + x) * 4, n = r();
     let a = row[y] * (0.72 + 0.28 * r()); if (n < 0.16) a *= 0.15 + r() * 0.3; d[q] = d[q + 1] = d[q + 2] = 255; d[q + 3] = Math.min(255, a * 255); }
   c.putImageData(id, 0, 0);
 }
 const L = mk(W, H), lc = L.getContext('2d');
-// eraser stamp (soft edge) and smudge stamp
+// eraser stamp (soft edge)
 const ER = { w: 250, h: 92 };
 const eStamp = mk(ER.w + 40, ER.h + 40);
 { const c = eStamp.getContext('2d'); c.filter = 'blur(9px)'; c.fillStyle = '#000'; c.beginPath(); c.roundRect(24, 24, ER.w - 8, ER.h - 8, 20); c.fill(); }
-{ const c = eStamp.getContext('2d'); }
-// wipe mask + horizontal stripe smudge texture
+// wipe mask + vertical smudge streaks (the eraser moves up and down)
 const M = mk(W, H), mc = M.getContext('2d'), SM = mk(W, H), smc = SM.getContext('2d');
 const streak = mk(W, H);
-{ const c = streak.getContext('2d'), r = rng(9); for (let k = 0; k < 2600; k++) { const y = r() * H, x = r() * W, l = 60 + r() * 420; c.strokeStyle = `rgba(235,240,232,${0.15 + r() * 0.85})`; c.lineWidth = .6 + r() * 2.2; c.beginPath(); c.moveTo(x, y); c.lineTo(x + l, y + (r() - .5) * 4); c.stroke(); } }
+{ const c = streak.getContext('2d'), r = rng(9); for (let k = 0; k < 2600; k++) { const y = r() * H, x = r() * W, l = 60 + r() * 420; c.strokeStyle = `rgba(235,240,232,${0.15 + r() * 0.85})`; c.lineWidth = .6 + r() * 2.2; c.beginPath(); c.moveTo(x, y); c.lineTo(x + (r() - .5) * 5, y + l); c.stroke(); } }
+// soft dust blob for the final puff
+const blob = mk(96, 96);
+{ const c = blob.getContext('2d'), g = c.createRadialGradient(48, 48, 0, 48, 48, 48); g.addColorStop(0, 'rgba(240,240,232,0.26)'); g.addColorStop(.45, 'rgba(240,240,232,0.1)'); g.addColorStop(1, 'rgba(240,240,232,0)'); c.fillStyle = g; c.fillRect(0, 0, 96, 96); }
 
 // ---------- Actions ----------
 const acts = [];
 function stroke(path, t0, t1, o = {}) { path.jitter(o.jit ?? 1.8, acts.length * 31 + 7); acts.push({ kind: 'path', path, t0, t1, color: o.color || WHITE, width: o.width || 8, ease: o.ease || (u => u) }); }
-function text(str, x, y, size, t0, t1, o = {}) { acts.push({ kind: 'text', str, x, y, size, t0, t1, color: o.color || WHITE, align: o.align || 'left', rot: o.rot || 0, w8: o.w8 || 700 }); }
-function circ(cx, cy, r, t0, t1, o = {}) { stroke(P().A(cx, cy, r * 1.04, r, -2.2, -2.2 + Math.PI * 2 + 0.45, 60), t0, t1, o); }
-function arrow(x0, y0, x1, y1, t0, t1, bend, o = {}) {
-  const mx = (x0 + x1) / 2, my = (y0 + y1) / 2 + bend; stroke(P().M(x0, y0).Q(mx, my, x1, y1, 40), t0, t1 - 0.07, o);
-  const a = Math.atan2(y1 - my, x1 - mx), s = o.head || 30;
-  stroke(P().M(x1 + Math.cos(a + 2.6) * s, y1 + Math.sin(a + 2.6) * s).L(x1, y1).L(x1 + Math.cos(a - 2.6) * s, y1 + Math.sin(a - 2.6) * s), t1 - 0.07, t1, o);
-}
+function text(str, x, y, size, t0, t1, o = {}) { acts.push({ kind: 'text', str, x, y, size, t0, t1, color: o.color || WHITE, align: o.align || 'left', rot: o.rot || 0, w8: o.w8 || 700, hide: o.hide ?? 1e9 }); }
+function poly(pts, t0, t1, o = {}) { const p = P().M(...pts[0]); for (const q of pts.slice(1)) p.L(...q); stroke(p, t0, t1, o); }
+const add2 = (p, v, k = 1) => [p[0] + v[0] * k, p[1] + v[1] * k];
 // title
-text('Lesson 1 · Improvisation', 150, 190, 104, 0.3, 1.3, { rot: -0.015 });
-stroke(P().M(146, 222).S([[400, 216], [700, 212], [812, 208]], 16), 1.32, 1.52, { width: 7 });
-// three steps
-const ROW = 540;
-[[300, 'listen', 1.6], [880, 'think', 2.8], [1470, 'speak', 3.85]].forEach(([x, w, t0], i) => {
-  circ(x - 70, ROW - 30, 40, t0, t0 + 0.24, { width: 6 });
-  text(String(i + 1), x - 70, ROW - 8, 64, t0 + 0.24, t0 + 0.34, { align: 'center' });
-  text(w, x - 10, ROW, 124, t0 + 0.38, t0 + 0.9);
-});
-arrow(565, ROW - 36, 725, ROW - 36, 2.55, 2.78, -12);
-arrow(1150, ROW - 36, 1310, ROW - 36, 3.6, 3.82, -12);
-// eraser: "think" is erased
-const ERASE = { t0: 4.72, t1: 5.95, in0: 4.4, out1: 6.3 };
-const ePath = (() => { const p = P().M(1195, 474);
-  const pts = [[690, 492], [1190, 524], [684, 560], [1192, 470], [700, 522], [1186, 574], [780, 506]];
-  p.S(pts, 22); return p.done(); })();
-// insertion: listen → speak yellow splash arrow, yellow ring, bottom note
-{ const p = P().M(330, 420).S([[520, 300], [900, 250], [1260, 290], [1420, 400]], 30);
-  stroke(p, 6.2, 6.78, { color: YEL, width: 8, ease: eio2 });
-  stroke(P().M(1392, 356).L(1424, 404).L(1368, 412), 6.78, 6.9, { color: YEL, width: 8 }); }
-stroke(P().A(1560, 505, 210, 92, -2.9, -2.9 + Math.PI * 2 + 0.55, 80), 6.95, 7.35, { color: YEL, width: 7, jit: 3 });
-text('THINK LESS. SPEAK!', 960, 850, 132, 7.45, 8.3, { align: 'center', rot: -0.012 });
-stroke(P().M(600, 890).S([[800, 884], [1100, 880], [1330, 886]], 20), 8.32, 8.5, { color: YEL, width: 8, ease: eout });
-stroke(P().M(650, 912).S([[860, 906], [1120, 904], [1290, 910]], 20), 8.52, 8.66, { color: YEL, width: 6, ease: eout });
+text('Lesson 3 · Pythagoras', 150, 150, 100, 0.25, 0.95, { rot: -0.015 });
+stroke(P().M(146, 184).S([[400, 178], [700, 174], [890, 170]], 16), 0.97, 1.12, { width: 7 });
+
+// --- scene 1: right triangle 3-4-5 with a square on each side (U = one counted cell) ---
+const U = 60, Cx = 440, Cy = 680;
+const A = [Cx, Cy - 3 * U], B = [Cx + 4 * U, Cy], C = [Cx, Cy];
+const E1 = [4 * U / 5, 3 * U / 5], NN = [3 * U / 5, -4 * U / 5];   // one cell along AB, one cell outward from C
+poly([C, B], 1.2, 1.38);
+poly([C, A], 1.4, 1.55);
+poly([A, B], 1.57, 1.8);
+poly([[Cx, Cy - 24], [Cx + 24, Cy - 24], [Cx + 24, Cy]], 1.82, 1.9, { width: 5 });
+// the squares (three new sides each)
+poly([A, [Cx - 3 * U, A[1]], [Cx - 3 * U, Cy], C], 2.12, 2.36, { width: 7 });
+poly([C, [Cx, Cy + 4 * U], [B[0], Cy + 4 * U], B], 2.3, 2.56, { width: 7 });
+poly([A, add2(A, NN, 5), add2(B, NN, 5), B], 2.5, 2.8, { width: 7 });
+// a², b², c² sit in the squares until counting replaces them with numbers
+const cC = [(A[0] + B[0] + 5 * NN[0]) / 2, (A[1] + B[1] + 5 * NN[1]) / 2];
+text('a²', Cx - 1.5 * U, Cy - 1.5 * U + 26, 84, 2.38, 2.5, { align: 'center', hide: 3.95 });
+text('b²', Cx + 2 * U, Cy + 2 * U + 26, 84, 2.58, 2.7, { align: 'center', hide: 4.33 });
+text('c²', cC[0], cC[1] + 26, 84, 2.82, 2.94, { align: 'center', hide: 4.77 });
+// formula on the right
+const RX = 1420;
+text('a² + b² = c²', RX, 400, 150, 2.96, 3.46, { align: 'center' });
+// grid lines inside the squares
+{ let t = 3.45; const g = (p, q) => { poly([p, q], t, t + 0.05, { width: 3, jit: 1 }); t += 0.028; };
+  for (let k = 1; k < 3; k++) { g([Cx - k * U, A[1]], [Cx - k * U, Cy]); g([Cx - 3 * U, Cy - k * U], [Cx, Cy - k * U]); }
+  for (let k = 1; k < 4; k++) { g([Cx + k * U, Cy], [Cx + k * U, Cy + 4 * U]); g([Cx, Cy + k * U], [B[0], Cy + k * U]); }
+  for (let k = 1; k < 5; k++) { g(add2(A, NN, k), add2(B, NN, k)); g(add2(A, E1, k), add2(add2(A, E1, k), NN, 5)); } }
+// counted cells: each cell is ticked in turn while the square's number counts up
+function countSquare(n, cell, cx, cy, t0, dt) {
+  const cells = []; for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) cells.push(cell(i, j));
+  cells.forEach((q, k) => acts.push({ kind: 'cell', q, t0: t0 + k * dt, t1: t0 + k * dt + 0.08 }));
+  acts.push({ kind: 'count', n: n * n, cx, cy, t0, dt, t1: t0 + n * n * dt });
+}
+const sq = (x, y) => [[x, y], [x + U, y], [x + U, y + U], [x, y + U]];
+countSquare(3, (i, j) => sq(Cx - 3 * U + i * U, A[1] + j * U), Cx - 1.5 * U, Cy - 1.5 * U, 3.95, 0.04);
+countSquare(4, (i, j) => sq(Cx + i * U, Cy + j * U), Cx + 2 * U, Cy + 2 * U, 4.33, 0.026);
+countSquare(5, (i, j) => { const o = add2(add2(A, E1, i), NN, j); return [o, add2(o, E1), add2(add2(o, E1), NN), add2(o, NN)]; },
+  cC[0], cC[1], 4.77, 0.02);
+text('9 + 16 = 25', RX, 570, 130, 5.35, 5.75, { align: 'center', color: YEL });
+stroke(P().M(1735, 528).L(1760, 556).L(1812, 478), 5.78, 5.9, { color: YEL, width: 8 });
+
+// --- eraser swipe: the diagram half is wiped up and down ---
+const ERASE = { t0: 6.15, t1: 6.95, in0: 5.9, out1: 7.3 };
+const ePath = P().M(330, 250).S([[345, 600], [330, 945], [440, 930], [540, 600], [545, 250], [650, 260], [750, 600], [760, 945], [830, 760], [780, 480]], 26).done();
+
+// --- scene 2: ladder against a wall (5 m ladder, foot 3 m out) ---
+const S = 130, WX = 800, GY = 900, F = [WX - 3 * S, GY], T = [WX, GY - 4 * S];
+poly([[220, GY], [890, GY]], 7.0, 7.15, { width: 7 });
+{ let t = 7.05; for (let x = 250; x < 880; x += 45) { poly([[x, GY + 6], [x - 18, GY + 26]], t, t + 0.03, { width: 3, jit: .5 }); t += 0.006; } }
+poly([[WX, GY], [WX, 330]], 7.1, 7.25, { width: 7 });
+{ let t = 7.18; for (let y = 380, k = 0; y < GY; y += 52, k++) { poly([[WX + 6, y], [WX + 78, y]], t, t + 0.025, { width: 3, jit: .6 }); const bx = WX + (k % 2 ? 30 : 58); poly([[bx, y], [bx, Math.min(GY, y + 52)]], t, t + 0.02, { width: 3, jit: .6 }); t += 0.011; } }
+{ const d = [(T[0] - F[0]) / (5 * S), (T[1] - F[1]) / (5 * S)], pp = [-d[1], d[0]], R = 18;
+  // each rail runs from the ground line (y = GY) up to the wall (x = WX)
+  const rail = off => { const o = add2(F, pp, off); return [add2(o, d, (GY - o[1]) / d[1]), add2(o, d, (WX - o[0]) / d[0])]; };
+  poly(rail(-R), 7.25, 7.42, { width: 7 });
+  poly(rail(R), 7.3, 7.47, { width: 7 });
+  for (let k = 1; k <= 8; k++) { const m = add2(F, d, k * 5 * S / 9.2); poly([add2(m, pp, -R), add2(m, pp, R)], 7.45 + k * 0.014, 7.48 + k * 0.014, { width: 5, jit: .6 }); }
+  const mid = add2(add2(F, d, 2.5 * S), pp, -62);
+  text('5 m', mid[0], mid[1], 78, 7.62, 7.74, { align: 'center', rot: Math.atan2(d[1], d[0]) });
+}
+poly([[WX - 26, GY], [WX - 26, GY - 26], [WX, GY - 26]], 7.55, 7.62, { width: 5 });
+text('3 m', (F[0] + WX) / 2, GY + 70, 76, 7.74, 7.86, { align: 'center' });
+text('h = ?', 694, 704, 84, 7.86, 8.0, { align: 'center', color: YEL });
+text('h² = 25 − 9', RX, 750, 116, 8.05, 8.45, { align: 'center' });
+text('h = 4 m', RX, 900, 140, 8.5, 8.8, { align: 'center', color: YEL });
+stroke(P().M(1215, 928).S([[1400, 922], [1560, 920], [1660, 924]], 20), 8.82, 8.98, { color: YEL, width: 8, ease: eout });
+const PUFF = { t: 8.98, x: 1672, y: 922 };
 acts.forEach(a => { if (a.kind === 'path') a.path.done(); });
 
+// ---------- Drawing ----------
 function prepText() { for (const a of acts) if (a.kind === 'text') { ctx.font = `${a.w8} ${a.size}px ${FONT}`; a.w = ctx.measureText(a.str).width; a.xs = [0]; for (let i = 1; i <= a.str.length; i++) a.xs.push(ctx.measureText(a.str.slice(0, i)).width); a.left = a.align === 'center' ? a.x - a.w / 2 : a.x; } }
 function revealX(a, t) { const u = seg(t, a.t0, a.t1), n = a.str.length, f = u * n, i = Math.min(n - 1, Math.floor(f)); return lerp(a.xs[i], a.xs[i + 1], f - i); }
-function headOf(a, t) { if (a.kind === 'text') { const u = seg(t, a.t0, a.t1), f = u * a.str.length; return [a.left + revealX(a, t), a.y - a.size * (0.25 + 0.18 * Math.sin(f * 3.1))]; } const q = a.path.at(a.ease(seg(t, a.t0, a.t1)) * a.path.len); return [q.x, q.y]; }
+function headOf(a, t) {
+  if (a.kind === 'text') { const u = seg(t, a.t0, a.t1), f = u * a.str.length, hx = a.left + revealX(a, t) - a.x, hy = -a.size * (0.25 + 0.18 * Math.sin(f * 3.1)), c = Math.cos(a.rot), s = Math.sin(a.rot);
+    return [a.x + hx * c - hy * s, a.y + hx * s + hy * c]; }
+  const q = a.path.at(a.ease(seg(t, a.t0, a.t1)) * a.path.len); return [q.x, q.y]; }
+const quadC = q => [(q[0][0] + q[2][0]) / 2, (q[0][1] + q[2][1]) / 2];
 
 function drawAct(c, a, t) {
   if (t < a.t0) return;
   c.save();
   if (a.kind === 'text') {
+    if (t >= a.hide + 0.15) { c.restore(); return; }
     const rx = t >= a.t1 ? a.w + 30 : revealX(a, t);
+    c.globalAlpha = 1 - seg(t, a.hide, a.hide + 0.15);
     c.translate(a.x, a.y); c.rotate(a.rot); c.translate(-a.x, -a.y);
     c.beginPath(); c.rect(a.left - 30, a.y - a.size * 1.2, rx + 30, a.size * 1.7); c.clip();
     c.font = `${a.w8} ${a.size}px ${FONT}`; c.textAlign = 'left'; c.fillStyle = a.color;
-    c.globalAlpha = 0.07; c.lineWidth = 10; c.strokeStyle = a.color; c.lineJoin = 'round'; c.strokeText(a.str, a.left, a.y);   // toz hâlesi
-    c.globalAlpha = 1; c.fillText(a.str, a.left, a.y); c.fillText(a.str, a.left + 0.8, a.y - 0.6);
-  } else {
+    const ga = c.globalAlpha; c.globalAlpha = 0.07 * ga; c.lineWidth = 10; c.strokeStyle = a.color; c.lineJoin = 'round'; c.strokeText(a.str, a.left, a.y);   // dust halo
+    c.globalAlpha = ga; c.fillText(a.str, a.left, a.y); c.fillText(a.str, a.left + 0.8, a.y - 0.6);
+  } else if (a.kind === 'path') {
     const u = a.ease(seg(t, a.t0, a.t1)); c.strokeStyle = a.color; c.lineCap = 'round'; c.lineJoin = 'round';
     c.globalAlpha = 0.07; c.lineWidth = a.width + 12; c.beginPath(); a.path.trace(c, 0, u * a.path.len); c.stroke();
     c.globalAlpha = 1; c.lineWidth = a.width; c.beginPath(); a.path.trace(c, 0, u * a.path.len); c.stroke();
+  } else if (a.kind === 'cell') {
+    // quick chalk fill, inset from the grid lines, with a small pop
+    const u = seg(t, a.t0, a.t1), [cx, cy] = quadC(a.q), k = 0.8 * (0.85 + 0.15 * eback(u));
+    c.globalAlpha = 0.2 + 0.25 * (1 - u); c.fillStyle = WHITE; c.beginPath();
+    a.q.forEach(([x, y], i) => { const px = cx + (x - cx) * k, py = cy + (y - cy) * k; i ? c.lineTo(px, py) : c.moveTo(px, py); }); c.closePath(); c.fill();
+  } else if (a.kind === 'count') {
+    // running count while cells are ticked, then the total pops in yellow (scaled around its own centre)
+    const done = t >= a.t1, n = done ? a.n : Math.min(a.n, Math.floor((t - a.t0) / a.dt) + 1);
+    const pop = done ? eback(seg(t, a.t1, a.t1 + 0.28), 2.4) : 1, size = done ? lerp(64, 112, pop) : 64;
+    c.font = `700 ${size}px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.lineJoin = 'round'; c.lineWidth = 16; c.strokeStyle = '#22302a'; c.globalAlpha = 0.85; c.strokeText(String(n), a.cx, a.cy + 4);
+    c.globalAlpha = 1; c.fillStyle = done ? YEL : WHITE; c.fillText(String(n), a.cx, a.cy + 4);
   }
   c.restore();
 }
 // chalk dust particles (pre-generated)
-const parts = [];
+const parts = [], puffs = [];
 function buildParticles() {
   const r = rng(21);
-  for (const a of acts) { for (let tt = a.t0; tt < a.t1; tt += 1 / 90) { if (r() < 0.55) { const [x, y] = headOf(a, tt); parts.push({ t0: tt, x, y, vx: (r() - .5) * 40, vy: 10 + r() * 50, life: .6 + r() * 1.1, s: .8 + r() * 1.8, a: .35 + r() * .45 }); } } }
+  for (const a of acts) { if (a.kind !== 'path' && a.kind !== 'text') continue;
+    for (let tt = a.t0; tt < a.t1; tt += 1 / 90) { if (r() < 0.55) { const [x, y] = headOf(a, tt); parts.push({ t0: tt, x, y, vx: (r() - .5) * 40, vy: 10 + r() * 50, life: .6 + r() * 1.1, s: .8 + r() * 1.8, a: .35 + r() * .45 }); } } }
+  for (const a of acts) if (a.kind === 'cell') { const [x, y] = quadC(a.q); for (let k = 0; k < 4; k++) parts.push({ t0: a.t0, x: x + (r() - .5) * 30, y: y + (r() - .5) * 30, vx: (r() - .5) * 60, vy: r() * 40, life: .5 + r() * .6, s: 1 + r() * 1.5, a: .3 + r() * .3 }); }
   for (let tt = ERASE.t0; tt < ERASE.t1; tt += 1 / 120) { const q = ePath.at(eio2(seg(tt, ERASE.t0, ERASE.t1)) * ePath.len);
-    for (let k = 0; k < 3; k++) parts.push({ t0: tt, x: q.x + (r() - .5) * ER.w, y: q.y + ER.h * (r() - .2) * .6, vx: (r() - .5) * 70, vy: 20 + r() * 60, life: .8 + r() * 1.6, s: 1 + r() * 2.2, a: .18 + r() * .3 }); }
+    for (let k = 0; k < 3; k++) parts.push({ t0: tt, x: q.x + (r() - .5) * ER.w, y: q.y + ER.h * (r() - .5) * .8, vx: (r() - .5) * 70, vy: 20 + r() * 60, life: .8 + r() * 1.6, s: 1 + r() * 2.2, a: .18 + r() * .3 }); }
+  // final puff: soft clouds that billow and slow down, plus specks that fall
+  for (let k = 0; k < 26; k++) { const an = -Math.PI * (0.02 + r() * 0.7), sp = 120 + r() * 300;
+    puffs.push({ t0: PUFF.t + r() * 0.08, x: PUFF.x + (r() - .5) * 20, y: PUFF.y + (r() - .5) * 12, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, life: 1.0 + r() * 0.7, s: 0.7 + r() * 1.0, a: 0.3 + r() * 0.35 }); }
+  for (let k = 0; k < 160; k++) { const an = -Math.PI * r(), sp = 60 + r() * 320;
+    parts.push({ t0: PUFF.t + r() * 0.05, x: PUFF.x, y: PUFF.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp * 0.8, life: .6 + r() * .9, s: 1 + r() * 2.2, a: .4 + r() * .5 }); }
 }
 function eraserPos(t) {
-  if (t < ERASE.t0) { const u = eio2(seg(t, ERASE.in0, ERASE.t0)); const s = ePath.p[0]; return [lerp(2150, s[0], u), lerp(760, s[1], u), 1 - u]; }
+  if (t < ERASE.t0) { const u = eio2(seg(t, ERASE.in0, ERASE.t0)); const s = ePath.p[0]; return [lerp(-320, s[0], u), lerp(560, s[1], u), 1 - u]; }
   if (t <= ERASE.t1) { const q = ePath.at(eio2(seg(t, ERASE.t0, ERASE.t1)) * ePath.len); return [q.x, q.y, 0]; }
-  const u = eio2(seg(t, ERASE.t1, ERASE.out1)), e = ePath.p[ePath.p.length - 1]; return [lerp(e[0], 2200, u), lerp(e[1], 860, u), u];
+  const u = eio2(seg(t, ERASE.t1, ERASE.out1)), e = ePath.p[ePath.p.length - 1]; return [lerp(e[0], -300, u), lerp(e[1], 300, u), u];
 }
 function drawEraser(x, y, lift) {
-  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.05 + Math.sin(x * 0.01) * 0.03);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.05 + Math.sin(y * 0.01) * 0.03);
   const w = ER.w + 10, h = ER.h + 10;
   ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.filter = 'blur(12px)'; ctx.beginPath(); ctx.roundRect(-w / 2 + 16 + lift * 26, -h / 2 + 22 + lift * 30, w, h, 16); ctx.fill(); ctx.filter = 'none';
   // felt base
@@ -153,27 +221,42 @@ function render(t) {
     const u = eio2(seg(t, ERASE.t0, ERASE.t1)), s1 = u * ePath.len;
     mc.clearRect(0, 0, W, H);
     for (let s = 0; s <= s1; s += 7) { const q = ePath.at(s); mc.drawImage(eStamp, q.x - ER.w / 2 - 20, q.y - ER.h / 2 - 20); }
-    lc.globalCompositeOperation = 'destination-out'; lc.globalAlpha = 0.9; lc.drawImage(M, 0, 0);
+    lc.globalCompositeOperation = 'destination-out'; lc.globalAlpha = 0.92; lc.drawImage(M, 0, 0);
     smc.globalCompositeOperation = 'source-over'; smc.clearRect(0, 0, W, H); smc.drawImage(M, 0, 0); smc.globalCompositeOperation = 'source-in'; smc.drawImage(streak, 0, 0);
-    lc.globalCompositeOperation = 'source-over'; lc.globalAlpha = 0.16; lc.drawImage(SM, 0, 0);
+    lc.globalCompositeOperation = 'source-over'; lc.globalAlpha = 0.14; lc.drawImage(SM, 0, 0);
     lc.globalAlpha = 1;
   }
   for (const a of acts) if (a.t0 >= ERASE.t0) drawAct(lc, a, t);
   lc.globalCompositeOperation = 'destination-in'; lc.drawImage(grain, 0, 0); lc.globalCompositeOperation = 'source-over';
   // 2) scene (slow camera push)
-  const s = 1 + 0.045 * eio2(seg(t, 0, 10)), cx = 960, cy = 520;
+  const s = 1 + 0.04 * eio2(seg(t, 0, 10)), cx = 960, cy = 540;
   ctx.setTransform(s, 0, 0, s, 960 - cx * s, 540 - cy * s);
   ctx.drawImage(board, 0, 0); ctx.drawImage(L, 0, 0);
   // dust
   for (const p of parts) { const age = t - p.t0; if (age < 0 || age > p.life) continue; const k = age / p.life;
     ctx.fillStyle = `rgba(240,240,230,${p.a * (1 - k)})`; ctx.fillRect(p.x + p.vx * age, p.y + p.vy * age + 90 * age * age, p.s, p.s); }
+  for (const p of puffs) { const age = t - p.t0; if (age < 0 || age > p.life) continue; const k = age / p.life, dr = (1 - Math.exp(-4 * age)) / 4, sc = p.s * (0.6 + 2.2 * eout(k)) * 96;
+    ctx.globalAlpha = p.a * Math.pow(1 - k, 1.4) * seg(age, 0, 0.12); ctx.drawImage(blob, p.x + p.vx * dr - sc / 2, p.y + p.vy * dr - 18 * age - sc / 2, sc, sc); }
+  ctx.globalAlpha = 1;
   // eraser
   if (t > ERASE.in0 && t < ERASE.out1) { const [x, y, lift] = eraserPos(t); drawEraser(x, y, lift); }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // input/output
-  const fi = 1 - seg(t, 0, 0.3), fo = seg(t, 9.4, 10);
+  // fade in / out
+  const fi = 1 - seg(t, 0, 0.3), fo = seg(t, 9.45, 10);
   const a = Math.max(fi, eio2(fo)); if (a > 0) { ctx.fillStyle = `rgba(12,17,15,${a})`; ctx.fillRect(0, 0, W, H); }
 }
-window.ready = loadFont('Caveat', 'Caveat-700', 700).then(() => document.fonts.load(`700 80px ${FONT}`, 'SPEAK LISTEN THINK')).then(() => { prepText(); buildParticles(); });
+// sound events for audio.py (k = kind, t = seconds, d = duration)
+window.events = () => {
+  const ev = [];
+  for (const a of acts) {
+    if (a.kind === 'path') ev.push({ k: 'chalk', t: a.t0, d: Math.max(0.04, a.t1 - a.t0), v: a.width >= 7 ? 1 : 0.5 });
+    else if (a.kind === 'text') ev.push({ k: 'write', t: a.t0, d: a.t1 - a.t0, n: a.str.replace(/ /g, '').length });
+    else if (a.kind === 'cell') ev.push({ k: 'tap', t: a.t0 });
+    else if (a.kind === 'count') ev.push({ k: 'ding', t: a.t1 });
+  }
+  ev.push({ k: 'thud', t: ERASE.t0 - 0.02 }, { k: 'erase', t: ERASE.t0, d: ERASE.t1 - ERASE.t0 }, { k: 'puff', t: PUFF.t });
+  return ev.sort((x, y) => x.t - y.t);
+};
+window.ready = loadFont('Caveat', 'Caveat-700', 700).then(() => document.fonts.load(`700 80px ${FONT}`, 'Lesson Pythagoras a² + b² = c² − h ?')).then(() => { prepText(); buildParticles(); });
 window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
 </script></body></html>
