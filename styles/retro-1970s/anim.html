@@ -5,14 +5,17 @@
 </head><body>
 <canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// ── retro-70s · 70s TV show credits ─────────────────────────────
-// Scene 1: TV turns on → striped sun rises → rainbow stripe flows → jumps letter by letter "immediately"
-// Transition: four color stripes wipe the screen from left to right
-// Scene 2: "Topic of the day..." the topic wheel spins, slows down, stops at "Dreams"
-// Out : TV turns off (line → dot → dark)
-const W = 1920, H = 1080, DUR = 10.0;
+// ── retro-70s · "SUNDAY KITCHEN" TV cooking show titles ─────────
+// Scene 1: TV turns on → zoom-lens pull-back from the pot → rainbow stripes flow in →
+//          vegetables drop onto the counter and bounce to the beat → "SUNDAY KITCHEN" jumps in letter by letter
+//          → one by one the vegetables hop into the pot (splash)
+// Transition: crash zoom into the soup, then four-colour stripe rings iris open onto scene 2
+// Scene 2: a lemon cake drops onto its stand, lemon slices land on the beat, "Tonight: Lemon Cake" zooms in with echo trails
+// Out : hold, then a soft fade to dark. Channel ident in the top-right corner throughout.
+const W = 1920, H = 1080, DUR = 10.0, BEAT = 0.5;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const C = { cream: '#F3E3C3', cream2: '#E9D2A8', brown: '#3A2216', brown2: '#6E3B1F', rust: '#C2501F', orange: '#E8862B', mustard: '#EDB53A' };
+const C = { cream: '#F3E3C3', cream2: '#E9D2A8', brown: '#3A2216', brown2: '#6E3B1F', rust: '#C2501F', orange: '#E8862B', mustard: '#EDB53A',
+  olive: '#7D7B2E', tomato: '#D4452A', lemon: '#F7D55C' };
 const STRIPES = [C.mustard, C.orange, C.rust, C.brown2];
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
 const lerp = (a, b, u) => a + (b - a) * u;
@@ -26,62 +29,17 @@ const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; 
 
 const S = mk(W, H), sx = S.getContext('2d');              // scene
 const CH = [mk(W, H), mk(W, H), mk(W, H)];                // RGB channel separation
-let SUNBURST, SUN, WHEEL, GRAIN = [], SCAN, VIG;
-const WORDS = ['Music', 'Travel', 'Childhood', 'Dreams', 'Cities', 'Food', 'Friendship', 'The future'];
-const WCOL = [C.rust, C.mustard, C.brown2, C.orange, C.rust, C.mustard, C.brown2, C.orange];
-const TARGET = 3; // Hayaller
-const NSEG = 8, SEGA = Math.PI * 2 / NSEG;
+let SUNBURST, GRAIN = [], SCAN, VIG;
 
 function buildSunburst() {
   const R = 1500, c = mk(R * 2, R * 2), x = c.getContext('2d');
   x.translate(R, R);
   const n = 28;
-  for (let i = 0; i < n; i++) {
-    x.fillStyle = i % 2 ? 'rgba(0,0,0,0)' : C.cream2;
+  for (let i = 0; i < n; i += 2) {
+    x.fillStyle = C.cream2;
     x.beginPath(); x.moveTo(0, 0);
     x.arc(0, 0, R, i * Math.PI * 2 / n, (i + 1) * Math.PI * 2 / n); x.closePath(); x.fill();
   }
-  return c;
-}
-function buildSun() {
-  const r = 300, c = mk(r * 2 + 4, r * 2 + 4), x = c.getContext('2d');
-  x.translate(r + 2, r + 2);
-  const g = x.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, C.mustard); g.addColorStop(0.45, C.orange); g.addColorStop(1, C.rust);
-  x.fillStyle = g; x.beginPath(); x.arc(0, 0, r, 0, Math.PI * 2); x.fill();
-  // widening horizontal spaces in the lower half (classic striped sunset)
-  x.globalCompositeOperation = 'destination-out';
-  let y = 10, gap = 6;
-  while (y < r) { x.fillRect(-r, y, r * 2, gap); y += gap + 34 - gap * 0.9; gap *= 1.32; }
-  return c;
-}
-function buildWheel() {
-  const R = 330, c = mk(R * 2 + 40, R * 2 + 40), x = c.getContext('2d');
-  x.translate(R + 20, R + 20);
-  for (let i = 0; i < NSEG; i++) {
-    const a0 = -Math.PI / 2 + (i - 0.5) * SEGA, a1 = a0 + SEGA;
-    x.fillStyle = WCOL[i]; x.beginPath(); x.moveTo(0, 0); x.arc(0, 0, R, a0, a1); x.closePath(); x.fill();
-    x.strokeStyle = C.cream; x.lineWidth = 6; x.stroke();
-    // word: read from the center outward
-    x.save(); x.rotate(-Math.PI / 2 + i * SEGA);
-    x.fillStyle = (WCOL[i] === C.mustard) ? C.brown : C.cream;
-    x.font = '900 46px Fraunces'; x.textAlign = 'right'; x.textBaseline = 'middle';
-    x.fillText(WORDS[i], R - 38, 2);
-    x.restore();
-  }
-  // rings
-  x.lineWidth = 16; x.strokeStyle = C.brown; x.beginPath(); x.arc(0, 0, R, 0, Math.PI * 2); x.stroke();
-  x.lineWidth = 5; x.strokeStyle = C.cream; x.beginPath(); x.arc(0, 0, R - 11, 0, Math.PI * 2); x.stroke();
-  // pins
-  for (let i = 0; i < NSEG; i++) {
-    const a = -Math.PI / 2 + (i - 0.5) * SEGA;
-    x.fillStyle = C.cream; x.beginPath(); x.arc(Math.cos(a) * (R - 1), Math.sin(a) * (R - 1), 9, 0, Math.PI * 2); x.fill();
-    x.fillStyle = C.brown; x.beginPath(); x.arc(Math.cos(a) * (R - 1), Math.sin(a) * (R - 1), 4, 0, Math.PI * 2); x.fill();
-  }
-  // belly
-  x.fillStyle = C.brown; x.beginPath(); x.arc(0, 0, 62, 0, Math.PI * 2); x.fill();
-  x.fillStyle = C.mustard; x.beginPath(); x.arc(0, 0, 44, 0, Math.PI * 2); x.fill();
-  x.fillStyle = C.brown; x.beginPath(); x.arc(0, 0, 14, 0, Math.PI * 2); x.fill();
   return c;
 }
 function buildGrain(seed) {
@@ -101,33 +59,35 @@ function buildVig() {
   const g = x.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.05);
   g.addColorStop(0, 'rgba(20,8,0,0)'); g.addColorStop(1, 'rgba(20,8,0,0.62)');
   x.fillStyle = g; x.fillRect(0, 0, W, H);
-  // rounded corners of tube screen
+  // rounded corners of the tube screen
   x.fillStyle = '#0b0604'; x.beginPath(); x.rect(0, 0, W, H); x.roundRect(18, 14, W - 36, H - 28, 70); x.fill('evenodd');
-  const e = x.createLinearGradient(0, 0, 0, H); // light glitter on glass
+  const e = x.createLinearGradient(0, 0, 0, H); // light glare on the glass
   e.addColorStop(0, 'rgba(255,240,210,0.06)'); e.addColorStop(0.5, 'rgba(255,240,210,0)');
   x.fillStyle = e; x.fillRect(0, 0, W, H);
   return c;
 }
 
-// ── writing aids ──
+// ── type helpers ──
 function stacked(x, text, cx, cy, size, font, prog, opts = {}) {
-  // 70s "stacked shadow" title, jumping letter by letter
+  // 70s "stacked shadow" title, jumping letter by letter (each letter scales around its own centre)
   x.save(); x.font = `${font.w} ${size}px ${font.f}`; x.textBaseline = 'alphabetic'; x.textAlign = 'left';
-  const chars = [...text], total = x.measureText(text).width;
+  const track = opts.track ?? 0;
+  const chars = [...text];
+  const adv = chars.map(ch => x.measureText(ch).width);
+  const total = adv.reduce((a, b) => a + b, 0) + track * (chars.length - 1);
   const depth = opts.depth ?? size * 0.035, stroke = opts.stroke ?? size * 0.055;
-  let pre = '';
-  const pos = chars.map(ch => { const px = x.measureText(pre).width; pre += ch; return px; });
   const layers = opts.layers ?? [C.brown2, C.rust, C.orange];
+  let px = cx - total / 2;
   chars.forEach((ch, i) => {
-    const u = prog(i);
-    if (u <= 0) return;
-    const s = eBack(clamp(u), 2.2), yo = (1 - eOut3(clamp(u))) * size * 0.45;
-    const cw = x.measureText(ch).width;
+    const cw = adv[i], u = prog(i), lx = px; px += cw + track;
+    if (u <= 0 || ch === ' ') return;
+    const s = eBack(clamp(u), 2.0), yo = (1 - eOut3(clamp(u))) * size * 0.45;
     x.save();
-    x.translate(cx - total / 2 + pos[i] + cw / 2, cy + yo);
+    x.translate(lx + cw / 2, cy + yo - size * 0.35);
     x.rotate((1 - clamp(u)) * (i % 2 ? 0.25 : -0.25));
     x.scale(s, s);
-    x.globalAlpha = clamp(u * 3);
+    x.translate(0, size * 0.35);
+    x.globalAlpha *= clamp(u * 3);
     x.lineJoin = 'round';
     for (let L = layers.length; L >= 1; L--) {
       x.fillStyle = layers[L - 1]; x.strokeStyle = layers[L - 1]; x.lineWidth = stroke * 2;
@@ -147,146 +107,351 @@ function sparkle(x, px, py, r, a) {
   x.closePath(); x.stroke(); x.fill(); x.restore();
 }
 
-// ── lane (rainbow) road ──
+// ── rainbow ribbon: enters from the right along the counter, curves up the left side ──
+const RX = 470, RY = 735, RB = 250;
 function ribbonPath(x, o) {
-  // straight → quarter arc → up; o = distance from center line (outward +)
-  const R = 250 + o;
-  x.beginPath(); x.moveTo(-120, 820 + o); x.lineTo(1470, 820 + o);
-  x.arc(1470, 570, R, Math.PI / 2, 0, true); x.lineTo(1470 + R, -140);
+  const R = RB + o;
+  x.beginPath(); x.moveTo(2060, RY + R); x.lineTo(RX, RY + R);
+  x.arc(RX, RY, R, Math.PI / 2, Math.PI, false); x.lineTo(RX - R, -160);
 }
-const ribbonLen = o => 1590 + (250 + o) * Math.PI / 2 + (570 + 140);
-
-// ── scene 1 ──
-function scene1(x, t) {
-  x.fillStyle = C.cream; x.fillRect(0, 0, W, H);
-  // sun rays
-  x.save(); x.translate(960, 600); x.rotate(t * 0.06);
-  x.globalAlpha = 0.9; x.drawImage(SUNBURST, -SUNBURST.width / 2, -SUNBURST.height / 2); x.restore();
-  // striped sun rises
-  const up = eOut3(seg(t, 0.35, 1.8));
-  x.drawImage(SUN, 960 - SUN.width / 2, lerp(980, 560, up) - SUN.height / 2);
-  // stripes (cuts out background sun)
-  const o4 = [-69, -23, 23, 69];
+const ribbonLen = o => (2060 - RX) + (RB + o) * Math.PI / 2 + (RY + 160);
+const O4 = [-69, -23, 23, 69];
+function ribbon(x, t, t0) {
   x.lineCap = 'butt'; x.lineJoin = 'round';
-  o4.forEach((o, i) => {
-    const u = eInOut(seg(t, 0.75 + i * 0.09, 1.9 + i * 0.09));
+  O4.forEach((o, i) => {
+    const u = eInOut(seg(t, t0 + i * 0.09, t0 + 1.1 + i * 0.09));
     if (u <= 0) return;
     const L = ribbonLen(o);
-    x.save(); x.setLineDash([L * u, L * 2]); x.lineDashOffset = 0;
+    x.save(); x.setLineDash([L * u, L * 2]);
     x.strokeStyle = STRIPES[i]; x.lineWidth = 47; ribbonPath(x, o); x.stroke(); x.restore();
   });
-  // title
-  const breath = 1 + 0.008 * Math.sin(t * 3.1);
-  x.save(); x.translate(930, 600); x.scale(breath, breath); x.translate(-930, -600);
-  stacked(x, 'irticalen', 930, 610, 250, { w: 900, f: 'Fraunces' }, i => seg(t, 1.25 + i * 0.06, 1.75 + i * 0.06), { depth: 10 });
-  x.restore();
-  // subtitle (Monotone)
-  const su = eOut3(seg(t, 2.25, 2.95));
-  if (su > 0) {
-    x.save(); x.globalAlpha = su; x.font = '400 64px Monoton'; x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.letterSpacing = `${lerp(40, 10, su)}px`; x.fillStyle = C.rust;
-    x.fillText('SPEAKING HOUR', 960, 985); x.restore();
-  }
-  // glitters
-  [[380, 360, 38, 2.7], [1510, 330, 30, 2.95], [1300, 190, 22, 3.2]].forEach(([px, py, r, t0]) => {
-    const u = seg(t, t0, t0 + 0.35);
-    sparkle(x, px, py, r * eBack(u) * (1 + 0.12 * Math.sin((t - t0) * 7)), clamp(u * 2));
-  });
 }
 
-// ── scene 2 ──
-const S2 = 4.45, SPIN0 = 4.5, SPIN1 = 7.15;
-function wheelAngle(t) {
-  const target = -TARGET * SEGA + Math.PI * 2 * 5;
-  if (t < SPIN0) return 0;
-  if (t < SPIN1) { const u = (t - SPIN0) / (SPIN1 - SPIN0); return target * (1 - Math.pow(1 - u, 3.2)) + 0.07 * Math.sin(u * Math.PI); }
-  const d = t - SPIN1; return target - 0.05 * Math.exp(-d * 5) * Math.sin(d * 16); // slight backswing
+// ── vegetables (origin = bottom centre, on the ground) ──
+function outline(x, w = 6) { x.strokeStyle = C.brown; x.lineWidth = w; x.lineJoin = 'round'; x.lineCap = 'round'; x.stroke(); }
+function leaf(x, ax, ay, ang, len, wid) {
+  x.save(); x.translate(ax, ay); x.rotate(ang);
+  x.beginPath(); x.moveTo(0, 0); x.quadraticCurveTo(wid, -len * 0.5, 0, -len); x.quadraticCurveTo(-wid, -len * 0.5, 0, 0);
+  x.fillStyle = C.olive; x.fill(); outline(x, 5); x.restore();
 }
-function flapper(t) {
-  // As the pin hits the needle, the needle deviates
-  const a = wheelAngle(t), ph = ((a / SEGA) % 1 + 1) % 1;
-  return (ph < 0.3 ? (1 - ph / 0.3) : 0) * 0.42;
+function tomato(x) {
+  x.beginPath(); x.ellipse(0, -60, 70, 60, 0, 0, Math.PI * 2); x.fillStyle = C.tomato; x.fill(); outline(x);
+  x.fillStyle = 'rgba(243,227,195,0.75)'; x.beginPath(); x.ellipse(-30, -86, 16, 9, -0.5, 0, Math.PI * 2); x.fill();
+  for (let i = 0; i < 5; i++) leaf(x, 0, -116, -1.2 + i * 0.6, 34, 11);
+  x.beginPath(); x.moveTo(0, -118); x.quadraticCurveTo(4, -136, 12, -142); outline(x, 7);
+}
+function carrot(x) {
+  for (let i = 0; i < 3; i++) leaf(x, 0, -176, -0.45 + i * 0.45, 78 - Math.abs(i - 1) * 14, 17);
+  x.beginPath(); x.moveTo(-40, -172); x.quadraticCurveTo(-30, -60, 0, 0); x.quadraticCurveTo(30, -60, 40, -172);
+  x.quadraticCurveTo(0, -192, -40, -172); x.closePath(); x.fillStyle = C.orange; x.fill(); outline(x);
+  [[-26, -140, 16], [8, -108, 18], [-14, -72, 12], [10, -44, 10]].forEach(([a, b, l]) => { x.beginPath(); x.moveTo(a, b); x.lineTo(a + l, b + 3); outline(x, 5); });
+}
+function mushroom(x) {
+  x.beginPath(); x.moveTo(-28, -84); x.quadraticCurveTo(-36, -8, -30, 0); x.lineTo(30, 0); x.quadraticCurveTo(36, -8, 28, -84); x.closePath();
+  x.fillStyle = C.cream; x.fill(); outline(x);
+  x.beginPath(); x.moveTo(-84, -80); x.bezierCurveTo(-84, -176, 84, -176, 84, -80); x.quadraticCurveTo(0, -62, -84, -80); x.closePath();
+  x.fillStyle = C.brown2; x.fill(); outline(x);
+  x.fillStyle = C.cream; [[-40, -118, 12], [10, -140, 14], [46, -104, 10], [-6, -100, 8]].forEach(([a, b, r]) => { x.beginPath(); x.arc(a, b, r, 0, Math.PI * 2); x.fill(); });
+}
+function onion(x) {
+  leaf(x, 0, -170, 0.15, 60, 12);
+  x.beginPath(); x.moveTo(0, -178); x.bezierCurveTo(24, -140, 76, -118, 70, -62); x.bezierCurveTo(66, -12, 30, 0, 0, 0);
+  x.bezierCurveTo(-30, 0, -66, -12, -70, -62); x.bezierCurveTo(-76, -118, -24, -140, 0, -178); x.closePath();
+  x.fillStyle = C.mustard; x.fill(); outline(x);
+  x.beginPath(); x.moveTo(-6, -160); x.bezierCurveTo(-44, -120, -44, -30, -14, -6); outline(x, 4);
+  x.beginPath(); x.moveTo(6, -160); x.bezierCurveTo(40, -120, 40, -30, 14, -6); outline(x, 4);
+  for (let i = -1; i <= 1; i++) { x.beginPath(); x.moveTo(i * 8, 0); x.lineTo(i * 14, 12); outline(x, 4); }
+}
+const VEG = [
+  { f: tomato, x: 520, land: 1.0, jump: 3.0, tilt: -0.06 },
+  { f: carrot, x: 680, land: 1.25, jump: 3.25, tilt: 0.05 },
+  { f: mushroom, x: 1370, land: 1.5, jump: 3.5, tilt: -0.04 },
+  { f: onion, x: 1540, land: 1.75, jump: 3.75, tilt: 0.06 },
+];
+const GROUND = 910, POT = { x: 1020, rim: 740, bot: 910, rx: 225, ry: 40 }, JUMP_D = 0.45;
+function vegPose(v, t) {
+  // returns {x, y, sx, sy, rot, inPot} or null when not on screen
+  if (t < v.land - 0.4) return null;
+  if (t < v.land) { const u = seg(t, v.land - 0.4, v.land); return { x: v.x, y: GROUND - 900 * (1 - u * u), sx: 0.92, sy: 1.1, rot: v.tilt * 3 * (1 - u) }; }
+  if (t >= v.jump) {
+    const u = seg(t, v.jump, v.jump + JUMP_D);
+    if (u >= 1) return null;
+    const tx = POT.x + (v.x < POT.x ? -50 : 50), ty = POT.rim + 150;
+    const dir = v.x < POT.x ? 1 : -1;
+    const sq = clamp(1 - u / 0.12);
+    const js = lerp(1, 0.72, u); return { x: lerp(v.x, tx, u), y: lerp(GROUND, ty, u * u) - 215 * 4 * u * (1 - u), sx: js * (1 + 0.1 * sq - 0.08 * (1 - sq)), sy: js * (1 - 0.1 * sq + 0.1 * (1 - sq)), rot: dir * u * 1.6, inPot: u > 0.5 };
+  }
+  // bounce on its own beat grid (contacts at land + n*BEAT)
+  const p = ((t - v.land) / BEAT) % 1, h = 4 * p * (1 - p);
+  const sq = clamp(1 - Math.min(p, 1 - p) / 0.13);
+  const first = clamp(1 - (t - v.land) / 0.3);          // bigger squash on the first landing
+  const k = 0.16 * sq + 0.14 * first;
+  return { x: v.x, y: GROUND - 120 * h, sx: 1 + k, sy: 1 - k + 0.07 * h, rot: v.tilt * Math.sin(Math.PI * 2 * p) };
+}
+function drawVeg(x, v, P) {
+  x.save(); x.translate(P.x, P.y); x.rotate(P.rot); x.scale(P.sx, P.sy); v.f(x); x.restore();
+}
+function vegShadow(x, v, P) {
+  if (!P || P.inPot || P.x !== v.x) return;
+  const h = clamp((GROUND - P.y) / 300);
+  x.fillStyle = `rgba(58,34,22,${0.28 * (1 - h)})`;
+  x.beginPath(); x.ellipse(v.x, GROUND + 4, 70 * (1 - h * 0.5), 12 * (1 - h * 0.5), 0, 0, Math.PI * 2); x.fill();
+}
+
+// ── the pot ──
+function potBodyPath(x) {
+  const { x: cx, rim, bot, rx, ry } = POT;
+  x.beginPath(); x.moveTo(cx + rx, rim);
+  x.lineTo(cx + rx - 12, bot - 60); x.quadraticCurveTo(cx + rx - 18, bot, cx + rx - 80, bot);
+  x.lineTo(cx - rx + 80, bot); x.quadraticCurveTo(cx - rx + 18, bot, cx - rx + 12, bot - 60);
+  x.lineTo(cx - rx, rim); x.ellipse(cx, rim, rx, ry, 0, Math.PI, 0, true); x.closePath();
+}
+function potBack(x, t) {
+  const { x: cx, rim, bot, rx, ry } = POT;
+  x.fillStyle = 'rgba(58,34,22,0.3)'; x.beginPath(); x.ellipse(cx + 14, bot + 6, rx + 10, 16, 0, 0, Math.PI * 2); x.fill();
+  [-1, 1].forEach(s => {
+    x.beginPath(); x.roundRect(cx + s * (rx + 30) - 36, rim + 36, 72, 34, 17);
+    x.fillStyle = C.brown2; x.fill(); outline(x);
+  });
+  // inner wall + soup
+  x.beginPath(); x.ellipse(cx, rim, rx, ry, 0, 0, Math.PI * 2); x.fillStyle = C.brown2; x.fill();
+  x.beginPath(); x.ellipse(cx, rim + 10, rx - 20, ry - 12, 0, 0, Math.PI * 2); x.fillStyle = C.rust; x.fill();
+  const r = rng(5);
+  for (let i = 0; i < 7; i++) {
+    const bx = cx + (r() - 0.5) * 300, by = rim + 10 + (r() - 0.5) * 30, ph = (t * 1.6 + r()) % 1;
+    x.fillStyle = C.orange; x.globalAlpha = 1 - ph; x.beginPath(); x.arc(bx, by, 5 + 11 * ph, 0, Math.PI * 2); x.fill();
+  }
+  x.globalAlpha = 1;
+  x.beginPath(); x.ellipse(cx, rim, rx, ry, 0, Math.PI, 0); outline(x, 7);
+}
+function potFront(x) {
+  const { x: cx, rim, bot, rx } = POT;
+  potBodyPath(x); x.fillStyle = C.orange; x.fill();
+  x.save(); potBodyPath(x); x.clip();
+  // enamel stripes: the four-colour motif wrapped around the pot
+  const bands = [[C.cream, 22], [C.mustard, 16], [C.rust, 16], [C.brown2, 16]];
+  let y = rim + 58;
+  bands.forEach(([c, h]) => { x.fillStyle = c; x.beginPath(); x.ellipse(cx, y, rx + 10, 38, 0, 0, Math.PI); x.ellipse(cx, y + h, rx + 10, 38, 0, Math.PI, 0, true); x.fill(); y += h; });
+  x.fillStyle = 'rgba(243,227,195,0.35)'; x.beginPath(); x.roundRect(cx - rx + 34, rim + 50, 26, bot - rim - 100, 13); x.fill();
+  x.fillStyle = 'rgba(58,34,22,0.18)'; x.beginPath(); x.rect(cx + rx - 60, rim, 60, bot - rim); x.fill();
+  x.restore();
+  potBodyPath(x); outline(x, 7);
+}
+function steam(x, t, amt, puff) {
+  const { x: cx, rim } = POT;
+  x.save(); x.lineCap = 'round';
+  [-90, 0, 90].forEach((dx, i) => {
+    const ph = t * 0.9 + i * 0.33;
+    x.globalAlpha = clamp(amt * (0.55 + 0.25 * Math.sin(t * 2.3 + i * 2)));
+    x.beginPath();
+    for (let k = 0; k <= 18; k++) {
+      const yy = rim - 50 - k * (8 + 3 * puff), sw = Math.sin(k * 0.45 - ph * 5) * (14 + k * 0.9 + 20 * puff);
+      k ? x.lineTo(cx + dx * (1 + puff * 0.6) + sw, yy) : x.moveTo(cx + dx + sw, yy);
+    }
+    x.strokeStyle = C.brown2; x.lineWidth = 24 + 10 * puff; x.stroke();
+    x.strokeStyle = '#FFF6E6'; x.lineWidth = 13 + 10 * puff; x.stroke();
+  });
+  x.restore();
+}
+function splash(x, t) {
+  const a0 = x.globalAlpha; if (a0 <= 0) return;
+  VEG.forEach((v, i) => {
+    const u = seg(t, v.jump + JUMP_D * 0.55, v.jump + JUMP_D * 0.55 + 0.45);
+    if (u <= 0 || u >= 1) return;
+    const r = rng(40 + i);
+    for (let k = 0; k < 9; k++) {
+      const a = -Math.PI * (0.12 + 0.76 * r()), sp = 180 + 200 * r();
+      const px = POT.x + (v.x < POT.x ? -50 : 50) + Math.cos(a) * sp * u, py = POT.rim + 5 + Math.sin(a) * sp * u + 420 * u * u;
+      x.fillStyle = k % 3 ? C.rust : C.cream; x.globalAlpha = a0 * (1 - u * u);
+      x.beginPath(); x.arc(px, py, 13 * (1 - u * 0.5), 0, Math.PI * 2); x.fill(); outline(x, 3);
+    }
+  });
+  x.globalAlpha = a0;
+}
+
+// ── scene 1: the kitchen ──
+const ZOOM_IN = 4.3, S2 = 4.62;
+function scene1(x, t) {
+  x.setTransform(1, 0, 0, 1, 0, 0);
+  x.fillStyle = C.cream; x.fillRect(0, 0, W, H);
+  // zoom-lens: pull back from the pot at the start, crash zoom into the soup at the end
+  const pull = seg(t, 0.25, 1.5);
+  let z = 1 + 0.75 * (1 - eOut3(pull)) + 0.025 * Math.sin(pull * Math.PI) * (1 - pull);
+  const cu = seg(t, ZOOM_IN, S2 + 0.2);
+  z *= Math.exp(3.75 * eIn3(cu));
+  const ax = POT.x, ay = lerp(800, POT.rim + 10, clamp(cu * 3));
+  const m = eInOut(clamp(cu * 1.6)), px = lerp(ax, W / 2, m), py = lerp(ay, H * 0.55, m);
+  x.setTransform(z, 0, 0, z, px - ax * z, py - ay * z);
+  // sunburst
+  x.save(); x.translate(POT.x, 760); x.rotate(t * 0.06); x.globalAlpha = 0.9;
+  x.drawImage(SUNBURST, -SUNBURST.width / 2, -SUNBURST.height / 2); x.restore();
+  ribbon(x, t, 0.55);
+  // pot, vegetables, steam
+  const poses = VEG.map(v => vegPose(v, t));
+  VEG.forEach((v, i) => vegShadow(x, v, poses[i]));
+  const lastPlop = VEG[3].jump + JUMP_D * 0.55, puff = Math.exp(-Math.pow((t - lastPlop - 0.25) / 0.25, 2));
+  const calm = 1 - seg(t, ZOOM_IN - 0.05, ZOOM_IN + 0.12);
+  steam(x, t, 0.8 * calm, puff);
+  potBack(x, t);
+  VEG.forEach((v, i) => { if (poses[i] && poses[i].inPot) drawVeg(x, v, poses[i]); });
+  potFront(x);
+  VEG.forEach((v, i) => { if (poses[i] && !poses[i].inPot) drawVeg(x, v, poses[i]); });
+  x.save(); x.globalAlpha = calm; splash(x, t); x.restore();
+  // title
+  stacked(x, 'SUNDAY', 1040, 200, 135, { w: 900, f: 'Fraunces' }, i => seg(t, 1.45 + i * 0.07, 1.95 + i * 0.07), { depth: 7, track: 8 });
+  stacked(x, 'KITCHEN', 1040, 378, 185, { w: 900, f: 'Fraunces' }, i => seg(t, 1.85 + i * 0.07, 2.35 + i * 0.07), { depth: 9, track: 10 });
+  const su = eOut3(seg(t, 2.75, 3.35));
+  if (su > 0) {
+    x.save(); x.globalAlpha = su; x.font = '400 46px Monoton'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.letterSpacing = `${lerp(34, 12, su)}px`; x.fillStyle = C.rust;
+    x.fillText('EVERY SUNDAY AT SIX', 1040, 446); x.restore();
+  }
+  [[380, 170, 34, 2.55], [1560, 330, 28, 2.8], [700, 110, 22, 3.05]].forEach(([qx, qy, r, t0]) => {
+    const u = seg(t, t0, t0 + 0.35);
+    sparkle(x, qx, qy, r * eBack(u) * (1 + 0.12 * Math.sin((t - t0) * 7)), clamp(u * 2));
+  });
+  x.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+// ── scene 2: tonight's recipe ──
+const CAKE = { x: 960, top: 640, bot: 900, rx: 250 };
+function lemonSlice(x, r) {
+  x.beginPath(); x.arc(0, 0, r, 0, Math.PI * 2); x.fillStyle = C.lemon; x.fill(); outline(x, 5);
+  x.beginPath(); x.arc(0, 0, r * 0.8, 0, Math.PI * 2); x.fillStyle = C.cream; x.fill();
+  x.fillStyle = C.lemon;
+  for (let i = 0; i < 8; i++) { const a0 = i * Math.PI / 4 + 0.07, a1 = a0 + Math.PI / 4 - 0.14; x.beginPath(); x.moveTo(0, 0); x.arc(0, 0, r * 0.72, a0, a1); x.closePath(); x.fill(); }
+  x.beginPath(); x.arc(0, 0, r * 0.1, 0, Math.PI * 2); x.fillStyle = C.cream; x.fill();
+}
+function leafSprig(x, px, py, u) {
+  if (u <= 0) return;
+  x.save(); x.translate(px, py); x.scale(eBack(u), eBack(u));
+  leaf(x, 0, 0, -0.5, 58, 16); leaf(x, 0, 0, 0.35, 48, 14); x.restore();
+}
+function cake(x, t) {
+  const { x: cx, top, bot, rx } = CAKE, ry = 46;
+  // stand
+  x.beginPath(); x.moveTo(cx - 60, bot + 14); x.lineTo(cx - 34, bot + 90); x.lineTo(cx - 90, bot + 104); x.lineTo(cx + 90, bot + 104); x.lineTo(cx + 34, bot + 90); x.lineTo(cx + 60, bot + 14); x.closePath();
+  x.fillStyle = C.brown2; x.fill(); outline(x);
+  x.beginPath(); x.ellipse(cx, bot + 8, rx + 60, 26, 0, 0, Math.PI * 2); x.fillStyle = C.cream2; x.fill(); outline(x);
+  // drop + squash
+  const dropU = seg(t, 4.95, 5.3), land = t - 5.3;
+  if (dropU <= 0) return;
+  const y0 = lerp(-900, 0, dropU * dropU);
+  const sq = land > 0 ? Math.exp(-land * 7) * Math.cos(land * 26) * 0.14 : -0.05 * dropU;
+  x.save(); x.translate(cx, bot + y0); x.scale(1 + sq, 1 - sq); x.translate(-cx, -bot);
+  // body: sponge + filling
+  const side = (y1, y2, c) => { x.beginPath(); x.moveTo(cx - rx, y1); x.lineTo(cx - rx, y2); x.ellipse(cx, y2, rx, ry, 0, Math.PI, 0, true); x.lineTo(cx + rx, y1); x.ellipse(cx, y1, rx, ry, 0, 0, Math.PI, false); x.closePath(); x.fillStyle = c; x.fill(); };
+  side(top, bot, C.mustard);
+  side(top + 118, top + 146, C.cream);
+  x.save(); side(top, bot, 'rgba(0,0,0,0)'); x.clip();
+  x.fillStyle = 'rgba(58,34,22,0.16)'; x.fillRect(cx + rx - 70, top - ry, 70, bot - top + ry * 2 + 4); x.restore();
+  x.beginPath(); x.moveTo(cx - rx, top); x.lineTo(cx - rx, bot); x.ellipse(cx, bot, rx, ry, 0, Math.PI, 0, true); x.lineTo(cx + rx, top); outline(x, 7);
+  // frosting top with drips
+  x.beginPath(); x.moveTo(cx - rx - 6, top);
+  const drips = [0.05, 0.16, 0.3, 0.42, 0.57, 0.7, 0.83, 0.95];
+  for (let k = 0; k <= 40; k++) {
+    const u = k / 40, a = Math.PI - u * Math.PI, ex = cx + Math.cos(a) * (rx + 6), ey = top + Math.sin(a) * (ry + 4);
+    let d = 0; drips.forEach((q, j) => { d += (28 + (j % 3) * 22) * Math.exp(-Math.pow((u - q) / 0.035, 2)); });
+    x.lineTo(ex, ey + 18 + d);
+  }
+  x.lineTo(cx + rx + 6, top); x.ellipse(cx, top, rx + 6, ry + 4, 0, 0, Math.PI, true); x.closePath();
+  x.fillStyle = C.cream; x.fill(); outline(x, 6);
+  // lemon slices land on the beat
+  [[-110, 6, 5.5], [0, -10, 5.75], [110, 6, 6.0]].forEach(([dx, dy, t0], j) => {
+    const u = seg(t, t0 - 0.3, t0); if (u <= 0) return;
+    const l = t - t0, s = l > 0 ? 1 + Math.exp(-l * 9) * Math.sin(l * 30) * 0.18 : 1;
+    x.save(); x.translate(cx + dx, top + dy - 700 * (1 - u * u)); x.scale(s, s * 0.5); x.rotate(j * 0.4 + (1 - u) * 3);
+    lemonSlice(x, 62); x.restore();
+  });
+  leafSprig(x, cx + 170, top - 26, seg(t, 6.2, 6.5));
+  x.restore();
+}
+function echoTitle(x, text, cx, cy, size, u) {
+  // zoom-lens echo: stripe-coloured ghosts contract into the title
+  if (u <= 0) return;
+  const oy = cy - size * 0.35, cols = [C.brown2, C.rust, C.orange];
+  x.save(); x.font = `900 ${size}px Fraunces`; x.textAlign = 'center'; x.textBaseline = 'alphabetic'; x.lineJoin = 'round';
+  x.letterSpacing = '4px';
+  for (let k = 3; k >= 1; k--) {
+    const uk = clamp(u * 1.3 - k * 0.1); if (uk <= 0 || uk >= 1) continue;
+    const s = lerp(3.0 - k * 0.35, 1, eOut3(uk));
+    x.save(); x.translate(cx, oy); x.scale(s, s); x.translate(-cx, -oy);
+    x.globalAlpha = 0.85 * (1 - uk);
+    x.strokeStyle = cols[k - 1]; x.lineWidth = size * 0.1; x.strokeText(text, cx, cy);
+    x.restore();
+  }
+  x.restore();
+  const v = clamp(u * 1.3), s = 1 + (1 - eBack(v, 1.5)) * 1.2;
+  x.save(); x.globalAlpha = clamp(v * 3); x.translate(cx, oy); x.scale(s, s); x.translate(-cx, -oy);
+  stacked(x, text, cx, cy, size, { w: 900, f: 'Fraunces' }, () => 1, { depth: 9, track: 4 });
+  x.restore();
 }
 function scene2(x, t) {
-  const lt = t - S2;
+  x.setTransform(1, 0, 0, 1, 0, 0);
   x.fillStyle = C.mustard; x.fillRect(0, 0, W, H);
-  x.save(); x.translate(960, 620); x.rotate(-t * 0.1); x.globalAlpha = 0.35;
+  const z = 1 + 0.05 * eInOut(seg(t, S2, DUR));
+  x.setTransform(z, 0, 0, z, 960 - 960 * z, 600 - 600 * z);
+  x.save(); x.translate(960, 640); x.rotate(-t * 0.08); x.globalAlpha = 0.4;
   x.drawImage(SUNBURST, -SUNBURST.width / 2, -SUNBURST.height / 2); x.restore();
-  // title
-  const hu = eBack(seg(t, S2 + 0.15, S2 + 0.65), 1.6);
-  x.save(); x.translate(960, lerp(-80, 150, hu));
-  x.font = '400 92px Shrikhand'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineJoin = 'round';
-  x.fillStyle = C.rust; x.strokeStyle = C.rust; x.lineWidth = 10; x.strokeText('Topic of the day…', 7, 7); x.fillText('Topic of the day…', 7, 7);
-  x.strokeStyle = C.brown; x.lineWidth = 10; x.strokeText('Topic of the day…', 0, 0);
-  x.fillStyle = C.cream; x.fillText('Topic of the day…', 0, 0); x.restore();
-  // wheel
-  const win = eBack(seg(t, S2 + 0.02, S2 + 0.6), 1.5);
-  const pop = seg(t, 7.3, 7.75);
-  const wscale = win * lerp(1, 0.9, eOut3(pop));
-  x.save(); x.translate(960, 625); x.scale(wscale, wscale);
-  // shadow
-  x.fillStyle = 'rgba(58,34,22,0.35)'; x.beginPath(); x.arc(14, 18, 350, 0, Math.PI * 2); x.fill();
-  // motion blur: center angle patterns in fast rotation (180° shutter)
-  const w0 = wheelAngle(t), w1 = wheelAngle(t - 1 / 60), n = Math.min(12, Math.max(1, Math.ceil(Math.abs(w0 - w1) / 0.012)));
-  for (let j = 0; j < n; j++) {
-    x.save(); x.globalAlpha = 1 / (j + 1); x.rotate(lerp(w0, w1, n > 1 ? j / (n - 1) : 0));
-    x.drawImage(WHEEL, -WHEEL.width / 2, -WHEEL.height / 2); x.restore();
+  // striped table band
+  [C.cream, C.orange, C.rust, C.brown2].forEach((c, i) => { x.fillStyle = c; x.fillRect(-100, 948 + i * 36, W + 200, 37); });
+  x.fillStyle = 'rgba(58,34,22,0.3)'; x.beginPath(); x.ellipse(CAKE.x + 12, CAKE.bot + 106, 150, 14, 0, 0, Math.PI * 2); x.fill();
+  cake(x, t);
+  const hu = eBack(seg(t, 5.55, 6.0), 1.6);
+  if (seg(t, 5.55, 6.0) > 0) {
+    x.save(); x.translate(960, lerp(-100, 150, hu));
+    x.font = '400 96px Shrikhand'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineJoin = 'round';
+    x.fillStyle = C.rust; x.strokeStyle = C.rust; x.lineWidth = 12; x.strokeText('Tonight:', 7, 7); x.fillText('Tonight:', 7, 7);
+    x.strokeStyle = C.brown; x.lineWidth = 12; x.strokeText('Tonight:', 0, 0);
+    x.fillStyle = C.cream; x.fillText('Tonight:', 0, 0); x.restore();
   }
-  // glow of selected slice
-  if (t > SPIN1) {
-    const g = 0.5 + 0.5 * Math.sin((t - SPIN1) * 14);
-    x.save(); x.globalAlpha = 0.28 * g * (1 - pop * 0.6); x.fillStyle = C.cream;
-    x.beginPath(); x.moveTo(0, 0); x.arc(0, 0, 330, -Math.PI / 2 - SEGA / 2, -Math.PI / 2 + SEGA / 2); x.closePath(); x.fill(); x.restore();
-  }
-  // hand
-  x.save(); x.translate(0, -372); x.rotate(-flapper(t));
-  x.fillStyle = C.brown; x.beginPath(); x.moveTo(-34, -30); x.lineTo(34, -30); x.lineTo(0, 62); x.closePath(); x.fill();
-  x.fillStyle = C.cream; x.beginPath(); x.arc(0, -12, 12, 0, Math.PI * 2); x.fill();
-  x.restore();
-  x.restore();
-  // blackout + selection text
-  if (pop > 0) {
-    x.fillStyle = `rgba(243,227,195,${0.55 * eOut3(pop)})`; x.fillRect(0, 0, W, H);
-    // beam burst
-    x.save(); x.translate(960, 640); x.strokeStyle = C.rust; x.lineCap = 'round';
-    const bu = eOut3(seg(t, 7.35, 7.9));
-    for (let i = 0; i < 14; i++) {
-      const a = i * Math.PI * 2 / 14 + 0.1, r0 = lerp(160, 360, bu), r1 = lerp(200, 520, bu);
-      x.globalAlpha = 1 - seg(t, 7.8, 8.3); x.lineWidth = 16 * (1 - bu * 0.6);
-      x.beginPath(); x.moveTo(Math.cos(a) * r0 * 1.6, Math.sin(a) * r0); x.lineTo(Math.cos(a) * r1 * 1.6, Math.sin(a) * r1); x.stroke();
-    }
-    x.restore();
-    stacked(x, 'Dreams', 960, 700, 230, { w: 900, f: 'Fraunces' }, i => seg(t, 7.32 + i * 0.045, 7.8 + i * 0.045), { depth: 8 });
-    const su = eBack(seg(t, 7.95, 8.35));
-    if (su > 0) {
-      x.save(); x.translate(960, 900); x.scale(su, su); x.font = '400 64px Shrikhand'; x.textAlign = 'center'; x.textBaseline = 'middle';
-      x.lineJoin = 'round'; x.strokeStyle = C.brown; x.lineWidth = 12; x.strokeText('You have one minute!', 0, 0);
-      x.fillStyle = C.mustard; x.fillText('You have one minute!', 0, 0); x.restore();
-    }
-  }
+  echoTitle(x, 'Lemon Cake', 960, 420, 190, seg(t, 6.0, 6.75));
+  [[300, 300, 36, 6.7], [1620, 420, 30, 6.85], [1450, 150, 22, 7.0], [470, 610, 24, 7.1]].forEach(([qx, qy, r, t0]) => {
+    const u = seg(t, t0, t0 + 0.35);
+    sparkle(x, qx, qy, r * eBack(u) * (1 + 0.14 * Math.sin((t - t0) * 6)), clamp(u * 2));
+  });
+  x.setTransform(1, 0, 0, 1, 0, 0);
 }
 
-// ── toggle: four-color stripe deletion ──
-function wipe(x, t) {
-  const a = 3.85, b = 4.95;
-  if (t < a || t > b) return;
-  const bh = H / 4;
-  for (let i = 0; i < 4; i++) {
-    const inU = eInOut(seg(t, a + i * 0.05, a + 0.42 + i * 0.05));
-    const outU = eInOut(seg(t, 4.5 + i * 0.05, 4.9 + i * 0.05));
-    const x0 = lerp(-W - 300, -40, inU) + lerp(0, W + 400, outU);
-    x.fillStyle = [C.brown2, C.rust, C.orange, C.mustard][i];
-    x.beginPath(); x.roundRect(x0, i * bh - 1, W + 200, bh + 2, bh / 2); x.fill();
-    if (outU <= 0) x.fillRect(x0 - 400, i * bh - 1, 500, bh + 2);
-  }
+// ── transition: four-colour stripe rings iris open from the soup ──
+function iris(x, t) {
+  const u = eInOut(seg(t, S2 - 0.05, S2 + 0.55));
+  const R0 = lerp(0, 1500, u), cx = W / 2, cy = H * 0.55;
+  [C.brown2, C.rust, C.orange, C.mustard].forEach((c, i) => {
+    const r = R0 - i * 85; if (r <= 0) return;
+    x.fillStyle = c; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
+  });
+  const r = R0 - 4 * 85;
+  if (r > 0) { x.save(); x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.clip(); scene2(x, t); x.restore(); }
+}
+
+// ── channel ident (corner bug) ──
+function ident(x, t) {
+  const u = seg(t, 0.8, 1.2); if (u <= 0) return;
+  const s = eBack(u, 2.2), cx = 1700, cy = 132;
+  x.save(); x.translate(cx, cy); x.scale(s, s); x.globalAlpha = 0.92;
+  x.beginPath(); x.roundRect(-140, -60, 280, 120, 40); x.fillStyle = C.brown; x.fill();
+  x.save(); x.beginPath(); x.roundRect(-134, -54, 268, 108, 34); x.clip();
+  x.fillStyle = C.cream; x.fillRect(-140, -60, 280, 120);
+  STRIPES.forEach((c, i) => { x.fillStyle = c; x.fillRect(-140, 2 + i * 14, 154, 14); });
+  x.restore();
+  x.textAlign = 'center'; x.textBaseline = 'alphabetic'; x.lineJoin = 'round';
+  x.font = '700 21px Fredoka'; x.fillStyle = C.brown; x.letterSpacing = '3px'; x.fillText('CHANNEL', -58, -16);
+  x.letterSpacing = '0px'; x.font = '900 100px Fraunces';
+  x.fillStyle = C.rust; x.fillText('7', 78 + 5, 36 + 5);
+  x.strokeStyle = C.brown; x.lineWidth = 8; x.strokeText('7', 78, 36); x.fillStyle = C.cream; x.fillText('7', 78, 36);
+  x.restore();
 }
 
 function render(t) {
-  // scene
-  if (t < S2) scene1(sx, t); else scene2(sx, t);
-  wipe(sx, t);
-  // tracking distortion: several momentary horizontal band slippage
-  const glitch = [[0.62, 0.1], [4.47, 0.12], [8.78, 0.1]].find(([g0, gd]) => t >= g0 && t < g0 + gd);
+  sx.setTransform(1, 0, 0, 1, 0, 0);
+  if (t < S2 + 0.6) scene1(sx, t);
+  if (t >= S2 - 0.05 && t < S2 + 0.6) iris(sx, t);
+  else if (t >= S2 + 0.6) scene2(sx, t);
+  sx.setTransform(1, 0, 0, 1, 0, 0);
+  ident(sx, t);
+  // tracking distortion: brief horizontal band slips
+  const glitch = [[0.62, 0.1], [S2 + 0.02, 0.12], [7.9, 0.08]].find(([g0, gd]) => t >= g0 && t < g0 + gd);
   if (glitch) {
     const r = rng(Math.floor(t * 30) * 7 + 3);
     for (let k = 0; k < 3; k++) {
@@ -303,61 +468,53 @@ function render(t) {
   ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   ctx.globalCompositeOperation = 'lighter';
   ctx.drawImage(CH[0], -shift, 0); ctx.drawImage(CH[1], 0, 0); ctx.drawImage(CH[2], shift, 1);
-  // scan lines + grain + warm tone
+  // scan lines + grain (refreshed at 15 fps) + warm tone
   ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(SCAN, 0, 0);
-  const f = Math.floor(t * 30), r = rng(f * 13 + 1);
+  const f = Math.floor(t * 15), r = rng(f * 13 + 1);
   ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.2;
   ctx.drawImage(GRAIN[f % GRAIN.length], -r() * 60, -r() * 60, W * 2 + 120, H * 2 + 120);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = 'rgba(200,120,50,0.25)'; ctx.fillRect(0, 0, W, H);
-  // slight brightness flicker
   ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = `rgba(255,235,200,${0.025 + 0.02 * r()})`; ctx.fillRect(0, 0, W, H);
 
-  // TV opening/closing mask
-  let openY = 1, openX = 1, flash = 0;
-  if (t < 0.6) { openX = eOut3(seg(t, 0.0, 0.2)); openY = eOut3(seg(t, 0.18, 0.55)); flash = 1 - seg(t, 0.2, 0.6); }
-  const off0 = 8.95;
-  if (t > off0) { openY = 1 - eIn3(seg(t, off0, off0 + 0.28)); openX = 1 - eIn3(seg(t, off0 + 0.28, off0 + 0.5)); flash = seg(t, off0, off0 + 0.3); }
-  if (openY < 1 || openX < 1 || flash > 0) {
+  // TV switching on
+  if (t < 0.6) {
+    const openX = eOut3(seg(t, 0.0, 0.2)), openY = eOut3(seg(t, 0.18, 0.55)), flash = 1 - seg(t, 0.2, 0.6);
     const hh = Math.max(3, H * openY), ww = Math.max(6, W * openX);
-    ctx.save();
-    // compress image vertically
     const tmp = CH[0].getContext('2d'); tmp.globalCompositeOperation = 'source-over'; tmp.drawImage(cv, 0, 0);
     ctx.fillStyle = '#060302'; ctx.fillRect(0, 0, W, H);
     ctx.drawImage(CH[0], (W - ww) / 2, (H - hh) / 2, ww, hh);
-    if (flash > 0) {
-      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = flash * 0.7; ctx.fillStyle = '#fff4e0';
-      ctx.fillRect((W - ww) / 2, (H - hh) / 2, ww, hh); ctx.globalAlpha = 1;
-    }
-    // end point
-    if (t > off0 + 0.45) {
-      const d = seg(t, off0 + 0.45, off0 + 0.95);
-      ctx.globalCompositeOperation = 'lighter';
-      const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 60 * (1 - d) + 4);
-      g.addColorStop(0, `rgba(255,245,225,${1 - d})`); g.addColorStop(1, 'rgba(255,245,225,0)');
-      ctx.fillStyle = g; ctx.fillRect(W / 2 - 80, H / 2 - 80, 160, 160);
-    }
-    ctx.restore();
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = flash * 0.7; ctx.fillStyle = '#fff4e0';
+    ctx.fillRect((W - ww) / 2, (H - hh) / 2, ww, hh); ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
   }
-  ctx.globalCompositeOperation = 'source-over';
   ctx.drawImage(VIG, 0, 0);
+  // soft fade to dark
+  const fo = eInOut(seg(t, 9.12, 9.96));
+  if (fo > 0) { ctx.fillStyle = `rgba(11,6,4,${fo})`; ctx.fillRect(0, 0, W, H); }
 }
 
 window.ready = (async () => {
-  await Promise.all(['900 100px Fraunces', '400 100px Shrikhand', '400 100px Monoton'].map(f => document.fonts.load(f, 'irticalen…')));
+  await Promise.all(['900 100px Fraunces', '400 100px Shrikhand', '400 100px Monoton', '700 30px Fredoka'].map(f => document.fonts.load(f, 'SUNDAY KITCHEN Tonight: Lemon Cake 7')));
   await document.fonts.ready;
-  SUNBURST = buildSunburst(); SUN = buildSun(); WHEEL = buildWheel(); SCAN = buildScan(); VIG = buildVig();
+  SUNBURST = buildSunburst(); SCAN = buildScan(); VIG = buildVig();
   for (let i = 0; i < 6; i++) GRAIN.push(buildGrain(i * 101 + 7));
   return true;
 })();
 window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
 window.events = () => {
-  // for sound: TV on/off, wheel clicks, selection, letter jumps
-  const ev = [{ t: 0.02, k: 'on' }, { t: 8.95, k: 'off' }, { t: 7.3, k: 'chime' }];
-  [...'irticalen'].forEach((_, i) => ev.push({ t: 1.3 + i * 0.06, k: 'pop', v: i }));
-  let last = 0;
-  for (let t = SPIN0; t < SPIN1 + 0.3; t += 1 / 240) { const n = Math.floor(wheelAngle(t) / SEGA); if (n !== last) { ev.push({ t, k: 'tick' }); last = n; } }
+  // for sound: TV on, ident, vegetable landings/bounces, letter pops, plops, zoom whoosh, iris, cake thump, lemon dings, title chime, fade
+  const ev = [{ t: 0.02, k: 'on' }, { t: 0.8, k: 'ident' }, { t: ZOOM_IN, k: 'whoosh' }, { t: S2 - 0.05, k: 'iris' },
+    { t: 5.3, k: 'thump' }, { t: 6.0, k: 'chime' }, { t: 9.12, k: 'fade' }];
+  VEG.forEach((v, i) => {
+    ev.push({ t: v.land, k: 'land', v: i });
+    for (let b = v.land + BEAT; b < v.jump - 0.01; b += BEAT) ev.push({ t: b, k: 'bounce', v: i });
+    ev.push({ t: v.jump, k: 'hop', v: i }); ev.push({ t: v.jump + JUMP_D * 0.55, k: 'plop', v: i });
+  });
+  [...'SUNDAY'].forEach((_, i) => ev.push({ t: 1.5 + i * 0.07, k: 'pop', v: i }));
+  [...'KITCHEN'].forEach((_, i) => ev.push({ t: 1.9 + i * 0.07, k: 'pop', v: i + 3 }));
+  [5.5, 5.75, 6.0].forEach((t, i) => ev.push({ t, k: 'ding', v: i }));
   return ev;
 };
 </script>
