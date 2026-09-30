@@ -1,9 +1,15 @@
-#!/bin/zsh
-# ./build.sh <slug> <duration> — render frames, encode H.264 and audio, make contact sheet, remove frames
-set -e; cd "${0:A:h}"; slug=$1; dur=$2
-while :; do free=$(memory_pressure | tail -1 | grep -oE '[0-9]+'); [ "$free" -ge 25 ] && break; echo "Free RAM $free%, waiting"; sleep 20; done
-rm -rf _frames; node render.mjs _frames 30 0 $dur 2
-ffmpeg -loglevel error -y -framerate 30 -i _frames/%05d.jpg -i sfx.wav -map 0:v -map 1:a -vf "scale=in_range=full:out_range=tv,format=yuv420p" -c:v libx264 -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 192k -ar 48000 -shortest -movflags +faststart out/$slug.mp4
-rm -rf _frames _test
-ffmpeg -loglevel error -y -i out/$slug.mp4 -vf "fps=2,scale=480:-1,tile=4x5" -frames:v 1 _contact_sheet.jpg
-ffprobe -v error -show_entries format=duration:stream=codec_name,width,height,r_frame_rate,pix_fmt -of csv=p=0 out/$slug.mp4
+#!/bin/bash
+# memphis: draw frames → events → synth audio → mp4 (H.264 30fps, full-range yuv420p, crf18 + AAC 48k stereo) → delete frames → preview.gif
+# Needs Node + Playwright (global @playwright/test, or PLAYWRIGHT_DIR=<playwright-core dir>), chromium headless shell, ffmpeg, python3 + numpy.
+set -e; cd "$(dirname "$0")"; SLUG=$(basename "$PWD"); DUR=${DUR:-9.5}; WORKERS=${WORKERS:-2}
+FR=$(mktemp -d "${TMPDIR:-/tmp}/${SLUG}_frames.XXXX")
+trap 'rm -rf "$FR"' EXIT
+node render.mjs "$FR" 30 0 $DUR $WORKERS
+node events.mjs && python3 audio.py
+ffmpeg -loglevel error -y -framerate 30 -i "$FR/%05d.jpg" -i audio.wav -map 0:v -map 1:a \
+  -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -r 30 \
+  -c:a aac -b:a 192k -ar 48000 -ac 2 -shortest -movflags +faststart $SLUG.mp4
+rm -rf "$FR" audio.wav
+# preview: same settings as make_previews.py
+ffmpeg -nostdin -v error -y -i $SLUG.mp4 -filter_complex "[0:v]fps=6,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4" -loop 0 preview.gif
+ffprobe -v error -show_entries format=duration:stream=codec_name,width,height,r_frame_rate,pix_fmt,sample_rate,channels -of compact $SLUG.mp4
