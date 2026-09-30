@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="fonts.css"></head>
+<body style="margin:0;background:#efe8d8"><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+//  isotype — Neurath/Arntz picture statistics. window.draw({t}) → JPEG base64
+//  "How a city gets to work, 1950 vs 2025" (illustrative data).
+//  1950 rows count out one symbol at a time; the year rolls to 2025; walkers,
+//  cyclists and a tram flip into cars and queue into the car row; new cars
+//  join; the chart regroups into 1950 | 2025 columns and the car row speaks.
+// ─────────────────────────────────────────────────────────────────────────────
+const W = 1920, H = 1080, DUR = 10;
+const cv = document.getElementById('c'); const ctx = cv.getContext('2d');
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, p) => a + (b - a) * p;
+const eOut = x => 1 - Math.pow(1 - x, 3), eIn = x => x * x * x;
+const eIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const eBack = (x, s = 1.2) => x <= 0 ? 0 : x >= 1 ? 1 : 1 + (s + 1) * Math.pow(x - 1, 3) + s * Math.pow(x - 1, 2);
+function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let x = s; x = Math.imul(x ^ (x >>> 15), x | 1); x ^= x + Math.imul(x ^ (x >>> 7), x | 61); return ((x ^ (x >>> 14)) >>> 0) / 4294967296; }; }
+const PAPER_C = '#efe8d8', INK = '#1f1c19', RED = '#c7352b', BLUE = '#2d5190', OCHRE = '#cf9a2c';
+const FONT = "'Jost', sans-serif";
+
+// ── layout ───────────────────────────────────────────────────────────────────
+const ROWS = [
+  { label: 'ON FOOT', kind: 'walk', col: INK },
+  { label: 'BICYCLE', kind: 'bike', col: OCHRE },
+  { label: 'TRAM', kind: 'tram', col: BLUE },
+  { label: 'CAR', kind: 'car', col: RED },
+];
+const N50 = [4, 5, 6, 1], N25 = [2, 2, 5, 11];
+const LX = 120, RY = [394, 532, 670, 808];            // row label x; row baselines
+const X1 = i => 510 + i * 100;                        // single-year slot centre
+const XL = i => 495 + i * 70, XR = i => 1035 + i * 70, SC = 0.7;   // compare columns
+const COLX = 1180;                                    // lane where the cars queue down
+
+// ── timeline ─────────────────────────────────────────────────────────────────
+const T = { title: 0.2, labels: 0.75, fill: 1.1, roll: 3.45, flip: 3.7, move: 3.95, newc: 6.1,
+  regroup: 6.7, re50: 7.2, note: 7.7, out: 9.12 };
+const POP = 0.3;
+
+// actors: every 1950 symbol that lives on into 2025, plus the new cars
+// movers leave from the end of their rows, front-most first, and park left to right
+const MOVERS = [[2, 5], [1, 4], [1, 3], [1, 2], [0, 3], [0, 2]];
+let ACT = [], COPY50 = [], NEWC = [];
+function pathLen(p) { let L = 0; for (let i = 1; i < p.length; i++) L += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]); return L; }
+function pathAt(p, d) {
+  for (let i = 1; i < p.length; i++) {
+    const l = Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
+    if (d <= l || i === p.length - 1) { const q = l ? clamp(d / l) : 1; return [lerp(p[i - 1][0], p[i][0], q), lerp(p[i - 1][1], p[i][1], q)]; }
+    d -= l;
+  }
+}
+function buildActors() {
+  let k = 0;
+  ROWS.forEach((r, ri) => {
+    for (let i = 0; i < N50[ri]; i++) {
+      const a = { kind: r.kind, col: r.col, row: ri, slot: i, tb: T.fill + k * 0.1 + ri * 0.12, end: [ri, i] };
+      const m = MOVERS.findIndex(([mr, ms]) => mr === ri && ms === i);
+      if (m >= 0) {
+        const tgt = 1 + m, y0 = RY[ri], y1 = RY[3];
+        a.path = [[X1(i), y0], [COLX, y0], [COLX, y1], [X1(tgt), y1]];
+        a.L = pathLen(a.path); a.tf = T.flip + m * 0.08; a.tm = T.move + m * 0.25; a.dm = 0.5 + a.L / 1700;
+        a.end = [3, tgt]; a.m = m;
+      }
+      ACT.push(a); k++;
+    }
+  });
+  for (let i = 0; i < 4; i++) NEWC.push({ kind: 'car', col: RED, tb: T.newc + i * 0.11, end: [3, 7 + i] });
+  ACT.push(...NEWC);
+  k = 0;
+  ROWS.forEach((r, ri) => { for (let i = 0; i < N50[ri]; i++) COPY50.push({ kind: r.kind, col: r.col, row: ri, slot: i, tb: T.re50 + k++ * 0.035 + ri * 0.05 }); });
+}
+
+// ── pictograms: origin bottom-centre, drawn flat in one colour ──────────────
+// (holes are punched with destination-out so the paper shows through)
+function line(g, pts, w, cap = 'butt') { g.lineWidth = w; g.lineCap = cap; g.lineJoin = 'round'; g.beginPath(); g.moveTo(...pts[0]); for (const p of pts.slice(1)) g.lineTo(...p); g.stroke(); }
+function poly(g, pts) { g.beginPath(); g.moveTo(...pts[0]); for (const p of pts.slice(1)) g.lineTo(...p); g.closePath(); g.fill(); }
+function circ(g, x, y, r) { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); }
+function hole(g, fn) { g.save(); g.globalCompositeOperation = 'destination-out'; g.fillStyle = g.strokeStyle = '#000'; fn(); g.restore(); }
+const GLYPH = {
+  walk(g) {
+    circ(g, 3, -70, 8.5);                                             // head
+    poly(g, [[-7, -60], [10, -60], [8, -35], [-5, -35]]);             // coat
+    line(g, [[-6, -57], [-14, -39]], 6, 'round');                     // back arm
+    line(g, [[9, -57], [17, -40]], 6, 'round');                       // front arm
+    line(g, [[-1, -37], [-11, -3]], 8); line(g, [[5, -37], [12, -3]], 8);   // legs in stride
+    poly(g, [[-15, -4], [-6, -4], [-5, 0], [-15, 0]]); poly(g, [[8, -4], [19, -4], [19, 0], [9, 0]]);   // feet
+  },
+  bike(g) {
+    g.lineWidth = 5; for (const x of [-20, 20]) { g.beginPath(); g.arc(x, -15, 13, 0, Math.PI * 2); g.stroke(); }
+    line(g, [[-20, -15], [-1, -15], [-8, -35], [-20, -15]], 4);       // rear triangle
+    line(g, [[-1, -15], [13, -35], [-8, -35]], 4); line(g, [[13, -35], [20, -15]], 4);
+    line(g, [[11, -42], [14, -35]], 4);                               // stem
+    poly(g, [[-13, -38], [-3, -38], [9, -60], [0, -62]]);             // leaning torso
+    circ(g, 9, -71, 7.5);                                             // head
+    line(g, [[6, -56], [14, -43]], 5, 'round');                       // arm to the bars
+    line(g, [[-7, -38], [7, -27], [1, -13]], 7, 'round');             // leg on the pedal
+  },
+  tram(g) {
+    g.beginPath(); g.roundRect(-36, -58, 72, 44, 6); g.fill();
+    g.fillRect(-26, -62, 52, 5);
+    line(g, [[-4, -62], [10, -80]], 3); line(g, [[4, -81], [16, -79]], 3);   // trolley pole
+    circ(g, -21, -8, 6.5); circ(g, 21, -8, 6.5);
+    hole(g, () => { for (let i = 0; i < 4; i++) g.fillRect(-30 + i * 15.5, -52, 11, 14); g.fillRect(-36, -26, 72, 3); });
+  },
+  car(g) {
+    g.scale(1.12, 1.12);
+    g.beginPath(); g.roundRect(-38, -28, 76, 17, 7); g.fill();
+    poly(g, [[-22, -27], [-12, -43], [14, -43], [25, -27]]);
+    hole(g, () => { poly(g, [[-15, -30], [-9, -39], [-0.5, -39], [-0.5, -30]]); poly(g, [[3.5, -30], [3.5, -39], [12, -39], [18, -30]]);
+      circ(g, -21, -10, 11); circ(g, 22, -10, 11); });
+    circ(g, -21, -10, 8); circ(g, 22, -10, 8);
+  },
+};
+const GW = { walk: 34, bike: 66, tram: 72, car: 85 }, GH = { walk: 80, bike: 80, tram: 81, car: 48 };
+// each glyph is rasterised once per colour at 2× and stamped
+const STAMP = {};
+function stampFor(kind, col) {
+  const key = kind + col; if (STAMP[key]) return STAMP[key];
+  const c = mk(200, 200), g = c.getContext('2d'); g.scale(2, 2); g.translate(50, 90); g.fillStyle = g.strokeStyle = col; GLYPH[kind](g);
+  return STAMP[key] = c;
+}
+function glyph(g, kind, col, x, y, s = 1, sx = 1, alpha = 1) {
+  if (s <= 0.001 || alpha <= 0.001 || Math.abs(sx) < 0.001) return;
+  g.save(); g.globalAlpha = alpha; g.translate(x, y); g.scale(s * sx, s); g.drawImage(stampFor(kind, col), -50, -90, 100, 100); g.restore();
+}
+
+// ── actor state at time t ────────────────────────────────────────────────────
+const popS = (t, tb) => eBack(seg(t, tb, tb + POP), 1.2);
+const exitS = (t, x, y) => 1 - eIn(seg(t, T.out + (x - 460) / 1400 * 0.35 + (y - 380) / 420 * 0.08, T.out + (x - 460) / 1400 * 0.35 + (y - 380) / 420 * 0.08 + 0.28));
+function actorState(a, t) {
+  let kind = a.kind, col = a.col, x, y, s = popS(t, a.tb), sx = 1, lift = 0;
+  if (a.path) {
+    const pf = seg(t, a.tf, a.tf + 0.32);
+    if (pf >= 0.5) { kind = 'car'; col = RED; }
+    sx = Math.abs(Math.cos(Math.PI * pf)); lift = Math.sin(Math.PI * pf) * 10;
+    const pm = seg(t, a.tm, a.tm + a.dm);
+    [x, y] = pathAt(a.path, a.L * eIO(pm));
+    y -= lift;
+  } else if (a.row !== undefined) { x = X1(a.slot); y = RY[a.row]; }
+  else { x = X1(a.end[1]); y = RY[3]; }
+  // regroup into the 2025 column
+  const pr = eIO(seg(t, T.regroup + a.end[0] * 0.05, T.regroup + a.end[0] * 0.05 + 0.6));
+  if (pr > 0) { x = lerp(x, XR(a.end[1]), pr); s *= lerp(1, SC, pr); }
+  return { kind, col, x, y, s, sx, row: a.end[0] };
+}
+window.boxes = t => ACT.map(a => { const st = actorState(a, t); return { x: st.x, y: st.y - GH[st.kind] * st.s / 2, w: GW[st.kind] * st.s * st.sx, h: GH[st.kind] * st.s, s: st.s }; }).filter(b => b.s > 0.01);
+
+// ── text helpers ─────────────────────────────────────────────────────────────
+function txt(g, s, x, y, size, w = 500, col = INK, ls = 0, align = 'left', alpha = 1) {
+  if (alpha <= 0.001) return;
+  g.save(); g.globalAlpha = alpha; g.font = `${w} ${size}px ${FONT}`; g.letterSpacing = ls + 'px'; g.fillStyle = col; g.textAlign = align; g.textBaseline = 'alphabetic';
+  g.fillText(s, x, y); g.restore();
+}
+// rolling year: each digit rolls up inside its own window
+function year(g, from, to, x, y, size, p0, alpha = 1) {
+  if (alpha <= 0.001) return;
+  g.save(); g.globalAlpha = alpha; g.font = `700 ${size}px ${FONT}`; g.fillStyle = INK; g.textAlign = 'center';
+  const adv = size * 0.6;
+  for (let j = 0; j < 4; j++) {
+    const p = eIO(seg(p0, j * 0.07, j * 0.07 + 0.36)), cx = x + adv * (j + 0.5);
+    g.save(); g.beginPath(); g.rect(cx - adv / 2, y - size * 0.86, adv, size * 0.98); g.clip();
+    if (p < 1) g.fillText(from[j], cx, y - p * size * 0.98);
+    if (p > 0) g.fillText(to[j], cx, y + (1 - p) * size * 0.98);
+    g.restore();
+  }
+  g.restore();
+}
+
+// ── scene ────────────────────────────────────────────────────────────────────
+let PAPER, SPECK, LAYER, LG;
+function prep() {
+  buildActors();
+  PAPER = mk(W, H); const g = PAPER.getContext('2d'); g.fillStyle = PAPER_C; g.fillRect(0, 0, W, H);
+  const R = rng(120);
+  for (let i = 0; i < 60; i++) {   // soft mottling
+    const x = R() * W, y = R() * H, r = 120 + R() * 380, gr = g.createRadialGradient(x, y, 0, x, y, r);
+    const dark = R() < 0.5; gr.addColorStop(0, dark ? 'rgba(120,95,55,0.018)' : 'rgba(255,252,240,0.03)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  const im = g.getImageData(0, 0, W, H); for (let i = 0; i < im.data.length; i += 4) { const n = (R() - 0.5) * 8; im.data[i] += n; im.data[i + 1] += n; im.data[i + 2] += n * 0.9; }
+  g.putImageData(im, 0, 0);
+  g.strokeStyle = 'rgba(110,90,60,0.07)'; g.lineWidth = 1;   // fibres
+  for (let i = 0; i < 900; i++) { const x = R() * W, y = R() * H, a = R() * Math.PI, l = 6 + R() * 16; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a) * l * .5 + R() * 3, y + Math.sin(a) * l * .5, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+  const v = g.createRadialGradient(960, 540, 420, 960, 540, 1200); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(90,70,40,0.12)'); g.fillStyle = v; g.fillRect(0, 0, W, H);
+  // ink speckle: tiny gaps where the print did not take
+  SPECK = mk(W, H); const s = SPECK.getContext('2d'); s.fillStyle = '#000';
+  for (let i = 0; i < 26000; i++) { s.globalAlpha = 0.25 + R() * 0.6; const r = 0.4 + R() * 1.1; s.beginPath(); s.arc(R() * W, R() * H, r, 0, Math.PI * 2); s.fill(); }
+  LAYER = mk(W, H); LG = LAYER.getContext('2d');
+}
+function render(t) {
+  const g = LG; g.clearRect(0, 0, W, H);
+  const fadeAll = 1 - seg(t, T.out + 0.35, T.out + 0.75);
+  // header
+  const tp = eOut(seg(t, T.title, T.title + 0.55));
+  g.save(); g.beginPath(); g.rect(LX - 10, 60, 1300, 110); g.clip();
+  txt(g, 'HOW A CITY GETS TO WORK', LX, 150 + (1 - tp) * 90, 64, 700, INK, 5, 'left', fadeAll);
+  g.restore();
+  const sp = eOut(seg(t, T.title + 0.25, T.title + 0.7));
+  txt(g, 'Daily commuters by means of transport', LX + (1 - sp) * -20, 198, 30, 400, INK, 1, 'left', sp * fadeAll);
+  g.fillStyle = INK; g.globalAlpha = fadeAll; g.fillRect(LX, 226, 1680 * eIO(seg(t, T.title + 0.1, T.title + 0.8)), 4); g.globalAlpha = 1;
+  // legend
+  const lp = seg(t, T.title + 0.45, T.title + 0.8);
+  g.font = `500 28px ${FONT}`; g.letterSpacing = '1px'; const lw = g.measureText('= 1 million commuters').width;
+  glyph(g, 'walk', INK, 1800 - lw - 28, 190, 0.62 * eBack(lp, 1.2), 1, fadeAll);
+  txt(g, '= 1 million commuters', 1800, 180, 28, 500, INK, 1, 'right', lp * fadeAll);
+  // row labels + rules
+  ROWS.forEach((r, i) => {
+    const p = eOut(seg(t, T.labels + i * 0.08, T.labels + i * 0.08 + 0.4));
+    txt(g, r.label, LX + (1 - p) * -30, RY[i] - 28, 30, 600, INK, 4, 'left', p * fadeAll);
+    g.globalAlpha = 0.28 * fadeAll; g.fillStyle = INK; g.fillRect(LX, RY[i] + 12, 1680 * eIO(p), 2); g.globalAlpha = 1;
+  });
+  // year headers
+  const pr = eIO(seg(t, T.regroup, T.regroup + 0.6));
+  const yp = eOut(seg(t, T.labels, T.labels + 0.4));
+  year(g, '1950', '2025', lerp(460, 1000, pr), 282, 54, t - T.roll, yp * fadeAll);
+  const r50 = eOut(seg(t, T.re50 - 0.15, T.re50 + 0.3));
+  if (r50 > 0) { g.save(); g.beginPath(); g.rect(440, 236, 300, 60); g.clip(); txt(g, '1950', 460, 282 + (1 - r50) * 70, 54, 700, INK, 0, 'left', fadeAll); g.restore(); }
+  // column divider
+  const dv = eIO(seg(t, T.regroup + 0.3, T.regroup + 0.8));
+  if (dv > 0) { g.globalAlpha = fadeAll; g.fillStyle = INK; g.fillRect(944, 250, 3, 590 * dv); g.globalAlpha = 1; }
+  // emphasis: everything but the car row steps back
+  const em = eIO(seg(t, T.note, T.note + 0.45));
+  const rowA = row => row === 3 ? 1 : 1 - 0.55 * em;
+  // 1950 copy in the left column
+  for (const a of COPY50) {
+    const x = XL(a.slot), y = RY[a.row];
+    glyph(g, a.kind, a.col, x, y, SC * popS(t, a.tb) * exitS(t, x, y), 1, rowA(a.row));
+  }
+  // live symbols (movers last so they travel over the rules)
+  for (const a of [...ACT].sort((p, q) => (p.path ? 1 : 0) - (q.path ? 1 : 0))) {
+    const st = actorState(a, t);
+    glyph(g, st.kind, st.col, st.x, st.y, st.s * exitS(t, st.x, st.y), st.sx, rowA(st.row));
+  }
+  // the note
+  const np = eOut(seg(t, T.note + 0.1, T.note + 0.55));
+  if (np > 0) {
+    g.save(); g.beginPath(); g.rect(LX - 10, 880, 1700, 80); g.clip();
+    const yy = 935 + (1 - np) * 60;
+    txt(g, 'In 1950, 1 commuter in 16 drove.', LX, yy, 40, 500, INK, 0, 'left', fadeAll);
+    g.font = `500 40px ${FONT}`; g.letterSpacing = '0px'; const w1 = g.measureText('In 1950, 1 commuter in 16 drove.  ').width;
+    txt(g, 'In 2025, more than half do.', LX + w1, yy, 40, 700, RED, 0, 'left', fadeAll);
+    g.restore();
+  }
+  txt(g, 'ILLUSTRATIVE DATA', LX, 1022, 20, 500, INK, 3, 'left', 0.6 * sp * fadeAll);
+  txt(g, 'Picture statistics after the Vienna method', 1800, 1022, 20, 400, INK, 1, 'right', 0.6 * sp * fadeAll);
+  // print: punch tiny gaps into the ink, then lay it on the paper
+  g.save(); g.globalCompositeOperation = 'destination-out'; g.globalAlpha = 0.55; g.drawImage(SPECK, 0, 0); g.restore();
+  ctx.globalCompositeOperation = 'source-over'; ctx.drawImage(PAPER, 0, 0);
+  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(LAYER, 0, 0); ctx.globalCompositeOperation = 'source-over';
+}
+// sound events (events.mjs → events.json → audio.py)
+window.events = () => {
+  const E = [{ t: T.title, k: 'stamp', v: 1 }, { t: T.title + 0.45, k: 'pop', v: 0 }];
+  ROWS.forEach((r, i) => E.push({ t: T.labels + i * 0.08, k: 'tick', v: i }));
+  ACT.forEach(a => { if (a.row !== undefined) E.push({ t: a.tb, k: 'pop', v: a.row, i: a.slot }); });
+  [0, 1, 2, 3].forEach(j => E.push({ t: T.roll + j * 0.07 + 0.1, k: 'tick', v: 4 + j }));
+  ACT.filter(a => a.path).forEach(a => { E.push({ t: a.tf + 0.12, k: 'flip' }, { t: a.tm, k: 'drive', d: a.dm }, { t: a.tm + a.dm - 0.05, k: 'park' }); });
+  NEWC.forEach((a, i) => E.push({ t: a.tb, k: 'pop', v: 3, i: 7 + i }));
+  E.push({ t: T.regroup, k: 'swish', d: 0.7 });
+  COPY50.forEach((a, i) => { if (i % 2 === 0) E.push({ t: a.tb, k: 'tick', v: 8 + (i % 6) }); });
+  E.push({ t: T.note + 0.1, k: 'chime' }, { t: T.out, k: 'swish', d: 0.6 }, { t: T.out + 0.7, k: 'stamp', v: 0.5 });
+  return E.sort((a, b) => a.t - b.t);
+};
+window.draw = function (job) { render(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
+window.ready = document.fonts.ready.then(() => Promise.all([400, 500, 600, 700].map(w => document.fonts.load(`${w} 40px 'Jost'`, 'HOW A CITY 1950 2025 =')))).then(prep);
+</script></body></html>
