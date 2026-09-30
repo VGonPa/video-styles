@@ -3,12 +3,15 @@
 <body style="margin:0;background:#000"><canvas id="c" width="1920" height="1080"></canvas>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-//  LINOL PRINT (linocut) — 10 s showcase clip. window.draw({t}) → JPEG base64
-//  On two color (black + red) cream printing paper, with plate mark.
-//  Red sun rays → black counter ring → numbers 3·2·1 printed like “stamp”.
-//  The black roller passes, the paper is lifted from the printing plate → "YOUR / TURN!" + red seal in corner.
-//  Motion staggered 12 fps; The ink texture is "boiled" again every 1/8 sec.
-//  Carving marks: white V-groove lines in black/red areas; uncarved splinters in empty space.
+//  LINOCUT — 10 s clip "LET THE FOREST GROW WILD". window.draw({t}) → JPEG base64
+//  Two-colour (black + red) print on cream paper with a plate mark.
+//  Print 1: red sun → black ground → a sapling grows into a tree → pines are
+//  stamped around it → a deer steps out of the forest → birds rise.
+//  A brayer rolls black ink over the block and off the sheet, the sheet is
+//  pulled → print 2: the manifesto poster, words pressed one by one, pencil
+//  edition marks in the margin → hold → the corner lifts off the block.
+//  Motion stepped at 12 fps; the ink texture "boils" every 1/8 s.
+//  Gouge marks: tapered V-groove cuts in black/red areas, stray chatter in empty space.
 // ─────────────────────────────────────────────────────────────────────────────
 const W = 1920, H = 1080;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
@@ -22,9 +25,14 @@ const mk = (w = W, h = H) => { const c = document.createElement('canvas'); c.wid
 const FONT = "'Alfa Slab One', serif";
 const PAPER = '#efe5cf', INK = '#15120f', RED = '#c7331f';
 const PLATE = { x: 86, y: 70, w: W - 172, h: H - 140 };
-const CX = 960, CY = 540;
+const CX = 960;
 
-// ── paper, ink masks (once) ───────────────────────────────────────
+// timeline
+const T = { sun: .35, ground: .7, grow0: 1.0, grow1: 2.25, reds: 2.2, pines: [2.35, 2.5, 2.65, 2.8, 2.95],
+  walk0: 3.05, walk1: 3.95, head: 4.05, birds: 3.75, roll0: 4.75, roll1: 5.5, peel0: 5.5, peel1: 6.05,
+  words: [6.2, 6.55, 6.95, 7.25], flock: 7.5, pencil0: 7.6, pencil1: 8.0, lift0: 8.9, lift1: 9.8, fade0: 9.35 };
+
+// ── paper, ink masks (once) ─────────────────────────────────────────────────
 const PAPERCV = mk(), MASKS = [];
 function valueNoise(w, h, gw, gh, r, smooth = true) {   // small grid → enlarged soft noise
   const s = mk(gw, gh), c = s.getContext('2d'), id = c.createImageData(gw, gh);
@@ -37,7 +45,7 @@ function buildPaper() {
   const id = c.getImageData(0, 0, W, H), d = id.data, r = rng(5), low = valueNoise(W, H, 80, 45, r), mid = valueNoise(W, H, 400, 225, r);
   for (let i = 0; i < d.length; i += 4) { const n = (low[i] - 128) * .06 + (mid[i] - 128) * .05 + (r() - .5) * 10; d[i] += n; d[i + 1] += n * .95; d[i + 2] += n * .85; }
   c.putImageData(id, 0, 0);
-  // die mark: rectangle (relief) embedded in the paper
+  // plate mark: the block's rectangle embossed into the paper
   const P = PLATE; c.lineWidth = 3;
   c.strokeStyle = 'rgba(255,255,255,0.55)'; c.strokeRect(P.x + 2, P.y + 2, P.w, P.h);
   c.strokeStyle = 'rgba(90,70,40,0.28)'; c.strokeRect(P.x - 1, P.y - 1, P.w, P.h);
@@ -48,21 +56,21 @@ function buildMasks() {
     const r = rng(100 + v * 17), m = mk(), c = m.getContext('2d'), id = c.createImageData(W, H), d = id.data;
     const low = valueNoise(W, H, 48, 27, r), patch = valueNoise(W, H, 140, 80, r), fine = valueNoise(W, H, 960, 540, r);
     for (let i = 0; i < d.length; i += 4) {
-      let a = .9 + (low[i] / 255) * .14;                                   // ink density fluctuates
-      if (patch[i] > 218) a *= 1 - clamp((patch[i] - 218) / 30, 0, 1) * .55;      // stains without ink
-      if (fine[i] > 226 || r() < .006) a *= r() * .35;                      // paper thread: tiny gaps
+      let a = .9 + (low[i] / 255) * .14;                                        // ink density varies
+      if (patch[i] > 218) a *= 1 - clamp((patch[i] - 218) / 30, 0, 1) * .55;     // starved patches
+      if (fine[i] > 226 || r() < .006) a *= r() * .35;                           // paper fibre gaps
       d[i] = d[i + 1] = d[i + 2] = 0; d[i + 3] = clamp(a, 0, 1) * 255;
     }
     c.putImageData(id, 0, 0); MASKS.push(m);
   }
 }
 
-// ── auxiliary figures ──────────────────────────── ────────────────────────────
+// ── carving helpers ─────────────────────────────────────────────────────────
 function lens(c, x0, y0, x1, y1, w) {            // V-groove / splinter: double-pointed lens
   const mx = (x0 + x1) / 2, my = (y0 + y1) / 2, L = Math.hypot(x1 - x0, y1 - y0) || 1, nx = -(y1 - y0) / L * w, ny = (x1 - x0) / L * w;
   c.moveTo(x0, y0); c.quadraticCurveTo(mx + nx, my + ny, x1, y1); c.quadraticCurveTo(mx - nx, my - ny, x0, y0);
 }
-function roughPoly(c, pts, j, seed, step = 34) {   // edges are split, each intermediate point has slight play (hand-engraved edge)
+function roughPoly(c, pts, j, seed, step = 34) {   // edges split, every point jittered (hand-cut edge)
   const r = rng(seed), out = [];
   for (let i = 0; i < pts.length; i++) {
     const a = pts[i], b = pts[(i + 1) % pts.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(L / step));
@@ -72,197 +80,322 @@ function roughPoly(c, pts, j, seed, step = 34) {   // edges are split, each inte
   c.moveTo(...out[0]); out.forEach(p => c.lineTo(...p)); c.closePath();
 }
 function roughCircle(c, x, y, R, j, seed, n = 90) { const r = rng(seed), pts = []; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, rr = R + (r() - .5) * j; pts.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr]); } c.moveTo(...pts[0]); pts.forEach(p => c.lineTo(...p)); c.closePath(); }
+function strip(c, pts, wAt) {   // polyline → filled strip, half-width wAt(u)
+  const n = pts.length, L = [], R = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, w = wAt(i / (n - 1));
+    L.push([pts[i][0] - dy / l * w, pts[i][1] + dx / l * w]); R.push([pts[i][0] + dy / l * w, pts[i][1] - dx / l * w]);
+  }
+  c.moveTo(...L[0]); L.forEach(p => c.lineTo(...p)); R.reverse().forEach(p => c.lineTo(...p)); c.closePath();
+}
+const taper = (c, pts, w0, w1) => strip(c, pts, u => lerp(w0, w1, u) / 2);               // branches, legs, antlers
+const lensPath = (c, pts, w) => strip(c, pts, u => w * Math.sin(Math.PI * u) / 2);        // curved gouge, pointed ends
+function arcGroove(c, x, y, R, a0, a1, w) { const p = []; for (let i = 0; i <= 12; i++) { const a = lerp(a0, a1, i / 12); p.push([x + Math.cos(a) * R, y + Math.sin(a) * R]); } lensPath(c, p, w); }
+function carve(c, fn) { c.save(); c.globalCompositeOperation = 'destination-out'; c.beginPath(); fn(c); c.fill(); c.restore(); }
+function chatter(c, seed, n, zone) {   // stray uncut splinters (small black marks in empty space)
+  const r = rng(seed); c.beginPath();
+  for (let i = 0; i < n; i++) { const [x, y] = zone(r); const a = r() * Math.PI, l = 10 + r() * 30; lens(c, x, y, x + Math.cos(a) * l, y + Math.sin(a) * l, 1.4 + r() * 2.2); }
+  c.fill();
+}
 
-// ── print events (12 fps digits) ───────────────────── ──────────────────────
-const q = t => Math.floor(t * 12) / 12;
-function stamp(tq, t0) { if (tq < t0) return null; const k = Math.round((tq - t0) * 12); return { s: k === 0 ? 1.07 : k === 1 ? .985 : 1, jx: k < 2 ? (k ? -2 : 3) : 0, jy: k < 2 ? (k ? 1 : -2) : 0 }; }
-
-// ── layer canvases ──────────────────────────── ─────────────────────────────
+// ── print impact (12 fps) ───────────────────────────────────────────────────
+const q = t => Math.floor(t * 12 + 1e-6) / 12;
+function stamp(tq, t0) { if (tq < t0 - 1e-6) return null; const k = Math.round((tq - t0) * 12); return { s: k === 0 ? 1.07 : k === 1 ? .985 : 1, jx: k < 2 ? (k ? -2 : 3) : 0, jy: k < 2 ? (k ? 1 : -2) : 0 }; }
 const LB = mk(), LR = mk(), TMP = mk();
 const lb = LB.getContext('2d'), lr = LR.getContext('2d'), tmp = TMP.getContext('2d');
 function withStamp(c, st, ox, oy, fn) { c.save(); c.translate(ox + st.jx, oy + st.jy); c.scale(st.s, st.s); c.translate(-ox, -oy); fn(c); c.restore(); }
+function onTmp(fn) { tmp.setTransform(1, 0, 0, 1, 0, 0); tmp.globalCompositeOperation = 'source-over'; tmp.clearRect(0, 0, W, H); tmp.fillStyle = '#000'; fn(tmp); tmp.globalCompositeOperation = 'source-over'; }
 
-// scene 1 ────────────────────────────────── ──────────────────────────────────
-function sunburst(c, tq) {
-  const rot = Math.floor(tq * 4) * .012;                       // digit slow rotation
-  const n = 22; c.beginPath();
-  for (let i = 0; i < n; i++) {
-    const a0 = rot + i / n * Math.PI * 2, a1 = a0 + Math.PI / n * 1.05, R0 = 430, R1 = 1300;
-    roughPoly(c, [[CX + Math.cos(a0) * R0, CY + Math.sin(a0) * R0], [CX + Math.cos(a0) * R1, CY + Math.sin(a0) * R1], [CX + Math.cos(a1) * R1, CY + Math.sin(a1) * R1], [CX + Math.cos(a1) * R0, CY + Math.sin(a1) * R0]], 5, i + 3);
+// ── motifs ──────────────────────────────────────────────────────────────────
+function sun(c, x, y, R, seed) {   // red disc with broken concentric gouge rings
+  c.beginPath(); roughCircle(c, x, y, R, 5, seed); c.fill();
+  carve(c, cc => { const r = rng(seed + 1);
+    for (let k = 1; k * 34 < R - 18; k++) { const rr = k * 34 + 6; let a = r() * 6.28; const end = a + Math.PI * 2 - .3;
+      while (a < end) { const l = .35 + r() * .9, gap = .08 + r() * .25; arcGroove(cc, x, y, rr, a, Math.min(a + l, end), 5 + k * .5); a += l + gap; } } });
+}
+const hill1 = x => 858 + Math.sin(x * .0042 + 1.2) * 16 - Math.exp(-(((x - CX) / 260) ** 2)) * 22;
+function ground(c, hy, seed, rows) {   // black earth with gouges that follow the hill line
+  c.beginPath(); const pts = [[PLATE.x - 10, H]]; for (let x = PLATE.x - 10; x <= PLATE.x + PLATE.w + 10; x += 24) pts.push([x, hy(x)]); pts.push([PLATE.x + PLATE.w + 10, H]);
+  roughPoly(c, pts, 4, seed, 24); c.fill();
+  carve(c, cc => { const r = rng(seed + 3);
+    for (let k = 0; k < rows; k++) for (let x = PLATE.x + r() * 80; x < PLATE.x + PLATE.w; x += 90 + r() * 150) {
+      const l = 50 + r() * 140, dy = 22 + k * 19 + (r() - .5) * 6; if (r() < .25) continue;
+      const p = []; for (let i = 0; i <= 6; i++) { const xx = x + l * i / 6; p.push([xx, hy(xx) + dy * (1 + k * .08)]); }
+      lensPath(cc, p, 3.4 - k * .25 + r());
+    } });
+}
+function pine(c, x, by, h, seed, cuts = true) {   // stacked tiers with a ragged hem, gouged shadow side
+  const r = rng(seed), tiers = h > 160 ? 4 : 3, top = by - h, tw = h * .5;
+  c.beginPath(); c.rect(x - h * .025, by - h * .22, h * .05, h * .24); c.fill();
+  c.beginPath();
+  for (let k = 0; k < tiers; k++) {
+    const ty = top + (h * .78) * (k / tiers) * .92, byy = top + (h * .78) * ((k + 1) / tiers) + h * .02, w = tw * (.42 + .58 * (k + 1) / tiers);
+    const pts = [[x, ty - (k ? 0 : 6)], [x + w / 2, byy]]; const nz = 5 + k;
+    for (let i = 1; i < nz; i++) pts.push([x + w / 2 - w * i / nz, byy - (i % 2 ? 7 + r() * 8 : 0)]);
+    pts.push([x - w / 2, byy]); roughPoly(c, pts, 3, seed + k, 22);
   }
   c.fill();
-  // engraving lines in beam
-  c.save(); c.globalCompositeOperation = 'destination-out'; c.beginPath(); const r = rng(9);
-  for (let i = 0; i < n; i++) { const a = rot + (i + .52) / n * Math.PI * 2; for (let k = 0; k < 3; k++) { const R0 = 470 + r() * 200, R1 = R0 + 90 + r() * 260, da = (r() - .5) * .05;
-    lens(c, CX + Math.cos(a + da) * R0, CY + Math.sin(a + da) * R0, CX + Math.cos(a + da * .6) * R1, CY + Math.sin(a + da * .6) * R1, 2.6 + r() * 2); } }
-  c.fill(); c.restore();
+  if (!cuts) return;
+  carve(c, cc => { for (let k = 0; k < tiers; k++) {
+    const ty = top + (h * .78) * (k / tiers) * .92, byy = top + (h * .78) * ((k + 1) / tiers), w = tw * (.42 + .58 * (k + 1) / tiers), n = 2 + k;
+    for (let i = 0; i < n; i++) { const u = (i + 1) / (n + 1), yy = lerp(ty + 14, byy - 6, u), half = (yy - ty) / (byy - ty) * w / 2;
+      lens(cc, x + 6, yy - 10, x + half * (.55 + r() * .3), yy + 4, 2 + r() * 1.4); } } });
 }
-function ring(c) {
-  c.beginPath(); roughCircle(c, CX, CY, 340, 4, 21); roughCircle(c, CX, CY, 298, 4, 22); c.fill('evenodd');
-  // notches carved into the ring
-  c.save(); c.globalCompositeOperation = 'destination-out'; c.beginPath();
-  for (let i = 0; i < 60; i++) { const a = i / 60 * Math.PI * 2, l = i % 5 ? 12 : 26; lens(c, CX + Math.cos(a) * (338 - l), CY + Math.sin(a) * (338 - l), CX + Math.cos(a) * 334, CY + Math.sin(a) * 334, i % 5 ? 2 : 3.5); }
-  c.fill(); c.restore();
-  // inner ring: thin uncarved inner circle
-  c.beginPath(); roughCircle(c, CX, CY, 282, 3, 23); roughCircle(c, CX, CY, 276, 3, 24); c.fill('evenodd');
-}
-function numeral(c, ch, st) {
-  tmp.setTransform(1, 0, 0, 1, 0, 0); tmp.globalCompositeOperation = 'source-over'; tmp.clearRect(0, 0, W, H);
-  tmp.font = `400 430px ${FONT}`; tmp.textAlign = 'center'; tmp.textBaseline = 'alphabetic'; tmp.fillStyle = '#000';
-  tmp.fillText(ch, CX, CY + 152);
-  // V-groove shadow lines on body (lower-right half)
-  tmp.globalCompositeOperation = 'destination-out'; tmp.beginPath(); const r = rng(ch.charCodeAt(0));
-  for (let i = 0; i < 14; i++) { const y = CY - 60 + i * 17, x0 = CX + 10 + r() * 30 - i * 4, len = 60 + r() * 90; lens(tmp, x0, y + 6, x0 + len, y - 12, 2.2 + r() * 1.6); }
-  for (let i = 0; i < 6; i++) { const y = CY - 150 + i * 16; lens(tmp, CX + 40, y, CX + 110 + r() * 40, y - 8, 1.8); }
-  tmp.fill();
-  withStamp(c, st, CX, CY, cc => cc.drawImage(TMP, 0, 0));
-}
-function progressArc(c, frac) {
-  if (frac <= 0) return; c.save(); c.lineCap = 'butt'; c.lineWidth = 26; c.beginPath();
-  c.arc(CX, CY, 378, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); c.stroke(); c.restore();
-}
-function chatter(c, seed, n, zone) {   // unengraved splinters (small black marks in empty space)
-  const r = rng(seed); c.beginPath();
-  for (let i = 0; i < n; i++) { const [x, y] = zone(r); const a = r() * Math.PI, l = 10 + r() * 34; lens(c, x, y, x + Math.cos(a) * l, y + Math.sin(a) * l, 1.5 + r() * 2.5); }
-  c.fill();
-}
-
-// scene 2 ────────────────────────────────── ──────────────────────────────────
-const BUB = { x: 960, y: 480, w: 1080, h: 520 };
-function bubble(c) {
-  const { x, y, w, h } = BUB, x0 = x - w / 2, y0 = y - h / 2, r = 70;
-  const pts = []; const arcPts = (cx, cy, a0, a1) => { for (let i = 0; i <= 8; i++) { const a = lerp(a0, a1, i / 8); pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } };
-  arcPts(x0 + r, y0 + r, Math.PI, Math.PI * 1.5); arcPts(x0 + w - r, y0 + r, -Math.PI / 2, 0); arcPts(x0 + w - r, y0 + h - r, 0, Math.PI / 2);
-  pts.push([x - 180, y0 + h], [x - 330, y0 + h + 170], [x - 300, y0 + h]);
-  arcPts(x0 + r, y0 + h - r, Math.PI / 2, Math.PI);
-  c.beginPath(); roughPoly(c, pts, 5, 77); c.fill();
-  // engraving in red block: flowing grooves at bottom-right
-  c.save(); c.globalCompositeOperation = 'destination-out'; c.beginPath(); const rr = rng(4);
-  for (let i = 0; i < 16; i++) { const yy = y0 + h - 40 - i * 13, xx = x0 + w - 60 - rr() * 120 - i * 18; lens(c, xx - 160 - rr() * 120, yy + 4, xx, yy - 4, 2 + rr() * 1.5); }
-  for (let i = 0; i < 10; i++) { const yy = y0 + 36 + i * 12; lens(c, x0 + 40 + rr() * 20, yy, x0 + 120 + rr() * 110, yy - 3, 1.8); }
-  c.fill(); c.restore();
-}
-function rays2(c, tq) {   // highlight lines overflowing from balloon, 4 fps "boil"
-  const b = Math.floor(tq * 4), r = rng(55); c.beginPath();
-  for (let i = 0; i < 34; i++) {
-    const a = i / 34 * Math.PI * 2 + (r() - .5) * .08; const e = Math.hypot(Math.cos(a) * BUB.w * .5, Math.sin(a) * BUB.h * .5) * 1.12 + 20;
-    const wob = rng(b * 97 + i)(), R0 = e + 12 + wob * 18, R1 = R0 + 50 + r() * 150 + wob * 30;
-    const x0 = BUB.x + Math.cos(a) * R0, y0 = BUB.y + Math.sin(a) * R0 * .9;
-    if (y0 > BUB.y + BUB.h * .55 && Math.cos(a) < 0 && Math.cos(a) > -.8) continue;   // leave tail direction blank
-    lens(c, x0, y0, BUB.x + Math.cos(a) * R1, BUB.y + Math.sin(a) * R1 * .9, 5 + r() * 5);
+// ── the growing tree (branching, deterministic) ─────────────────────────────
+const BR = [];
+(function buildTree() {
+  const r = rng(42);
+  function br(x, y, a, len, w, depth, s) {
+    const d = .2; BR.push({ x, y, a, len, w, depth, s, d });
+    if (depth >= 5) return;
+    const ex = x + Math.cos(a) * len, ey = y + Math.sin(a) * len, n = depth === 0 ? 3 : r() < .45 ? 2 : 3;
+    for (let i = 0; i < n; i++) {
+      let na = a + (i - (n - 1) / 2) * (.52 + r() * .22) + (r() - .5) * .18; na = clamp(na, -Math.PI + .42 + depth * .02, -.42 - depth * .02); na = lerp(na, -Math.PI / 2, depth >= 3 ? .12 : 0);
+      br(ex, ey, na, len * (depth >= 2 ? .6 + r() * .08 : .7 + r() * .1), w * .62, depth + 1, s + d * .9);
+    }
+  }
+  br(CX, 842, -Math.PI / 2, 215, 36, 0, 0);
+})();
+const TREE_END = Math.max(...BR.map(b => b.s + b.d));
+function tree(c, g) {   // g: growth in tree units (0 → TREE_END + leaf time)
+  c.beginPath();
+  for (const b of BR) { const f = clamp((g - b.s) / b.d); if (f <= 0) continue;
+    const L = b.len * f, ex = b.x + Math.cos(b.a) * L, ey = b.y + Math.sin(b.a) * L;
+    taper(c, [[b.x, b.y], [lerp(b.x, ex, .5) + Math.sin(b.a * 3) * 3, lerp(b.y, ey, .5)], [ex, ey]], b.w, b.w * lerp(1, .62, f));
+    c.moveTo(b.x + b.w / 2, b.y); c.arc(b.x, b.y, b.w / 2, 0, Math.PI * 2);
   }
   c.fill();
+  c.beginPath();   // leaf clusters pop in at the tips once a twig has finished
+  for (const b of BR) { if (b.depth < 3) continue; const k = Math.floor((g - (b.s + b.d)) / .06); if (k < 0) continue;
+    const r = rng(Math.round(b.x * 7 + b.y * 13)), ex = b.x + Math.cos(b.a) * b.len, ey = b.y + Math.sin(b.a) * b.len, sc = k === 0 ? .6 : k === 1 ? 1.12 : 1;
+    for (let i = 0; i < 6; i++) { const a = b.a + (i - 2.5) * .58 + (r() - .5) * .3, l = (24 + r() * 16) * sc; lens(c, ex, ey, ex + Math.cos(a) * l, ey + Math.sin(a) * l, 8 * sc); }
+    const mx = b.x + Math.cos(b.a) * b.len * .55, my = b.y + Math.sin(b.a) * b.len * .55;   // side sprigs along the twig
+    for (let i = 0; i < 4; i++) { const a = b.a + (i % 2 ? 1 : -1) * (1.1 + r() * .5), l = (20 + r() * 12) * sc; lens(c, mx, my, mx + Math.cos(a) * l, my + Math.sin(a) * l, 7 * sc); }
+  }
+  c.fill();
+  if (g >= TREE_END) carve(c, cc => { const r = rng(8);   // trunk bark grooves
+    for (let i = 0; i < 7; i++) { const x = CX - 4 + i * 2.6 + r() * 3, y0 = 830 - r() * 30, y1 = 660 + r() * 40; lensPath(cc, [[x, y0], [x + 3, (y0 + y1) / 2], [x + 1, y1]], 2.4); } });
 }
-function carvedWord(c, st, txt, x, y, ls, seed) {   // word: black block letters with V-groove marks on the body
-  tmp.setTransform(1, 0, 0, 1, 0, 0); tmp.globalCompositeOperation = 'source-over'; tmp.clearRect(0, 0, W, H);
-  tmp.font = `400 212px ${FONT}`; tmp.textAlign = 'center'; tmp.textBaseline = 'alphabetic'; tmp.letterSpacing = ls; tmp.fillStyle = '#000';
-  tmp.fillText(txt, x, y); const tw = tmp.measureText(txt).width; tmp.letterSpacing = '0px';
-  tmp.globalCompositeOperation = 'destination-out'; tmp.beginPath(); const r = rng(seed);
-  for (let i = 0; i < 9; i++) { const yy = y - 16 - i * 11, x0 = x + tw * (.05 + r() * .3), len = 70 + r() * 150; lens(tmp, x0, yy + 3, x0 + len, yy - 5, 1.6 + r() * 1.4); }
-  for (let i = 0; i < 5; i++) { const yy = y - 150 + i * 10, x0 = x - tw * (.45 - r() * .2); lens(tmp, x0, yy, x0 + 50 + r() * 70, yy - 3, 1.4); }
-  tmp.fill(); tmp.globalCompositeOperation = 'source-over';
-  withStamp(c, st, x, y - 80, cc => cc.drawImage(TMP, 0, 0));
+// ── deer (profile, facing left; origin = ground under the body) ─────────────
+const rot = ([x, y], a) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
+function deerParts(ph, walking, headA) {
+  const P = [], add = fn => { const p = new Path2D(); fn(p); P.push(p); };
+  const bob = walking ? -Math.abs(Math.sin(ph)) * 4 : 0;
+  // legs: [hip, thigh, shank, phase offset, hind?] — diagonal gait
+  const legs = [[[-48, -112], [2, 50], [0, 62], Math.PI, 0, .1], [[62, -118], [12, 52], [-8, 64], 0, 1, -.08], [[-40, -112], [2, 50], [0, 62], 0, 0, -.06], [[70, -118], [12, 52], [-8, 64], Math.PI, 1, .07]];
+  for (const [hip, th, sh, off, hind, rest] of legs) {
+    const s = walking ? Math.sin(ph + off) : 0, lift = walking ? Math.max(0, Math.cos(ph + off)) : 0;
+    const a1 = walking ? s * .36 : rest, a2 = a1 - lift * (hind ? -.35 : .55);
+    const h = [hip[0], hip[1] + bob], k = [h[0] + rot(th, a1)[0], h[1] + rot(th, a1)[1]], f = [k[0] + rot(sh, a2)[0], k[1] + rot(sh, a2)[1] - lift * 6];
+    add(p => { taper(p, [h, k], hind ? 36 : 26, 13); taper(p, [k, [lerp(k[0], f[0], .5), lerp(k[1], f[1], .5)], f], 11, 7); p.moveTo(f[0] + 5, f[1] - 3); p.ellipse(f[0] - 2, f[1] - 3, 7, 5, 0, 0, Math.PI * 2); });
+  }
+  add(p => { p.moveTo(-58, -146 + bob); p.bezierCurveTo(-20, -164 + bob, 40, -166 + bob, 80, -154 + bob); p.bezierCurveTo(104, -146 + bob, 106, -108 + bob, 84, -94 + bob);
+    p.bezierCurveTo(40, -84 + bob, -20, -86 + bob, -58, -94 + bob); p.bezierCurveTo(-88, -104 + bob, -90, -136 + bob, -58, -146 + bob); p.closePath(); });
+  add(p => { lens(p, 80, -146 + bob, 104, -160 + bob, 7); });   // tail
+  // neck + head rotate about the base of the neck
+  const nb = [-52, -138 + bob], R = pt => { const v = rot([pt[0] - nb[0], pt[1] + bob - nb[1]], headA); return [nb[0] + v[0], nb[1] + v[1]]; };
+  const poly = (p, pts) => { pts = pts.map(R); p.moveTo(...pts[0]); pts.forEach(q => p.lineTo(...q)); p.closePath(); };
+  add(p => poly(p, [[-78, -126], [-20, -152], [-64, -222], [-108, -230], [-106, -190]]));
+  add(p => poly(p, [[-84, -236], [-98, -250], [-118, -248], [-136, -232], [-156, -214], [-156, -204], [-140, -200], [-108, -208], [-82, -218]]));
+  add(p => { const a = R([-96, -244]), b = R([-66, -262]); lens(p, a[0], a[1], b[0], b[1], 8); });   // ear
+  for (const [dx, sc] of [[0, 1], [14, .86]]) {   // antlers: beam + tines (near, far)
+    const pt = (x, y) => R([-104 + dx + (x + 104) * sc, -246 + (y + 246) * sc]);
+    add(p => taper(p, [pt(-104, -246), pt(-100, -276), pt(-86, -306), pt(-64, -326)], 8, 3.5));
+    add(p => taper(p, [pt(-101, -272), pt(-120, -290), pt(-126, -310)], 6, 2.5));
+    add(p => taper(p, [pt(-92, -298), pt(-100, -322), pt(-98, -340)], 5.5, 2.5));
+    add(p => taper(p, [pt(-80, -312), pt(-78, -336)], 5, 2));
+  }
+  return P;
 }
-function words(c, tq) {
-  const s1 = stamp(tq, 5.45), s2 = stamp(tq, 5.95);
-  if (s1) carvedWord(c, s1, 'YOUR', BUB.x - 4, BUB.y - 12, '6px', 31);
-  if (s2) carvedWord(c, s2, 'TURN!', BUB.x, BUB.y + 196, '2px', 32);
+function deer(c, x, y, s, ph, walking, headA) {   // carve a clean margin first so it reads over other black
+  const P = deerParts(ph, walking, headA);
+  c.save(); c.translate(x, y); c.scale(s, s);
+  c.save(); c.globalCompositeOperation = 'destination-out'; c.lineWidth = 16; c.lineJoin = 'round'; P.forEach(p => c.stroke(p)); c.restore();
+  P.forEach(p => c.fill(p));
+  carve(c, cc => { for (let i = 0; i < 5; i++) { const yy = -132 + i * 8; lensPath(cc, [[-10 + i * 6, yy], [30, yy - 3], [66 - i * 4, yy + 2]], 3); } });   // flank gouges
+  c.restore();
 }
-function seal(cR, cB, tq) {   // corner seal: logo engraved in red square + black text
-  const st = stamp(tq, 6.9); if (!st) return;
-  const x = 1520, y = 850, s = 118;
-  withStamp(cR, st, x + s / 2, y + s / 2, c => {
-    c.beginPath(); roughPoly(c, [[x, y], [x + s, y], [x + s, y + s], [x, y + s]], 4, 12); c.fill();
-    c.save(); c.globalCompositeOperation = 'destination-out'; const k = s * .72 / 92, ox = x + s * .14, oy = y + s * .16;
-    const P = pts => { c.beginPath(); pts.forEach((p, i) => { const u = ox + p[0] * k, v = oy + p[1] * k; i ? c.lineTo(u, v) : c.moveTo(u, v); }); c.closePath(); };
-    P([[0, 0], [92, 0], [92, 70], [40, 70], [14, 94], [14, 70], [0, 70]]); c.lineWidth = 7; c.stroke();
-    [22, 46, 70].forEach(cx => { P([[cx, 25], [cx + 10, 35], [cx, 45], [cx - 10, 35]]); c.fill(); });
-    c.restore();
+function bird(c, x, y, s, pose) {   // gull silhouette; pose 0 up, 1 mid, 2 down
+  const ty = [-20, -3, 13][pose], my = [-5, 0, 3][pose];
+  c.moveTo(x - 30 * s, y + ty * s); c.quadraticCurveTo(x - 14 * s, y + (my - 6) * s, x, y + 2 * s); c.quadraticCurveTo(x + 14 * s, y + (my - 6) * s, x + 30 * s, y + ty * s);
+  c.quadraticCurveTo(x + 14 * s, y + (my + 2) * s, x + 2 * s, y + 9 * s); c.lineTo(x - 2 * s, y + 9 * s); c.quadraticCurveTo(x - 14 * s, y + (my + 2) * s, x - 30 * s, y + ty * s); c.closePath();
+}
+const POSE = [0, 1, 2, 1];
+function carvedWord(c, st, txt, x, y, size, ls, seed) {   // block letters with V-groove marks on the body
+  onTmp(t => {
+    t.font = `400 ${size}px ${FONT}`; t.textAlign = 'center'; t.textBaseline = 'alphabetic'; t.letterSpacing = ls; t.fillText(txt, x, y); const tw = t.measureText(txt).width; t.letterSpacing = '0px';
+    t.globalCompositeOperation = 'destination-out'; t.beginPath(); const r = rng(seed), k = size / 212;
+    for (let i = 0; i < 8; i++) { const yy = y - 16 * k - i * 11 * k, x0 = x + tw * (.02 + r() * .34), len = (70 + r() * 150) * k; lens(t, x0, yy + 3 * k, x0 + len, yy - 5 * k, (1.6 + r() * 1.4) * k); }
+    for (let i = 0; i < 5; i++) { const yy = y - 140 * k + i * 10 * k, x0 = x - tw * (.46 - r() * .3); lens(t, x0, yy, x0 + (50 + r() * 70) * k, yy - 3 * k, 1.4 * k); }
+    t.fill();
   });
-  const st2 = stamp(tq, 7.2); if (!st2) return;
-  withStamp(cB, st2, x - 30, y + 60, c => { c.font = `400 58px ${FONT}`; c.textAlign = 'right'; c.textBaseline = 'alphabetic'; c.fillText('irticalen.', x - 28, y + 84); });
+  withStamp(c, st, x, y - size * .35, cc => cc.drawImage(TMP, 0, 0));
 }
 
-// ── square ────────────────────────────────── ───────────────────────────────────
-function inkComposite(target, layer, color, maskIdx, dx, dy, alpha = 1) {
+// ── print 1: the forest ─────────────────────────────────────────────────────
+const REDPINES = [[170, 300], [380, 340], [590, 280], [800, 250], [1130, 260], [1340, 320], [1600, 360], [1810, 300]];
+const PINES = [[690, 430, T.pines[0]], [480, 500, T.pines[1]], [1520, 470, T.pines[2]], [270, 400, T.pines[3]], [1730, 520, T.pines[4]]];
+const BIRDS = Array.from({ length: 7 }, (_, i) => { const r = rng(300 + i); return { x: 860 + r() * 200, y: 330 + r() * 110, vx: (i % 2 ? 1 : -1) * (40 + r() * 170), vy: -(250 + r() * 140), t0: T.birds + i * .07, ph: i }; });
+function scene1(tq) {
+  lr.fillStyle = lb.fillStyle = '#000';
+  let st = stamp(tq, T.sun); if (st) withStamp(lr, st, CX, 460, c => sun(c, CX, 460, 270, 11));
+  st = stamp(tq, T.reds); if (st) withStamp(lr, st, CX, 700, c => REDPINES.forEach(([x, h], i) => pine(c, x, hill1(x) - 24, h, 60 + i)));
+  st = stamp(tq, T.ground); if (st) withStamp(lb, st, CX, 950, c => { ground(c, hill1, 21, 7); chatter(c, 3, 30, r => [PLATE.x + 30 + r() * (PLATE.w - 60), PLATE.y + 20 + r() * 200]); });
+  if (tq >= T.grow0) tree(lb, seg(tq, T.grow0, T.grow1) * (TREE_END + .2));
+  for (const [x, h, t0] of PINES) { const s = stamp(tq, t0); if (s) withStamp(lb, s, x, hill1(x) - h / 2, c => pine(c, x, hill1(x) + 6, h, x)); }
+  if (tq >= T.walk0) {   // the deer steps out of the right-hand forest and stops, head up
+    const u = seg(tq, T.walk0, T.walk1), walking = u < 1, x = lerp(1640, 1290, u), ph = (tq - T.walk0) * Math.PI * 2 * 2.3;
+    deer(lb, x, hill1(x) + 2, 1, ph, walking, .2 * eOut(seg(tq, T.head, T.head + .25)));
+  }
+  lb.beginPath();
+  for (const b of BIRDS) { if (tq < b.t0) continue; const d = tq - b.t0; bird(lb, b.x + b.vx * d, b.y + b.vy * d - 60 * d * d, 1.35 + d * .5, POSE[(Math.round(tq * 12) + b.ph) % 4]); }
+  lb.fill();
+}
+// ── print 2: the manifesto ──────────────────────────────────────────────────
+const hill2 = x => 918 + Math.sin(x * .006 + .5) * 10 - Math.exp(-(((x - 1420) / 180) ** 2)) * 14;
+const PINES2 = (() => { const r = rng(77), a = []; for (let x = 130; x < 1800; x += 64 + r() * 50) { const nearSun = Math.abs(x - CX) < 200; a.push([x, nearSun ? 50 + r() * 34 : 90 + r() * 80]); } return a; })();
+const GW = { dx: 300, dx2: 300 };
+function measureGW() { const c = tmp; c.font = `400 190px ${FONT}`; c.letterSpacing = '6px'; const a = c.measureText('GROW').width, b = c.measureText('WILD').width, gap = 70, tot = a + gap + b; c.letterSpacing = '0px';
+  GW.dx = tot / 2 - a / 2; GW.dx2 = tot / 2 - b / 2; }
+const FLOCK = [[1640, 190, .7], [1710, 140, .55], [1770, 200, .6], [1590, 125, .48], [1740, 250, .45]];
+function scene2(tq) {
+  lr.fillStyle = lb.fillStyle = '#000';
+  sun(lr, CX, 930, 175, 31);
+  PINES2.forEach(([x, h], i) => pine(lb, x, hill2(x) + 6, h, 200 + i, h > 120));
+  ground(lb, hill2, 41, 4);
+  deer(lb, 1420, hill2(1420) + 2, .6, 0, false, .2);
+  chatter(lb, 8, 24, r => { const side = r() < .5; return [side ? PLATE.x + 20 + r() * 150 : PLATE.x + PLATE.w - 170 + r() * 150, PLATE.y + 30 + r() * 560]; });
+  const [w0, w1, w2, w3] = T.words;
+  let st = stamp(tq, w0); if (st) withStamp(lr, st, CX, 200, c => {
+    carvedWord(c, { s: 1, jx: 0, jy: 0 }, 'LET THE', CX, 214, 112, '18px', 51);
+    c.beginPath(); roughPoly(c, [[CX - 560, 164], [CX - 330, 164], [CX - 330, 178], [CX - 560, 178]], 3, 5); roughPoly(c, [[CX + 330, 164], [CX + 560, 164], [CX + 560, 178], [CX + 330, 178]], 3, 6); c.fill(); });
+  st = stamp(tq, w1); if (st) carvedWord(lb, st, 'FOREST', CX, 478, 290, '10px', 52);
+  st = stamp(tq, w2); if (st) carvedWord(lb, st, 'GROW', CX - GW.dx, 700, 190, '6px', 53);
+  st = stamp(tq, w3); if (st) carvedWord(lr, { ...st, s: st.s === 1 ? 1 : st.s + .04 }, 'WILD', CX + GW.dx2, 700, 190, '6px', 54);
+  st = stamp(tq, T.flock); if (st) withStamp(lb, st, 1600, 220, c => { c.beginPath(); FLOCK.forEach(([x, y, s], i) => bird(c, x, y, s * 1.5, POSE[i % 4])); c.fill(); });
+}
+function pencil(c, t) {   // edition marks written in graphite under the plate
+  const u = seg(t, T.pencil0, T.pencil1); if (u <= 0) return;
+  c.save(); c.font = `400 26px ${FONT}`; c.textBaseline = 'alphabetic'; c.fillStyle = 'rgba(70,64,58,0.62)';
+  const y = PLATE.y + PLATE.h + 42, L = PLATE.x + 8, Rr = PLATE.x + PLATE.w - 8;
+  c.beginPath(); c.rect(0, y - 40, L + 150 * clamp(u * 3), 60); c.rect(Rr - 420 * clamp(u * 1.4 - .4), y - 40, 420, 60); c.clip();
+  c.textAlign = 'left'; c.fillText('7 / 50', L, y); c.textAlign = 'right'; c.fillText('Let the forest grow wild', Rr, y); c.restore();
+}
+
+// ── press ───────────────────────────────────────────────────────────────────
+function inkComposite(target, layer, color, maskIdx, dx, dy) {
   const c = layer.getContext('2d');
   c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'destination-in'; c.drawImage(MASKS[maskIdx], (maskIdx % 2) * -7, 0, W + 7, H); c.globalCompositeOperation = 'source-in';
   c.fillStyle = color; c.fillRect(0, 0, W, H); c.globalCompositeOperation = 'source-over';
-  target.save(); target.globalAlpha = alpha; target.globalCompositeOperation = 'multiply'; target.drawImage(layer, dx, dy); target.restore();
-}
-function scene1(tq) {
-  lr.fillStyle = '#000'; lb.fillStyle = '#000'; lb.strokeStyle = '#000'; lr.strokeStyle = '#000';
-  const sR = stamp(tq, .35); if (sR) withStamp(lr, sR, CX, CY, c => sunburst(c, tq));
-  const sB = stamp(tq, .8); if (sB) withStamp(lb, sB, CX, CY, c => { ring(c); chatter(c, 3, 26, r => { const a = r() * 6.28, rr = 300 + r() * 120; return [CX + Math.cos(a) * rr * 1.1, CY + Math.sin(a) * rr]; }); });
-  // red progress arc: gradually decreases in 3 seconds
-  if (tq >= 1.2) progressArc(lr, 1 - clamp((tq - 1.2) / 3));
-  const n = tq >= 3.2 ? '1' : tq >= 2.2 ? '2' : tq >= 1.2 ? '3' : null;
-  if (n) numeral(lb, n, stamp(tq, n === '3' ? 1.2 : n === '2' ? 2.2 : 3.2));
-}
-function scene2(tq) {
-  lr.fillStyle = '#000'; lb.fillStyle = '#000';
-  bubble(lr); rays2(lb, tq); words(lb, tq); seal(lr, lb, tq);
-  chatter(lb, 8, 40, r => { const side = r() < .5; return [side ? PLATE.x + 20 + r() * 160 : PLATE.x + PLATE.w - 180 + r() * 160, PLATE.y + 30 + r() * (PLATE.h - 60)]; });
+  target.save(); target.globalCompositeOperation = 'multiply'; target.drawImage(layer, dx, dy); target.restore();
 }
 function printScene(target, fn, tq, mi) {
-  for (const c of [lb, lr]) { c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, W, H); }
-  // everything is clipped to the printing plate area
-  for (const c of [lb, lr]) { c.save(); c.beginPath(); c.rect(PLATE.x, PLATE.y, PLATE.w, PLATE.h); c.clip(); }
+  for (const c of [lb, lr]) { c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, W, H); c.save(); c.beginPath(); c.rect(PLATE.x, PLATE.y, PLATE.w, PLATE.h); c.clip(); }
   fn(tq);
   for (const c of [lb, lr]) c.restore();
   target.drawImage(PAPERCV, 0, 0);
-  inkComposite(target, LR, RED, mi, 4, -3);                    // red pattern: slightly offset print (register)
+  inkComposite(target, LR, RED, mi, 4, -3);                    // red block printed slightly off register
   inkComposite(target, LB, INK, (mi + 1) % 4, 0, 0);
 }
 const S1CV = mk(), S2CV = mk(), s1c = S1CV.getContext('2d'), s2c = S2CV.getContext('2d');
-function roller(c, x, mi) {   // roller: the plate is covered with black ink from left to right; rough edge + roller marks
-  tmp.setTransform(1, 0, 0, 1, 0, 0); tmp.globalCompositeOperation = 'source-over'; tmp.clearRect(0, 0, W, H);
-  tmp.save(); tmp.beginPath(); tmp.rect(PLATE.x - 6, PLATE.y - 6, PLATE.w + 12, PLATE.h + 12); tmp.clip();
-  tmp.beginPath(); tmp.moveTo(0, 0); const r = rng(7);
-  for (let y = 0; y <= H; y += 18) tmp.lineTo(x + Math.sin(y * .045) * 12 + (r() - .5) * 9, y);
-  tmp.lineTo(0, H); tmp.closePath(); tmp.fillStyle = '#000'; tmp.fill(); tmp.clip();
-  tmp.globalCompositeOperation = 'destination-out'; const r2 = rng(3);
-  for (let i = 0; i < 26; i++) { const yy = PLATE.y + r2() * PLATE.h, hh = 2 + r2() * 7, x0 = PLATE.x + r2() * PLATE.w * .6, ww = 200 + r2() * 900;
-    const g = tmp.createLinearGradient(x0, 0, x0 + ww, 0); const al = .05 + r2() * .1; g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.3, `rgba(0,0,0,${al})`); g.addColorStop(.7, `rgba(0,0,0,${al})`); g.addColorStop(1, 'rgba(0,0,0,0)');
-    tmp.fillStyle = g; tmp.fillRect(x0, yy, ww, hh); }
-  tmp.restore();
-  tmp.globalCompositeOperation = 'destination-in'; tmp.drawImage(MASKS[mi], 0, 0); tmp.globalCompositeOperation = 'source-in'; tmp.fillStyle = INK; tmp.fillRect(0, 0, W, H);
-  tmp.globalCompositeOperation = 'source-over';
-  c.save(); c.globalCompositeOperation = 'multiply'; c.drawImage(TMP, 0, 0); c.drawImage(TMP, 0, 0); c.restore();   // two coats: roller ink opaque
+function inkSheet(c, x, mi) {   // black ink laid behind the brayer: ragged leading edge + roller streaks
+  onTmp(t => {
+    t.save(); t.beginPath(); t.rect(PLATE.x - 6, PLATE.y - 6, PLATE.w + 12, PLATE.h + 12); t.clip();
+    t.beginPath(); t.moveTo(0, 0); const r = rng(7);
+    for (let y = 0; y <= H; y += 18) t.lineTo(x + Math.sin(y * .045) * 10 + (r() - .5) * 8, y);
+    t.lineTo(0, H); t.closePath(); t.fill(); t.clip();
+    t.globalCompositeOperation = 'destination-out'; const r2 = rng(3);
+    for (let i = 0; i < 26; i++) { const yy = PLATE.y + r2() * PLATE.h, hh = 2 + r2() * 7, x0 = PLATE.x + r2() * PLATE.w * .6, ww = 200 + r2() * 900;
+      const g = t.createLinearGradient(x0, 0, x0 + ww, 0), al = .05 + r2() * .1; g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.3, `rgba(0,0,0,${al})`); g.addColorStop(.7, `rgba(0,0,0,${al})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+      t.fillStyle = g; t.fillRect(x0, yy, ww, hh); }
+    t.restore();
+    t.globalCompositeOperation = 'destination-in'; t.drawImage(MASKS[mi], 0, 0); t.globalCompositeOperation = 'source-in'; t.fillStyle = INK; t.fillRect(0, 0, W, H);
+  });
+  c.save(); c.globalCompositeOperation = 'multiply'; c.drawImage(TMP, 0, 0); c.drawImage(TMP, 0, 0); c.restore();   // two coats: opaque
 }
-function peel(p) {   // removing the print from the mold: horizontal oblique fold line goes up from the bottom
-  const ang = .1, fy = lerp(H + 240, -380, p), nx = Math.sin(ang), ny = -Math.cos(ang);   // normal up
-  const Lb = 4000, dx = Math.cos(ang), dy = Math.sin(ang);
-  // bottom side: new edition
-  ctx.drawImage(S2CV, 0, 0);
-  ctx.save(); ctx.beginPath(); ctx.moveTo(CX - dx * Lb, fy - dy * Lb); ctx.lineTo(CX + dx * Lb, fy + dy * Lb); ctx.lineTo(CX + dx * Lb + nx * Lb, fy + dy * Lb + ny * Lb); ctx.lineTo(CX - dx * Lb + nx * Lb, fy - dy * Lb + ny * Lb); ctx.closePath(); ctx.clip();
-  // top: inked black (rolled die)
-  ctx.drawImage(S1CV, 0, 0);
-  const a = 1 - 2 * nx * nx, b = -2 * nx * ny, d = 1 - 2 * ny * ny, ex = CX - (a * CX + b * fy), ey = fy - (b * CX + d * fy);
-  ctx.save(); ctx.transform(a, b, b, d, ex, ey); ctx.beginPath(); ctx.rect(0, 0, W, H);
+function brayer(c, x) {   // seen from above: inked rubber roller, steel frame, wooden handle trailing left
+  const y0 = PLATE.y - 34, y1 = PLATE.y + PLATE.h + 34, rw = 64, hx = x - 470;
+  c.save();
+  c.shadowColor = 'rgba(0,0,0,0.45)'; c.shadowBlur = 30; c.shadowOffsetX = 14; c.shadowOffsetY = 10;
+  c.strokeStyle = '#8d8a84'; c.lineWidth = 12; c.lineCap = 'round'; c.lineJoin = 'round';
+  c.beginPath(); c.moveTo(x + rw / 2, y0 - 12); c.lineTo(x + rw / 2, y0 - 26); c.lineTo(hx + 40, 540 - 16); c.moveTo(x + rw / 2, y1 + 12); c.lineTo(x + rw / 2, y1 + 26); c.lineTo(hx + 40, 540 + 16); c.stroke();
+  const hg = c.createLinearGradient(0, 514, 0, 566); hg.addColorStop(0, '#b98a57'); hg.addColorStop(.5, '#8a5f36'); hg.addColorStop(1, '#5b3c20');
+  c.fillStyle = hg; c.beginPath(); c.roundRect(hx - 330, 516, 380, 48, 22); c.fill();
+  const g = c.createLinearGradient(x, 0, x + rw, 0); g.addColorStop(0, '#0d0b0a'); g.addColorStop(.28, '#3a3531'); g.addColorStop(.42, '#1a1715'); g.addColorStop(1, '#070606');
+  c.fillStyle = g; c.beginPath(); c.roundRect(x, y0 - 12, rw, y1 - y0 + 24, 14); c.fill();
+  c.shadowColor = 'transparent';
+  c.fillStyle = '#6c6963'; c.fillRect(x + rw / 2 - 9, y0 - 22, 18, 12); c.fillRect(x + rw / 2 - 9, y1 + 10, 18, 12);
+  c.restore();
+}
+function reflectAcross(px, py, nx, ny) { const a = 1 - 2 * nx * nx, b = -2 * nx * ny, d = 1 - 2 * ny * ny; return [a, b, b, d, px - (a * px + b * py), py - (b * px + d * py)]; }
+function fold(lower, upper, px, py, ang, back) {   // sheet folded back along a line: 'upper' stays, 'lower' shows where it lifted, flap shows the paper's back
+  const nx = Math.sin(ang), ny = -Math.cos(ang), dx = Math.cos(ang), dy = Math.sin(ang), Lb = 4000;
+  ctx.drawImage(lower, 0, 0);
+  ctx.save(); ctx.beginPath(); ctx.moveTo(px - dx * Lb, py - dy * Lb); ctx.lineTo(px + dx * Lb, py + dy * Lb); ctx.lineTo(px + dx * Lb + nx * Lb, py + dy * Lb + ny * Lb); ctx.lineTo(px - dx * Lb + nx * Lb, py - dy * Lb + ny * Lb); ctx.closePath(); ctx.clip();
+  ctx.drawImage(upper, 0, 0);
+  ctx.save(); ctx.transform(...reflectAcross(px, py, nx, ny)); ctx.beginPath(); ctx.rect(0, 0, W, H);
   ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 50; ctx.fillStyle = '#e2d7bf'; ctx.fill(); ctx.shadowColor = 'transparent';
-  ctx.clip(); ctx.drawImage(PAPERCV, 0, 0); ctx.fillStyle = 'rgba(90,70,40,0.1)'; ctx.fillRect(0, 0, W, H); ctx.restore();   // back side of removed paper
-  const g = ctx.createLinearGradient(CX, fy, CX + nx * 160, fy + ny * 160); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(.3, 'rgba(255,255,255,0.3)'); g.addColorStop(1, 'rgba(60,40,20,0.12)');
+  ctx.clip(); ctx.drawImage(PAPERCV, 0, 0); ctx.fillStyle = back; ctx.fillRect(0, 0, W, H); ctx.restore();
+  const g = ctx.createLinearGradient(px, py, px + nx * 160, py + ny * 160); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(.3, 'rgba(255,255,255,0.3)'); g.addColorStop(1, 'rgba(60,40,20,0.12)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore();
 }
+const BLOCK = mk(), bk = BLOCK.getContext('2d');
+function buildBlock() {   // under print 2: dark worktable, the inked lino block (mirror image, carved-away areas show the lino)
+  const P = PLATE; bk.setTransform(1, 0, 0, 1, 0, 0); bk.globalCompositeOperation = 'source-over';
+  bk.fillStyle = '#2b221c'; bk.fillRect(0, 0, W, H);
+  bk.save(); bk.beginPath(); bk.rect(P.x, P.y, P.w, P.h); bk.clip();
+  bk.setTransform(-1, 0, 0, 1, W, 0); bk.drawImage(S2CV, 0, 0); bk.setTransform(1, 0, 0, 1, 0, 0);
+  bk.globalCompositeOperation = 'multiply'; bk.fillStyle = '#76634f'; bk.fillRect(0, 0, W, H); bk.globalCompositeOperation = 'source-over';
+  const g = bk.createLinearGradient(0, 0, W, H); g.addColorStop(0, 'rgba(255,255,255,0.08)'); g.addColorStop(1, 'rgba(0,0,0,0.22)'); bk.fillStyle = g; bk.fillRect(0, 0, W, H);
+  bk.restore();
+  bk.strokeStyle = 'rgba(0,0,0,0.5)'; bk.lineWidth = 6; bk.strokeRect(P.x - 3, P.y - 3, P.w + 6, P.h + 6);   // block edge
+}
+let blockMi = -1;
 function renderFrame(t) {
   const tq = q(t), mi = Math.floor(t * 8) % 4;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-  const rollP = eInOut(seg(tq, 4.25, 4.75)), peelP = eInOut(seg(t, 4.8, 5.35));
-  if (peelP <= 0) {
-    printScene(ctx, scene1, tq, mi);
-    if (rollP > 0) roller(ctx, lerp(PLATE.x - 60, PLATE.x + PLATE.w + 60, rollP), mi);
+  const rollP = eInOut(seg(t, T.roll0, T.roll1)), peelP = eInOut(seg(t, T.peel0, T.peel1)), liftP = eInOut(seg(t, T.lift0, T.lift1));
+  const bx = lerp(PLATE.x - 80, W + 540, rollP);
+  if (t < T.peel0) {
+    printScene(ctx, scene1, Math.min(tq, T.roll0), mi);
+    if (rollP > 0) { inkSheet(ctx, bx, mi); brayer(ctx, bx); }
+  } else if (peelP < 1) {
+    printScene(s1c, scene1, T.roll0, mi); inkSheet(s1c, W + 80, mi);
+    printScene(s2c, scene2, tq, mi); pencil(s2c, t);
+    fold(S2CV, S1CV, CX, lerp(H + 240, -380, peelP), .1, 'rgba(90,70,40,0.1)');
   } else {
-    printScene(s1c, scene1, 4.75, mi); roller(s1c, W + 80, mi);
-    printScene(s2c, scene2, tq, mi);
-    if (peelP >= 1) ctx.drawImage(S2CV, 0, 0); else peel(peelP);
+    printScene(s2c, scene2, tq, mi); pencil(s2c, t);
+    if (liftP <= 0) ctx.drawImage(S2CV, 0, 0);
+    else {   // the corner of the sheet lifts off the block
+      if (blockMi !== mi) { buildBlock(); blockMi = mi; }
+      const d = lerp(0, 820, liftP), ang = -Math.PI / 4 + .12;
+      fold(BLOCK, S2CV, W - d * .78, H - d * .62, ang, 'rgba(90,70,40,0.12)');
+    }
   }
-  const f = Math.min(eOut(seg(t, 0, .3)), 1 - eInOut(seg(t, 9.35, 10)));
+  const f = Math.min(eOut(seg(t, 0, .3)), 1 - eInOut(seg(t, T.fade0, 10)));
   if (f < 1) { ctx.fillStyle = `rgba(16,13,11,${1 - f})`; ctx.fillRect(0, 0, W, H); }
 }
 
+// ── sound events (read by events.mjs → audio.py) ────────────────────────────
+window.events = () => {
+  const e = [], th = (t, v = 1, f = 100) => e.push({ k: 'thump', t, v, f });
+  th(T.sun, .9, 90); th(T.ground, .9, 80); th(T.reds, .8, 110);
+  for (let t = T.grow0; t < T.grow1; t += 1 / 12) e.push({ k: 'creak', t, v: .5 + .5 * seg(t, T.grow0, T.grow1) });
+  e.push({ k: 'rustle', t: T.grow1 - .1, d: .5 });
+  T.pines.forEach((t, i) => th(t, .8, 95 + i * 8));
+  for (let t = T.walk0; t < T.walk1; t += .23) e.push({ k: 'hoof', t });
+  BIRDS.forEach(b => e.push({ k: 'flutter', t: b.t0, d: .7 }));
+  e.push({ k: 'roll', t: T.roll0, d: T.roll1 - T.roll0 });
+  e.push({ k: 'peel', t: T.peel0, d: T.peel1 - T.peel0 });
+  T.words.forEach((t, i) => th(t, i === 1 ? 1.15 : 1, [110, 80, 95, 88][i]));
+  th(T.flock, .55, 150);
+  e.push({ k: 'pencil', t: T.pencil0, d: T.pencil1 - T.pencil0 });
+  e.push({ k: 'tone', t: T.words[3] + .05 });
+  e.push({ k: 'peel', t: T.lift0, d: T.lift1 - T.lift0, v: .6 });
+  return e;
+};
 window.draw = function (job) { renderFrame(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
-window.ready = document.fonts.load(`400 200px ${FONT}`, 'YOUR TURN! 321 irticalen.').then(() => document.fonts.ready).then(() => {
-  buildPaper(); buildMasks(); renderFrame(0);
+window.ready = document.fonts.load(`400 200px ${FONT}`, 'LET THE FOREST GROW WILD 7/50 Let the forest grow wild').then(() => document.fonts.ready).then(() => {
+  buildPaper(); buildMasks(); measureGW(); renderFrame(0);
 });
 </script></body></html>
