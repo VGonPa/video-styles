@@ -4,7 +4,10 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 const require = createRequire(import.meta.url);
-const { chromium } = require(path.join(execSync('npm root -g').toString().trim(), '@playwright/test'));
+// Playwright: global @playwright/test (as in the other styles), else $PLAYWRIGHT_DIR (a playwright or playwright-core package dir)
+const loadPW = () => { const cands = [process.env.PLAYWRIGHT_DIR, path.join(execSync('npm root -g').toString().trim(), '@playwright/test'), 'playwright', 'playwright-core'].filter(Boolean);
+  for (const c of cands) { try { return require(c); } catch {} } throw new Error('Playwright not found: npm i -g @playwright/test or set PLAYWRIGHT_DIR'); };
+const { chromium } = loadPW();
 const dir = path.dirname(new URL(import.meta.url).pathname);
 const [outDir, fpsA = '30', t0A = '0', t1A = '66', wA = '4', timesA] = process.argv.slice(2);
 const fps = +fpsA, t0 = +t0A, t1 = +t1A, workers = +wA;
