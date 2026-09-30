@@ -3,182 +3,280 @@
 <body style="margin:0;background:#f6f4ef"><canvas id="c" width="1920" height="1080"></canvas>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-//  data — editorial data journalism narrative. window.draw({t}) → JPEG base64
-//  Scene 1: line chart draws itself (filler word / weeks), difference note, −78%.
-//  Transition: page scrolls down (scrollytelling). Scene 2: horizontal bars grow larger.
-//  Closing: content fades out, extemporaneous logo.
+//  data-visualization — editorial data journalism: protected bike lanes. window.draw({t}) → JPEG base64
+//  Scene 1: line chart of daily cyclists draws itself, lane-opening marker, bracket + "×3" counter.
+//  Scroll (scrollytelling) → Scene 2: street-by-street bars, with vs without lanes.
+//  Scroll → Scene 3: small multiples by season. Closing: content lifts away, key takeaway holds.
 // ─────────────────────────────────────────────────────────────────────────────
-const W = 1920, H = 1080, DUR = 9.0;
+const W = 1920, H = 1080, DUR = 10.0;
 const cv = document.getElementById('c'); const ctx = cv.getContext('2d');
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
 const seg = (t, a, b) => clamp((t - a) / (b - a));
 const lerp = (a, b, p) => a + (b - a) * p;
 const eOut = x => 1 - Math.pow(1 - x, 3), eOut4 = x => 1 - Math.pow(1 - x, 4), eIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-const eIO2 = x => x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+const eBack = x => { const c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
 const PAPER = '#f6f4ef', INK = '#15130f', MUTED = '#6d685e', GRID = '#dcd7cc', ACC = '#d8402f', GREY = '#a19b8f', DARK = '#45413a';
 const SERIF = "'Source Serif 4', Georgia, serif", SANS = "'Libre Franklin', sans-serif";
 function F(size, w, fam, ls = 0) { ctx.font = `${w} ${size}px ${fam}`; ctx.letterSpacing = ls + 'px'; }
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+const fmt = v => Math.round(v).toLocaleString('en-US');
+function rng(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
-// ── data (representative) ───────────────────────────── ──────────────────────────────
-const A = [14.2, 12.9, 11.1, 9.8, 8.9, 7.6, 6.8, 5.9, 5.1, 4.4, 3.6, 3.1];
-const B = [13.8, 14.1, 13.5, 13.9, 13.2, 13.6, 13.0, 13.4, 12.9, 13.2, 12.8, 13.1];
-const PX0 = 200, PX1 = 1330, PY0 = 890, PY1 = 400, YMAX = 15;
-const X = i => lerp(PX0, PX1, i / 11), Y = v => lerp(PY0, PY1, v / YMAX);
-const BARS = [{ lab: '1 topic daily', v: 4, col: ACC }, { lab: '3 topics weekly', v: 7, col: DARK }, { lab: '1 topic weekly', v: 11, col: GREY }];
-const T = { head: 0.1, grid: 0.75, lineB: 1.45, lineA: 2.05, lineA1: 3.85, area: 3.8, note: 4.2, scroll0: 5.2, scroll1: 6.05, bars: 6.0, fade: 8.15, logo: 8.5 };
+// ── data (illustrative) ─────────────────────────────────────────────────────
+// average daily cyclists on one avenue, 24 months; the protected lane opens after month 8
+const LINE = [760, 790, 840, 870, 900, 880, 910, 860, 830, 1050, 1280, 1420, 1500, 1690, 1840, 1980, 2120, 2210, 2290, 2380, 2330, 2440, 2520, 2560];
+const OPEN = 8, BEFORE = 850, NL = LINE.length - 1;
+const PX0 = 200, PX1 = 1330, PY0 = 890, PY1 = 400, YMAX = 3000;
+const X = i => lerp(PX0, PX1, i / NL), Y = v => lerp(PY0, PY1, v / YMAX);
+const STREETS = [
+  { lab: 'Harbor Avenue', v: 2560, lane: true }, { lab: 'Mill Road', v: 2140, lane: true }, { lab: 'Linden Street', v: 1790, lane: true },
+  { lab: 'Quarry Lane', v: 830, lane: false }, { lab: 'Fenwick Street', v: 690, lane: false }, { lab: 'Elm Parade', v: 540, lane: false }];
+const SEASONS = [
+  { lab: 'Winter', b: [420, 400, 390, 410, 430, 450, 440, 470, 480, 500, 520, 540, 560], k: 2.8 },
+  { lab: 'Spring', b: [600, 640, 690, 720, 760, 800, 830, 860, 880, 900, 930, 950, 970], k: 3.0 },
+  { lab: 'Summer', b: [990, 1030, 1060, 1100, 1120, 1150, 1170, 1160, 1180, 1150, 1130, 1110, 1090], k: 3.2 },
+  { lab: 'Autumn', b: [1000, 960, 930, 890, 860, 820, 790, 760, 720, 690, 660, 620, 590], k: 2.9 }];
+// "after" series: same seasonal shape, lifted by the season's factor, with a little seeded wobble
+SEASONS.forEach((s, i) => { const r = rng(40 + i); s.a = s.b.map(v => v * s.k * (0.96 + 0.08 * r())); s.pct = Math.round((s.k - 1) * 100); });
+const SMAX = 4000;
 
-window.SFX = [];
-SFX.push({ t: T.lineB + 0.8, k: 'tick' });
-for (let i = 0; i < 12; i++) SFX.push({ t: T.lineA + (T.lineA1 - T.lineA) * invIO(i / 11), k: 'dot', v: i });
-SFX.push({ t: T.note + 0.1, k: 'tock' });
-BARS.forEach((b, i) => SFX.push({ t: T.bars + 0.25 + i * 0.16 + 0.7, k: 'tick' }));
-SFX.push({ t: T.logo + 0.15, k: 'soft' });
+const T = { head: 0.1, grid: 0.55, line0: 0.95, line1: 2.6, note: 2.7, sc1a: 3.55, sc1b: 4.2, bars: 4.0,
+  sc2a: 5.9, sc2b: 6.5, pan: 6.3, fade: 7.85, end: 8.05 };
+
 function invIO(f) { let lo = 0, hi = 1; for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; eIO(m) < f ? lo = m : hi = m; } return lo; }
+const tLine = i => T.line0 + (T.line1 - T.line0) * invIO(i / NL);   // time the drawn line reaches point i
+window.events = () => {
+  const E = [];
+  for (let i = 0; i <= NL; i++) E.push({ t: tLine(i), k: 'dot', v: LINE[i] / YMAX });
+  E.push({ t: tLine(OPEN) + 0.05, k: 'tock' });
+  for (let j = 0; j < 8; j++) E.push({ t: T.note + 0.12 + 0.62 * (1 - Math.cbrt(1 - j / 7)), k: 'count', v: j / 7 });
+  E.push({ t: T.note + 0.8, k: 'tock' });
+  E.push({ t: T.sc1a, k: 'slide', d: T.sc1b - T.sc1a });
+  STREETS.forEach((s, i) => E.push({ t: T.bars + 0.25 + i * 0.12 + 0.55, k: s.lane ? 'tick' : 'tickLo' }));
+  E.push({ t: T.bars + 1.3, k: 'tock' });
+  E.push({ t: T.sc2a, k: 'slide', d: T.sc2b - T.sc2a });
+  SEASONS.forEach((s, i) => E.push({ t: T.pan + i * 0.12 + 0.62, k: 'dot', v: 0.45 + i * 0.08 }));
+  E.push({ t: T.end + 0.1, k: 'soft' });
+  E.push({ t: T.end + 0.74, k: 'tock' });
+  return E;
+};
 
-// ── text aids ─────────────────────────── ────────────────────────────
-// line rising from mask (editorial title entry)
-function riseText(str, x, y, p, lineH) {
-  if (p <= 0) return; const e = eOut4(p);
+// ── text helpers ────────────────────────────────────────────────────────────
+// line rising out of a mask (editorial title entry)
+function riseText(str, x, y, p, lineH, halo = 0) {
+  if (p <= 0) return; const e = eOut4(p), yy = y + (1 - e) * lineH * 0.9;
   ctx.save(); ctx.beginPath(); ctx.rect(x - 10, y - lineH * 0.95, 1700, lineH * 1.25); ctx.clip();
-  ctx.globalAlpha *= clamp(p * 2); ctx.fillText(str, x, y + (1 - e) * lineH * 0.9); ctx.restore();
+  ctx.globalAlpha *= clamp(p * 2);
+  if (halo) { const fs = ctx.fillStyle; ctx.strokeStyle = PAPER; ctx.lineWidth = halo; ctx.lineJoin = 'round'; ctx.strokeText(str, x, yy); ctx.fillStyle = fs; }
+  ctx.fillText(str, x, yy); ctx.restore();
 }
-// number with equal width digits (do not flicker while counting)
+// headline with one accent phrase in red and an underline wipe under it
+function headline(pre, key, post, x, y, p, up) {
+  F(66, 600, SERIF, -0.8); ctx.textAlign = 'left';
+  const w1 = ctx.measureText(pre).width, w2 = ctx.measureText(key).width;
+  const u = eOut(up); if (u > 0) { ctx.fillStyle = ACC; ctx.fillRect(x + w1 + 2, y + 14, (w2 - 4) * u, 4); }
+  ctx.fillStyle = INK; riseText(pre, x, y, p, 76);
+  ctx.fillStyle = ACC; riseText(key, x + w1, y, p, 76, 7);
+  ctx.fillStyle = INK; riseText(post, x + w1 + w2, y, p, 76);
+}
+// number with equal-width digits (does not jitter while counting)
 function numText(str, x, y, align = 'left') {
   const dw = ctx.measureText('0').width; let w = 0; const parts = [...str].map(ch => { const cw = /[0-9]/.test(ch) ? dw : ctx.measureText(ch).width; w += cw; return [ch, cw]; });
   let cx = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x; const al = ctx.textAlign; ctx.textAlign = 'center';
   for (const [ch, cw] of parts) { ctx.fillText(ch, cx + cw / 2, y); cx += cw; } ctx.textAlign = al; return w;
 }
-const fmt1 = v => v.toFixed(1).replace('.', ',');
+function source(x, y, a, str = 'Illustrative data.') { if (a <= 0) return; F(16, 400, SANS, 0.3); ctx.fillStyle = rgba(MUTED, a * 0.9); ctx.textAlign = 'left'; ctx.fillText(str, x, y); }
+function kicker(str, x, y, p) { F(17, 700, SANS, 2.5); ctx.fillStyle = ACC; ctx.textAlign = 'left'; riseText(str, x, y, p, 24); }
+function sub(str, x, y, p) { F(25, 400, SANS, 0); ctx.fillStyle = MUTED; ctx.textAlign = 'left'; riseText(str, x, y, p, 34); }
 
-// ── scene 1 ───────────────────────────────── ─────────────────────────────────
+// ── scene 1: line chart ─────────────────────────────────────────────────────
 function scene1(t) {
-  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
-  F(17, 700, SANS, 2.5); ctx.fillStyle = ACC; riseText('IMPROVISED SPEECH', PX0, 150, seg(t, T.head, T.head + 0.55), 24);
-  F(66, 600, SERIF, -0.8); ctx.fillStyle = INK;
-  const hp = seg(t, T.head + 0.12, T.head + 0.8);
-  const pre = 'The more you speak, ', key = '“um”', post = ' fades';
-  riseText(pre, PX0, 232, hp, 76); const w1 = ctx.measureText(pre).width;
-  ctx.fillStyle = ACC; riseText(key, PX0 + w1, 232, hp, 76); const w2 = ctx.measureText(key).width;
-  ctx.fillStyle = INK; riseText(post, PX0 + w1 + w2, 232, hp, 76);
-  // accent underline
-  const up = eOut(seg(t, 0.9, 1.35)); if (up > 0) { ctx.fillStyle = ACC; ctx.fillRect(PX0 + w1 + 4, 246, (w2 - 8) * up, 4); }
-  F(25, 400, SANS, 0); ctx.fillStyle = MUTED;
-  riseText('Filler words in a one-minute improvised talk, by week', PX0, 292, seg(t, T.head + 0.35, T.head + 0.95), 34);
+  ctx.textBaseline = 'alphabetic';
+  kicker('CITY CYCLING', PX0, 150, seg(t, T.head, T.head + 0.55));
+  headline('Build the lane and ', 'the riders come', '', PX0, 232, seg(t, T.head + 0.12, T.head + 0.8), seg(t, 0.85, 1.3));
+  sub('Average cyclists per day on Harbor Avenue, by month', PX0, 292, seg(t, T.head + 0.35, T.head + 0.95));
 
-  // grid (extends from bottom to top, left to right)
-  for (let k = 0; k <= 3; k++) { const v = k * 5, y = Y(v), p = eOut(seg(t, T.grid + k * 0.08, T.grid + 0.55 + k * 0.08)); if (p <= 0) continue;
+  // grid grows bottom to top, left to right
+  for (let k = 0; k <= 3; k++) { const v = k * 1000, y = Y(v), p = eOut(seg(t, T.grid + k * 0.08, T.grid + 0.55 + k * 0.08)); if (p <= 0) continue;
     ctx.fillStyle = k === 0 ? INK : GRID; ctx.fillRect(PX0, y - (k === 0 ? 1 : 0.5), (PX1 - PX0 + 40) * p, k === 0 ? 2 : 1);
     F(19, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, clamp(p * 1.5)); ctx.textAlign = 'left';
-    if (k > 0) ctx.fillText(k === 3 ? '15 words' : String(v), PX0, y - 10); }
+    if (k > 0) ctx.fillText(k === 3 ? '3,000 riders' : fmt(v), PX0, y - 10); }
   F(19, 400, SANS, 0); ctx.textAlign = 'center';
-  [[0, 'Week 1'], [3, '4'], [7, '8'], [11, 'Week 12']].forEach(([i, s], k) => { const p = seg(t, T.grid + 0.3 + k * 0.06, T.grid + 0.7 + k * 0.06); if (p <= 0) return;
+  [[0, 'Jan'], [6, 'Jul'], [12, 'Jan'], [18, 'Jul'], [23, 'Dec']].forEach(([i, s], k) => { const p = seg(t, T.grid + 0.3 + k * 0.06, T.grid + 0.7 + k * 0.06); if (p <= 0) return;
     ctx.fillStyle = rgba(MUTED, p); ctx.fillRect(X(i) - 0.5, PY0, 1, 8 * p); ctx.fillText(s, X(i), PY0 + 36); });
+  const yp = seg(t, T.grid + 0.5, T.grid + 0.9);
+  if (yp > 0) { F(16, 700, SANS, 1.5); ctx.fillStyle = rgba(DARK, yp); ctx.textAlign = 'center'; ctx.fillText('YEAR 1', X(0), PY0 + 64); ctx.fillText('YEAR 2', X(12), PY0 + 64); }
 
-  // difference area
-  const ap = seg(t, T.area, T.area + 0.6);
-  if (ap > 0) { ctx.beginPath(); A.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)));
-    for (let i = 11; i >= 0; i--) ctx.lineTo(X(i), Y(B[i])); ctx.closePath(); ctx.fillStyle = rgba(ACC, 0.075 * eOut(ap)); ctx.fill(); }
+  // lane-opening marker: dashed rule drops from the top when the line reaches it
+  const mp = seg(t, tLine(OPEN) - 0.05, tLine(OPEN) + 0.4);
+  if (mp > 0) { const x = (X(OPEN) + X(OPEN + 1)) / 2, e = eOut(mp), top = PY1 - 30;
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.setLineDash([5, 6]); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + (PY0 - top) * e); ctx.stroke(); ctx.setLineDash([]);
+    F(20, 700, SANS, 0); ctx.textAlign = 'left'; ctx.fillStyle = rgba(INK, clamp(mp * 2)); ctx.fillText('Protected lane opens', x + 12 + (1 - e) * 10, top + 16);
+    F(19, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, clamp(mp * 2 - 0.4)); ctx.fillText('Curb-separated, both directions', x + 12 + (1 - e) * 10, top + 42); }
 
-  // lines
-  drawLine(B, GREY, 3, eIO(seg(t, T.lineB, T.lineB + 0.8)), false, t);
-  drawLine(A, ACC, 5, eIO(seg(t, T.lineA, T.lineA1)), true, t);
-  // direct labels (no legend)
-  ctx.textAlign = 'left';
-  const lb = seg(t, T.lineB + 0.7, T.lineB + 1.1); if (lb > 0) { F(22, 500, SANS, 0); ctx.fillStyle = rgba(DARK, lb); ctx.fillText('No practice', X(11) + 22 + (1 - eOut(lb)) * 10, Y(B[11]) + 8); }
-  const la = seg(t, T.lineA1 - 0.05, T.lineA1 + 0.35); if (la > 0) { F(22, 700, SANS, 0); ctx.fillStyle = rgba(ACC, la); ctx.fillText('Daily practice', X(11) + 22 + (1 - eOut(la)) * 10, Y(A[11]) + 8); }
+  // "before" reference level
+  const bp = seg(t, T.note - 0.1, T.note + 0.45);
+  if (bp > 0) { const y = Y(BEFORE); ctx.strokeStyle = rgba(DARK, 0.8); ctx.lineWidth = 1.5; ctx.setLineDash([2, 5]);
+    ctx.beginPath(); ctx.moveTo(X(0), y); ctx.lineTo(lerp(X(0), X(NL), eOut(bp)), y); ctx.stroke(); ctx.setLineDash([]);
+    F(19, 500, SANS, 0); ctx.fillStyle = rgba(DARK, clamp(bp * 2 - 0.8)); ctx.textAlign = 'right'; ctx.fillText('Before the lane: 850 a day', X(NL), y + 30); }
 
-  // note: parentheses + large number
+  drawLine(LINE, ACC, 5, eIO(seg(t, T.line0, T.line1)));
+
+  // note: bracket + big "×3" counter
   const np = seg(t, T.note, T.note + 0.5);
-  if (np > 0) { const x = X(11) + 150, y0 = Y(B[11]) + 30, y1 = Y(A[11]) - 30, e = eOut(np);
-    ctx.fillStyle = INK; const ym = (y0 + y1) / 2; const hh = (y1 - y0) / 2 * e;
+  if (np > 0) { const x = X(NL) + 70, y0 = Y(BEFORE), y1 = Y(LINE[NL]), e = eOut(np);
+    ctx.fillStyle = INK; const ym = (y0 + y1) / 2; const hh = (y0 - y1) / 2 * e;
     ctx.fillRect(x, ym - hh, 2, hh * 2); ctx.fillRect(x - 8, ym - hh, 10, 2); ctx.fillRect(x - 8, ym + hh - 2, 10, 2);
-    const cp = seg(t, T.note + 0.1, T.note + 0.7); const n = Math.round(78 * eOut(cp));
-    ctx.save(); ctx.globalAlpha *= clamp(cp * 3); F(86, 800, SANS, -2); ctx.fillStyle = ACC; ctx.textAlign = 'left';
-    const tx = x + 26; const mw = ctx.measureText('−%').width; ctx.fillText('−%', tx, ym + 22); numText(String(n), tx + mw, ym + 22);
-    F(21, 400, SANS, 0); ctx.fillStyle = MUTED; ctx.fillText('Compared with week 1, after 12 weeks', tx + 4, ym + 58); ctx.restore(); }
-  // source line
-  const sp = seg(t, 1.2, 1.7); if (sp > 0) { F(16, 400, SANS, 0.3); ctx.fillStyle = rgba(MUTED, sp * 0.9); ctx.textAlign = 'left'; ctx.fillText('Illustrative data. Filler words include “um”, “well”, and similar expressions.', PX0, 985); }
+    const cp = seg(t, T.note + 0.12, T.note + 0.74), v = lerp(1, 3, eOut(cp));
+    const pop = cp >= 1 ? 1 + 0.06 * Math.sin(Math.PI * seg(t, T.note + 0.74, T.note + 0.98)) : 1;
+    ctx.save(); ctx.globalAlpha *= clamp(cp * 3); const tx = x + 30;
+    ctx.translate(tx, ym + 22); ctx.scale(pop, pop); F(104, 800, SANS, -2); ctx.fillStyle = ACC; ctx.textAlign = 'left';
+    const mw = ctx.measureText('×').width; ctx.fillText('×', 0, 0); numText(cp >= 1 ? '3' : v.toFixed(1), mw + 2, 0); ctx.restore();
+    ctx.save(); ctx.globalAlpha *= clamp(cp * 2 - 0.5); F(21, 400, SANS, 0); ctx.fillStyle = MUTED; ctx.textAlign = 'left';
+    ctx.fillText('riders a day, two years', tx + 4, ym + 64); ctx.fillText('after the lane opened', tx + 4, ym + 92); ctx.restore(); }
+  source(PX0, 985, seg(t, 1.2, 1.7), 'Illustrative data. Monthly average of automatic counter readings.');
 }
-function drawLine(D, col, lw, p, head, t) {
+function drawLine(D, col, lw, p) {
   if (p <= 0) return;
-  const pts = D.map((v, i) => [X(i), Y(v)]); const segL = []; let tot = 0;
-  for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); segL.push(l); tot += l; }
-  let rem = tot * p; ctx.beginPath(); ctx.moveTo(...pts[0]); let hx = pts[0][0], hy = pts[0][1], hv = D[0];
-  for (let i = 1; i < pts.length; i++) { const l = segL[i - 1];
-    if (rem >= l) { ctx.lineTo(...pts[i]); rem -= l; hx = pts[i][0]; hy = pts[i][1]; hv = D[i]; }
-    else { const f = rem / l; hx = lerp(pts[i - 1][0], pts[i][0], f); hy = lerp(pts[i - 1][1], pts[i][1], f); hv = lerp(D[i - 1], D[i], f); ctx.lineTo(hx, hy); break; } }
-  ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
-  // data points (as passed)
-  const passed = Math.floor(p * 11 + 1e-6);
-  if (head) for (let i = 0; i <= passed && i < 12; i++) { const sz = i === 11 || i === 0 ? 7 : 4.5;
+  const pts = D.map((v, i) => [X(i), Y(v)]);
+  // parametrise by x so the head moves at a steady pace across months
+  const px = lerp(pts[0][0], pts[NL][0], p); let hx = pts[0][0], hy = pts[0][1], hv = D[0];
+  const trace = () => { ctx.moveTo(...pts[0]);
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i][0] <= px + 1e-6) { ctx.lineTo(...pts[i]); hx = pts[i][0]; hy = pts[i][1]; hv = D[i]; }
+      else { const f = (px - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]); hx = px; hy = lerp(pts[i - 1][1], pts[i][1], f); hv = lerp(D[i - 1], D[i], f); ctx.lineTo(hx, hy); break; } } };
+  // soft area under the drawn line
+  ctx.beginPath(); trace(); ctx.lineTo(hx, PY0); ctx.lineTo(pts[0][0], PY0); ctx.closePath(); ctx.fillStyle = rgba(ACC, 0.07); ctx.fill();
+  ctx.beginPath(); trace(); ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+  const passed = Math.floor(p * NL + 1e-6);
+  for (let i = 0; i <= passed && i <= NL; i++) { const sz = i === NL || i === 0 ? 7 : 4.5;
     ctx.fillStyle = PAPER; ctx.beginPath(); ctx.arc(X(i), Y(D[i]), sz + 2, 0, 7); ctx.fill(); ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(i), Y(D[i]), sz, 0, 7); ctx.fill(); }
-  if (head && p < 1) {   // end meter label
+  if (p < 1) {   // running value at the head
     ctx.fillStyle = col; ctx.beginPath(); ctx.arc(hx, hy, 9, 0, 7); ctx.fill();
-    F(30, 700, SANS, 0); ctx.fillStyle = INK; numText(fmt1(hv), hx + 16, hy - 20, 'left'); }
-  if (head && p >= 1) { F(22, 700, SANS, 0); ctx.fillStyle = ACC; ctx.textAlign = 'center';
-    ctx.textAlign = 'right'; ctx.fillText('14,2', X(0) - 16, Y(D[0]) + 8); ctx.textAlign = 'center'; ctx.fillText('3,1', X(11), Y(D[11]) + 44); }
+    F(30, 700, SANS, 0); ctx.fillStyle = INK; ctx.textAlign = 'left'; numText(fmt(hv), hx + 14, hy - 20, 'left'); }
+  else { F(24, 700, SANS, 0); ctx.fillStyle = INK; ctx.textAlign = 'right'; ctx.fillText('2,560', X(NL) - 14, Y(D[NL]) - 18);
+    ctx.fillStyle = MUTED; ctx.textAlign = 'left'; F(22, 700, SANS, 0); ctx.fillText('760', X(0) + 12, Y(D[0]) + 34); }
 }
 
-// ── scene 2 ───────────────────────────────── ─────────────────────────────────
+// ── scene 2: street-by-street bars ─────────────────────────────────────────
 function scene2(t, oy) {
-  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
-  const b = T.scroll1 - 0.45;
-  F(17, 700, SANS, 2.5); ctx.fillStyle = ACC; riseText('HOW OFTEN?', PX0, oy + 150, seg(t, b, b + 0.55), 24);
-  F(66, 600, SERIF, -0.8); ctx.fillStyle = INK; riseText('One topic a day is the shortest path', PX0, oy + 232, seg(t, b + 0.1, b + 0.75), 76);
-  F(25, 400, SANS, 0); ctx.fillStyle = MUTED; riseText('Weeks to cut filler words in half', PX0, oy + 292, seg(t, b + 0.25, b + 0.85), 34);
-  const BX0 = 640, BX1 = 1640, unit = (BX1 - BX0) / 12, top = oy + 440, gap = 150, bh = 76;
+  ctx.textBaseline = 'alphabetic';
+  const b = T.sc1b - 0.45;
+  kicker('STREET BY STREET', PX0, oy + 150, seg(t, b, b + 0.55));
+  headline('Streets ', 'with protected lanes', ' carry more', PX0, oy + 232, seg(t, b + 0.1, b + 0.75), seg(t, b + 0.7, b + 1.1));
+  sub('Average cyclists per day, six comparable streets', PX0, oy + 292, seg(t, b + 0.25, b + 0.85));
+  const BX0 = 620, BX1 = 1560, unit = (BX1 - BX0) / 3000, top = oy + 410, gap = 80, bh = 52, split = 40;
+  const rowY = i => top + i * gap + (i >= 3 ? split : 0);
   // scale
-  for (let k = 0; k <= 12; k += 4) { const x = BX0 + k * unit, p = seg(t, T.bars + k * 0.02, T.bars + 0.4 + k * 0.02); if (p <= 0) continue;
-    ctx.fillStyle = k === 0 ? INK : GRID; ctx.fillRect(x - (k === 0 ? 1 : 0.5), top - 40, k === 0 ? 2 : 1, (gap * 2 + bh + 70) * eOut(p));
-    F(19, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, p); ctx.textAlign = 'center'; ctx.fillText(k === 12 ? '12 weeks' : String(k), x, top - 54); }
-  BARS.forEach((d, i) => { const y = top + i * gap; const p = seg(t, T.bars + 0.25 + i * 0.16, T.bars + 1.15 + i * 0.16); if (p <= 0) return;
-    const e = eOut4(p); ctx.textAlign = 'right'; F(28, i === 0 ? 700 : 500, SANS, 0); ctx.fillStyle = rgba(i === 0 ? INK : DARK, clamp(p * 2.5));
+  for (let k = 0; k <= 3000; k += 1000) { const x = BX0 + k * unit, d = k / 1000 * 0.03, p = seg(t, T.bars + d, T.bars + 0.4 + d); if (p <= 0) continue;
+    ctx.fillStyle = k === 0 ? INK : GRID; ctx.fillRect(x - (k === 0 ? 1 : 0.5), top - 36, k === 0 ? 2 : 1, (rowY(5) + bh + 28 - top) * eOut(p));
+    F(19, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, p); ctx.textAlign = 'center'; ctx.fillText(k === 3000 ? '3,000 riders' : fmt(k), x, top - 50); }
+  // group labels
+  [[0, 'WITH PROTECTED LANES', ACC], [3, 'PAINT ONLY OR NO LANE', DARK]].forEach(([i, s, c], k) => { const p = seg(t, T.bars + 0.1 + k * 0.36, T.bars + 0.5 + k * 0.36); if (p <= 0) return;
+    F(15, 700, SANS, 2); ctx.fillStyle = rgba(c, p); ctx.textAlign = 'right'; ctx.fillText(s, BX0 - 28, rowY(i) - 12); });
+  STREETS.forEach((d, i) => { const y = rowY(i); const p = seg(t, T.bars + 0.25 + i * 0.12, T.bars + 1.05 + i * 0.12); if (p <= 0) return;
+    const e = eOut4(p), col = d.lane ? ACC : GREY, len = d.v * unit * e;
+    ctx.textAlign = 'right'; F(27, d.lane ? 700 : 500, SANS, 0); ctx.fillStyle = rgba(d.lane ? INK : DARK, clamp(p * 2.5));
     ctx.fillText(d.lab, BX0 - 28, y + bh / 2 + 10);
-    ctx.fillStyle = d.col; ctx.fillRect(BX0, y, d.v * unit * e, bh);
-    F(34, 800, SANS, -0.5); ctx.fillStyle = d.col === GREY ? DARK : d.col; ctx.textAlign = 'left';
-    const n = Math.max(1, Math.round(d.v * e)); const w = numText(String(n), BX0 + d.v * unit * e + 18, y + bh / 2 + 12);
-    F(22, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, clamp(p * 2 - 1)); ctx.fillText(' weeks', BX0 + d.v * unit * e + 18 + w, y + bh / 2 + 12); });
-  // memo
-  const np = seg(t, T.bars + 1.35, T.bars + 1.8);
-  if (np > 0) { F(22, 400, SANS, 0); ctx.textAlign = 'left'; ctx.fillStyle = rgba(INK, np);
-    const y = top + bh / 2 + 12, x = BX0 + 4 * unit + 150;
-    ctx.fillStyle = rgba(ACC, np); ctx.fillText('Compared with weekly practice', x + (1 - eOut(np)) * 12, y - 16);
-    F(22, 700, SANS, 0); ctx.fillText('about 3× faster', x + (1 - eOut(np)) * 12, y + 14); }
-  const sp = seg(t, b + 0.4, b + 0.9); if (sp > 0) { F(16, 400, SANS, 0.3); ctx.fillStyle = rgba(MUTED, sp * 0.9); ctx.textAlign = 'left'; ctx.fillText('Illustrative data.', PX0, oy + 985); }
+    ctx.fillStyle = col; ctx.fillRect(BX0, y, len, bh);
+    F(30, 800, SANS, -0.5); ctx.fillStyle = d.lane ? ACC : DARK; ctx.textAlign = 'left';
+    numText(fmt(Math.round(d.v * e / 10) * 10), BX0 + len + 16, y + bh / 2 + 11); });
+  // note beside the "without" group
+  const np = seg(t, T.bars + 1.25, T.bars + 1.65);
+  if (np > 0) { const x = BX0 + 1150 * unit + 40 + (1 - eOut(np)) * 12, y = rowY(3) + 24;
+    ctx.save(); ctx.globalAlpha *= np; ctx.fillStyle = INK; ctx.fillRect(x - 20, rowY(3), 2, rowY(5) + bh - rowY(3));
+    F(22, 400, SANS, 0); ctx.textAlign = 'left'; ctx.fillStyle = ACC; ctx.fillText('On average, lane streets', x, y);
+    F(22, 700, SANS, 0); ctx.fillText('carry 3.1 times the riders', x, y + 30); ctx.restore(); }
+  source(PX0, oy + 985, seg(t, b + 0.4, b + 0.9), 'Illustrative data. Streets matched for length and traffic volume.');
 }
 
-// ── logo (ad hoc: speech bubble + 3 diamonds) ───────────────────────────────
-function logo(x, y, size, a) {
-  const b = size * 0.62, k = b * 1.15 / 92; ctx.save(); ctx.globalAlpha = a;
-  const P = (pts, col) => { ctx.fillStyle = col; ctx.beginPath(); pts.forEach((p, i) => { const u = x + p[0] * k, v = y - b * 0.95 + p[1] * k; i ? ctx.lineTo(u, v) : ctx.moveTo(u, v); }); ctx.closePath(); ctx.fill(); };
-  P([[0, 0], [92, 0], [92, 70], [40, 70], [14, 94], [14, 70], [0, 70]], INK);
-  [[22, PAPER], [46, ACC], [70, PAPER]].forEach(([cx, col]) => P([[cx, 25], [cx + 10, 35], [cx, 45], [cx - 10, 35]], col));
-  F(size, 600, SERIF, -0.5); ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText('irticalen.', x + b * 1.45, y);
-  ctx.restore();
+// ── scene 3: small multiples by season ─────────────────────────────────────
+function scene3(t, oy) {
+  ctx.textBaseline = 'alphabetic';
+  const b = T.sc2b - 0.45;
+  kicker('BY SEASON', PX0, oy + 150, seg(t, b, b + 0.55));
+  headline('The gain holds ', 'in every season', '', PX0, oy + 232, seg(t, b + 0.1, b + 0.75), seg(t, b + 0.7, b + 1.1));
+  sub('Cyclists per day, year before vs. year after the lane opened', PX0, oy + 292, seg(t, b + 0.25, b + 0.85));
+  const pw = 350, gp = 60, ph = 300, y0 = oy + 520, base = y0 + ph;
+  SEASONS.forEach((s, i) => { const x0 = PX0 + i * (pw + gp), st = T.pan + i * 0.12, p = seg(t, st, st + 0.35); if (p <= 0) return;
+    const e = eOut(p), SX = j => x0 + j / 12 * pw, SY = v => base - v / SMAX * ph;
+    // panel frame: baseline + faint gridlines (shared scale across panels)
+    ctx.fillStyle = rgba(GRID, e); for (let g = 1; g <= 4; g++) ctx.fillRect(x0, SY(g * 1000) - 0.5, pw * e, 1);
+    ctx.fillStyle = INK; ctx.fillRect(x0, base - 1, pw * e, 2);
+    if (i === 0) { F(16, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, e); ctx.textAlign = 'left'; ctx.fillText('4,000', x0, SY(4000) - 10); ctx.fillText('2,000', x0, SY(2000) - 8); }
+    F(26, 700, SANS, 0); ctx.fillStyle = rgba(INK, e); ctx.textAlign = 'left'; ctx.fillText(s.lab, x0, y0 - 128 + (1 - e) * 10);
+    // lines draw left to right, "before" slightly ahead of "after"
+    const lp = eIO(seg(t, st + 0.12, st + 0.62)), la = eIO(seg(t, st + 0.2, st + 0.7));
+    const path = (D, q, col, lw) => { if (q <= 0) return; const n = q * 12; ctx.beginPath(); ctx.moveTo(SX(0), SY(D[0]));
+      for (let j = 1; j <= Math.floor(n); j++) ctx.lineTo(SX(j), SY(D[j]));
+      const f = n - Math.floor(n); if (f > 0 && n < 12) { const j = Math.floor(n); ctx.lineTo(SX(j + f), SY(lerp(D[j], D[j + 1], f))); }
+      ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke(); };
+    path(s.b, lp, GREY, 3); path(s.a, la, ACC, 4.5);
+    if (i === 0) { const lb = seg(t, st + 0.6, st + 0.9); F(18, 700, SANS, 0); ctx.textAlign = 'right';
+      ctx.fillStyle = rgba(DARK, lb); ctx.fillText('Before', SX(12), SY(s.b[12]) + 28);
+      ctx.fillStyle = rgba(ACC, lb); ctx.fillText('After', SX(12), SY(s.a[12]) - 16); }
+    // counting percentage with a small overshoot pop
+    const cp = seg(t, st + 0.3, st + 0.8);
+    if (cp > 0) { const sc = 0.6 + 0.4 * eBack(cp); ctx.save(); ctx.translate(x0, y0 - 50); ctx.scale(sc, sc); ctx.globalAlpha *= clamp(cp * 3);
+      F(52, 800, SANS, -1.5); ctx.fillStyle = ACC; ctx.textAlign = 'left'; const n = Math.round(s.pct * eOut(cp)); const w = numText('+' + n, 0, 0); ctx.fillText('%', w + 2, 0); ctx.restore(); }
+  });
+  source(PX0, oy + 985, seg(t, b + 0.4, b + 0.9), 'Illustrative data. Daily averages by week within each season.');
+}
+
+// ── closing: key takeaway, with the opening line chart echoed as a sparkline ─────
+function takeaway(t) {
+  const p = seg(t, T.end, T.end + 0.5); if (p <= 0) return;
+  ctx.textBaseline = 'alphabetic'; const x = PX0;
+  kicker('THE TAKEAWAY', x, 400, p);
+  F(92, 600, SERIF, -1.2); ctx.fillStyle = INK; ctx.textAlign = 'left';
+  riseText('Protect the lane,', x, 512, seg(t, T.end + 0.05, T.end + 0.6), 104);
+  const p2 = seg(t, T.end + 0.15, T.end + 0.7); const pre = 'and cycling ', w1 = ctx.measureText(pre).width, w2 = ctx.measureText('triples').width;
+  const u = eOut(seg(t, T.end + 0.6, T.end + 0.9)); if (u > 0) { ctx.fillStyle = ACC; ctx.fillRect(x + w1 + 2, 640, (w2 - 2) * u, 5); }
+  ctx.fillStyle = INK; riseText(pre, x, 620, p2, 104); ctx.fillStyle = ACC; riseText('triples.', x + w1, 620, p2, 104, 9);
+  F(25, 400, SANS, 0); ctx.fillStyle = MUTED; riseText('Daily cyclists on Harbor Avenue: 850 before, 2,560 two years after.', x, 712, seg(t, T.end + 0.3, T.end + 0.8), 34);
+  // sparkline
+  const sx0 = 1200, sx1 = 1700, sy0 = 640, sy1 = 420, SX = i => lerp(sx0, sx1, i / NL), SY = v => lerp(sy0, sy1, v / 2600);
+  const fp = seg(t, T.end + 0.1, T.end + 0.45);
+  if (fp > 0) { ctx.fillStyle = rgba(INK, fp); ctx.fillRect(sx0, sy0 + 20, (sx1 - sx0) * eOut(fp), 2);
+    const mx = (SX(OPEN) + SX(OPEN + 1)) / 2; ctx.strokeStyle = rgba(INK, fp); ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
+    ctx.beginPath(); ctx.moveTo(mx, sy1 - 10); ctx.lineTo(mx, sy1 - 10 + (sy0 - sy1 + 30) * eOut(fp)); ctx.stroke(); ctx.setLineDash([]);
+    F(17, 700, SANS, 0); ctx.fillStyle = rgba(DARK, fp); ctx.textAlign = 'left'; ctx.fillText('Lane opens', mx + 10, sy1 + 4); }
+  const lp = eIO(seg(t, T.end + 0.2, T.end + 0.8));
+  if (lp > 0) { const n = lp * NL; ctx.beginPath(); ctx.moveTo(SX(0), SY(LINE[0]));
+    for (let i = 1; i <= Math.floor(n); i++) ctx.lineTo(SX(i), SY(LINE[i]));
+    const f = n - Math.floor(n); if (f > 0 && n < NL) { const i = Math.floor(n); ctx.lineTo(SX(i + f), SY(lerp(LINE[i], LINE[i + 1], f))); }
+    ctx.lineWidth = 4.5; ctx.strokeStyle = ACC; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+    const by = SY(BEFORE); ctx.strokeStyle = rgba(DARK, 0.8); ctx.lineWidth = 1.5; ctx.setLineDash([2, 5]);
+    ctx.beginPath(); ctx.moveTo(SX(0), by); ctx.lineTo(SX(Math.min(n, OPEN + 0.5)), by); ctx.stroke(); ctx.setLineDash([]);
+    F(22, 700, SANS, 0); ctx.fillStyle = DARK; ctx.textAlign = 'right'; ctx.fillText('850', SX(0) - 14, by + 8); }
+  const ep = seg(t, T.end + 0.72, T.end + 0.92);
+  if (ep > 0) { const s = 0.6 + 0.4 * eBack(ep); ctx.fillStyle = ACC; ctx.beginPath(); ctx.arc(SX(NL), SY(LINE[NL]), 8 * s, 0, 7); ctx.fill();
+    F(22, 700, SANS, 0); ctx.fillStyle = rgba(INK, ep); ctx.textAlign = 'right'; ctx.fillText('2,560', SX(NL), SY(LINE[NL]) - 22); }
+  source(x, 985, seg(t, T.end + 0.4, T.end + 0.8));
 }
 
 function render(t) {
   ctx.globalAlpha = 1; ctx.drawImage(PAPER_CV, 0, 0);
-  const sc = eIO(seg(t, T.scroll0, T.scroll1)); const oy = -H * sc;
-  const fo = 1 - eIO(seg(t, T.fade, T.fade + 0.45));
-  ctx.save(); ctx.globalAlpha = fo; ctx.translate(0, -18 * seg(t, T.fade, T.fade + 0.45));
-  if (sc < 1) { ctx.save(); ctx.translate(0, oy); scene1(t); ctx.restore(); }
-  if (sc > 0) scene2(t, oy + H);
-  ctx.restore();
-  const lp = seg(t, T.logo, T.logo + 0.45);
-  if (lp > 0) { ctx.save(); F(46, 600, SERIF, -0.5); const tw = ctx.measureText('irticalen.').width + 46 * 0.62 * 1.45;
-    logo(W / 2 - tw / 2, H / 2 + 16 + (1 - eOut(lp)) * 14, 46, eOut(lp)); ctx.restore(); }
+  const s1 = eIO(seg(t, T.sc1a, T.sc1b)), s2 = eIO(seg(t, T.sc2a, T.sc2b)); const oy = -H * (s1 + s2);
+  const fp = seg(t, T.fade, T.fade + 0.45), fo = 1 - eIO(fp);
+  if (fo > 0) { ctx.save(); ctx.globalAlpha = fo; ctx.translate(0, -24 * eIO(fp));
+    if (oy > -H) { ctx.save(); ctx.translate(0, oy); scene1(t); ctx.restore(); }
+    if (oy > -2 * H && oy < 0) scene2(t, oy + H);
+    if (oy < -H) scene3(t, oy + 2 * H);
+    ctx.restore(); }
+  takeaway(t);
+  // last 0.2 s: settle toward paper for a soft ending
+  const ep = seg(t, DUR - 0.2, DUR); if (ep > 0) { ctx.globalAlpha = eIO(ep) * 0.85; ctx.drawImage(PAPER_CV, 0, 0); ctx.globalAlpha = 1; }
 }
 let PAPER_CV;
 function prep() {
   PAPER_CV = mk(W, H); const g = PAPER_CV.getContext('2d'); g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
-  const im = g.getImageData(0, 0, W, H); for (let i = 0; i < im.data.length; i += 4) { const n = (Math.random() - 0.5) * 7; im.data[i] += n; im.data[i + 1] += n; im.data[i + 2] += n; }
+  const r = rng(19); const im = g.getImageData(0, 0, W, H); for (let i = 0; i < im.data.length; i += 4) { const n = (r() - 0.5) * 7; im.data[i] += n; im.data[i + 1] += n; im.data[i + 2] += n; }
   g.putImageData(im, 0, 0);
 }
 window.draw = function (job) { render(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
 window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`600 60px 'Source Serif 4'`, 'The more you speak, um fades'),
-  ...[400, 500, 700, 800].map(w => document.fonts.load(`${w} 20px 'Libre Franklin'`, 'Improvisation 0123−%'))])).then(prep);
+  document.fonts.load(`600 60px 'Source Serif 4'`, 'Build the lane and riders come'),
+  ...[400, 500, 700, 800].map(w => document.fonts.load(`${w} 20px 'Libre Franklin'`, 'Cycling 0123456789,.×+%'))])).then(prep);
 </script></body></html>
