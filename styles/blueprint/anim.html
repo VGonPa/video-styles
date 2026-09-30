@@ -3,12 +3,10 @@
 <body><canvas id="c" width="1920" height="1080"></canvas>
 <script src="common.js"></script>
 <script>
-// BLUEPRINT — technical drawing of microphone: front view, section A–A, top view, dimensions, letterhead
+// BLUEPRINT — Model MP-7 mechanical pencil: front view, end view, section A–A, exploded view, parts list, title block
 const LN = '232,241,255';                      // line color (rgb)
 const COND = "'Barlow Condensed'", MONO = "'IBM Plex Mono'";
-const CM = 30;                                 // 1 cm = 30 px
-const FX = 520, SX = 1150;                     // view axes
-const G = { top: 190, hc: 280, hr: 90, ringT: 350, ringB: 380, ringW: 64, bodyB: 730, bw0: 58, bw1: 46, capB: 750, cw: 40 };
+const evs = [];                                // sound events (read by events.mjs)
 
 // ---------- Paper (once) ----------
 const paper = mk(W, H);
@@ -25,14 +23,18 @@ const L = mk(W, H), lc = L.getContext('2d'), GL = mk(W / 4, H / 4), gc = GL.getC
 
 // ---------- Action system ----------
 const acts = [];
-function line(path, t0, t1, o = {}) { acts.push({ kind: 'path', path: path.done(), t0, t1, w: o.w ?? 1.5, a: o.a ?? 0.9, dash: o.dash, ease: o.ease || eio2, clip: o.clip }); }
-function txt(str, x, y, size, t0, o = {}) { acts.push({ kind: 'text', str, x, y, size, t0, t1: t0 + (o.dur ?? str.length * 0.028), font: o.font || COND, w8: o.w8 || 500, it: o.it ?? true, align: o.align || 'center', rot: o.rot || 0, a: o.a ?? 0.95, ls: o.ls ?? 1 }); }
-function arrowHead(x, y, ang, t0) { acts.push({ kind: 'arrow', x, y, ang, t0, t1: t0 + 0.18 }); }
-function hatch(clipFn, t0, t1, o = {}) { acts.push({ kind: 'hatch', clipFn, t0, t1, gap: o.gap || 11, ang: o.ang ?? Math.PI / 4, box: o.box, a: o.a ?? 0.75, cross: o.cross }); }
-const CEN = [26, 6, 4, 6];                     // axis line (dashed-dot)
-const HID = [10, 7];
+function line(path, t0, t1, o = {}) { acts.push({ kind: 'path', path: path.done(), t0, t1, w: o.w ?? 1.5, a: o.a ?? 0.9, dash: o.dash, ease: o.ease || eio2 });
+  if (t1 - t0 >= 0.15) evs.push({ k: (o.w ?? 1.5) >= 2 ? 'scribe' : 'pen', t: t0, d: t1 - t0 }); }
+function txt(str, x, y, size, t0, o = {}) { const dur = o.dur ?? str.length * 0.028;
+  acts.push({ kind: 'text', str, x, y, size, t0, t1: t0 + dur, font: o.font || COND, w8: o.w8 || 500, it: o.it ?? true, align: o.align || 'center', rot: o.rot || 0, a: o.a ?? 0.95, ls: o.ls ?? 1 });
+  const n = str.replace(/ /g, '').length; for (let i = 0; i < n; i += 2) evs.push({ k: 'key', t: t0 + dur * i / n }); }
+function arrowHead(x, y, ang, t0) { acts.push({ kind: 'arrow', x, y, ang, t0, t1: t0 + 0.18 }); evs.push({ k: 'tick', t: t0 }); }
+function dot(x, y, t0, r = 4.5) { acts.push({ kind: 'dot', x, y, r, t0, t1: t0 + 0.12 }); if (r > 3) evs.push({ k: 'tick', t: t0 }); }
+function hatch(clipFn, t0, t1, o = {}) { acts.push({ kind: 'hatch', clipFn, t0, t1, gap: o.gap || 11, ang: o.ang ?? Math.PI / 4, box: o.box, a: o.a ?? 0.75, cross: o.cross });
+  evs.push({ k: 'hatch', t: t0, d: t1 - t0 }); }
+const CEN = [26, 6, 4, 6];                     // axis line (dash-dot)
+const HID = [8, 6];                            // hidden line
 
-// dimension: vertical
 function dimV(x, y0, y1, fromX, t0, label, o = {}) {
   const side = Math.sign(x - fromX) || -1;
   line(P().M(fromX + side * 6, y0).L(x + side * 12, y0), t0, t0 + 0.2, { w: 1.1, a: .8 });
@@ -40,9 +42,8 @@ function dimV(x, y0, y1, fromX, t0, label, o = {}) {
   const ym = (y0 + y1) / 2;
   line(P().M(x, ym).L(x, y0 + 1), t0 + 0.2, t0 + 0.45, { w: 1.2 }); line(P().M(x, ym).L(x, y1 - 1), t0 + 0.2, t0 + 0.45, { w: 1.2 });
   arrowHead(x, y0, -Math.PI / 2, t0 + 0.43); arrowHead(x, y1, Math.PI / 2, t0 + 0.43);
-  txt(label, x - 12 * (o.flip ? -1 : 1), ym, 30, t0 + 0.5, { rot: -Math.PI / 2 });
+  txt(label, x - 12, ym, o.size || 30, t0 + 0.5, { rot: -Math.PI / 2 });
 }
-// size: horizontal
 function dimH(y, x0, x1, fromY, t0, label, o = {}) {
   const side = Math.sign(y - fromY) || -1;
   line(P().M(x0, fromY + side * 6).L(x0, y + side * 12), t0, t0 + 0.2, { w: 1.1, a: .8 });
@@ -50,101 +51,206 @@ function dimH(y, x0, x1, fromY, t0, label, o = {}) {
   const xm = (x0 + x1) / 2;
   line(P().M(xm, y).L(x0 + 1, y), t0 + 0.2, t0 + 0.45, { w: 1.2 }); line(P().M(xm, y).L(x1 - 1, y), t0 + 0.2, t0 + 0.45, { w: 1.2 });
   arrowHead(x0, y, Math.PI, t0 + 0.43); arrowHead(x1, y, 0, t0 + 0.43);
-  txt(label, xm + (o.dx || 0), y - 12, 30, t0 + 0.5);
+  txt(label, xm + (o.dx || 0), y - 12, o.size || 30, t0 + 0.5);
 }
-// read tag (leader)
 function leader(x0, y0, x1, y1, x2, label, t0, align = 'left') {
-  acts.push({ kind: 'dot', x: x0, y: y0, t0, t1: t0 + 0.12 });
+  dot(x0, y0, t0);
   line(P().M(x0, y0).L(x1, y1).L(x2, y1), t0 + 0.05, t0 + 0.4, { w: 1.1 });
-  txt(label, align === 'left' ? x2 + 10 : x2 - 10, y1 + 9, 26, t0 + 0.38, { align, font: MONO, it: false, w8: 400, ls: 0.5 });
+  txt(label, align === 'left' ? x2 + 10 : x2 - 10, y1 + 8, 23, t0 + 0.38, { align, font: MONO, it: false, w8: 400, ls: 0.5 });
 }
+function polyPath(pts, close = true) { const p = P().M(...pts[0]); for (let i = 1; i < pts.length; i++) p.L(...pts[i]); if (close) p.L(...pts[0]); return p; }
+function tracePoly(c, pts) { c.moveTo(...pts[0]); for (let i = 1; i < pts.length; i++) c.lineTo(...pts[i]); c.closePath(); }
+const mapper = (ox, oy, k) => pts => pts.map(([x, y]) => [ox + x * k, oy + y * k]);
+const rectMM = (x0, x1, r) => [[x0, -r], [x1, -r], [x1, r], [x0, r]];
 
-// contour paths (same for front and section)
-function outline(cx, inset = 0) {
-  const k = inset, a0 = Math.asin((G.ringT - G.hc) / (G.hr - k));
-  const p = P().A(cx, G.hc, G.hr - k, G.hr - k, Math.PI - a0, 2 * Math.PI + a0, 90);
-  return p;
+// ---------- Part geometry (mm; x along the axis from the tip, y radial) ----------
+const R_HEX = 4.62, R_EDGE = 2.31;             // hex barrel: across corners 9.24, visible edges at ±2.31
+const SH = {
+  cone: [[0, -0.6], [5, -0.6], [5, -1.2], [18, -3.9], [18, -4.0], [20, -4.0], [20, 4.0], [18, 4.0], [18, 3.9], [5, 1.2], [5, 0.6], [0, 0.6]],
+  coneIn: [[0, -0.3], [5, -0.3], [14, -1.0], [18, -1.6], [20, -2.6], [20, 2.6], [18, 1.6], [14, 1.0], [5, 0.3], [0, 0.3]],
+  grip: [[20, -3.8], [20.4, -4.2], [51.6, -4.2], [52, -3.8], [52, 3.8], [51.6, 4.2], [20.4, 4.2], [20, 3.8]],
+  gripIn: rectMM(20, 52, 3.4),
+  barrel: rectMM(52, 126, R_HEX), barrelIn: rectMM(52, 126, 3.62),
+  clip: [[122, -R_HEX], [122, -6.6], [101, -6.6], [99, -6.1], [99, -5.3], [101, -4.62]],
+  cap: (() => { const p = [[126, -3.4], [137, -3.4]]; for (let i = 1; i < 12; i++) { const a = -Math.PI / 2 + Math.PI * i / 12; p.push([137 + Math.cos(a) * 3, Math.sin(a) * 3.4]); } p.push([137, 3.4], [126, 3.4]); return p; })(),
+  capIn: rectMM(126, 137.5, 2.7),
+  clutch: [[14, -1.0], [18, -1.6], [30, -1.6], [30, 1.6], [18, 1.6], [14, 1.0]],
+  ring: rectMM(16, 20, 2.2),
+  tube: [[30, -2.0], [116, -2.0], [116, -2.4], [118, -2.4], [118, 2.4], [116, 2.4], [116, 2.0], [30, 2.0]],
+  eraser: [[122, -2.5], [135.5, -2.5], [136.5, -1.8], [136.5, 1.8], [135.5, 2.5], [122, 2.5]],
+};
+function springPts(x0, len, r, n = 12) { const p = [[x0, -r]]; for (let i = 1; i <= n * 2; i++) p.push([x0 + len * i / (n * 2), i % 2 ? r : -r]); return p; }
+
+// ===== 1) FRONT VIEW (7 px/mm) =====
+const FK = 7, FOX = 185, FOY = 215, fm = mapper(FOX, FOY, FK), FXp = x => FOX + x * FK, FYp = y => FOY + y * FK;
+line(P().M(FXp(-9), FOY).L(FXp(143), FOY), 0.3, 1.0, { w: 1.1, a: .6, dash: CEN });
+line(polyPath(fm(SH.cone)), 0.75, 1.3, { w: 3 });
+line(P().M(FXp(5), FYp(-1.2)).L(FXp(5), FYp(1.2)), 1.2, 1.3, { w: 1.4 });
+line(P().M(FXp(18), FYp(-4)).L(FXp(18), FYp(4)), 1.22, 1.32, { w: 1.4 });
+line(polyPath(fm(SH.grip)), 1.0, 1.6, { w: 3 });
+line(polyPath(fm(SH.barrel)), 1.3, 2.05, { w: 3 });
+line(polyPath(fm(SH.clip), false), 1.8, 2.15, { w: 3 });
+line(polyPath(fm(SH.cap)), 1.9, 2.3, { w: 3 });
+line(P().M(FXp(129), FYp(-3.4)).L(FXp(129), FYp(3.4)), 2.2, 2.3, { w: 1.4 });
+[-R_EDGE, R_EDGE].forEach((y, i) => line(P().M(FXp(52), FYp(y)).L(FXp(126), FYp(y)), 1.95 + i * .05, 2.3 + i * .05, { w: 1.4 }));
+line(P().M(FXp(-5), FOY).L(FXp(0), FOY), 2.25, 2.35, { w: 3.2 });                                   // 0.5 lead
+hatch(c => { c.beginPath(); c.rect(FXp(23), FYp(-4.2) + 2, FXp(49) - FXp(23), FK * 8.4 - 4); c.clip(); }, 2.1, 2.6, { gap: 8, cross: true, a: .45, box: [FXp(23), FYp(-4.2), FXp(49), FYp(4.2)] });
+dimH(127, FXp(-5), FXp(140), FYp(-1), 2.35, '145');
+dimH(291, FXp(20), FXp(52), FYp(4.2), 2.6, '32');
+dimV(FXp(-12), FYp(-4.2), FYp(4.2), FXp(20), 2.75, 'Ø 8.4', { size: 24 });
+txt('FRONT VIEW', 735, 336, 34, 2.8, { w8: 600, it: false, ls: 3 });
+line(P().M(735 - 104, 349).L(735 + 104, 349), 3.0, 3.2, { w: 1.6 });
+
+// ===== 2) SHEET FRAME =====
+line(polyPath([[40, 40], [1880, 40], [1880, 1040], [40, 1040]]), 3.1, 4.1, { w: 1.2, a: .7 });
+line(polyPath([[62, 62], [1858, 62], [1858, 1018], [62, 1018]]), 3.2, 4.2, { w: 2.6 });
+for (let i = 1; i < 8; i++) { const x = 62 + i * (1796 / 8); line(P().M(x, 40).L(x, 62), 3.7 + i * .02, 3.8 + i * .02, { w: 1.2, a: .7 }); line(P().M(x, 1018).L(x, 1040), 3.7 + i * .02, 3.8 + i * .02, { w: 1.2, a: .7 }); }
+for (let i = 0; i < 8; i++) { const x = 62 + (i + .5) * (1796 / 8); txt(String(i + 1), x, 58, 17, 3.9 + i * .03, { font: MONO, it: false, w8: 500, dur: .05 }); txt(String(i + 1), x, 1036, 17, 3.9 + i * .03, { font: MONO, it: false, w8: 500, dur: .05 }); }
+'ABCD'.split('').forEach((ch, i) => { const y = 62 + (i + .5) * (956 / 4); txt(ch, 51, y + 6, 17, 4.0 + i * .04, { font: MONO, it: false, w8: 500, dur: .05 }); txt(ch, 1869, y + 6, 17, 4.0 + i * .04, { font: MONO, it: false, w8: 500, dur: .05 }); });
+
+// ===== 3) END VIEW (2:1, from the cap end) with cutting plane A–A =====
+const EX = 1310, EY = 215, EK = 14;
+line(P().M(EX - 90, EY).L(EX + 90, EY), 3.55, 3.9, { w: 1.1, a: .6, dash: CEN });
+{ const hex = []; for (let i = 0; i < 6; i++) { const a = -Math.PI / 2 + i * Math.PI / 3; hex.push([EX + Math.cos(a) * R_HEX * EK, EY + Math.sin(a) * R_HEX * EK]); }
+  line(polyPath(hex), 3.6, 4.2, { w: 3 }); }
+line(P().A(EX, EY, 4.2 * EK, 4.2 * EK, -Math.PI / 2, Math.PI * 1.5, 90), 3.75, 4.3, { w: 1.3, dash: HID });
+line(P().A(EX, EY, 3.4 * EK, 3.4 * EK, -Math.PI / 2, Math.PI * 1.5, 80), 3.85, 4.35, { w: 2.4 });
+line(P().A(EX, EY, 2.2 * EK, 2.2 * EK, -Math.PI / 2, Math.PI * 1.5, 60), 3.95, 4.35, { w: 1.3 });
+line(polyPath([[EX - 21, EY - R_HEX * EK + 4], [EX - 21, EY - 6.6 * EK], [EX + 21, EY - 6.6 * EK], [EX + 21, EY - R_HEX * EK + 4]], false), 4.1, 4.4, { w: 2.4 });
+// cutting plane: dash-dot through the axis, heavy ends, arrows point in the viewing direction
+line(P().M(EX, EY - 118).L(EX, EY + 118), 4.2, 4.55, { w: 1.1, a: .7, dash: CEN });
+[[-1, EY - 124], [1, EY + 124]].forEach(([s, y], i) => { const t0 = 4.4 + i * .08;
+  line(P().M(EX, y - s * 26).L(EX, y), t0, t0 + .12, { w: 4.5 });
+  line(P().M(EX, y).L(EX - 46, y), t0 + .1, t0 + .26, { w: 1.6 }); arrowHead(EX - 52, y, Math.PI, t0 + .24);
+  txt('A', EX - 82, y + 12, 34, t0 + .28, { w8: 600 }); });
+dimH(EY + 94, EX - 4 * EK, EX + 4 * EK, EY + 60, 4.55, '8', { dx: 22, size: 26 });
+txt('END VIEW  2 : 1', EX, 395, 28, 4.6, { w8: 600, it: false, ls: 2.5 });
+
+// projection lines: front view → section
+[-5, 20, 52, 126, 140].forEach((x, i) => line(P().M(FXp(x), 253).L(FXp(x), 384), 3.9 + i * .05, 4.4 + i * .05, { w: 1, a: .4, dash: [3, 5] }));
+
+// ===== 4) SECTION A–A (7 px/mm) =====
+const SOY = 440, sm = mapper(FOX, SOY, FK), SYp = y => SOY + y * FK;
+line(P().M(FXp(-9), SOY).L(FXp(143), SOY), 4.3, 4.9, { w: 1.1, a: .6, dash: CEN });
+const shells = [['cone', 'coneIn', 1], ['grip', 'gripIn', -1], ['barrel', 'barrelIn', 1], ['cap', 'capIn', -1]];
+shells.forEach(([o, i], k) => { line(polyPath(sm(SH[o])), 4.4 + k * .18, 4.9 + k * .22, { w: 3 }); line(polyPath(sm(SH[i])), 4.6 + k * .18, 5.05 + k * .22, { w: 1.5 }); });
+shells.forEach(([o, i, s], k) => { const A = sm(SH[o]), B = sm(SH[i]), xs = A.map(q => q[0]);
+  hatch(c => { c.beginPath(); tracePoly(c, A); tracePoly(c, B); c.clip('evenodd'); }, 5.1 + k * .1, 5.55 + k * .1,
+    { gap: 7, ang: s * Math.PI / 4, a: .7, box: [Math.min(...xs), SYp(-4.7), Math.max(...xs), SYp(4.7)] }); });
+line(polyPath(sm(SH.clutch)), 4.95, 5.3, { w: 2.2 });
+line(polyPath(sm(SH.ring)), 5.1, 5.35, { w: 2.2 });
+[-0.5, 0.5].forEach((y, i) => line(P().M(FXp(14.5), SYp(y)).L(FXp(24), SYp(y)), 5.25 + i * .04, 5.45 + i * .04, { w: 1.2 }));   // jaw slits
+line(polyPath(sm(SH.tube)), 5.05, 5.65, { w: 2.2 });
+[-1.4, 1.4].forEach((y, i) => line(P().M(FXp(30), SYp(y)).L(FXp(116), SYp(y)), 5.3 + i * .05, 5.7 + i * .05, { w: 1.2, dash: HID }));
+line(polyPath(sm(springPts(32, 24, 2.9)), false), 5.2, 5.7, { w: 1.8 });
+for (let i = 0; i <= 24; i++) dot(FXp(32 + i), SYp(i % 2 ? 2.9 : -2.9), 5.25 + i * 0.018, 2.6);
+line(polyPath(sm(SH.eraser)), 5.4, 5.7, { w: 2.2 });
+hatch(c => { c.beginPath(); tracePoly(c, sm(SH.eraser)); c.clip(); }, 5.6, 5.85, { gap: 6, cross: true, a: .5, box: [FXp(122), SYp(-2.5), FXp(137), SYp(2.5)] });
+line(P().M(FXp(-5), SOY).L(FXp(116), SOY), 5.5, 5.8, { w: 2.6 });                                  // lead through the clutch
+leader(FXp(16.5), SYp(1.5), FXp(0), 590, FXp(6), 'CLUTCH · 3 JAWS', 5.75);
+leader(FXp(44), SYp(2.9), FXp(52), 590, FXp(58), 'SPRING Ø 5.8', 5.85);
+leader(FXp(90), SYp(2), FXp(97), 590, FXp(103), 'LEAD TUBE', 5.95);
+leader(FXp(131), SYp(2.5), FXp(137), 590, FXp(143), 'ERASER', 6.05);
+txt('SECTION A–A', 735, 530, 34, 5.6, { w8: 600, it: false, ls: 3 });
+line(P().M(735 - 100, 543).L(735 + 100, 543), 5.8, 6.0, { w: 1.6 });
+
+// ===== 5) EXPLODED VIEW (4.4 px/mm) — drawn by drawExploded() =====
+const XK = 4.4, XY = 790, XAX = 855 - 70 * XK, xm = mapper(XAX, XY, XK);
+const PARTS = [   // n, name, material, internal?, shapes, assembled start (mm), exploded start (px)
+  { n: 1, name: 'TIP CONE', mat: 'BRASS', int: false, sh: ['cone'], lines: [[[5, -1.2], [5, 1.2]], [[18, -4], [18, 4]]], x0: 0, to: 150 },
+  { n: 2, name: 'GRIP', mat: 'ALUMINUM', int: false, sh: ['grip'], knurl: true, x0: 20, to: 262 },
+  { n: 3, name: 'CLUTCH', mat: 'STEEL', int: true, sh: ['clutch', 'ring'], lines: [[[14.5, -0.5], [24, -0.5]], [[14.5, 0.5], [24, 0.5]]], x0: 14, to: 424 },
+  { n: 4, name: 'SPRING', mat: 'STEEL', int: true, spring: true, x0: 32, to: 506 },
+  { n: 5, name: 'LEAD TUBE', mat: 'ABS', int: true, sh: ['tube'], x0: 30, to: 668 },
+  { n: 6, name: 'BARREL', mat: 'ALUMINUM', int: false, sh: ['barrel', 'clip'], openClip: true, lines: [[[52, -R_EDGE], [126, -R_EDGE]], [[52, R_EDGE], [126, R_EDGE]]], x0: 52, to: 1070 },
+  { n: 7, name: 'ERASER', mat: 'RUBBER', int: true, sh: ['eraser'], x0: 122, to: 1428 },
+  { n: 8, name: 'CAP', mat: 'ALUMINUM', int: false, sh: ['cap'], lines: [[[129, -3.4], [129, 3.4]]], x0: 126, to: 1516 },
+];
+const XD0 = 6.05, XD1 = 6.55, XS0 = 6.6;       // draw assembled, then separate
+PARTS.forEach((p, i) => {
+  p.paths = (p.sh || []).map(s => polyPath(xm(SH[s]), !(p.openClip && s === 'clip')).done());
+  (p.lines || []).forEach(l => p.paths.push(polyPath(xm(l), false).done()));
+  p.sil = (p.sh || []).map(s => xm(SH[s]));
+  p.off = p.to - (XAX + p.x0 * XK);
+  p.ts = XS0 + Math.abs(i - 3.5) * 0.05;       // stagger from the middle outward
+  evs.push({ k: 'slide', t: p.ts, d: 0.8, v: Math.min(1, Math.abs(p.off) / 400) });
+});
+const sepU = (p, t) => eio(seg(t, p.ts, p.ts + 0.8));
+function drawExploded(c, t) {
+  if (t < XD0) return;
+  const dr = eio2(seg(t, XD0, XD1)), ua = eio(seg(t, XS0, XS0 + 1));
+  c.save(); c.strokeStyle = `rgba(${LN},0.6)`; c.lineWidth = 1.1; c.setLineDash(CEN);
+  const ax0 = lerp(XAX - 20, 118, ua), ax1 = lerp(XAX + 146 * XK, 1600, ua);
+  c.beginPath(); c.moveTo(ax0, XY); c.lineTo(lerp(ax0, ax1, dr), XY); c.stroke(); c.restore();
+  const stroke = (p, w) => { c.strokeStyle = `rgba(${LN},0.92)`; c.lineWidth = w; c.lineJoin = 'round'; c.lineCap = 'round';
+    for (const pa of p.paths) { c.beginPath(); pa.trace(c, 0, dr * pa.len); c.stroke(); } };
+  const xhatch = (x0, x1, a) => { c.strokeStyle = `rgba(${LN},${a})`; c.lineWidth = 1; c.beginPath();
+    for (let x = x0 - 40; x < x1; x += 6) { c.moveTo(x, XY - 20); c.lineTo(x + 40, XY + 20); c.moveTo(x + 40, XY - 20); c.lineTo(x, XY + 20); } c.stroke(); };
+  // internal parts first
+  for (const p of PARTS.filter(q => q.int)) { c.save(); c.translate(p.off * sepU(p, t), 0);
+    if (p.spring) { const len = lerp(24, 30, eout(seg(t, p.ts + 0.35, p.ts + 1.0))), pa = polyPath(xm(springPts(32, len, 2.9)), false).done();
+      c.strokeStyle = `rgba(${LN},0.92)`; c.lineWidth = 1.8; c.beginPath(); pa.trace(c, 0, dr * pa.len); c.stroke(); }
+    else stroke(p, 2.2);
+    if (p.n === 7 && dr >= 1) { c.save(); c.beginPath(); tracePoly(c, p.sil[0]); c.clip(); xhatch(XAX + 122 * XK, XAX + 137 * XK, 0.45); c.restore(); }
+    c.restore(); }
+  // external shells hide what is inside them
+  const ext = PARTS.filter(q => !q.int);
+  c.save(); c.globalCompositeOperation = 'destination-out'; c.fillStyle = '#000';
+  for (const p of ext) { c.save(); c.translate(p.off * sepU(p, t), 0); c.beginPath(); p.sil.forEach(s => tracePoly(c, s)); c.fill('nonzero'); c.restore(); }
+  c.restore();
+  for (const p of ext) { c.save(); c.translate(p.off * sepU(p, t), 0); stroke(p, 2.6);
+    if (p.knurl && dr > 0.6) { c.save(); c.beginPath(); c.rect(XAX + 23 * XK, XY - 4.2 * XK + 2, 26 * XK, 8.4 * XK - 4); c.clip(); xhatch(XAX + 23 * XK, XAX + 49 * XK, 0.45 * seg(dr, .6, 1)); c.restore(); }
+    c.restore(); }
 }
-function bodyPoly(cx, k = 0) {   // body+ring+cap, outline (closed polygon)
-  return [[cx - G.ringW + k, G.ringT + k], [cx + G.ringW - k, G.ringT + k], [cx + G.ringW - k, G.ringB], [cx + G.bw0 - k, G.ringB], [cx + G.bw1 - k, G.bodyB - k * 0], [cx + G.cw - k, G.capB - k], [cx - G.cw + k, G.capB - k], [cx - G.bw1 + k, G.bodyB], [cx - G.bw0 + k, G.ringB], [cx - G.ringW + k, G.ringB]];
+// balloons: pop in with overshoot, each scaled around its own centre; spaced so neighbours never touch at peak
+const BY = 690, BR = 21;
+PARTS.forEach((p, i) => {
+  const xs = p.spring ? [p.to, p.to + 30 * XK] : p.sil.flat().map(q => q[0] + p.off);
+  p.bx = (Math.min(...xs) + Math.max(...xs)) / 2 + (p.n === 6 ? -60 : 0); p.bt = 7.35 + i * 0.075;
+  const r = p.spring ? 2.9 : p.n === 6 ? R_HEX : p.n === 1 ? 2.8 : p.n === 3 ? 2.2 : p.n === 5 ? 2.4 : p.n === 7 ? 2.5 : 3.4;
+  p.ay = XY - r * XK; evs.push({ k: 'pop', t: p.bt, v: i });
+});
+function drawBalloons(c, t) {
+  for (const p of PARTS) { if (t < p.bt) continue;
+    const u = seg(t, p.bt, p.bt + 0.32), s = eback(u, 2.6), lu = eio2(seg(t, p.bt + 0.1, p.bt + 0.4));
+    c.save(); c.strokeStyle = `rgba(${LN},0.85)`; c.lineWidth = 1.1;
+    const ly0 = BY + BR, ly1 = lerp(ly0, p.ay - 3, lu); c.beginPath(); c.moveTo(p.bx, ly0); c.lineTo(p.bx, ly1); c.stroke();
+    if (lu >= 1) { c.fillStyle = `rgba(${LN},0.95)`; c.beginPath(); c.arc(p.bx, p.ay - 1, 3.6, 0, 7); c.fill(); }
+    c.translate(p.bx, BY); c.scale(s, s); c.lineWidth = 1.8 / Math.max(s, .01); c.strokeStyle = `rgba(${LN},0.95)`;
+    c.beginPath(); c.arc(0, 0, BR, 0, 7); c.stroke();
+    c.font = `600 26px ${COND}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = `rgba(${LN},0.97)`; c.fillText(String(p.n), 0, 1.5);
+    c.restore(); }
 }
-function polyPath(pts) { const p = P().M(...pts[0]); for (let i = 1; i < pts.length; i++) p.L(...pts[i]); return p.L(...pts[0]); }
+txt('EXPLODED VIEW', 855, 880, 34, 7.2, { w8: 600, it: false, ls: 3 });
+line(P().M(855 - 118, 893).L(855 + 118, 893), 7.4, 7.6, { w: 1.6 });
 
-// ===== 1) FRONT VIEW =====
-line(P().M(FX, 150).L(FX, 790), 0.3, 1.0, { w: 1.1, a: .6, dash: CEN });
-line(P().M(FX - 130, G.hc).L(FX + 130, G.hc), 0.45, 1.05, { w: 1.1, a: .6, dash: CEN });
-line(outline(FX), 0.9, 1.6, { w: 3 });
-line(polyPath(bodyPoly(FX)), 1.35, 2.25, { w: 3 });
-line(P().M(FX - G.bw0, G.ringB + 18).L(FX + G.bw0 - 1, G.ringB + 18), 2.0, 2.2, { w: 1.4 });            // body line
-line(P().M(FX - G.bw1, G.bodyB - 20).L(FX + G.bw1, G.bodyB - 20), 2.05, 2.25, { w: 1.4 });
-{ const sw = P().M(FX - 12, 470); sw.L(FX + 12, 470).L(FX + 12, 520).L(FX - 12, 520).L(FX - 12, 470); line(sw, 2.2, 2.45, { w: 1.6 }); }   // anahtar
-hatch(c => { c.beginPath(); c.arc(FX, G.hc, G.hr - 7, 0, 7); c.clip(); c.beginPath(); c.rect(FX - 200, 0, 400, G.ringT - 4); c.clip(); }, 2.15, 2.75, { gap: 12, ang: Math.PI / 4, cross: true, a: .42, box: [FX - 100, 180, FX + 100, 352] });   // grid
-// section plane marking A–A
-function cutMark(y, t0, up) { line(P().M(FX, y).L(FX, y + (up ? -34 : 34)), t0, t0 + 0.15, { w: 4.5 });
-  line(P().M(FX, y + (up ? -26 : 26)).L(FX + 50, y + (up ? -26 : 26)), t0 + 0.12, t0 + 0.3, { w: 1.6 }); arrowHead(FX + 56, y + (up ? -26 : 26), 0, t0 + 0.28);
-  txt('A', FX + 80, y + (up ? -16 : 38), 36, t0 + 0.3, { w8: 600 }); }
-cutMark(128, 2.6, true); cutMark(812, 2.7, false);
-dimV(FX - 180, G.top, G.capB, FX - 50, 2.8, (((G.capB - G.top) / CM).toFixed(1)).replace('.', ',') + ' cm');
-dimH(142, FX - G.hr, FX + G.hr, G.hc, 3.05, 'Ø ' + (2 * G.hr / CM).toFixed(1).replace('.', ',') + ' cm', { dx: -120 });
-txt('FRONT VIEW', FX, 905, 34, 3.5, { w8: 600, it: false, ls: 3 });
-line(P().M(FX - 118, 918).L(FX + 118, 918), 3.8, 4.0, { w: 1.6 });
+// ===== 6) PARTS LIST + NOTES =====
+const PL = { x0: 1450, x1: 1840, y0: 110, rh: 31 }, PC = [1450, 1510, 1680];
+const PLy1 = PL.y0 + 38 + PL.rh * 8;
+line(polyPath([[PL.x0, PL.y0], [PL.x1, PL.y0], [PL.x1, PLy1], [PL.x0, PLy1]]), 6.6, 7.1, { w: 2.2 });
+line(P().M(PL.x0, PL.y0 + 38).L(PL.x1, PL.y0 + 38), 6.9, 7.1, { w: 1.4 });
+[PC[1], PC[2]].forEach((x, i) => line(P().M(x, PL.y0).L(x, PLy1), 6.95 + i * .05, 7.2 + i * .05, { w: 1.2 }));
+[['ITEM', PC[0]], ['PART', PC[1]], ['MATERIAL', PC[2]]].forEach(([s, x], i) => txt(s, x + 10, PL.y0 + 26, 15, 7.05 + i * .05, { align: 'left', font: MONO, it: false, w8: 500, a: .7, ls: 1.5, dur: .1 }));
+PARTS.forEach((p, i) => { const y = PL.y0 + 38 + PL.rh * (i + 1) - 9, t0 = p.bt + 0.1;
+  if (i < 7) line(P().M(PL.x0, y + 9).L(PL.x1, y + 9), t0 - 0.05, t0 + 0.15, { w: .9, a: .45 });
+  txt(String(p.n), PC[0] + 30, y, 22, t0, { font: MONO, it: false, w8: 500, dur: .05 });
+  txt(p.name, PC[1] + 10, y, 22, t0 + 0.03, { align: 'left', font: MONO, it: false, w8: 400, dur: .22 });
+  txt(p.mat, PC[2] + 10, y, 22, t0 + 0.06, { align: 'left', font: MONO, it: false, w8: 400, dur: .22 }); });
+txt('NOTES', 1450, 490, 22, 7.6, { align: 'left', w8: 600, it: false, ls: 2 });
+['1. LEAD Ø 0.5 mm, HB', '2. ALL DIMENSIONS IN mm', '3. BREAK ALL SHARP EDGES'].forEach((s, i) =>
+  txt(s, 1450, 526 + i * 32, 20, 7.7 + i * 0.12, { align: 'left', font: MONO, it: false, w8: 400, a: .85, dur: .3 }));
 
-// ===== 2) PROJECTION LINES =====
-[G.top, G.hc, G.ringT, G.ringB, G.capB].forEach((y, i) => line(P().M(FX + 110, y).L(1760, y), 4.0 + i * 0.05, 4.9 + i * 0.05, { w: 1, a: .42, dash: [3, 5] }));
-
-// ===== 3) SECTION A–A =====
-line(P().M(SX, 150).L(SX, 790), 4.4, 5.0, { w: 1.1, a: .6, dash: CEN });
-line(outline(SX), 4.6, 5.2, { w: 3 });
-line(outline(SX, 9), 4.75, 5.3, { w: 1.2, dash: [5, 4] });                     // mesh (in cross-section)
-line(polyPath(bodyPoly(SX)), 4.9, 5.7, { w: 3 });
-const inner = bodyPoly(SX, 9);
-line(polyPath(inner), 5.1, 5.8, { w: 1.6 });
-hatch(c => { const o = bodyPoly(SX), i2 = bodyPoly(SX, 9); c.beginPath(); c.moveTo(...o[0]); o.forEach(q => c.lineTo(...q)); c.closePath(); c.moveTo(...i2[0]); i2.forEach(q => c.lineTo(...q)); c.closePath(); c.clip('evenodd'); }, 5.7, 6.2, { gap: 9, box: [SX - 70, 340, SX + 70, 760] });
-// capsule + shock absorber + cable channel + XLR
-{ const cy0 = 250, cy1 = 302, cw = 51;
-  line(polyPath([[SX - cw, cy0], [SX + cw, cy0], [SX + cw, cy1], [SX - cw, cy1]]), 5.4, 5.8, { w: 2.2 });
-  hatch(c => { c.beginPath(); c.rect(SX - cw, cy0, cw * 2, cy1 - cy0); c.clip(); }, 5.8, 6.1, { gap: 7, ang: -Math.PI / 4, box: [SX - cw, cy0, SX + cw, cy1], cross: true, a: .55 });
-  line(P().M(SX - 30, cy1).L(SX - 22, 330).L(SX - 30, 350).L(SX - 22, 370).L(SX - 30, 392), 5.6, 5.9, { w: 1.3 });
-  line(P().M(SX + 30, cy1).L(SX + 22, 330).L(SX + 30, 350).L(SX + 22, 370).L(SX + 30, 392), 5.62, 5.92, { w: 1.3 });
-  line(P().M(SX - 8, 392).L(SX - 8, 690), 5.8, 6.1, { w: 1.2, dash: HID }); line(P().M(SX + 8, 392).L(SX + 8, 690), 5.82, 6.12, { w: 1.2, dash: HID });
-  line(polyPath([[SX - 30, 690], [SX + 30, 690], [SX + 30, 741], [SX - 30, 741]]), 5.9, 6.15, { w: 1.8 });
-  [-14, 0, 14].forEach((dx, i) => line(P().M(SX + dx, 700).L(SX + dx, 732), 6.1 + i * .03, 6.2 + i * .03, { w: 3 })); }
-dimV(SX + 170, G.top, G.ringB, SX + G.hr, 6.3, (((G.ringB - G.top) / CM).toFixed(1)).replace('.', ',') + ' cm', { flip: true });
-dimV(SX + 170, G.ringB, G.capB, SX + 60, 6.45, (((G.capB - G.ringB) / CM).toFixed(1)).replace('.', ',') + ' cm', { flip: true });
-leader(SX + 30, 276, SX + 190, 206, SX + 215, 'CAPSULE Ø 3.4', 6.7);
-leader(SX + 54, 460, SX + 220, 430, SX + 250, 'WALL 0.3 cm', 6.85);
-leader(SX + 14, 716, SX + 220, 670, SX + 250, 'XLR-3', 7.0);
-leader(SX - 70, 230, SX - 170, 200, SX - 200, 'IZGARA', 6.95, 'right');
-dimH(G.capB + 52, SX - G.cw, SX + G.cw, G.capB, 6.6, 'Ø ' + (2 * G.cw / CM).toFixed(1).replace('.', ',') + ' cm', { dx: -120 });
-txt('SECTION A–A', SX, 905, 34, 6.2, { w8: 600, it: false, ls: 3 });
-line(P().M(SX - 86, 918).L(SX + 86, 918), 6.5, 6.7, { w: 1.6 });
-
-// ===== 4) TOP VIEW =====
-const TX = 1680, TY = 330;
-line(P().M(TX - 125, TY).L(TX + 125, TY), 5.9, 6.3, { w: 1.1, a: .6, dash: CEN });
-line(P().M(TX, TY - 125).L(TX, TY + 125), 5.95, 6.35, { w: 1.1, a: .6, dash: CEN });
-line(P().A(TX, TY, G.hr, G.hr, -Math.PI / 2, Math.PI * 1.5, 90), 6.0, 6.5, { w: 3 });
-line(P().A(TX, TY, G.ringW, G.ringW, -Math.PI / 2, Math.PI * 1.5, 80), 6.1, 6.55, { w: 1.4, dash: HID });
-line(P().A(TX, TY, 30, 30, -Math.PI / 2, Math.PI * 1.5, 40), 6.2, 6.5, { w: 1.4 });
-dimH(TY - G.hr - 32, TX - G.hr, TX + G.hr, TY - G.hr, 6.55, 'Ø 6,0 cm');
-txt('TOP VIEW', TX, 490, 34, 6.6, { w8: 600, it: false, ls: 3 });
-line(P().M(TX - 124, 503).L(TX + 124, 503), 6.9, 7.1, { w: 1.6 });
-
-// ===== 5) FRAME + LETTERHEAD =====
-line(polyPath([[40, 40], [1880, 40], [1880, 1040], [40, 1040]]), 3.7, 4.7, { w: 1.2, a: .7 });
-line(polyPath([[62, 62], [1858, 62], [1858, 1018], [62, 1018]]), 3.8, 4.8, { w: 2.6 });
-for (let i = 1; i < 8; i++) { const x = 62 + i * (1796 / 8); line(P().M(x, 40).L(x, 62), 4.3 + i * .02, 4.4 + i * .02, { w: 1.2, a: .7 }); line(P().M(x, 1018).L(x, 1040), 4.3 + i * .02, 4.4 + i * .02, { w: 1.2, a: .7 }); }
-for (let i = 0; i < 8; i++) { const x = 62 + (i + .5) * (1796 / 8); txt(String(i + 1), x, 58, 17, 4.5 + i * .03, { font: MONO, it: false, w8: 500, dur: .05 }); txt(String(i + 1), x, 1036, 17, 4.5 + i * .03, { font: MONO, it: false, w8: 500, dur: .05 }); }
-'ABCD'.split('').forEach((ch, i) => { const y = 62 + (i + .5) * (956 / 4); txt(ch, 51, y + 6, 17, 4.6 + i * .04, { font: MONO, it: false, w8: 500, dur: .05 }); txt(ch, 1869, y + 6, 17, 4.6 + i * .04, { font: MONO, it: false, w8: 500, dur: .05 }); });
+// ===== 7) TITLE BLOCK =====
 const TB = { x0: 1318, x1: 1858, y0: 850, y1: 1018 };
-line(polyPath([[TB.x0, TB.y0], [TB.x1, TB.y0], [TB.x1, TB.y1], [TB.x0, TB.y1]]), 7.2, 7.6, { w: 2.6 });
-line(P().M(TB.x0, 906).L(TB.x1, 906), 7.45, 7.65, { w: 1.4 }); line(P().M(TB.x0, 962).L(TB.x1, 962), 7.5, 7.7, { w: 1.4 });
-[1498, 1678].forEach((x, i) => line(P().M(x, 906).L(x, TB.y1), 7.55 + i * .05, 7.75 + i * .05, { w: 1.4 }));
-txt('IRTICALEN · STUDIO MICROPHONE', TB.x0 + 18, 890, 36, 7.6, { align: 'left', w8: 600, it: false, ls: 2 });
-const cells = [['DRAWING NO', 'IRT-001'], ['SCALE', '1 : 2'], ['UNIT', 'cm'], ['MATERIAL', 'Aluminum'], ['DATE', '27.09.2026'], ['SHEET', '1 / 1']];
+line(polyPath([[TB.x0, TB.y0], [TB.x1, TB.y0], [TB.x1, TB.y1], [TB.x0, TB.y1]]), 7.45, 7.85, { w: 2.6 });
+line(P().M(TB.x0, 906).L(TB.x1, 906), 7.65, 7.85, { w: 1.4 }); line(P().M(TB.x0, 962).L(TB.x1, 962), 7.7, 7.9, { w: 1.4 });
+[1498, 1678].forEach((x, i) => line(P().M(x, 906).L(x, TB.y1), 7.75 + i * .05, 7.95 + i * .05, { w: 1.4 }));
+txt('MODEL MP-7 · MECHANICAL PENCIL', TB.x0 + 18, 890, 34, 7.8, { align: 'left', w8: 600, it: false, ls: 2, dur: .5 });
+const cells = [['DRAWING NO', 'MP7-001'], ['SCALE', '1 : 1'], ['UNIT', 'mm'], ['MATERIAL', 'AL / BRASS'], ['DATE', '30.09.2026'], ['SHEET', '1 / 1']];
 cells.forEach(([k, v], i) => { const col = i % 3, row = Math.floor(i / 3), x = [TB.x0, 1498, 1678][col] + 12, y = 906 + row * 56;
-  txt(k, x, y + 18, 14, 7.75 + i * .06, { align: 'left', font: MONO, it: false, w8: 500, a: .7, ls: 1.5, dur: .08 });
-  txt(v, x, y + 47, 27, 7.85 + i * .07, { align: 'left', w8: 500, it: false, dur: .18 }); });
+  txt(k, x, y + 18, 14, 7.95 + i * .06, { align: 'left', font: MONO, it: false, w8: 500, a: .7, ls: 1.5, dur: .08 });
+  txt(v, x, y + 47, 27, 8.05 + i * .07, { align: 'left', w8: 500, it: false, dur: .18 }); });
+evs.push({ k: 'whoosh', t: 2.95, d: 1.3 }, { k: 'chord', t: 8.55 });
 
 acts.sort((a, b) => a.t0 - b.t0);
 
@@ -169,10 +275,9 @@ function drawAct(c, a, t) {
     const s = eback(u, 3); c.translate(a.x, a.y); c.rotate(a.ang); c.scale(s, s); c.fillStyle = `rgba(${LN},0.95)`;
     c.beginPath(); c.moveTo(0, 0); c.lineTo(-20, -5.5); c.lineTo(-20, 5.5); c.closePath(); c.fill();
   } else if (a.kind === 'dot') {
-    const s = eback(u, 3); c.fillStyle = `rgba(${LN},0.95)`; c.beginPath(); c.arc(a.x, a.y, 4.5 * s, 0, 7); c.fill();
+    const s = eback(u, 3); c.fillStyle = `rgba(${LN},0.95)`; c.beginPath(); c.arc(a.x, a.y, a.r * s, 0, 7); c.fill();
   } else if (a.kind === 'hatch') {
     const [x0, y0, x1, y1] = a.box; a.clipFn(c);
-    // scan opens by sweeping from top-left to bottom-right of the box
     const e = eio2(u), sweep = lerp(x0 - 300, x1 + 700, e);
     c.beginPath(); c.moveTo(x0 - 400, y0 - 400); c.lineTo(sweep + (y1 - y0) * 0.5, y0 - 400); c.lineTo(sweep - (y1 - y0) * 0.5 - 200, y1 + 400); c.lineTo(x0 - 400, y1 + 400); c.closePath(); c.clip();
     c.strokeStyle = `rgba(${LN},${a.a})`; c.lineWidth = 1.1;
@@ -188,24 +293,28 @@ function drawGrid(c) {
   for (let y = -240; y <= H + 240; y += 24) { c.strokeStyle = ((y % 120) + 120) % 120 === 0 ? 'rgba(200,225,255,0.13)' : 'rgba(200,225,255,0.055)'; c.beginPath(); c.moveTo(-240, y + .5); c.lineTo(W + 240, y + .5); c.stroke(); }
 }
 function cam(t) {
-  const u = eio(seg(t, 3.55, 4.85)); let s = lerp(1.45, 1.0, u), cx = lerp(560, 960, u), cy = lerp(482, 540, u);
-  s *= 1 + 0.018 * seg(t, 4.85, 10) + 0.02 * (1 - u) * seg(t, 0, 3.55);
-  return [s, cx, cy];
+  const u = eio(seg(t, 2.95, 4.25)); let s = lerp(1.58, 1.0, u), cx = lerp(680, 960, u), cy = lerp(262, 540, u);
+  s *= 1 + 0.018 * seg(t, 4.25, 10) + 0.02 * (1 - u) * seg(t, 0, 2.95);
+  // push in on the section while it draws, ease back out for the exploded view
+  const p = eio(seg(t, 4.3, 5.2)) * (1 - eio(seg(t, 6.0, 6.8)));
+  return [s * (1 + 0.22 * p), lerp(cx, 660, p), lerp(cy, 455, p)];
 }
 function render(t) {
   const [s, cx, cy] = cam(t), tf = [s, 0, 0, s, 960 - cx * s, 540 - cy * s];
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#123b75'; ctx.fillRect(0, 0, W, H); ctx.setTransform(...tf); ctx.drawImage(paper, -160, -90, W + 320, H + 180); drawGrid(ctx);
   lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, W, H); lc.setTransform(...tf);
   for (const a of acts) drawAct(lc, a, t);
-  // cyanotype glow: reduced layer appears blurry
+  drawExploded(lc, t); drawBalloons(lc, t);
+  // cyanotype glow: a reduced, blurred copy of the line layer added on top
   gc.clearRect(0, 0, GL.width, GL.height); gc.filter = 'blur(2px)'; gc.drawImage(L, 0, 0, GL.width, GL.height); gc.filter = 'none';
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 0.55; ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(GL, 0, 0, W, H); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   ctx.drawImage(L, 0, 0);
   const v = ctx.createRadialGradient(960, 540, 600, 960, 540, 1200); v.addColorStop(0, 'rgba(0,10,40,0)'); v.addColorStop(1, 'rgba(0,10,40,0.35)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
-  const a = Math.max(1 - seg(t, 0, 0.35), eio2(seg(t, 9.35, 10))); if (a > 0) { ctx.fillStyle = `rgba(9,33,70,${a})`; ctx.fillRect(0, 0, W, H); }
+  const a = Math.max(1 - seg(t, 0, 0.35), eio2(seg(t, 9.45, 10))); if (a > 0) { ctx.fillStyle = `rgba(9,33,70,${a})`; ctx.fillRect(0, 0, W, H); }
 }
 window.ready = Promise.all([loadFont('Barlow Condensed', 'BarlowCondensed-500i', 500, 'italic').catch(() => {}), loadFont('Barlow Condensed', 'BarlowCondensed-500', 500), loadFont('Barlow Condensed', 'BarlowCondensed-600', 600), loadFont('IBM Plex Mono', 'IBMPlexMono-400', 400), loadFont('IBM Plex Mono', 'IBMPlexMono-500', 500)])
   .then(() => document.fonts.load(`600 30px ${COND}`, 'DRAWING SCALE'));
 window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => evs.slice().sort((a, b) => a.t - b.t);
 </script></body></html>
