@@ -11,4 +11,4 @@
 
 **Credits:** Originally developed by <a href="https://github.com/yasinozmeen/animasyon-stil-katalogu">Yasin Özmen</a>
 
-▶ [Watch the clip](whiteboard.mp4) · Source: [`anim.html`](anim.html)
+▶ [Watch the clip](whiteboard.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
