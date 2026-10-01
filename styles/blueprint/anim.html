@@ -10,12 +10,12 @@
 <script>
 // BLUEPRINT — Model MP-7 mechanical pencil: front view, end view, section A–A, exploded view, parts list, title block
 const LN = '232,241,255';                      // line color (rgb)
-const COND = "'Barlow Condensed'", MONO = "'IBM Plex Mono'";
+const FONT_C = "'Barlow Condensed'", FONT_M = "'IBM Plex Mono'";
 const evs = [];                                // sound events (read by events.mjs)
 
 // ---------- cyanotype sheet, painted once ----------
-const paper = mk(W, H);
-{ const g = paper.getContext('2d'), rand = rng(4);
+const sheetTex = mk(W, H);
+{ const g = sheetTex.getContext('2d'), rand = rng(4);
   const wash = g.createRadialGradient(900, 480, 100, 960, 540, 1200);
   wash.addColorStop(0, '#1f5aa6'); wash.addColorStop(1, '#123b75');
   g.fillStyle = wash; g.fillRect(0, 0, W, H);
@@ -33,48 +33,44 @@ const paper = mk(W, H);
     const x = rand() * W, y = rand() * H, ang = rand() * Math.PI, len = 5 + rand() * 20;
     g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len); g.stroke();
   } }
-// L: everything drawn in ink this frame; GL: a quarter-size copy blurred for the glow
-const L = mk(W, H), lc = L.getContext('2d');
-const GL = mk(W / 4, H / 4), gc = GL.getContext('2d');
+// inkCv: everything drawn in ink this frame; glowCv: a quarter-size copy blurred for the glow
+const inkCv = mk(W, H), inkCtx = inkCv.getContext('2d');
+const glowCv = mk(W / 4, H / 4), glowCtx = glowCv.getContext('2d');
 
 // ---------- Action system ----------
-const acts = [];
-function line(path, t0, t1, o = {}) { acts.push({ kind: 'path', path: path.done(), t0, t1, w: o.w ?? 1.5, a: o.a ?? 0.9, dash: o.dash, ease: o.ease || eio2 });
+const items = [];
+function line(path, t0, t1, o = {}) { items.push({ kind: 'path', path: path.done(), t0, t1, w: o.w ?? 1.5, a: o.a ?? 0.9, dash: o.dash, ease: o.ease || eio2 });
   if (t1 - t0 >= 0.15) evs.push({ k: (o.w ?? 1.5) >= 2 ? 'scribe' : 'pen', t: t0, d: t1 - t0 }); }
 function txt(str, x, y, size, t0, o = {}) { const dur = o.dur ?? str.length * 0.028;
-  acts.push({ kind: 'text', str, x, y, size, t0, t1: t0 + dur, font: o.font || COND, w8: o.w8 || 500, it: o.it ?? true, align: o.align || 'center', rot: o.rot || 0, a: o.a ?? 0.95, ls: o.ls ?? 1 });
+  items.push({ kind: 'text', str, x, y, size, t0, t1: t0 + dur, font: o.font || FONT_C, w8: o.w8 || 500, it: o.it ?? true, align: o.align || 'center', rot: o.rot || 0, a: o.a ?? 0.95, ls: o.ls ?? 1 });
   const n = str.replace(/ /g, '').length; for (let i = 0; i < n; i += 2) evs.push({ k: 'key', t: t0 + dur * i / n }); }
-function arrowHead(x, y, ang, t0) { acts.push({ kind: 'arrow', x, y, ang, t0, t1: t0 + 0.18 }); evs.push({ k: 'tick', t: t0 }); }
-function dot(x, y, t0, r = 4.5) { acts.push({ kind: 'dot', x, y, r, t0, t1: t0 + 0.12 }); if (r > 3) evs.push({ k: 'tick', t: t0 }); }
-function hatch(clipFn, t0, t1, o = {}) { acts.push({ kind: 'hatch', clipFn, t0, t1, gap: o.gap || 11, ang: o.ang ?? Math.PI / 4, box: o.box, a: o.a ?? 0.75, cross: o.cross });
+function arrowHead(x, y, ang, t0) { items.push({ kind: 'arrow', x, y, ang, t0, t1: t0 + 0.18 }); evs.push({ k: 'tick', t: t0 }); }
+function dot(x, y, t0, r = 4.5) { items.push({ kind: 'dot', x, y, r, t0, t1: t0 + 0.12 }); if (r > 3) evs.push({ k: 'tick', t: t0 }); }
+function hatch(clipFn, t0, t1, o = {}) { items.push({ kind: 'hatch', clipFn, t0, t1, gap: o.gap || 11, ang: o.ang ?? Math.PI / 4, box: o.box, a: o.a ?? 0.75, cross: o.cross });
   evs.push({ k: 'hatch', t: t0, d: t1 - t0 }); }
 const CEN = [26, 6, 4, 6];                     // axis line (dash-dot)
 const HID = [8, 6];                            // hidden line
 
-// Dimension: two extension lines from the part, a dimension line drawn outward from its middle with
-// arrowheads at both ends, then the value. dimV measures y0..y1 at column x; dimH measures x0..x1 at row y.
-function dimV(x, y0, y1, fromX, t0, label, o = {}) {
-  const side = Math.sign(x - fromX) || -1, mid = (y0 + y1) / 2;
-  const extend = (y, start) => line(P().M(fromX + side * 6, y).L(x + side * 12, y), start, start + 0.2, { w: 1.1, a: .8 });
-  extend(y0, t0); extend(y1, t0 + 0.05);
-  for (const end of [y0 + 1, y1 - 1]) line(P().M(x, mid).L(x, end), t0 + 0.2, t0 + 0.45, { w: 1.2 });
-  arrowHead(x, y0, -Math.PI / 2, t0 + 0.43); arrowHead(x, y1, Math.PI / 2, t0 + 0.43);
-  txt(label, x - 12, mid, o.size || 30, t0 + 0.5, { rot: -Math.PI / 2 });
+// Dimension along one axis: extension lines from the part edge `base` out past `at`, a dimension line
+// growing from the middle of a..b towards both ends, arrowheads, then the value.
+function dimension(vertical, at, base, a, b, t0, label, opt = {}) {
+  const xy = (along, across) => (vertical ? [across, along] : [along, across]);
+  const dir = Math.sign(at - base) || -1, centre = (a + b) / 2, axisAng = vertical ? Math.PI / 2 : 0;
+  [a, b].forEach((v, i) => line(P().M(...xy(v, base + dir * 6)).L(...xy(v, at + dir * 12)), t0 + i * 0.05, t0 + 0.2 + i * 0.05, { w: 1.1, a: .8 }));
+  [[a, 1, Math.PI], [b, -1, 0]].forEach(([v, inset, turn]) => {
+    line(P().M(...xy(centre, at)).L(...xy(v + inset, at)), t0 + 0.2, t0 + 0.45, { w: 1.2 });
+    arrowHead(...xy(v, at), axisAng + turn, t0 + 0.43);
+  });
+  const size = opt.size || 30;
+  if (vertical) txt(label, at - 12, centre, size, t0 + 0.5, { rot: -Math.PI / 2 });
+  else txt(label, centre + (opt.dx || 0), at - 12, size, t0 + 0.5);
 }
-function dimH(y, x0, x1, fromY, t0, label, o = {}) {
-  const side = Math.sign(y - fromY) || -1, mid = (x0 + x1) / 2;
-  const extend = (x, start) => line(P().M(x, fromY + side * 6).L(x, y + side * 12), start, start + 0.2, { w: 1.1, a: .8 });
-  extend(x0, t0); extend(x1, t0 + 0.05);
-  for (const end of [x0 + 1, x1 - 1]) line(P().M(mid, y).L(end, y), t0 + 0.2, t0 + 0.45, { w: 1.2 });
-  arrowHead(x0, y, Math.PI, t0 + 0.43); arrowHead(x1, y, 0, t0 + 0.43);
-  txt(label, mid + (o.dx || 0), y - 12, o.size || 30, t0 + 0.5);
-}
-// Callout: dot on the part, a kinked leader line, then the note.
-function leader(x0, y0, x1, y1, x2, label, t0, align = 'left') {
-  dot(x0, y0, t0);
-  line(P().M(x0, y0).L(x1, y1).L(x2, y1), t0 + 0.05, t0 + 0.4, { w: 1.1 });
-  const textX = align === 'left' ? x2 + 10 : x2 - 10;
-  txt(label, textX, y1 + 8, 23, t0 + 0.38, { align, font: MONO, it: false, w8: 400, ls: 0.5 });
+// Callout: dot on the part, a kinked leader up to a shelf, then the note.
+function callout(px, py, kneeX, shelfY, endX, label, t0) {
+  dot(px, py, t0);
+  const kink = P().M(px, py).L(kneeX, shelfY).L(endX, shelfY);
+  line(kink, t0 + 0.05, t0 + 0.4, { w: 1.1 });
+  txt(label, endX + 10, shelfY + 8, 23, t0 + 0.38, { align: 'left', font: FONT_M, it: false, w8: 400, ls: 0.5 });
 }
 function polyPath(pts, close = true) { const p = P().M(...pts[0]); for (let i = 1; i < pts.length; i++) p.L(...pts[i]); if (close) p.L(...pts[0]); return p; }
 function tracePoly(c, pts) { c.moveTo(...pts[0]); for (let i = 1; i < pts.length; i++) c.lineTo(...pts[i]); c.closePath(); }
@@ -113,9 +109,9 @@ line(P().M(FXp(129), FYp(-3.4)).L(FXp(129), FYp(3.4)), 2.2, 2.3, { w: 1.4 });
 [-R_EDGE, R_EDGE].forEach((y, i) => line(P().M(FXp(52), FYp(y)).L(FXp(126), FYp(y)), 1.95 + i * .05, 2.3 + i * .05, { w: 1.4 }));
 line(P().M(FXp(-5), FOY).L(FXp(0), FOY), 2.25, 2.35, { w: 3.2 });                                   // 0.5 lead
 hatch(c => { c.beginPath(); c.rect(FXp(23), FYp(-4.2) + 2, FXp(49) - FXp(23), FK * 8.4 - 4); c.clip(); }, 2.1, 2.6, { gap: 8, cross: true, a: .45, box: [FXp(23), FYp(-4.2), FXp(49), FYp(4.2)] });
-dimH(127, FXp(-5), FXp(140), FYp(-1), 2.35, '145');
-dimH(291, FXp(20), FXp(52), FYp(4.2), 2.6, '32');
-dimV(FXp(-12), FYp(-4.2), FYp(4.2), FXp(20), 2.75, 'Ø 8.4', { size: 24 });
+dimension(false, 127, FYp(-1), FXp(-5), FXp(140), 2.35, '145');
+dimension(false, 291, FYp(4.2), FXp(20), FXp(52), 2.6, '32');
+dimension(true, FXp(-12), FXp(20), FYp(-4.2), FYp(4.2), 2.75, 'Ø 8.4', { size: 24 });
 txt('FRONT VIEW', 735, 336, 34, 2.8, { w8: 600, it: false, ls: 3 });
 line(P().M(735 - 104, 349).L(735 + 104, 349), 3.0, 3.2, { w: 1.6 });
 
@@ -123,8 +119,8 @@ line(P().M(735 - 104, 349).L(735 + 104, 349), 3.0, 3.2, { w: 1.6 });
 line(polyPath([[40, 40], [1880, 40], [1880, 1040], [40, 1040]]), 3.1, 4.1, { w: 1.2, a: .7 });
 line(polyPath([[62, 62], [1858, 62], [1858, 1018], [62, 1018]]), 3.2, 4.2, { w: 2.6 });
 for (let i = 1; i < 8; i++) { const x = 62 + i * (1796 / 8); line(P().M(x, 40).L(x, 62), 3.7 + i * .02, 3.8 + i * .02, { w: 1.2, a: .7 }); line(P().M(x, 1018).L(x, 1040), 3.7 + i * .02, 3.8 + i * .02, { w: 1.2, a: .7 }); }
-for (let i = 0; i < 8; i++) { const x = 62 + (i + .5) * (1796 / 8); txt(String(i + 1), x, 58, 17, 3.9 + i * .03, { font: MONO, it: false, w8: 500, dur: .05 }); txt(String(i + 1), x, 1036, 17, 3.9 + i * .03, { font: MONO, it: false, w8: 500, dur: .05 }); }
-'ABCD'.split('').forEach((ch, i) => { const y = 62 + (i + .5) * (956 / 4); txt(ch, 51, y + 6, 17, 4.0 + i * .04, { font: MONO, it: false, w8: 500, dur: .05 }); txt(ch, 1869, y + 6, 17, 4.0 + i * .04, { font: MONO, it: false, w8: 500, dur: .05 }); });
+for (let i = 0; i < 8; i++) { const x = 62 + (i + .5) * (1796 / 8); txt(String(i + 1), x, 58, 17, 3.9 + i * .03, { font: FONT_M, it: false, w8: 500, dur: .05 }); txt(String(i + 1), x, 1036, 17, 3.9 + i * .03, { font: FONT_M, it: false, w8: 500, dur: .05 }); }
+'ABCD'.split('').forEach((ch, i) => { const y = 62 + (i + .5) * (956 / 4); txt(ch, 51, y + 6, 17, 4.0 + i * .04, { font: FONT_M, it: false, w8: 500, dur: .05 }); txt(ch, 1869, y + 6, 17, 4.0 + i * .04, { font: FONT_M, it: false, w8: 500, dur: .05 }); });
 
 // ===== 3) END VIEW (2:1, from the cap end) with cutting plane A–A =====
 const EX = 1310, EY = 215, EK = 14;
@@ -141,7 +137,7 @@ line(P().M(EX, EY - 118).L(EX, EY + 118), 4.2, 4.55, { w: 1.1, a: .7, dash: CEN 
   line(P().M(EX, y - s * 26).L(EX, y), t0, t0 + .12, { w: 4.5 });
   line(P().M(EX, y).L(EX - 46, y), t0 + .1, t0 + .26, { w: 1.6 }); arrowHead(EX - 52, y, Math.PI, t0 + .24);
   txt('A', EX - 82, y + 12, 34, t0 + .28, { w8: 600 }); });
-dimH(EY + 94, EX - 4 * EK, EX + 4 * EK, EY + 60, 4.55, '8', { dx: 22, size: 26 });
+dimension(false, EY + 94, EY + 60, EX - 4 * EK, EX + 4 * EK, 4.55, '8', { dx: 22, size: 26 });
 txt('END VIEW  2 : 1', EX, 395, 28, 4.6, { w8: 600, it: false, ls: 2.5 });
 
 // projection lines: front view → section
@@ -165,10 +161,10 @@ for (let i = 0; i <= 24; i++) dot(FXp(32 + i), SYp(i % 2 ? 2.9 : -2.9), 5.25 + i
 line(polyPath(sm(SH.eraser)), 5.4, 5.7, { w: 2.2 });
 hatch(c => { c.beginPath(); tracePoly(c, sm(SH.eraser)); c.clip(); }, 5.6, 5.85, { gap: 6, cross: true, a: .5, box: [FXp(122), SYp(-2.5), FXp(137), SYp(2.5)] });
 line(P().M(FXp(-5), SOY).L(FXp(116), SOY), 5.5, 5.8, { w: 2.6 });                                  // lead through the clutch
-leader(FXp(16.5), SYp(1.5), FXp(0), 590, FXp(6), 'CLUTCH · 3 JAWS', 5.75);
-leader(FXp(44), SYp(2.9), FXp(52), 590, FXp(58), 'SPRING Ø 5.8', 5.85);
-leader(FXp(90), SYp(2), FXp(97), 590, FXp(103), 'LEAD TUBE', 5.95);
-leader(FXp(131), SYp(2.5), FXp(137), 590, FXp(143), 'ERASER', 6.05);
+callout(FXp(16.5), SYp(1.5), FXp(0), 590, FXp(6), 'CLUTCH · 3 JAWS', 5.75);
+callout(FXp(44), SYp(2.9), FXp(52), 590, FXp(58), 'SPRING Ø 5.8', 5.85);
+callout(FXp(90), SYp(2), FXp(97), 590, FXp(103), 'LEAD TUBE', 5.95);
+callout(FXp(131), SYp(2.5), FXp(137), 590, FXp(143), 'ERASER', 6.05);
 txt('SECTION A–A', 735, 530, 34, 5.6, { w8: 600, it: false, ls: 3 });
 line(P().M(735 - 100, 543).L(735 + 100, 543), 5.8, 6.0, { w: 1.6 });
 
@@ -236,7 +232,7 @@ function drawBalloons(c, t) {
     if (lu >= 1) { c.fillStyle = `rgba(${LN},0.95)`; c.beginPath(); c.arc(p.bx, p.ay - 1, 3.6, 0, 7); c.fill(); }
     c.translate(p.bx, BY); c.scale(s, s); c.lineWidth = 1.8 / Math.max(s, .01); c.strokeStyle = `rgba(${LN},0.95)`;
     c.beginPath(); c.arc(0, 0, BR, 0, 7); c.stroke();
-    c.font = `600 26px ${COND}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = `rgba(${LN},0.97)`; c.fillText(String(p.n), 0, 1.5);
+    c.font = `600 26px ${FONT_C}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = `rgba(${LN},0.97)`; c.fillText(String(p.n), 0, 1.5);
     c.restore(); }
 }
 txt('EXPLODED VIEW', 855, 880, 34, 7.2, { w8: 600, it: false, ls: 3 });
@@ -248,36 +244,36 @@ const PLy1 = PL.y0 + 38 + PL.rh * 8;
 line(polyPath([[PL.x0, PL.y0], [PL.x1, PL.y0], [PL.x1, PLy1], [PL.x0, PLy1]]), 6.6, 7.1, { w: 2.2 });
 line(P().M(PL.x0, PL.y0 + 38).L(PL.x1, PL.y0 + 38), 6.9, 7.1, { w: 1.4 });
 [PC[1], PC[2]].forEach((x, i) => line(P().M(x, PL.y0).L(x, PLy1), 6.95 + i * .05, 7.2 + i * .05, { w: 1.2 }));
-[['ITEM', PC[0]], ['PART', PC[1]], ['MATERIAL', PC[2]]].forEach(([s, x], i) => txt(s, x + 10, PL.y0 + 26, 15, 7.05 + i * .05, { align: 'left', font: MONO, it: false, w8: 500, a: .7, ls: 1.5, dur: .1 }));
+[['ITEM', PC[0]], ['PART', PC[1]], ['MATERIAL', PC[2]]].forEach(([s, x], i) => txt(s, x + 10, PL.y0 + 26, 15, 7.05 + i * .05, { align: 'left', font: FONT_M, it: false, w8: 500, a: .7, ls: 1.5, dur: .1 }));
 PARTS.forEach((p, i) => { const y = PL.y0 + 38 + PL.rh * (i + 1) - 9, t0 = p.bt + 0.1;
   if (i < 7) line(P().M(PL.x0, y + 9).L(PL.x1, y + 9), t0 - 0.05, t0 + 0.15, { w: .9, a: .45 });
-  txt(String(p.n), PC[0] + 30, y, 22, t0, { font: MONO, it: false, w8: 500, dur: .05 });
-  txt(p.name, PC[1] + 10, y, 22, t0 + 0.03, { align: 'left', font: MONO, it: false, w8: 400, dur: .22 });
-  txt(p.mat, PC[2] + 10, y, 22, t0 + 0.06, { align: 'left', font: MONO, it: false, w8: 400, dur: .22 }); });
+  txt(String(p.n), PC[0] + 30, y, 22, t0, { font: FONT_M, it: false, w8: 500, dur: .05 });
+  txt(p.name, PC[1] + 10, y, 22, t0 + 0.03, { align: 'left', font: FONT_M, it: false, w8: 400, dur: .22 });
+  txt(p.mat, PC[2] + 10, y, 22, t0 + 0.06, { align: 'left', font: FONT_M, it: false, w8: 400, dur: .22 }); });
 txt('NOTES', 1450, 490, 22, 7.6, { align: 'left', w8: 600, it: false, ls: 2 });
 ['1. LEAD Ø 0.5 mm, HB', '2. ALL DIMENSIONS IN mm', '3. BREAK ALL SHARP EDGES'].forEach((s, i) =>
-  txt(s, 1450, 526 + i * 32, 20, 7.7 + i * 0.12, { align: 'left', font: MONO, it: false, w8: 400, a: .85, dur: .3 }));
+  txt(s, 1450, 526 + i * 32, 20, 7.7 + i * 0.12, { align: 'left', font: FONT_M, it: false, w8: 400, a: .85, dur: .3 }));
 
 // ===== 7) TITLE BLOCK =====
-const TB = { x0: 1318, x1: 1858, y0: 850, y1: 1018 };
-line(polyPath([[TB.x0, TB.y0], [TB.x1, TB.y0], [TB.x1, TB.y1], [TB.x0, TB.y1]]), 7.45, 7.85, { w: 2.6 });
-line(P().M(TB.x0, 906).L(TB.x1, 906), 7.65, 7.85, { w: 1.4 }); line(P().M(TB.x0, 962).L(TB.x1, 962), 7.7, 7.9, { w: 1.4 });
-[1498, 1678].forEach((x, i) => line(P().M(x, 906).L(x, TB.y1), 7.75 + i * .05, 7.95 + i * .05, { w: 1.4 }));
-txt('MODEL MP-7 · MECHANICAL PENCIL', TB.x0 + 18, 890, 34, 7.8, { align: 'left', w8: 600, it: false, ls: 2, dur: .5 });
+const TBLK = { x0: 1318, x1: 1858, y0: 850, y1: 1018 };
+line(polyPath([[TBLK.x0, TBLK.y0], [TBLK.x1, TBLK.y0], [TBLK.x1, TBLK.y1], [TBLK.x0, TBLK.y1]]), 7.45, 7.85, { w: 2.6 });
+line(P().M(TBLK.x0, 906).L(TBLK.x1, 906), 7.65, 7.85, { w: 1.4 }); line(P().M(TBLK.x0, 962).L(TBLK.x1, 962), 7.7, 7.9, { w: 1.4 });
+[1498, 1678].forEach((x, i) => line(P().M(x, 906).L(x, TBLK.y1), 7.75 + i * .05, 7.95 + i * .05, { w: 1.4 }));
+txt('MODEL MP-7 · MECHANICAL PENCIL', TBLK.x0 + 18, 890, 34, 7.8, { align: 'left', w8: 600, it: false, ls: 2, dur: .5 });
 const cells = [['DRAWING NO', 'MP7-001'], ['SCALE', '1 : 1'], ['UNIT', 'mm'], ['MATERIAL', 'AL / BRASS'], ['DATE', '30.09.2026'], ['SHEET', '1 / 1']];
-cells.forEach(([k, v], i) => { const col = i % 3, row = Math.floor(i / 3), x = [TB.x0, 1498, 1678][col] + 12, y = 906 + row * 56;
-  txt(k, x, y + 18, 14, 7.95 + i * .06, { align: 'left', font: MONO, it: false, w8: 500, a: .7, ls: 1.5, dur: .08 });
+cells.forEach(([k, v], i) => { const col = i % 3, row = Math.floor(i / 3), x = [TBLK.x0, 1498, 1678][col] + 12, y = 906 + row * 56;
+  txt(k, x, y + 18, 14, 7.95 + i * .06, { align: 'left', font: FONT_M, it: false, w8: 500, a: .7, ls: 1.5, dur: .08 });
   txt(v, x, y + 47, 27, 8.05 + i * .07, { align: 'left', w8: 500, it: false, dur: .18 }); });
 evs.push({ k: 'whoosh', t: 2.95, d: 1.3 }, { k: 'chord', t: 8.55 });
 
-acts.sort((a, b) => a.t0 - b.t0);
+items.sort((a, b) => a.t0 - b.t0);
 
 // ---------- drawing ----------
 const ink = a => `rgba(${LN},${a})`;
 function drawLine(c, a, u) {
   const reach = a.ease(u) * a.path.len;
   c.strokeStyle = ink(a.a); c.lineWidth = a.w; c.lineCap = a.dash ? 'butt' : 'round'; c.lineJoin = 'round';
-  if (a.dash) c.setLineDash(a.dash);
+  c.setLineDash(a.dash || []);
   c.beginPath(); a.path.trace(c, 0, reach); c.stroke();
   const drawing = u > 0 && u < 1, scriber = !a.dash && a.w > 2;   // bright tip on heavy outlines while they draw
   if (drawing && scriber) {
@@ -306,7 +302,8 @@ function drawArrow(c, a, u) {
   const pop = eback(u, 3);
   c.translate(a.x, a.y); c.rotate(a.ang); c.scale(pop, pop);
   c.fillStyle = ink(0.95);
-  c.beginPath(); c.moveTo(0, 0); c.lineTo(-20, -5.5); c.lineTo(-20, 5.5); c.closePath(); c.fill();
+  const barb = new Path2D('M0 0 L-20 -5.5 L-20 5.5 Z');
+  c.fill(barb);
 }
 function drawDot(c, a, u) {
   c.fillStyle = ink(0.95);
@@ -333,39 +330,37 @@ function drawHatch(c, a, u) {
   }
 }
 const DRAWERS = { path: drawLine, text: drawText, arrow: drawArrow, dot: drawDot, hatch: drawHatch };
-function drawAct(c, a, t) {
-  if (t < a.t0) return;
-  c.save(); DRAWERS[a.kind](c, a, seg(t, a.t0, a.t1)); c.restore();
+function paintItem(c, item, t) {
+  if (t >= item.t0) { c.save(); DRAWERS[item.kind](c, item, seg(t, item.t0, item.t1)); c.restore(); }
 }
 // Drafting grid: 24 px squares, every fifth line stronger; extends past the sheet for camera moves.
-function drawGrid(c) {
-  c.lineWidth = 1;
+function paintGrid(c) {
+  Object.assign(c, { lineWidth: 1 });
   const style = v => (((v % 120) + 120) % 120 === 0 ? 'rgba(200,225,255,0.13)' : 'rgba(200,225,255,0.055)');
   for (let x = -240; x <= W + 240; x += 24) { c.strokeStyle = style(x); c.beginPath(); c.moveTo(x + .5, -240); c.lineTo(x + .5, H + 240); c.stroke(); }
   for (let y = -240; y <= H + 240; y += 24) { c.strokeStyle = style(y); c.beginPath(); c.moveTo(-240, y + .5); c.lineTo(W + 240, y + .5); c.stroke(); }
 }
-function cam(t) {
+function viewAt(t) {
   const u = eio(seg(t, 2.95, 4.25)); let s = lerp(1.58, 1.0, u), cx = lerp(680, 960, u), cy = lerp(262, 540, u);
   s *= 1 + 0.018 * seg(t, 4.25, 10) + 0.02 * (1 - u) * seg(t, 0, 2.95);
   // push in on the section while it draws, ease back out for the exploded view
   const p = eio(seg(t, 4.3, 5.2)) * (1 - eio(seg(t, 6.0, 6.8)));
   return [s * (1 + 0.22 * p), lerp(cx, 660, p), lerp(cy, 455, p)];
 }
-function render(t) {
-  const [s, cx, cy] = cam(t), view = [s, 0, 0, s, 960 - cx * s, 540 - cy * s];
+function composeFrame(t) {
+  const [s, cx, cy] = viewAt(t), view = [s, 0, 0, s, 960 - cx * s, 540 - cy * s];
   // sheet and grid
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#123b75'; ctx.fillRect(0, 0, W, H);
-  ctx.setTransform(...view); ctx.drawImage(paper, -160, -90, W + 320, H + 180); drawGrid(ctx);
+  ctx.setTransform(...view); ctx.drawImage(sheetTex, -160, -90, W + 320, H + 180); paintGrid(ctx);
   // ink layer
-  lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, W, H); lc.setTransform(...view);
-  for (const a of acts) drawAct(lc, a, t);
-  drawExploded(lc, t); drawBalloons(lc, t);
+  inkCtx.setTransform(1, 0, 0, 1, 0, 0); inkCtx.clearRect(0, 0, W, H); inkCtx.setTransform(...view);
+  for (const a of items) paintItem(inkCtx, a, t);
+  drawExploded(inkCtx, t); drawBalloons(inkCtx, t);
   // cyanotype glow: a reduced, blurred copy of the line layer added on top
-  gc.clearRect(0, 0, GL.width, GL.height); gc.filter = 'blur(2px)'; gc.drawImage(L, 0, 0, GL.width, GL.height); gc.filter = 'none';
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55; ctx.drawImage(GL, 0, 0, W, H);
-  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-  ctx.drawImage(L, 0, 0);
+  glowCtx.clearRect(0, 0, glowCv.width, glowCv.height); glowCtx.filter = 'blur(2px)'; glowCtx.drawImage(inkCv, 0, 0, glowCv.width, glowCv.height); glowCtx.filter = 'none';
+  ctx.resetTransform();
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55; ctx.drawImage(glowCv, 0, 0, W, H); ctx.restore();
+  ctx.drawImage(inkCv, 0, 0, W, H);
   const edge = ctx.createRadialGradient(960, 540, 600, 960, 540, 1200);
   edge.addColorStop(0, 'rgba(0,10,40,0)'); edge.addColorStop(1, 'rgba(0,10,40,0.35)');
   ctx.fillStyle = edge; ctx.fillRect(0, 0, W, H);
@@ -380,9 +375,9 @@ const FACES = [
   ['IBM Plex Mono', 'IBMPlexMono-500', 500],
 ];
 window.ready = Promise.all(FACES.map((f, i) => (i === 0 ? loadFont(...f).catch(() => {}) : loadFont(...f))))
-  .then(() => document.fonts.load(`600 30px ${COND}`, 'DRAWING SCALE'));
+  .then(() => document.fonts.load(`600 30px ${FONT_C}`, 'DRAWING SCALE'));
 window.draw = ({ t }) => {
-  render(t);
+  composeFrame(t);
   const url = cv.toDataURL('image/jpeg', 0.92);
   return url.slice(url.indexOf(',') + 1);
 };
