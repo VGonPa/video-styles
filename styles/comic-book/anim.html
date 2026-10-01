@@ -2,711 +2,844 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<link rel="stylesheet" href="fonts.css">
-<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+<link href="fonts.css" rel="stylesheet">
+<style>body { margin: 0; background: #000 } canvas { display: block }</style>
 </head>
 <body>
-<canvas id="c" width="1920" height="1080"></canvas>
+<canvas id="c"></canvas>
 <script>
-// ── comic book · "CAPTAIN CLARITY vs. THE RUNAWAY ROBOT" ────────────────────
-// Newsprint page inks in → camera enters panel 1: a robot vacuum runs amok in the museum (VROOM! BONK!)
-// → panel 2: Captain Clarity swoops over the city (WHOOSH!) → panel 3: the robot leaps, POW! on her palm,
-// its eyes turn happy and it sweeps the dust away → pull back to the whole page, "THE END?" + a second robot peeks → fade.
-// Colors are printed with Ben-Day dots (CMY + ink), the color pattern is slightly offset from the line (print shift).
-const W = 1920, H = 1080, DUR = 10.0;
+// Comic book: "CAPTAIN CLARITY vs. THE RUNAWAY ROBOT".
+// A newsprint page inks itself in, the camera dives into each panel in turn:
+//   1. a robot vacuum tears through the museum and bumps a vase (VROOOM! BONK!)
+//   2. Captain Clarity flies over the city (WHOOSH!)
+//   3. the robot leaps at her, POW! on her open palm, it calms down and sweeps up the dust
+//   4. back out to the full page: "THE END?" while a second robot peeks in, then fade to black.
+// Colour is printed as Ben-Day dot screens on a plate that sits slightly off register from the black line.
+const FRAME = { w: 1920, h: 1080 };
 const cv = document.getElementById('c');
-const ctx = cv.getContext('2d');
+cv.width = FRAME.w; cv.height = FRAME.h;
+const pen = cv.getContext('2d');
+const TAU = Math.PI * 2;
 
-// ── math ──
-const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
-const lerp = (from, to, k) => from + (to - from) * k;
-const seg = (t, start, end) => clamp((t - start) / (end - start));
-const eInOut = k => (k < .5 ? 4 * k * k * k : 1 - Math.pow(2 - 2 * k, 3) / 2);
-const eOut = k => 1 - Math.pow(1 - k, 3);
-// overshooting ease; 0 until the animation starts so callers can skip drawing
-const eBack = (k, over = 2.2) => {
-  if (k <= 0) return 0;
-  const d = k - 1;
-  return 1 + (over + 1) * Math.pow(d, 3) + over * Math.pow(d, 2);
-};
-// seeded generator in [0, 1): the public-domain mulberry32 algorithm
-function rng(seed) {
-  let state = seed;
-  return () => {
-    state = (state | 0) + 0x6D2B79F5 | 0;
-    let z = Math.imul(state ^ state >>> 15, 1 | state);
-    z = z + Math.imul(z ^ z >>> 7, 61 | z) ^ z;
-    return ((z ^ z >>> 14) >>> 0) / 4294967296;
+// ── numbers ──
+const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
+const mixN = (a, b, u) => a + (b - a) * u;
+const mixP = (p, q, u) => [mixN(p[0], q[0], u), mixN(p[1], q[1], u)];
+const span = (t, t0, t1) => clamp01((t - t0) / (t1 - t0));
+const easeOut = u => 1 - (1 - u) ** 3;
+const easeInOut = u => (u < 0.5 ? 4 * u ** 3 : 1 - (2 - 2 * u) ** 3 / 2);
+// overshoot ease; returns 0 before the start so callers can skip drawing
+const backOut = (u, s = 2.2) => (u <= 0 ? 0 : 1 + (s + 1) * (u - 1) ** 3 + s * (u - 1) ** 2);
+// mulberry32 (public domain), written out here; returns a generator of floats in [0, 1)
+function seeded(seed) {
+  let a = seed | 0;
+  return function next() {
+    a = (a + 0x6D2B79F5) | 0;
+    let q = Math.imul(a ^ (a >>> 15), a | 1);
+    q ^= q + Math.imul(q ^ (q >>> 7), q | 61);
+    return ((q ^ (q >>> 14)) >>> 0) / 2 ** 32;
   };
 }
-function mk(w, h) { const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; return canvas; }
+const sheet = (w, h) => Object.assign(document.createElement('canvas'), { width: w, height: h });
 
 // ── the printed page ──
-const INK = '#1b1716', PAPER = '#efe2c0', CY = '#2f9fd8', MG = '#e0393e', YE = '#f5c928', CR = '#fbf6e6';
-const MIS = [5, -4];                              // colour plate offset from the ink plate (page units)
-const PW = 3050, PH = 2130;                       // page size
-const PAN = {                                     // panel boxes [x, y, w, h]
-  P1: [100, 340, 1350, 740],
-  P2: [1500, 340, 1350, 740],
-  P3: [100, 1130, 1900, 800],
-  P4: [2050, 1130, 800, 800],
+const INK = '#1b1716', PAPER = '#efe2c0', CREAM = '#fbf6e6', DESK = '#2e2622';
+const CYAN = '#2f9fd8', MAGENTA = '#e0393e', YELLOW = '#f5c928';
+const SHIFT = [5, -4];                            // colour plate offset from the black plate, page units
+const PAGE = { w: 3050, h: 2130 };
+const BOX = {
+  P1: { x: 100, y: 340, w: 1350, h: 740 },
+  P2: { x: 1500, y: 340, w: 1350, h: 740 },
+  P3: { x: 100, y: 1130, w: 1900, h: 800 },
+  P4: { x: 2050, y: 1130, w: 800, h: 800 },
 };
-let PAPERC;                                       // newsprint texture, built in window.ready
-const HAND = '"Patrick Hand"', BANG = 'Bangers';
+const FONT_HAND = '"Patrick Hand"', FONT_BANG = 'Bangers';
+let NEWSPRINT = null;                             // paper texture, made in window.ready
 
-// ── Ben-Day printing ──
-// A screen tile is one dot in the middle plus quarter dots in the corners, so the repeat forms a diagonal grid;
-// the pattern is rotated to its screen angle. Tiles are cached per colour/size/angle.
-const SCREENS = {};
-function pat(x, col, r, cell = 18, ang = 15) {
-  const id = [col, r, cell, ang].join('|');
-  if (!(id in SCREENS)) {
-    const tile = mk(cell, cell), g = tile.getContext('2d');
-    const disc = (cx, cy, rad) => { g.beginPath(); g.arc(cx, cy, rad, 0, Math.PI * 2); g.fill(); };
-    g.fillStyle = col;
-    disc(cell / 2, cell / 2, r);
-    for (const [cx, cy] of [[0, 0], [cell, 0], [0, cell], [cell, cell]]) disc(cx, cy, r * 0.55);
-    const screen = x.createPattern(tile, 'repeat');
-    screen.setTransform(new DOMMatrix().rotateSelf(ang));
-    SCREENS[id] = screen;
+// ── dot screens ──
+// One tile = a centre dot plus quarter dots at the corners, so the repeat is a diagonal grid; the
+// pattern is turned to the screen angle. Patterns are cached by their parameters.
+const tileCache = new Map();
+function screen(col, r, cell = 18, ang = 15) {
+  const key = `${col}/${r}/${cell}/${ang}`;
+  let pattern = tileCache.get(key);
+  if (!pattern) {
+    const tile = sheet(cell, cell), tg = tile.getContext('2d');
+    tg.fillStyle = col;
+    const spots = [[cell / 2, cell / 2, r], [0, 0, r * 0.55], [cell, 0, r * 0.55], [0, cell, r * 0.55], [cell, cell, r * 0.55]];
+    for (const [sx, sy, sr] of spots) { tg.beginPath(); tg.arc(sx, sy, sr, 0, TAU); tg.fill(); }
+    pattern = pen.createPattern(tile, 'repeat');
+    pattern.setTransform(new DOMMatrix().rotateSelf(ang));
+    tileCache.set(key, pattern);
   }
-  return SCREENS[id];
+  return pattern;
 }
-// Overprint on the shifted colour plate: everything multiplies onto what is already there.
-function onColourPlate(x, paint) {
-  x.save(); x.translate(MIS[0], MIS[1]); x.globalCompositeOperation = 'multiply';
-  paint();
-  x.restore();
+// Anything printed on the colour plate: shifted off register and multiplied onto what is below.
+function overprint(job) {
+  pen.save();
+  pen.globalCompositeOperation = 'multiply';
+  pen.translate(SHIFT[0], SHIFT[1]);
+  job();
+  pen.restore();
 }
-function dots(x, pathFn, col, r, cell, ang) {      // dot screen inside a shape
-  onColourPlate(x, () => { x.fillStyle = pat(x, col, r, cell, ang); pathFn(x); x.fill(); });
-}
-function flat(x, pathFn, col) {                    // solid tint inside a shape
-  onColourPlate(x, () => { x.fillStyle = col; pathFn(x); x.fill(); });
-}
-// Dot screen whose dot radius varies across the box (rFn(px, py) gives it), on a grid rotated by `ang`.
-function halftoneGrad(x, bx, by, bw, bh, col, rFn, cell = 20, ang = 0.26) {
-  onColourPlate(x, () => {
-    x.fillStyle = col; x.beginPath();
-    const cos = Math.cos(ang), sin = Math.sin(ang), mx = bx + bw / 2, my = by + bh / 2, reach = Math.hypot(bw, bh) / 2 + cell;
-    for (let v = -reach; v < reach; v += cell) {
-      for (let u = -reach; u < reach; u += cell) {
-        const px = mx + u * cos - v * sin, py = my + u * sin + v * cos;
-        const outside = px < bx - cell || px > bx + bw + cell || py < by - cell || py > by + bh + cell;
-        if (outside) continue;
-        const r = rFn(px, py);
-        if (r < 0.6) continue;
-        x.moveTo(px + r, py); x.arc(px, py, r, 0, Math.PI * 2);
+const screenFill = (shape, col, r, cell, ang) => overprint(() => { pen.fillStyle = screen(col, r, cell, ang); shape(); pen.fill(); });
+const tintFill = (shape, col) => overprint(() => { pen.fillStyle = col; shape(); pen.fill(); });
+// Screen with a dot size that changes over an area: radiusAt(px, py) per dot, grid turned by `ang` radians.
+function gradedScreen(area, col, radiusAt, cell, ang) {
+  const ux = Math.cos(ang), uy = Math.sin(ang);
+  const ox = area.x + area.w / 2, oy = area.y + area.h / 2, n = Math.ceil(Math.hypot(area.w, area.h) / 2 / cell) + 1;
+  overprint(() => {
+    pen.fillStyle = col;
+    pen.beginPath();
+    for (let j = -n; j <= n; j++) {
+      for (let i = -n; i <= n; i++) {
+        const px = ox + (i * ux - j * uy) * cell, py = oy + (i * uy + j * ux) * cell;
+        if (px < area.x - cell || py < area.y - cell || px > area.x + area.w + cell || py > area.y + area.h + cell) continue;
+        const rad = radiusAt(px, py);
+        if (rad >= 0.6) { pen.moveTo(px + rad, py); pen.ellipse(px, py, rad, rad, 0, 0, TAU); }
       }
     }
-    x.fill();
+    pen.fill();
   });
 }
-const rectP = (bx, by, bw, bh) => x => { x.beginPath(); x.rect(bx, by, bw, bh); };
-// print colors: [dot color, dot radius, cell, screen angle, flat tint or null]
-const C_SUIT = [CY, 5.6, 12, 15, 'rgba(47,159,216,0.30)'], C_RED = [MG, 5.8, 12, 75, 'rgba(224,57,62,0.45)'],
-  C_GOLD = [YE, 5.8, 12, 45, 'rgba(245,201,40,0.55)'], C_SKIN = [MG, 1.9, 8, 75, 'rgba(240,160,130,0.18)'], C_HAIR = [INK, 0, 0, 0, INK];
-function part(x, pathFn, c, lw = 6) { // paper-white base, offset color, then ink outline
-  x.fillStyle = CR; pathFn(x); x.fill();
-  if (c) { if (c[1]) dots(x, pathFn, c[0], c[1], c[2], c[3]); if (c[4]) flat(x, pathFn, c[4]); }
-  pathFn(x); inkStroke(x, lw);
+const rectShape = (rx, ry, rw, rh) => () => { pen.beginPath(); pen.rect(rx, ry, rw, rh); };
+const areaShape = a => rectShape(a.x, a.y, a.w, a.h);
+
+// Print specs: dot screen (colour, radius, cell, angle) plus an optional flat tint under the dots.
+const ink = (dot, r, cell, ang, tint = null) => ({ dot, r, cell, ang, tint });
+const SUIT = ink(CYAN, 5.6, 12, 15, 'rgba(47,159,216,0.30)');
+const RED = ink(MAGENTA, 5.8, 12, 75, 'rgba(224,57,62,0.45)');
+const GOLD = ink(YELLOW, 5.8, 12, 45, 'rgba(245,201,40,0.55)');
+const SKIN = ink(MAGENTA, 1.9, 8, 75, 'rgba(240,160,130,0.18)');
+const SOLID = ink(INK, 0, 0, 0, INK);
+function outline(w = 9) {
+  pen.lineJoin = 'round'; pen.lineCap = 'round';
+  pen.strokeStyle = INK; pen.lineWidth = w;
+  pen.stroke();
+}
+// Cream base, colour plate, then the black line on top.
+function printShape(shape, spec, lw = 6) {
+  pen.fillStyle = CREAM; shape(); pen.fill();
+  if (spec && spec.r) screenFill(shape, spec.dot, spec.r, spec.cell, spec.ang);
+  if (spec && spec.tint) tintFill(shape, spec.tint);
+  shape(); outline(lw);
 }
 
-// ── geometry helpers ──
-function spline(x, P, closed = true, cont = false) { // Catmull-Rom through points
-  const n = P.length, g = i => closed ? P[(i + n) % n] : P[clamp(i, 0, n - 1)];
-  cont ? x.lineTo(P[0][0], P[0][1]) : x.moveTo(P[0][0], P[0][1]);
-  for (let i = 0; i < (closed ? n : n - 1); i++) {
-    const p0 = g(i - 1), p1 = g(i), p2 = g(i + 1), p3 = g(i + 2);
-    x.bezierCurveTo(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6, p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6, p2[0], p2[1]);
+// ── curves ──
+// Catmull-Rom curve through pts as cubic Béziers; `joined` continues the current subpath.
+function smooth(pts, closed = true, joined = false) {
+  const n = pts.length;
+  const at = i => (closed ? pts[((i % n) + n) % n] : pts[Math.max(0, Math.min(n - 1, i))]);
+  if (joined) pen.lineTo(pts[0][0], pts[0][1]); else pen.moveTo(pts[0][0], pts[0][1]);
+  const count = closed ? n : n - 1;
+  for (let i = 0; i < count; i++) {
+    const a = at(i - 1), b = at(i), c = at(i + 1), d = at(i + 2);
+    pen.bezierCurveTo(b[0] + (c[0] - a[0]) / 6, b[1] + (c[1] - a[1]) / 6, c[0] - (d[0] - b[0]) / 6, c[1] - (d[1] - b[1]) / 6, c[0], c[1]);
   }
-  if (closed) x.closePath();
+  if (closed) pen.closePath();
 }
-const sp = P => x => { x.beginPath(); spline(x, P); };
-function capsule(a, b, ra, rb) { // tapered capsule between two joints
-  return x => {
-    const th = Math.atan2(b[1] - a[1], b[0] - a[0]), d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-3;
-    const ph = Math.asin(clamp((ra - rb) / d, -0.95, 0.95));
-    x.beginPath(); x.arc(a[0], a[1], ra, th + Math.PI / 2 - ph, th + 3 * Math.PI / 2 + ph);
-    x.arc(b[0], b[1], rb, th - Math.PI / 2 + ph, th + Math.PI / 2 - ph); x.closePath();
+const blob = pts => () => { pen.beginPath(); smooth(pts); };
+// Limb segment between two joints with different end radii.
+function capsule(a, b, ra, rb) {
+  return () => {
+    const dir = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-3;
+    const tilt = Math.asin(Math.max(-0.95, Math.min(0.95, (ra - rb) / len))), q = Math.PI / 2;
+    pen.beginPath();
+    pen.arc(a[0], a[1], ra, dir + q - tilt, dir + 3 * q + tilt);
+    pen.arc(b[0], b[1], rb, dir - q + tilt, dir + q - tilt);
+    pen.closePath();
   };
 }
-function tube(P, R) { // smooth tube with varying radius and round caps
-  return x => {
-    const n = P.length, L = [], Rt = [], ang = [];
-    for (let i = 0; i < n; i++) {
-      const a = P[Math.max(i - 1, 0)], b = P[Math.min(i + 1, n - 1)], th = Math.atan2(b[1] - a[1], b[0] - a[0]); ang.push(th);
-      L.push([P[i][0] - Math.sin(th) * R[i], P[i][1] + Math.cos(th) * R[i]]); Rt.push([P[i][0] + Math.sin(th) * R[i], P[i][1] - Math.cos(th) * R[i]]);
-    }
-    x.beginPath(); spline(x, L, false);
-    x.arc(P[n - 1][0], P[n - 1][1], R[n - 1], ang[n - 1] + Math.PI / 2, ang[n - 1] - Math.PI / 2, true);
-    spline(x, Rt.reverse(), false, true);
-    x.arc(P[0][0], P[0][1], R[0], ang[0] - Math.PI / 2, ang[0] + Math.PI / 2, true); x.closePath();
+// Smooth tube along a spine with a radius per point and round ends.
+function tube(spine, radii) {
+  return () => {
+    const n = spine.length, left = [], right = [], dirs = [];
+    spine.forEach((p, i) => {
+      const prev = spine[Math.max(0, i - 1)], next = spine[Math.min(n - 1, i + 1)];
+      const d = Math.atan2(next[1] - prev[1], next[0] - prev[0]), nx = -Math.sin(d) * radii[i], ny = Math.cos(d) * radii[i];
+      dirs.push(d); left.push([p[0] + nx, p[1] + ny]); right.unshift([p[0] - nx, p[1] - ny]);
+    });
+    const q = Math.PI / 2, head = spine[n - 1], foot = spine[0];
+    pen.beginPath(); smooth(left, false);
+    pen.arc(head[0], head[1], radii[n - 1], dirs[n - 1] + q, dirs[n - 1] - q, true);
+    smooth(right, false, true);
+    pen.arc(foot[0], foot[1], radii[0], dirs[0] - q, dirs[0] + q, true);
+    pen.closePath();
   };
 }
-const mix = (a, b, u) => [lerp(a[0], b[0], u), lerp(a[1], b[1], u)];
 
-// ── drawing elements ──
 // ── lettering and page furniture ──
-function inkStroke(x, w = 9) {
-  x.strokeStyle = INK; x.lineWidth = w; x.lineJoin = 'round'; x.lineCap = 'round';
-  x.stroke();
+function handLines(lines, size) {
+  pen.fillStyle = INK; pen.textAlign = 'center'; pen.textBaseline = 'middle';
+  pen.font = `400 ${size}px ${FONT_HAND}`;
+  const first = -(lines.length - 1) / 2;
+  lines.forEach((line, i) => pen.fillText(line, 0, (first + i) * size * 1.02 + 4));
 }
-// Centred lines of hand lettering around the origin (balloon interiors).
-function letterLines(x, lines, size, weight = 400) {
-  x.fillStyle = INK; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = `${weight} ${size}px ${HAND}`;
-  const mid = (lines.length - 1) / 2;
-  lines.forEach((line, i) => x.fillText(line, 0, (i - mid) * size * 1.02 + 4));
-}
-// Speech balloon that pops in (prog 0..1). tail = [tipX, tipY, startAngle, endAngle] relative to the centre.
-function balloon(x, cx, cy, rw, rh, tail, lines, size, prog, opt = {}) {
-  const pop = eBack(prog, 2.4);
-  if (pop <= 0) return;
-  x.save(); x.translate(cx, cy); x.scale(pop, pop);
-  const rim = (ang, k) => [Math.cos(ang) * rw * k, Math.sin(ang) * rh * k];
-  const outline = () => {
-    x.beginPath(); x.ellipse(0, 0, rw, rh, 0, 0, Math.PI * 2);
-    if (!tail) return;
-    const [tx, ty, from, to] = tail;
-    x.moveTo(...rim(from, 0.98)); x.quadraticCurveTo(tx * 0.45, ty * 0.6, tx, ty); x.lineTo(...rim(to, 0.98));
-  };
-  x.fillStyle = CR; outline(); x.fill();
-  outline(); inkStroke(x, 8);
-  x.fillStyle = CR; x.beginPath(); x.ellipse(0, 0, rw - 5, rh - 5, 0, 0, Math.PI * 2); x.fill();   // cover the line where the tail joins
-  letterLines(x, lines, size, opt.w ?? 400);
-  x.restore();
-}
-function zapBalloon(x, cx, cy, rw, rh, tail, lines, size, prog) { // electric (robot) balloon: zigzag edge + lightning tail
-  const s = eBack(prog, 2.4); if (s <= 0) return;
-  x.save(); x.translate(cx, cy); x.scale(s, s);
-  const edge = k => { const P = []; for (let i = 0; i < 30; i++) { const a = i / 30 * Math.PI * 2, r = (i % 2 ? 0.9 : 1.05) * k; P.push([Math.cos(a) * rw * r, Math.sin(a) * rh * r]); } return P; };
-  const [tx, ty] = tail, ta = Math.atan2(ty / rh, tx / rw), nx = -Math.sin(ta), ny = Math.cos(ta);
-  const b0 = [Math.cos(ta - 0.3) * rw * 0.9, Math.sin(ta - 0.3) * rh * 0.9], b1 = [Math.cos(ta + 0.3) * rw * 0.9, Math.sin(ta + 0.3) * rh * 0.9];
-  const m = mix(b0, [tx, ty], 0.5), m2 = mix(b1, [tx, ty], 0.5);
-  const path = () => {
-    x.beginPath(); edge(1).forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath();
-    x.moveTo(b0[0], b0[1]); x.lineTo(m[0] - nx * 22, m[1] - ny * 22); x.lineTo(m[0] + nx * 10, m[1] + ny * 10); x.lineTo(tx, ty);
-    x.lineTo(m2[0] + nx * 26, m2[1] + ny * 26); x.lineTo(b1[0], b1[1]); x.closePath();
-  };
-  x.fillStyle = CR; path(); x.fill(); path(); inkStroke(x, 7);
-  x.fillStyle = CR; x.beginPath(); edge(0.93).forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath(); x.fill();
-  letterLines(x, lines, size);
-  x.restore();
-}
-// Yellow caption box that unrolls downward; width fits the text unless `w` is given.
-function caption(x, bx, by, text, size, prog, w) {
-  if (prog <= 0) return;
-  x.save();
-  x.font = `400 ${size}px ${HAND}`;
-  const boxW = w ?? x.measureText(text).width + 60, boxH = size + 36, box = rectP(0, 0, boxW, boxH);
-  x.translate(bx, by); x.scale(1, eOut(prog));
-  x.fillStyle = CR; x.fillRect(0, 0, boxW, boxH);
-  dots(x, box, YE, 8.5, 16, 45);
-  flat(x, box, 'rgba(245,201,40,0.35)');
-  box(x); inkStroke(x, 7);
-  x.fillStyle = INK; x.textBaseline = 'middle'; x.fillText(text, 30, boxH / 2 + 3);
-  x.restore();
-}
-// Speed lines: n thin ink wedges radiating from (cx, cy), starting r0..r0+90 out, clipped to the panel.
-function actionLines(x, cx, cy, r0, n, seed, bx, by, bw, bh) {
-  const rand = rng(seed);
-  const at = (ang, dist) => [cx + Math.cos(ang) * dist, cy + Math.sin(ang) * dist];
-  x.save();
-  x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
-  x.fillStyle = INK;
-  for (let i = 0; i < n; i++) {
-    const ang = i / n * Math.PI * 2 + rand() * 0.05, half = 0.008 + rand() * 0.012, start = r0 + rand() * 90;
-    x.beginPath(); x.moveTo(...at(ang, start)); x.lineTo(...at(ang - half, 2600)); x.lineTo(...at(ang + half, 2600));
-    x.closePath(); x.fill();
-  }
-  x.restore();
-}
-// Jagged explosion outline with n spikes (wider than tall), as a path ready to fill or stroke.
-function burstPath(x, cx, cy, R, n, seed, jit = 0) {
-  const rand = rng(seed), corners = n * 2;
-  x.beginPath();
-  for (let i = 0; i < corners; i++) {
-    const ang = i / corners * Math.PI * 2 + (rand() - 0.5) * 0.12;
-    const radius = (i % 2 ? R * (0.62 + rand() * 0.08) : R * (0.95 + rand() * 0.2)) + jit * (rand() - 0.5);
-    const px = cx + Math.cos(ang) * radius * 1.25, py = cy + Math.sin(ang) * radius;
-    if (i) x.lineTo(px, py); else x.moveTo(px, py);
-  }
-  x.closePath();
-}
-// Sound-effect lettering: letters pop in one after another, each tilted, outlined and with a stacked block shadow.
-function sfx(x, text, cx, cy, size, rot, prog, fill, shadow = INK) {
-  if (prog <= 0) return;
-  x.save();
-  x.translate(cx, cy); x.rotate(rot);
-  x.font = `400 ${size}px ${BANG}`; x.textBaseline = 'middle'; x.letterSpacing = `${size * 0.04}px`;
-  const letters = [...text], total = x.measureText(text).width, stagger = 0.18;
-  let before = '';
-  letters.forEach((ch, i) => {
-    const offset = x.measureText(before).width;
-    before += ch;
-    const u = clamp(prog * (1 + (letters.length - 1) * stagger) - i * stagger);
-    if (u <= 0) return;
-    const pop = eBack(u, 2.6), cw = x.measureText(ch).width, odd = i % 2 === 1;
-    x.save();
-    x.translate(-total / 2 + offset + cw / 2, (odd ? -1 : 1) * size * 0.04);
-    x.scale(pop, pop); x.rotate(odd ? 0.06 : -0.05);
-    x.lineJoin = 'round';
-    for (let depth = 10; depth >= 1; depth -= 1.5) { x.fillStyle = shadow; x.fillText(ch, -cw / 2 + depth, depth); }
-    x.strokeStyle = INK; x.lineWidth = size * 0.1; x.strokeText(ch, -cw / 2, 0);
-    x.fillStyle = fill; x.fillText(ch, -cw / 2, 0);
-    x.restore();
-  });
-  x.restore();
-}
-// Panel border inked clockwise from the top-left corner; prog 0..1 is how much of the perimeter is done.
-function panelFrame(x, [bx, by, bw, bh], prog) {
-  if (prog <= 0) return false;
-  const target = 2 * (bw + bh) * eOut(prog);
-  let done = 0, [px, py] = [bx, by];
-  x.save();
-  x.beginPath(); x.moveTo(px, py);
-  for (const [qx, qy] of [[bx + bw, by], [bx + bw, by + bh], [bx, by + bh], [bx, by]]) {
-    const side = Math.hypot(qx - px, qy - py);
-    if (done + side > target) { const f = (target - done) / side; x.lineTo(px + (qx - px) * f, py + (qy - py) * f); break; }
-    x.lineTo(qx, qy); done += side; px = qx; py = qy;
-  }
-  inkStroke(x, 10);
-  x.restore();
-  return true;
-}
-function star(x, cx, cy, s, rot, col = YE) {
+// Oval speech balloon that pops in. tail = [tipX, tipY, rim angle 1, rim angle 2], relative to the centre.
+function speech(b, prog) {
+  const s = backOut(prog, 2.4);
   if (s <= 0) return;
-  x.save(); x.translate(cx, cy); x.rotate(rot); x.beginPath();
-  for (let j = 0; j < 8; j++) { const a = j * Math.PI / 4, r = j % 2 ? s * 0.3 : s; x.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
-  x.closePath(); x.fillStyle = col; x.fill(); inkStroke(x, 4); x.restore();
+  const { rx, ry, tail } = b;
+  const shape = () => {
+    pen.beginPath(); pen.ellipse(0, 0, rx, ry, 0, 0, TAU);
+    if (!tail) return;
+    const [tipX, tipY, a0, a1] = tail;
+    pen.moveTo(Math.cos(a0) * rx * 0.98, Math.sin(a0) * ry * 0.98);
+    pen.quadraticCurveTo(tipX * 0.45, tipY * 0.6, tipX, tipY);
+    pen.lineTo(Math.cos(a1) * rx * 0.98, Math.sin(a1) * ry * 0.98);
+  };
+  pen.save(); pen.translate(b.at[0], b.at[1]); pen.scale(s, s);
+  pen.fillStyle = CREAM; shape(); pen.fill(); shape(); outline(8);
+  // paint over the seam where the tail meets the oval
+  pen.fillStyle = CREAM; pen.beginPath(); pen.ellipse(0, 0, rx - 5, ry - 5, 0, 0, TAU); pen.fill();
+  handLines(b.lines, b.size);
+  pen.restore();
+}
+// The robot's balloon: zigzag rim and a lightning-bolt tail pointing at [tipX, tipY].
+function robotSpeech(b, prog) {
+  const s = backOut(prog, 2.4);
+  if (s <= 0) return;
+  const { rx, ry } = b, tip = b.tail;
+  const ring = k => Array.from({ length: 30 }, (_, i) => {
+    const a = i * TAU / 30, f = (i % 2 ? 0.9 : 1.05) * k;
+    return [Math.cos(a) * rx * f, Math.sin(a) * ry * f];
+  });
+  const poly = pts => pts.forEach(([px, py], i) => (i ? pen.lineTo(px, py) : pen.moveTo(px, py)));
+  const aim = Math.atan2(tip[1] / ry, tip[0] / rx), nx = -Math.sin(aim), ny = Math.cos(aim);
+  const rim = da => [Math.cos(aim + da) * rx * 0.9, Math.sin(aim + da) * ry * 0.9];
+  const l = rim(-0.3), r = rim(0.3), ml = mixP(l, tip, 0.5), mr = mixP(r, tip, 0.5);
+  const bolt = [l, [ml[0] - nx * 22, ml[1] - ny * 22], [ml[0] + nx * 10, ml[1] + ny * 10], tip, [mr[0] + nx * 26, mr[1] + ny * 26], r];
+  const shape = () => { pen.beginPath(); poly(ring(1)); pen.closePath(); poly(bolt); pen.closePath(); };
+  pen.save(); pen.translate(b.at[0], b.at[1]); pen.scale(s, s);
+  pen.fillStyle = CREAM; shape(); pen.fill(); shape(); outline(7);
+  pen.fillStyle = CREAM; pen.beginPath(); poly(ring(0.93)); pen.closePath(); pen.fill();
+  handLines(b.lines, b.size);
+  pen.restore();
+}
+// Yellow narration box, sized to its text, unrolling downwards.
+function captionBox(at, text, size, prog) {
+  if (!(prog > 0)) return;
+  pen.save();
+  pen.font = `400 ${size}px ${FONT_HAND}`;
+  const w = pen.measureText(text).width + 60, h = size + 36, shape = rectShape(0, 0, w, h);
+  pen.translate(at[0], at[1]); pen.scale(1, easeOut(prog));
+  pen.fillStyle = CREAM; pen.fillRect(0, 0, w, h);
+  screenFill(shape, YELLOW, 8.5, 16, 45);
+  tintFill(shape, 'rgba(245,201,40,0.35)');
+  shape(); outline(7);
+  pen.fillStyle = INK; pen.textAlign = 'left'; pen.textBaseline = 'middle';
+  pen.fillText(text, 30, h / 2 + 3);
+  pen.restore();
+}
+// Radiating ink wedges around a centre, each starting a little way past r0 (the panel clip trims them).
+function speedBurst([cx, cy], r0, count, seed) {
+  const rnd = seeded(seed), far = 2600;
+  const ray = (a, d) => [cx + Math.cos(a) * d, cy + Math.sin(a) * d];
+  pen.fillStyle = INK;
+  for (let n = 0; n < count; n++) {
+    const a = n * TAU / count + rnd() * 0.05, half = 0.008 + rnd() * 0.012, near = r0 + rnd() * 90;
+    pen.beginPath();
+    for (const [px, py] of [ray(a, near), ray(a - half, far), ray(a + half, far)]) pen.lineTo(px, py);
+    pen.fill();
+  }
+}
+// Spiky explosion outline around the origin, stretched sideways.
+function starburst(R, spikes, seed, jitter = 0) {
+  const rnd = seeded(seed), corners = spikes * 2;
+  pen.beginPath();
+  for (let i = 0; i < corners; i++) {
+    const a = i * TAU / corners + (rnd() - 0.5) * 0.12;
+    const d = R * (i % 2 ? 0.62 + rnd() * 0.08 : 0.95 + rnd() * 0.2) + jitter * (rnd() - 0.5);
+    pen.lineTo(Math.cos(a) * d * 1.25, Math.sin(a) * d);
+  }
+  pen.closePath();
+}
+// Sound effect: letters pop in one by one, rocked alternately, with an outline and a stepped drop shadow.
+function boom(text, [cx, cy], size, rot, prog, fill, shadow = INK) {
+  if (!(prog > 0)) return;
+  const chars = Array.from(text), lag = 0.18, run = 1 + (chars.length - 1) * lag;
+  pen.save();
+  pen.translate(cx, cy); pen.rotate(rot);
+  pen.font = `400 ${size}px ${FONT_BANG}`; pen.letterSpacing = `${size * 0.04}px`;
+  pen.textAlign = 'left'; pen.textBaseline = 'middle';
+  const width = pen.measureText(text).width;
+  for (const [i, ch] of chars.entries()) {
+    const local = clamp01(prog * run - i * lag);
+    if (!(local > 0)) continue;
+    const left = pen.measureText(chars.slice(0, i).join('')).width, cw = pen.measureText(ch).width;
+    const odd = i % 2 === 1, s = backOut(local, 2.6);
+    pen.save();
+    pen.translate(left + cw / 2 - width / 2, size * (odd ? -0.04 : 0.04));
+    pen.scale(s, s); pen.rotate(odd ? 0.06 : -0.05);
+    pen.fillStyle = shadow;
+    for (let d = 10; d >= 1; d -= 1.5) pen.fillText(ch, d - cw / 2, d);
+    pen.lineJoin = 'round'; pen.lineWidth = size * 0.1; pen.strokeStyle = INK;
+    pen.strokeText(ch, -cw / 2, 0);
+    pen.fillStyle = fill;
+    pen.fillText(ch, -cw / 2, 0);
+    pen.restore();
+  }
+  pen.restore();
+}
+// Panel border inked clockwise from its top-left corner; prog is the share of the perimeter drawn.
+function inkBorder(b, prog) {
+  if (!(prog > 0)) return;
+  const corners = [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h], [b.x, b.y]];
+  let left = 2 * (b.w + b.h) * easeOut(prog);
+  pen.save();
+  pen.beginPath(); pen.moveTo(b.x, b.y);
+  for (let i = 1; i < corners.length && left > 0; i++) {
+    const [ax, ay] = corners[i - 1], [bx, by] = corners[i], len = Math.hypot(bx - ax, by - ay), f = Math.min(1, left / len);
+    pen.lineTo(ax + (bx - ax) * f, ay + (by - ay) * f);
+    left -= len;
+  }
+  outline(10);
+  pen.restore();
+}
+function sparkle(cx, cy, size, spin, col = YELLOW) {
+  if (size <= 0) return;
+  pen.save(); pen.translate(cx, cy); pen.rotate(spin);
+  pen.beginPath();
+  for (let j = 0; j < 8; j++) {
+    const a = j * Math.PI / 4, d = j % 2 ? size * 0.3 : size;
+    pen.lineTo(Math.cos(a) * d, Math.sin(a) * d);
+  }
+  pen.closePath(); pen.fillStyle = col; pen.fill(); outline(4);
+  pen.restore();
 }
 
-// ── Captain Clarity: jointed figure in profile, facing right ──
-// head outlines in head-radius units, facing +x
+// ── Captain Clarity, a jointed figure in profile facing right ──
+// head shapes in head-radius units, facing +x
 const FACE = [[-0.2, -0.98], [0.45, -0.86], [0.8, -0.47], [0.9, -0.12], [0.94, 0.08], [1.13, 0.33], [0.94, 0.43], [0.98, 0.56], [0.9, 0.64], [0.95, 0.73], [0.8, 0.94], [0.42, 1.02], [0.02, 0.88], [-0.55, 0.55], [-0.92, 0.0], [-0.76, -0.66]];
 const HAIR = [[0.8, -0.5], [0.5, -0.6], [0.12, -0.46], [-0.18, -0.12], [-0.3, 0.38], [-0.58, 0.8], [-0.97, 0.62], [-1.1, 0.0], [-0.97, -0.62], [-0.5, -1.05], [0.15, -1.12], [0.62, -0.94]];
 const MASK = [[0.24, -0.34], [0.6, -0.42], [0.93, -0.32], [0.97, -0.06], [0.62, 0.03], [0.28, 0.0]];
-function head(x, c, R, rot, tail) {
-  // no ctx.scale here: the print offset and dot size must stay in page units
-  x.save(); x.translate(c[0], c[1]); x.rotate(rot);
-  const S = P => P.map(([a, b]) => [a * R, b * R]), E = (ex, ey, rx, ry, a) => xx => { xx.beginPath(); xx.ellipse(ex * R, ey * R, rx * R, ry * R, a, 0, Math.PI * 2); };
-  part(x, tube(S(tail), [0.26, 0.3, 0.27, 0.18, 0.05].map(v => v * R)), C_HAIR, 5); // ponytail
-  part(x, sp(S(FACE)), C_SKIN, 6);
-  part(x, E(-0.02, 0.3, 0.14, 0.21, 0.2), C_SKIN, 4.5); // ear
-  part(x, sp(S(HAIR)), C_HAIR, 6);
-  x.save(); x.beginPath(); spline(x, S(HAIR)); x.clip(); x.strokeStyle = CY; x.lineWidth = 0.09 * R; x.lineCap = 'round'; // blue-black hair shine
-  [[-0.7, -0.5, -0.1, -0.85, 0.35, -0.78], [-0.85, 0.05, -0.55, -0.35, -0.2, -0.45]].forEach(q => { x.beginPath(); x.moveTo(q[0] * R, q[1] * R); x.quadraticCurveTo(q[2] * R, q[3] * R, q[4] * R, q[5] * R); x.stroke(); });
-  x.restore();
-  part(x, E(-0.84, -0.3, 0.13, 0.2, 0.3), C_GOLD, 4); // hair tie
-  part(x, sp(S(MASK)), C_RED, 5);
-  x.fillStyle = CR; x.beginPath(); spline(x, S([[0.5, -0.17], [0.68, -0.26], [0.84, -0.17], [0.68, -0.1]])); x.fill(); inkStroke(x, 3.5);
-  x.fillStyle = INK; x.beginPath(); x.arc(0.74 * R, -0.17 * R, 0.065 * R, 0, Math.PI * 2); x.fill();
-  x.beginPath(); x.moveTo(0.45 * R, -0.5 * R); x.quadraticCurveTo(0.7 * R, -0.62 * R, 0.9 * R, -0.5 * R); inkStroke(x, 5); // brow
-  x.beginPath(); x.moveTo(0.76 * R, 0.64 * R); x.lineTo(0.9 * R, 0.63 * R); x.strokeStyle = MG; x.lineWidth = 6; x.stroke(); // mouth
-  x.beginPath(); x.moveTo(0.72 * R, 0.645 * R); x.lineTo(0.88 * R, 0.645 * R); inkStroke(x, 2.5);
-  x.restore();
+const EYE_WHITE = [[0.5, -0.17], [0.68, -0.26], [0.84, -0.17], [0.68, -0.1]];
+const SHINE = [[-0.7, -0.5, -0.1, -0.85, 0.35, -0.78], [-0.85, 0.05, -0.55, -0.35, -0.2, -0.45]];   // quadratic strokes
+const PONYTAIL_R = [0.26, 0.3, 0.27, 0.18, 0.05];
+function heroHead([hx, hy], R, rot, tail) {
+  // scaled by hand rather than with pen.scale, so the plate shift and dot size stay in page units
+  const sc = pts => pts.map(([u, v]) => [u * R, v * R]);
+  const oval = (u, v, ru, rv, a) => () => { pen.beginPath(); pen.ellipse(u * R, v * R, ru * R, rv * R, a, 0, TAU); };
+  pen.save(); pen.translate(hx, hy); pen.rotate(rot);
+  printShape(tube(sc(tail), PONYTAIL_R.map(f => f * R)), SOLID, 5);
+  printShape(blob(sc(FACE)), SKIN, 6);
+  printShape(oval(-0.02, 0.3, 0.14, 0.21, 0.2), SKIN, 4.5);              // ear
+  const hair = blob(sc(HAIR));
+  printShape(hair, SOLID, 6);
+  pen.save(); hair(); pen.clip();                                        // blue highlights in the black hair
+  pen.strokeStyle = CYAN; pen.lineWidth = 0.09 * R; pen.lineCap = 'round';
+  for (const [a, b, c, d, e, f] of SHINE) { pen.beginPath(); pen.moveTo(a * R, b * R); pen.quadraticCurveTo(c * R, d * R, e * R, f * R); pen.stroke(); }
+  pen.restore();
+  printShape(oval(-0.84, -0.3, 0.13, 0.2, 0.3), GOLD, 4);                // hair tie
+  printShape(blob(sc(MASK)), RED, 5);
+  pen.fillStyle = CREAM; blob(sc(EYE_WHITE))(); pen.fill(); outline(3.5);
+  pen.fillStyle = INK; pen.beginPath(); pen.arc(0.74 * R, -0.17 * R, 0.065 * R, 0, TAU); pen.fill();
+  pen.beginPath(); pen.moveTo(0.45 * R, -0.5 * R); pen.quadraticCurveTo(0.7 * R, -0.62 * R, 0.9 * R, -0.5 * R); outline(5);   // brow
+  pen.beginPath(); pen.moveTo(0.76 * R, 0.64 * R); pen.lineTo(0.9 * R, 0.63 * R);
+  pen.strokeStyle = MAGENTA; pen.lineWidth = 6; pen.stroke();                                                                   // lips
+  pen.beginPath(); pen.moveTo(0.72 * R, 0.645 * R); pen.lineTo(0.88 * R, 0.645 * R); outline(2.5);
+  pen.restore();
 }
-function glove(x, w, ang, s, open) { // gloved hand at wrist w, fingers pointing along ang
-  x.save(); x.translate(w[0], w[1]); x.rotate(ang); x.scale(s, s);
-  part(x, x => { x.beginPath(); x.moveTo(-30, -13); x.lineTo(2, -19); x.lineTo(2, 19); x.lineTo(-30, 13); x.closePath(); }, C_GOLD, 5); // cuff
+const FINGERS = [[-12, 30, -0.08], [-4, 35, -0.02], [4.5, 33, 0.04], [12.5, 27, 0.1]];   // [base y, length, angle]
+function glove(wrist, ang, open) {
+  pen.save(); pen.translate(wrist[0], wrist[1]); pen.rotate(ang);
+  printShape(() => { pen.beginPath(); pen.moveTo(-30, -13); pen.lineTo(2, -19); pen.lineTo(2, 19); pen.lineTo(-30, 13); pen.closePath(); }, GOLD, 5);   // cuff
   if (open) {
-    const F = [[-12, 30, -0.08], [-4, 35, -0.02], [4.5, 33, 0.04], [12.5, 27, 0.1]];
-    F.forEach(([y, l, a]) => part(x, capsule([26, y], [26 + Math.cos(a) * l, y + Math.sin(a) * l], 5.2, 4.4), C_GOLD, 4.5));
-    part(x, x => { x.beginPath(); x.roundRect(-2, -17, 34, 34, 9); }, C_GOLD, 5);
-    part(x, capsule([10, -14], [28, -34], 6, 4.8), C_GOLD, 4.5); // thumb
+    for (const [y, len, a] of FINGERS) printShape(capsule([26, y], [26 + Math.cos(a) * len, y + Math.sin(a) * len], 5.2, 4.4), GOLD, 4.5);
+    printShape(() => { pen.beginPath(); pen.roundRect(-2, -17, 34, 34, 9); }, GOLD, 5);
+    printShape(capsule([10, -14], [28, -34], 6, 4.8), GOLD, 4.5);         // thumb
   } else {
-    part(x, x => { x.beginPath(); x.roundRect(-2, -18, 38, 36, 12); }, C_GOLD, 5);
-    x.beginPath(); [-6, 5].forEach(y => { x.moveTo(22, y); x.lineTo(35, y); }); inkStroke(x, 3.5);
-    part(x, capsule([4, -16], [22, -12], 6.5, 5.5), C_GOLD, 4); // thumb over fingers
+    printShape(() => { pen.beginPath(); pen.roundRect(-2, -18, 38, 36, 12); }, GOLD, 5);
+    pen.beginPath(); pen.moveTo(22, -6); pen.lineTo(35, -6); pen.moveTo(22, 5); pen.lineTo(35, 5); outline(3.5);
+    printShape(capsule([4, -16], [22, -12], 6.5, 5.5), GOLD, 4);          // thumb folded over the fist
   }
-  x.restore();
+  pen.restore();
 }
-function boot(x, knee, ank, toe) {
-  const m = mix(knee, ank, 0.45), th = Math.atan2(ank[1] - knee[1], ank[0] - knee[0]);
-  part(x, capsule(m, ank, 20, 14), C_RED, 6);
-  part(x, capsule(ank, toe, 14.5, 10), C_RED, 6);
-  x.beginPath(); x.moveTo(m[0] - Math.sin(th) * 21, m[1] + Math.cos(th) * 21); x.lineTo(m[0] + Math.sin(th) * 21, m[1] - Math.cos(th) * 21); inkStroke(x, 6);
+function leg(hip, knee, ankle, toe) {
+  printShape(tube([hip, knee, ankle], [28, 18.5, 12.5]), SUIT, 6);
+  const top = mixP(knee, ankle, 0.45), d = Math.atan2(ankle[1] - knee[1], ankle[0] - knee[0]);
+  printShape(capsule(top, ankle, 20, 14), RED, 6);
+  printShape(capsule(ankle, toe, 14.5, 10), RED, 6);
+  const ox = Math.sin(d) * 21, oy = Math.cos(d) * 21;
+  pen.beginPath(); pen.moveTo(top[0] - ox, top[1] + oy); pen.lineTo(top[0] + ox, top[1] - oy); outline(6);   // boot top
 }
-function arm(x, S, E, Wr, hang, open) {
-  part(x, tube([S, E, Wr], [17.5, 13.5, 10.5]), C_SUIT, 6);
-  glove(x, Wr, hang, 1, open);
+function arm(shoulder, elbow, wrist, handAng, open) {
+  printShape(tube([shoulder, elbow, wrist], [17.5, 13.5, 10.5]), SUIT, 6);
+  glove(wrist, handAng, open);
 }
-function hero(x, P) {
-  // P: joints in local units (head radius 36). Order: cape, back arm, back leg, torso, front leg, neck, head, front arm.
-  part(x, sp(P.cape), C_RED, 6);
-  arm(x, P.S2, P.E2, P.W2, P.h2, false);
-  part(x, tube([P.H2, P.K2, P.A2], [28, 18.5, 12.5]), C_SUIT, 6); boot(x, P.K2, P.A2, P.T2);
-  const torso = tube(P.torso, P.torsoR);
-  part(x, torso, C_SUIT, 6);
-  x.save(); torso(x); x.clip(); // belt
-  const [a, b] = P.belt, th = Math.atan2(b[1] - a[1], b[0] - a[0]);
-  x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); x.strokeStyle = CR; x.lineWidth = 22; x.lineCap = 'butt'; x.stroke();
-  x.globalCompositeOperation = 'multiply'; x.strokeStyle = 'rgba(245,201,40,0.95)'; x.stroke(); x.globalCompositeOperation = 'source-over';
-  [-11, 11].forEach(o => { const nx = -Math.sin(th) * o, ny = Math.cos(th) * o; x.beginPath(); x.moveTo(a[0] + nx, a[1] + ny); x.lineTo(b[0] + nx, b[1] + ny); inkStroke(x, 4); });
-  x.restore(); torso(x); inkStroke(x, 6);
-  if (P.emblem) { const [ex, ey] = P.emblem; part(x, x => { x.beginPath(); x.moveTo(ex, ey - 19); x.lineTo(ex + 13, ey); x.lineTo(ex, ey + 19); x.lineTo(ex - 13, ey); x.closePath(); }, C_GOLD, 4); }
-  part(x, tube([P.H1, P.K1, P.A1], [28, 18.5, 12.5]), C_SUIT, 6); boot(x, P.K1, P.A1, P.T1);
-  part(x, capsule(P.N, P.neckTop, 13, 12), C_SKIN, 6);
-  head(x, P.head, 40, P.headRot, P.tail);
-  arm(x, P.S1, P.E1, P.W1, P.h1, P.open1);
+// Draw order: cape, far arm, far leg, torso + belt, near leg, neck, head, near arm. Head radius 40.
+function hero(p) {
+  printShape(blob(p.cape), RED, 6);
+  arm(p.S2, p.E2, p.W2, p.h2, false);
+  leg(p.H2, p.K2, p.A2, p.T2);
+  const torso = tube(p.torso, p.torsoR);
+  printShape(torso, SUIT, 6);
+  pen.save(); torso(); pen.clip();
+  const [b0, b1] = p.belt, d = Math.atan2(b1[1] - b0[1], b1[0] - b0[0]);
+  pen.beginPath(); pen.moveTo(b0[0], b0[1]); pen.lineTo(b1[0], b1[1]);
+  pen.lineCap = 'butt'; pen.lineWidth = 22; pen.strokeStyle = CREAM; pen.stroke();
+  pen.globalCompositeOperation = 'multiply'; pen.strokeStyle = 'rgba(245,201,40,0.95)'; pen.stroke();
+  pen.globalCompositeOperation = 'source-over';
+  for (const off of [-11, 11]) {
+    const nx = -Math.sin(d) * off, ny = Math.cos(d) * off;
+    pen.beginPath(); pen.moveTo(b0[0] + nx, b0[1] + ny); pen.lineTo(b1[0] + nx, b1[1] + ny); outline(4);
+  }
+  pen.restore();
+  torso(); outline(6);
+  if (p.emblem) {
+    const [ex, ey] = p.emblem;
+    printShape(() => { pen.beginPath(); pen.moveTo(ex, ey - 19); pen.lineTo(ex + 13, ey); pen.lineTo(ex, ey + 19); pen.lineTo(ex - 13, ey); pen.closePath(); }, GOLD, 4);
+  }
+  leg(p.H1, p.K1, p.A1, p.T1);
+  printShape(capsule(p.N, p.neckTop, 13, 12), SKIN, 6);
+  heroHead(p.head, 40, p.headRot, p.tail);
+  arm(p.S1, p.E1, p.W1, p.h1, p.open1);
 }
 function flyPose(t) {
-  const w = k => Math.sin(t * 11 + k * 1.3) * 9, v = k => Math.sin(t * 13 + k * 1.1) * 0.12;
+  const flap = i => Math.sin(t * 11 + i * 1.3) * 9, flick = i => Math.sin(t * 13 + i * 1.1) * 0.12;
   return {
-    cape: [[196, -40], [140, -62], [50, -78], [-60, -84 + w(0)], [-170, -96 + w(1)], [-280, -118 + w(2)], [-345, -130 + w(3)], [-318, -92 + w(3)], [-332, -64 + w(4)], [-240, -48 + w(2)], [-120, -26], [40, -8], [160, -12]],
+    cape: [[196, -40], [140, -62], [50, -78], [-60, -84 + flap(0)], [-170, -96 + flap(1)], [-280, -118 + flap(2)], [-345, -130 + flap(3)], [-318, -92 + flap(3)], [-332, -64 + flap(4)], [-240, -48 + flap(2)], [-120, -26], [40, -8], [160, -12]],
     S2: [176, -24], E2: [252, 16], W2: [334, 22], h2: 0.08,
     H2: [4, -10], K2: [-112, -28], A2: [-190, -84], T2: [-236, -110],
     torso: [[186, -22], [140, -14], [70, -2], [4, 2]], torsoR: [32, 45, 35, 41], belt: [[40, -62], [22, 62]],
     H1: [0, 6], K1: [-124, 18], A1: [-238, 26], T1: [-290, 26],
     N: [190, -24], neckTop: [214, -52], head: [232, -78], headRot: -0.12,
-    tail: [[-0.8, -0.3], [-1.3, -0.42 + v(0)], [-1.85, -0.28 + v(1)], [-2.4, -0.42 + v(2)], [-2.95, -0.3 + v(3)]],
+    tail: [[-0.8, -0.3], [-1.3, -0.42 + flick(0)], [-1.85, -0.28 + flick(1)], [-2.4, -0.42 + flick(2)], [-2.95, -0.3 + flick(3)]],
     S1: [168, -6], E1: [262, -24], W1: [350, -44], h1: -0.22, open1: false,
   };
 }
 function standPose(t, raise) {
-  const w = k => Math.sin(t * 5 + k * 1.4) * 7, v = k => Math.sin(t * 4 + k) * 0.06, br = Math.sin(t * 3) * 2;
-  const u = eBack(raise, 1.6);
+  const flap = i => Math.sin(t * 5 + i * 1.4) * 7, flick = i => Math.sin(t * 4 + i) * 0.06, breath = Math.sin(t * 3) * 2;
+  const lift = backOut(raise, 1.6);
   return {
-    cape: [[12, -468], [-26, -462], [-72, -400], [-112, -300], [-150, -200 + w(0)], [-182, -118 + w(1)], [-140, -104 + w(2)], [-96, -122 + w(3)], [-56, -112 + w(4)], [-28, -250], [-6, -430]],
-    S2: [-10, -455 + br], E2: [-78, -380], W2: [-44, -304], h2: 0.9,
+    cape: [[12, -468], [-26, -462], [-72, -400], [-112, -300], [-150, -200 + flap(0)], [-182, -118 + flap(1)], [-140, -104 + flap(2)], [-96, -122 + flap(3)], [-56, -112 + flap(4)], [-28, -250], [-6, -430]],
+    S2: [-10, -455 + breath], E2: [-78, -380], W2: [-44, -304], h2: 0.9,
     H2: [-16, -288], K2: [-30, -160], A2: [-44, -22], T2: [-2, -12],
-    torso: [[6, -468 + br], [9, -420 + br], [0, -350], [-2, -296]], torsoR: [30, 45, 34, 42], belt: [[-70, -316], [70, -316]], emblem: [28, -418 + br],
+    torso: [[6, -468 + breath], [9, -420 + breath], [0, -350], [-2, -296]], torsoR: [30, 45, 34, 42], belt: [[-70, -316], [70, -316]], emblem: [28, -418 + breath],
     H1: [16, -288], K1: [44, -160], A1: [52, -22], T1: [96, -12],
-    N: [8, -472 + br], neckTop: [18, -505 + br], head: [22, -538 + br], headRot: 0.02,
-    tail: [[-0.84, -0.3], [-1.2, 0.02 + v(0)], [-1.36, 0.5 + v(1)], [-1.34, 1.0 + v(2)], [-1.2, 1.45 + v(3)]],
-    S1: [22, -452 + br], E1: mix([34, -372], [124, -448], u), W1: mix([46, -292], [220, -452], u), h1: lerp(Math.PI / 2 - 0.1, -Math.PI / 2, u), open1: true,
+    N: [8, -472 + breath], neckTop: [18, -505 + breath], head: [22, -538 + breath], headRot: 0.02,
+    tail: [[-0.84, -0.3], [-1.2, 0.02 + flick(0)], [-1.36, 0.5 + flick(1)], [-1.34, 1.0 + flick(2)], [-1.2, 1.45 + flick(3)]],
+    S1: [22, -452 + breath], E1: mixP([34, -372], [124, -448], lift), W1: mixP([46, -292], [220, -452], lift), h1: mixN(Math.PI / 2 - 0.1, -Math.PI / 2, lift), open1: true,
   };
 }
 
 // ── the robot vacuum ──
-function robot(x, cx, gy, s, o) {
-  // o: mood 0 (angry red) → 1 (happy), tilt, squash, brush (angle), ant (antenna sway), noShadow
-  const sq = o.squash ?? 1, RX = 150, RY = 52, Hh = 46;
-  x.save(); x.translate(cx, gy);
-  if (!o.noShadow) { x.save(); x.scale(s, s); dots(x, xx => { xx.beginPath(); xx.ellipse(8, 4, RX * 1.05, RY * 0.8, 0, 0, Math.PI * 2); }, INK, 4.2, 12, 45); x.restore(); }
-  x.rotate(o.tilt || 0); x.scale(s / Math.sqrt(sq), s * sq);
-  // side brush (front-left, under the rim)
-  x.save(); x.translate(-RX * 0.72, RY * 0.5); x.scale(1, 0.4); x.rotate(o.brush || 0);
-  for (let k = 0; k < 3; k++) { x.rotate(Math.PI * 2 / 3); x.beginPath(); x.moveTo(0, 0); x.lineTo(46, 6); inkStroke(x, 4); }
-  x.restore();
-  const side = xx => { xx.beginPath(); xx.moveTo(RX, -Hh); xx.lineTo(RX, 0); xx.ellipse(0, 0, RX, RY, 0, 0, Math.PI); xx.lineTo(-RX, -Hh); xx.ellipse(0, -Hh, RX, RY, 0, Math.PI, 0, true); xx.closePath(); };
-  part(x, side, [INK, 3.6, 10, 45, null], 7);
-  x.beginPath(); x.ellipse(0, -Hh + 17, RX - 3, RY, 0, 0.14, Math.PI - 0.14); x.strokeStyle = CR; x.lineWidth = 9; x.stroke(); // bumper stripe
-  const top = xx => { xx.beginPath(); xx.ellipse(0, -Hh, RX, RY, 0, 0, Math.PI * 2); };
-  part(x, top, C_RED, 7);
-  x.beginPath(); x.ellipse(0, -Hh, RX * 0.8, RY * 0.74, 0, 0, Math.PI * 2); inkStroke(x, 3.5);
-  // dome with visor
-  const dome = xx => { xx.beginPath(); xx.moveTo(-68, -Hh); xx.bezierCurveTo(-68, -Hh - 86, 68, -Hh - 86, 68, -Hh); xx.ellipse(0, -Hh, 68, 22, 0, 0, Math.PI); xx.closePath(); };
-  part(x, dome, [CY, 4.6, 11, 15, 'rgba(47,159,216,0.18)'], 7);
-  x.beginPath(); x.moveTo(-42, -Hh - 56); x.quadraticCurveTo(-30, -Hh - 70, -10, -Hh - 72); x.strokeStyle = CR; x.lineWidth = 7; x.lineCap = 'round'; x.stroke();
-  x.beginPath(); x.roundRect(-50, -Hh - 48, 100, 36, 14); x.fillStyle = INK; x.fill();
-  const m = o.mood ?? 0, ey = Math.abs(m - 0.5) * 2, vy = -Hh - 30;
-  [-1, 1].forEach(sd => {
-    x.save(); x.translate(sd * 22, vy); x.scale(1, Math.max(ey, 0.08));
-    if (m < 0.5) { x.rotate(sd * 0.38); x.beginPath(); x.roundRect(-15, -6, 30, 12, 3); x.fillStyle = MG; x.fill(); }
-    else { x.beginPath(); x.arc(0, 7, 12, Math.PI * 1.1, Math.PI * 1.9); x.strokeStyle = YE; x.lineWidth = 6; x.lineCap = 'round'; x.stroke(); }
-    x.restore();
-  });
-  // antenna
-  const aa = o.ant || 0, tip = [30 + Math.sin(aa) * 30, -Hh - 122 + Math.abs(Math.sin(aa)) * 6];
-  x.beginPath(); x.moveTo(22, -Hh - 62); x.quadraticCurveTo(28, -Hh - 96, tip[0], tip[1]); inkStroke(x, 5);
-  x.beginPath(); x.arc(tip[0], tip[1], 11, 0, Math.PI * 2); x.fillStyle = m < 0.5 ? MG : YE; x.fill(); inkStroke(x, 5);
-  x.restore();
+// o: mood 0 (angry, red) .. 1 (happy), tilt, squash, brush angle, antenna sway, shadow (default on)
+function robot(cx, groundY, scale, o) {
+  const squash = o.squash ?? 1, mood = o.mood ?? 0, RX = 150, RY = 52, HT = 46;
+  pen.save(); pen.translate(cx, groundY);
+  if (o.shadow !== false) {
+    pen.save(); pen.scale(scale, scale);
+    screenFill(() => { pen.beginPath(); pen.ellipse(8, 4, RX * 1.05, RY * 0.8, 0, 0, TAU); }, INK, 4.2, 12, 45);
+    pen.restore();
+  }
+  pen.rotate(o.tilt || 0); pen.scale(scale / Math.sqrt(squash), scale * squash);
+  // spinning side brush, peeking out under the front rim
+  pen.save(); pen.translate(-RX * 0.72, RY * 0.5); pen.scale(1, 0.4); pen.rotate(o.brush || 0);
+  for (let k = 1; k <= 3; k++) {
+    const a = k * TAU / 3;
+    pen.beginPath(); pen.moveTo(0, 0); pen.lineTo(46 * Math.cos(a) - 6 * Math.sin(a), 46 * Math.sin(a) + 6 * Math.cos(a)); outline(4);
+  }
+  pen.restore();
+  const shell = () => {
+    pen.beginPath(); pen.moveTo(RX, -HT); pen.lineTo(RX, 0); pen.ellipse(0, 0, RX, RY, 0, 0, Math.PI);
+    pen.lineTo(-RX, -HT); pen.ellipse(0, -HT, RX, RY, 0, Math.PI, 0, true); pen.closePath();
+  };
+  printShape(shell, ink(INK, 3.6, 10, 45), 7);
+  pen.beginPath(); pen.ellipse(0, -HT + 17, RX - 3, RY, 0, 0.14, Math.PI - 0.14);
+  pen.strokeStyle = CREAM; pen.lineWidth = 9; pen.stroke();                        // bumper stripe
+  printShape(() => { pen.beginPath(); pen.ellipse(0, -HT, RX, RY, 0, 0, TAU); }, RED, 7);
+  pen.beginPath(); pen.ellipse(0, -HT, RX * 0.8, RY * 0.74, 0, 0, TAU); outline(3.5);
+  const dome = () => {
+    pen.beginPath(); pen.moveTo(-68, -HT); pen.bezierCurveTo(-68, -HT - 86, 68, -HT - 86, 68, -HT);
+    pen.ellipse(0, -HT, 68, 22, 0, 0, Math.PI); pen.closePath();
+  };
+  printShape(dome, ink(CYAN, 4.6, 11, 15, 'rgba(47,159,216,0.18)'), 7);
+  pen.beginPath(); pen.moveTo(-42, -HT - 56); pen.quadraticCurveTo(-30, -HT - 70, -10, -HT - 72);
+  pen.strokeStyle = CREAM; pen.lineWidth = 7; pen.lineCap = 'round'; pen.stroke();   // glint
+  pen.fillStyle = INK; pen.beginPath(); pen.roundRect(-50, -HT - 48, 100, 36, 14); pen.fill();   // visor
+  // eyes squash shut through mood 0.5, switching from angry slits to happy arcs
+  const lid = Math.max(Math.abs(mood - 0.5) * 2, 0.08);
+  for (const side of [-1, 1]) {
+    pen.save(); pen.translate(side * 22, -HT - 30); pen.scale(1, lid);
+    if (mood < 0.5) {
+      pen.rotate(side * 0.38); pen.fillStyle = MAGENTA;
+      pen.beginPath(); pen.roundRect(-15, -6, 30, 12, 3); pen.fill();
+    } else {
+      pen.strokeStyle = YELLOW; pen.lineWidth = 6; pen.lineCap = 'round';
+      pen.beginPath(); pen.arc(0, 7, 12, Math.PI * 1.1, Math.PI * 1.9); pen.stroke();
+    }
+    pen.restore();
+  }
+  const sway = o.antenna || 0, tip = [30 + 30 * Math.sin(sway), -HT - 122 + 6 * Math.abs(Math.sin(sway))];
+  pen.beginPath(); pen.moveTo(22, -HT - 62); pen.quadraticCurveTo(28, -HT - 96, tip[0], tip[1]); outline(5);
+  pen.beginPath(); pen.arc(tip[0], tip[1], 11, 0, TAU); pen.fillStyle = mood < 0.5 ? MAGENTA : YELLOW; pen.fill(); outline(5);
+  pen.restore();
 }
-function dustBunny(x, cx, cy, s, seed) {
+function dust(cx, cy, s, seed) {
   if (s <= 0.03) return;
-  const r = rng(seed), P = []; for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2, rr = (i % 2 ? 0.82 : 1.0) + r() * 0.12; P.push([cx + Math.cos(a) * 40 * s * rr, cy + Math.sin(a) * 27 * s * rr]); }
-  part(x, sp(P), [INK, 2.6, 9, 30, null], 4.5);
-  x.beginPath(); x.arc(cx - 8 * s, cy - 2 * s, 12 * s, Math.PI * 1.1, Math.PI * 1.8); inkStroke(x, 3);
+  const rnd = seeded(seed), pts = [];
+  for (let i = 0; i < 10; i++) {
+    const a = i * TAU / 10, f = (i % 2 ? 0.82 : 1) + rnd() * 0.12;
+    pts.push([cx + Math.cos(a) * 40 * s * f, cy + Math.sin(a) * 27 * s * f]);
+  }
+  printShape(blob(pts), ink(INK, 2.6, 9, 30), 4.5);
+  pen.beginPath(); pen.arc(cx - 8 * s, cy - 2 * s, 12 * s, Math.PI * 1.1, Math.PI * 1.8); outline(3);
 }
 
 // ── panels ──
-function museumWall(x, by, floorY, cols) {
-  cols.forEach(cx => {
-    part(x, xx => { xx.beginPath(); xx.rect(cx - 55, by - 10, 110, floorY - by + 10); }, null, 6);
-    dots(x, xx => { xx.beginPath(); xx.rect(cx + 18, by - 10, 37, floorY - by + 10); }, CY, 5, 13, 15);
-    for (let k = -30; k <= 30; k += 20) { x.beginPath(); x.moveTo(cx + k, by + 60); x.lineTo(cx + k, floorY - 40); inkStroke(x, 3); }
-    part(x, xx => { xx.beginPath(); xx.rect(cx - 72, floorY - 40, 144, 40); }, C_GOLD, 6);
-    part(x, xx => { xx.beginPath(); xx.rect(cx - 72, by + 20, 144, 40); }, C_GOLD, 6);
-  });
-}
-function panel1(x, t) {
-  const [bx, by, bw, bh] = PAN.P1, fy = by + 560, gy = by + 612;
-  x.save(); x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
-  x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
-  dots(x, rectP(bx, by, bw, bh), YE, 7, 18, 45); dots(x, rectP(bx, by, bw, bh), MG, 2.2, 18, 75);
-  museumWall(x, by, fy, [bx + 110, bx + 1245]);
-  // painting on the wall
-  const pf = [bx + 780, by + 130, 300, 210];
-  part(x, xx => { xx.beginPath(); xx.rect(pf[0] - 24, pf[1] - 24, pf[2] + 48, pf[3] + 48); }, C_GOLD, 7);
-  part(x, rectP(...pf), [CY, 6, 14, 15, null], 5);
-  part(x, xx => { xx.beginPath(); xx.arc(pf[0] + 220, pf[1] + 70, 36, 0, Math.PI * 2); }, C_RED, 4);
-  const hill = xx => { xx.beginPath(); xx.moveTo(pf[0], pf[1] + pf[3]); xx.lineTo(pf[0], pf[1] + 130); xx.quadraticCurveTo(pf[0] + 90, pf[1] + 80, pf[0] + 190, pf[1] + 150); xx.quadraticCurveTo(pf[0] + 250, pf[1] + 120, pf[0] + pf[2], pf[1] + 140); xx.lineTo(pf[0] + pf[2], pf[1] + pf[3]); xx.closePath(); };
-  x.fillStyle = CR; hill(x); x.fill(); dots(x, hill, YE, 6.5, 13, 45); dots(x, hill, CY, 5, 13, 15); hill(x); inkStroke(x, 4);
-  x.beginPath(); x.rect(...pf); inkStroke(x, 5);
-  // floor
-  const fl = xx => { xx.beginPath(); xx.rect(bx, fy, bw, bh); };
-  x.fillStyle = CR; fl(x); x.fill(); dots(x, fl, MG, 6, 16, 75);
-  for (let k = -6; k < 12; k++) { x.beginPath(); x.moveTo(bx + k * 150, fy); x.lineTo(bx + k * 150 - 200, by + bh); inkStroke(x, 3); }
-  x.beginPath(); x.moveTo(bx, fy); x.lineTo(bx + bw, fy); inkStroke(x, 8);
-  // pedestal + wobbling vase
-  const px = bx + 470, bump = 1.95, k = t - bump;
-  part(x, xx => { xx.beginPath(); xx.rect(px - 72, by + 400, 144, gy - by - 400); }, null, 7);
-  dots(x, xx => { xx.beginPath(); xx.rect(px + 22, by + 400, 50, gy - by - 400); }, CY, 5, 13, 15);
-  part(x, xx => { xx.beginPath(); xx.rect(px - 88, by + 384, 176, 26); }, C_GOLD, 6);
-  const wob = k > 0 ? 0.24 * Math.exp(-k * 2.2) * Math.sin(k * 13) : 0, hop = k > 0 && k < 0.2 ? Math.sin(k / 0.2 * Math.PI) * 14 : 0;
-  const piv = wob > 0 ? 26 : -26; // rocks on the edge of its foot
-  x.save(); x.translate(px + piv, by + 384 - hop); x.rotate(wob); x.translate(-piv, 0);
-  const V = [[-26, 0], [-44, -30], [-60, -90], [-50, -150], [-24, -178], [-30, -206], [-40, -214], [40, -214], [30, -206], [24, -178], [50, -150], [60, -90], [44, -30], [26, 0]];
-  [-1, 1].forEach(sd => { x.beginPath(); x.moveTo(sd * 28, -198); x.bezierCurveTo(sd * 84, -204, sd * 82, -150, sd * 48, -142); inkStroke(x, 8); }); // handles
-  part(x, sp(V), [CY, 5.6, 12, 15, 'rgba(47,159,216,0.25)'], 7);
-  x.save(); x.beginPath(); spline(x, V); x.clip();
-  x.fillStyle = CR; x.fillRect(-70, -122, 140, 32); dots(x, rectP(-70, -122, 140, 32), YE, 5.5, 11, 45);
-  x.beginPath(); for (let i = 0; i < 8; i++) x.lineTo(-64 + i * 18, i % 2 ? -114 : -98); inkStroke(x, 3.5);
-  x.beginPath(); x.moveTo(-70, -122); x.lineTo(70, -122); x.moveTo(-70, -90); x.lineTo(70, -90); inkStroke(x, 4);
-  x.restore(); x.beginPath(); spline(x, V); inkStroke(x, 7);
-  x.restore();
-  if (k > 0 && k < 1.2) { // wobble marks
-    x.save(); x.globalAlpha = 1 - seg(k, 0.8, 1.2);
-    [-1, 1].forEach(sd => { for (let j = 0; j < 2; j++) { const a0 = -Math.PI / 2 + sd * 0.42, a1 = -Math.PI / 2 + sd * 0.75; x.beginPath(); x.arc(px, by + 300, 120 + j * 28, Math.min(a0, a1), Math.max(a0, a1)); inkStroke(x, 5); } });
-    x.restore();
-  }
-  // robot run
-  const X0 = bx + bw + 220, Xb = px + 72 + 106;
-  let rx, sq = 1, tilt = 0;
-  if (t < bump) { const u = seg(t, 1.35, bump); rx = lerp(X0, Xb, Math.pow(u, 1.25)); tilt = u > 0 ? 0.06 : 0; }
-  else { const u = seg(t, bump, bump + 0.3); rx = Xb + 80 * eOut(u) + (u >= 1 ? Math.sin(t * 38) * 4 : 0); sq = 1 - 0.22 * Math.exp(-k * 9) * Math.cos(k * 30); tilt = -0.1 * Math.exp(-k * 5) * Math.sin(k * 20) + (u >= 1 ? Math.sin(t * 29) * 0.02 : 0); }
-  // dust trail + speed lines
-  const r = rng(7);
-  for (let i = 0; i < 9; i++) {
-    const tk = 1.4 + i * 0.065, age = t - tk, j1 = r(), j2 = r(); if (age < 0) continue; const life = seg(age, 0, 0.9);
-    const u = seg(tk, 1.35, bump), dx = lerp(X0, Xb, Math.pow(u, 1.25)) + 150 + j1 * 40, dy = gy - 20 - j2 * 40, s = (0.45 + life * 0.6) * (1 - seg(age, 0.6, 1.1));
-    dustBunny(x, dx + age * 60, dy - age * 30, s, 30 + i);
-  }
-  if (t > 1.35 && t < bump + 0.4) {
-    x.save(); x.globalAlpha = t < bump ? 1 : 1 - seg(t, bump, bump + 0.4);
-    for (let i = 0; i < 6; i++) { const yy = gy - 130 + i * 24, x0 = rx + 170 + (i % 3) * 30; x.beginPath(); x.moveTo(x0, yy); x.lineTo(x0 + 180 + (i % 2) * 90, yy); inkStroke(x, 5); }
-    x.restore();
-  }
-  robot(x, rx, gy, 0.72, { mood: 0, tilt, squash: sq, brush: t * 30, ant: Math.sin(t * 24) * 0.5 });
-  sfx(x, 'VROOOM!', bx + 1040, by + 668, 104, -0.04, seg(t, 1.45, 1.8), CY);
-  sfx(x, 'BONK!', bx + 250, by + 470, 110, -0.14, seg(t, bump, bump + 0.3), YE);
-  caption(x, bx + 36, by + 34, 'MEANWHILE, AT THE CITY MUSEUM...', 46, seg(t, 1.3, 1.55));
-  zapBalloon(x, bx + 1010, by + 430, 190, 80, [-200, 60], ['BZZT! BEEP!', 'DUST DETECTED!'], 46, seg(t, 2.25, 2.55));
-  x.restore();
-}
-function skyline(x, bx, by, bw, bh, seed, base, hMin, hMax, col, winCol) {
-  const r = rng(seed); let px = bx - 20;
-  while (px < bx + bw) {
-    const w = 90 + r() * 110, h = hMin + r() * (hMax - hMin), top = base - h;
-    const b = xx => { xx.beginPath(); xx.rect(px, top, w, by + bh - top); };
-    x.fillStyle = CR; b(x); x.fill(); dots(x, b, col[0], col[1], col[2], col[3]); b(x); inkStroke(x, 5);
-    if (winCol) for (let wy = top + 22; wy < by + bh - 20; wy += 38) for (let wx = px + 16; wx < px + w - 24; wx += 30) if (r() < 0.55) { x.fillStyle = winCol; x.fillRect(wx + MIS[0], wy + MIS[1], 12, 18); }
-    px += w + 8;
+function columns(top, floor, xs) {
+  for (const cx of xs) {
+    printShape(rectShape(cx - 55, top - 10, 110, floor - top + 10), null, 6);
+    screenFill(rectShape(cx + 18, top - 10, 37, floor - top + 10), CYAN, 5, 13, 15);
+    pen.beginPath();
+    for (let f = -30; f <= 30; f += 20) { pen.moveTo(cx + f, top + 60); pen.lineTo(cx + f, floor - 40); }
+    outline(3);                                                                   // flutes
+    printShape(rectShape(cx - 72, floor - 40, 144, 40), GOLD, 6);
+    printShape(rectShape(cx - 72, top + 20, 144, 40), GOLD, 6);
   }
 }
-function panel2(x, t) {
-  const [bx, by, bw, bh] = PAN.P2;
-  x.save(); x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
-  x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
-  dots(x, rectP(bx, by, bw, bh), CY, 6.5, 18, 15);
-  halftoneGrad(x, bx, by, bw, bh, YE, (px, py) => clamp(1 - Math.hypot((px - bx - 820) / 1.3, py - by - 330) / 620, 0, 1) * 9, 18, 0.26);
-  skyline(x, bx, by, bw, bh, 4, by + 600, 60, 180, [CY, 7, 14, 15], null);
-  skyline(x, bx, by, bw, bh, 9, by + 700, 20, 140, [INK, 4, 12, 45], YE);
-  const u = seg(t, 3.45, 3.95), lt = Math.max(t, 3.45);
-  const hx = lerp(bx - 520, bx + 520, eBack(u, 1.3)), hy = lerp(by + 470, by + 380, eOut(u)) + (u >= 1 ? Math.sin((lt - 3.95) * 5) * 7 : 0);
-  if (u > 0) {
-    const r = rng(12);
-    for (let i = 0; i < 11; i++) {
-      const yy = hy - 120 + i * 22 + r() * 8, x1 = hx - 300 - r() * 60, len = 260 + r() * 420;
-      x.beginPath(); x.moveTo(x1, yy); x.lineTo(x1 - len, yy); inkStroke(x, i % 3 ? 4 : 7);
+const VASE = [[-26, 0], [-44, -30], [-60, -90], [-50, -150], [-24, -178], [-30, -206], [-40, -214], [40, -214], [30, -206], [24, -178], [50, -150], [60, -90], [44, -30], [26, 0]];
+function vase() {
+  for (const side of [-1, 1]) {
+    pen.beginPath(); pen.moveTo(side * 28, -198); pen.bezierCurveTo(side * 84, -204, side * 82, -150, side * 48, -142); outline(8);   // handles
+  }
+  const body = blob(VASE), band = rectShape(-70, -122, 140, 32);
+  printShape(body, ink(CYAN, 5.6, 12, 15, 'rgba(47,159,216,0.25)'), 7);
+  pen.save(); body(); pen.clip();
+  pen.fillStyle = CREAM; band(); pen.fill(); screenFill(band, YELLOW, 5.5, 11, 45);
+  pen.beginPath(); for (let i = 0; i < 8; i++) pen.lineTo(-64 + i * 18, i % 2 ? -114 : -98); outline(3.5);   // zigzag
+  pen.beginPath(); pen.moveTo(-70, -122); pen.lineTo(70, -122); pen.moveTo(-70, -90); pen.lineTo(70, -90); outline(4);
+  pen.restore();
+  body(); outline(7);
+}
+// 1 · the museum: the robot charges in from the right and rams the vase pedestal.
+function museumScene(t) {
+  const { x: ox, y: oy, w: pw, h: ph } = BOX.P1, floorY = oy + 560, groundY = oy + 612;
+  columns(oy, floorY, [ox + 110, ox + 1245]);
+  // the painting
+  const fx = ox + 780, fy = oy + 130, fw = 300, fh = 210;
+  printShape(rectShape(fx - 24, fy - 24, fw + 48, fh + 48), GOLD, 7);
+  printShape(rectShape(fx, fy, fw, fh), ink(CYAN, 6, 14, 15), 5);
+  printShape(() => { pen.beginPath(); pen.arc(fx + 220, fy + 70, 36, 0, TAU); }, RED, 4);
+  const hill = () => {
+    pen.beginPath(); pen.moveTo(fx, fy + fh); pen.lineTo(fx, fy + 130);
+    pen.quadraticCurveTo(fx + 90, fy + 80, fx + 190, fy + 150); pen.quadraticCurveTo(fx + 250, fy + 120, fx + fw, fy + 140);
+    pen.lineTo(fx + fw, fy + fh); pen.closePath();
+  };
+  pen.fillStyle = CREAM; hill(); pen.fill();
+  screenFill(hill, YELLOW, 6.5, 13, 45); screenFill(hill, CYAN, 5, 13, 15);
+  hill(); outline(4);
+  rectShape(fx, fy, fw, fh)(); outline(5);
+  // floor with receding boards
+  const floor = rectShape(ox, floorY, pw, ph);
+  pen.fillStyle = CREAM; floor(); pen.fill(); screenFill(floor, MAGENTA, 6, 16, 75);
+  pen.beginPath();
+  for (let j = -6; j < 12; j++) { pen.moveTo(ox + j * 150, floorY); pen.lineTo(ox + j * 150 - 200, oy + ph); }
+  outline(3);
+  pen.beginPath(); pen.moveTo(ox, floorY); pen.lineTo(ox + pw, floorY); outline(8);
+  // pedestal and the vase rocking after the bump
+  const px = ox + 470, BUMP = 1.95, since = t - BUMP;
+  printShape(rectShape(px - 72, oy + 400, 144, groundY - oy - 400), null, 7);
+  screenFill(rectShape(px + 22, oy + 400, 50, groundY - oy - 400), CYAN, 5, 13, 15);
+  printShape(rectShape(px - 88, oy + 384, 176, 26), GOLD, 6);
+  const rock = since > 0 ? 0.24 * Math.exp(-since * 2.2) * Math.sin(since * 13) : 0;
+  const hop = since > 0 && since < 0.2 ? 14 * Math.sin(since / 0.2 * Math.PI) : 0;
+  const pivot = rock > 0 ? 26 : -26;                                            // tips onto one edge of its foot
+  pen.save(); pen.translate(px + pivot, oy + 384 - hop); pen.rotate(rock); pen.translate(-pivot, 0);
+  vase();
+  pen.restore();
+  if (since > 0 && since < 1.2) {                                               // wobble arcs
+    pen.save(); pen.globalAlpha *= 1 - span(since, 0.8, 1.2);
+    for (const side of [-1, 1]) {
+      const a0 = -Math.PI / 2 + side * 0.42, a1 = -Math.PI / 2 + side * 0.75;
+      for (let j = 0; j < 2; j++) { pen.beginPath(); pen.arc(px, oy + 300, 120 + j * 28, Math.min(a0, a1), Math.max(a0, a1)); outline(5); }
     }
-    x.save(); x.translate(hx, hy); x.rotate(-0.07 + (1 - u) * -0.1); x.scale(0.95, 0.95); hero(x, flyPose(lt)); x.restore();
+    pen.restore();
   }
-  sfx(x, 'WHOOSH!', bx + 300, by + 610, 116, -0.08, seg(t, 3.55, 3.9), YE);
-  caption(x, bx + 36, by + 34, 'HERE COMES CAPTAIN CLARITY!', 46, seg(t, 3.4, 3.65));
-  balloon(x, bx + 1070, by + 170, 236, 96, [-190, 100, 1.9, 2.4], ['NOT ON', 'MY WATCH!'], 58, seg(t, 4.05, 4.4));
-  x.restore();
+  // the charge: accelerating in, then knocked back with a squash and a shudder
+  const START = ox + pw + 220, HIT = px + 178;
+  const approach = tt => mixN(START, HIT, span(tt, 1.35, BUMP) ** 1.25);
+  let rx, squash = 1, tilt = 0;
+  if (t < BUMP) {
+    rx = approach(t); tilt = t > 1.35 ? 0.06 : 0;
+  } else {
+    const back = span(t, BUMP, BUMP + 0.3), settled = back >= 1;
+    rx = HIT + 80 * easeOut(back) + (settled ? 4 * Math.sin(t * 38) : 0);
+    squash = 1 - 0.22 * Math.exp(-since * 9) * Math.cos(since * 30);
+    tilt = -0.1 * Math.exp(-since * 5) * Math.sin(since * 20) + (settled ? 0.02 * Math.sin(t * 29) : 0);
+  }
+  const rnd = seeded(7);                                                        // dust kicked up behind it
+  for (let i = 0; i < 9; i++) {
+    const born = 1.4 + i * 0.065, age = t - born, jx = rnd(), jy = rnd();
+    if (age < 0) continue;
+    const size = (0.45 + 0.6 * span(age, 0, 0.9)) * (1 - span(age, 0.6, 1.1));
+    dust(approach(born) + 150 + jx * 40 + age * 60, groundY - 20 - jy * 40 - age * 30, size, 30 + i);
+  }
+  if (t > 1.35 && t < BUMP + 0.4) {                                             // motion streaks
+    pen.save(); pen.globalAlpha *= t < BUMP ? 1 : 1 - span(t, BUMP, BUMP + 0.4);
+    for (let i = 0; i < 6; i++) {
+      const ly = groundY - 130 + i * 24, lx = rx + 170 + (i % 3) * 30;
+      pen.beginPath(); pen.moveTo(lx, ly); pen.lineTo(lx + 180 + (i % 2) * 90, ly); outline(5);
+    }
+    pen.restore();
+  }
+  robot(rx, groundY, 0.72, { mood: 0, tilt, squash, brush: t * 30, antenna: 0.5 * Math.sin(t * 24) });
+  boom('VROOOM!', [ox + 1040, oy + 668], 104, -0.04, span(t, 1.45, 1.8), CYAN);
+  boom('BONK!', [ox + 250, oy + 470], 110, -0.14, span(t, BUMP, BUMP + 0.3), YELLOW);
+  captionBox([ox + 36, oy + 34], 'MEANWHILE, AT THE CITY MUSEUM...', 46, span(t, 1.3, 1.55));
+  robotSpeech({ at: [ox + 1010, oy + 430], rx: 190, ry: 80, tail: [-200, 60], lines: ['BZZT! BEEP!', 'DUST DETECTED!'], size: 46 }, span(t, 2.25, 2.55));
 }
-function panel3(x, t) {
-  const [bx, by, bw, bh] = PAN.P3, fy = by + 690, gy = by + 745, T0 = 5.85;
-  x.save(); x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
-  x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
-  const lt = Math.max(t, 5.3), k = lt - T0, pop = seg(lt, T0, T0 + 0.35);
-  const cx = bx + 800, cy = by + 300;
-  // background: calm museum wall before the POW, yellow-red radiance after
-  dots(x, rectP(bx, by, bw, bh), CY, 6, 18, 15);
-  museumWall(x, by, fy, [bx + 1200, bx + 1760]);
-  if (pop > 0) {
-    x.save(); x.beginPath(); x.arc(cx, cy, lerp(0, 2400, eOut(pop)), 0, Math.PI * 2); x.clip();
-    x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
-    dots(x, rectP(bx, by, bw, bh), YE, 8, 18, 45);
-    halftoneGrad(x, bx, by, bw, bh, MG, (px, py) => clamp(Math.hypot(px - cx, py - cy) / 1000 - 0.2, 0, 1) * 9, 18, 0.26);
-    actionLines(x, cx, cy, 380, 70, 23, bx, by, bw, bh);
-    x.restore();
+// Row of towers along a baseline; optional lit windows printed on the colour plate.
+function skyline(area, seed, base, lo, hi, scr, windowCol) {
+  const rnd = seeded(seed), bottom = area.y + area.h;
+  for (let left = area.x - 20; left < area.x + area.w;) {
+    const w = 90 + rnd() * 110, top = base - (lo + rnd() * (hi - lo)), tower = rectShape(left, top, w, bottom - top);
+    pen.fillStyle = CREAM; tower(); pen.fill(); screenFill(tower, ...scr); tower(); outline(5);
+    if (windowCol) {
+      pen.fillStyle = windowCol;
+      for (let wy = top + 22; wy < bottom - 20; wy += 38) {
+        for (let wx = left + 16; wx < left + w - 24; wx += 30) if (rnd() < 0.55) pen.fillRect(wx + SHIFT[0], wy + SHIFT[1], 12, 18);
+      }
+    }
+    left += w + 8;
   }
-  const fl = xx => { xx.beginPath(); xx.rect(bx, fy, bw, bh); };
-  x.fillStyle = CR; fl(x); x.fill(); dots(x, fl, MG, 5.5, 16, 75);
-  x.beginPath(); x.moveTo(bx, fy); x.lineTo(bx + bw, fy); inkStroke(x, 8);
-  // dust pile (swept away by the calm robot)
-  const sw = seg(lt, 6.5, 7.4), rxSweep = lerp(bx + 930, bx + 1430, eInOut(sw));
-  [[1300, 20, 1.0], [1360, 38, 1.2], [1420, 14, 0.9], [1475, 34, 1.05], [1530, 22, 0.8]].forEach(([dx, dy, s], i) => {
-    const gone = seg(rxSweep, bx + dx - 140, bx + dx - 40); if (gone >= 1) return;
-    dustBunny(x, bx + dx, gy - dy, s * (1 - gone), 50 + i);
+}
+// 2 · over the city: a yellow sun glow, two skyline rows, the heroine shoots in from the left.
+function cityScene(t) {
+  const area = BOX.P2, { x: ox, y: oy } = area;
+  gradedScreen(area, YELLOW, (px, py) => 9 * clamp01(1 - Math.hypot((px - ox - 820) / 1.3, py - oy - 330) / 620), 18, 0.26);
+  skyline(area, 4, oy + 600, 60, 180, [CYAN, 7, 14, 15], null);
+  skyline(area, 9, oy + 700, 20, 140, [INK, 4, 12, 45], YELLOW);
+  const fly = span(t, 3.45, 3.95), lt = Math.max(t, 3.45);
+  if (fly > 0) {
+    const hx = mixN(ox - 520, ox + 520, backOut(fly, 1.3));
+    const hy = mixN(oy + 470, oy + 380, easeOut(fly)) + (fly >= 1 ? 7 * Math.sin((lt - 3.95) * 5) : 0);
+    const rnd = seeded(12);
+    for (let i = 0; i < 11; i++) {
+      const ly = hy - 120 + i * 22 + rnd() * 8, lx = hx - 300 - rnd() * 60, len = 260 + rnd() * 420;
+      pen.beginPath(); pen.moveTo(lx, ly); pen.lineTo(lx - len, ly); outline(i % 3 ? 4 : 7);
+    }
+    pen.save(); pen.translate(hx, hy); pen.rotate(-0.07 - 0.1 * (1 - fly)); pen.scale(0.95, 0.95);
+    hero(flyPose(lt));
+    pen.restore();
+  }
+  boom('WHOOSH!', [ox + 300, oy + 610], 116, -0.08, span(t, 3.55, 3.9), YELLOW);
+  captionBox([ox + 36, oy + 34], 'HERE COMES CAPTAIN CLARITY!', 46, span(t, 3.4, 3.65));
+  speech({ at: [ox + 1070, oy + 170], rx: 236, ry: 96, tail: [-190, 100, 1.9, 2.4], lines: ['NOT ON', 'MY WATCH!'], size: 58 }, span(t, 4.05, 4.4));
+}
+const PILE = [[1300, 20, 1.0], [1360, 38, 1.2], [1420, 14, 0.9], [1475, 34, 1.05], [1530, 22, 0.8]];   // [x, lift, size]
+const GLINTS = [[980, 60], [1080, 30], [1190, 70], [1290, 40], [1390, 66]];
+// 3 · the showdown: the robot leaps, POW! against her palm, it turns happy and sweeps the dust pile away.
+function showdownScene(t) {
+  const area = BOX.P3, { x: ox, y: oy, w: pw } = area, floorY = oy + 690, groundY = oy + 745, HIT = 5.85;
+  const lt = Math.max(t, 5.3), since = lt - HIT, flash = span(lt, HIT, HIT + 0.35);
+  const ex = ox + 800, ey = oy + 300;
+  columns(oy, floorY, [ox + 1200, ox + 1760]);
+  if (flash > 0) {                                                              // radiance spreading from the hit
+    pen.save();
+    pen.beginPath(); pen.arc(ex, ey, 2400 * easeOut(flash), 0, TAU); pen.clip();
+    const all = areaShape(area);
+    pen.fillStyle = CREAM; all(); pen.fill();
+    screenFill(all, YELLOW, 8, 18, 45);
+    gradedScreen(area, MAGENTA, (px, py) => 9 * clamp01(Math.hypot(px - ex, py - ey) / 1000 - 0.2), 18, 0.26);
+    speedBurst([ex, ey], 380, 70, 23);
+    pen.restore();
+  }
+  const floor = rectShape(ox, floorY, pw, area.h);
+  pen.fillStyle = CREAM; floor(); pen.fill(); screenFill(floor, MAGENTA, 5.5, 16, 75);
+  pen.beginPath(); pen.moveTo(ox, floorY); pen.lineTo(ox + pw, floorY); outline(8);
+  const sweep = span(lt, 6.5, 7.4), broom = mixN(ox + 930, ox + 1430, easeInOut(sweep));
+  PILE.forEach(([dx, dy, s], i) => {
+    const gone = span(broom, ox + dx - 140, ox + dx - 40);
+    if (gone < 1) dust(ox + dx, groundY - dy, s * (1 - gone), 50 + i);
   });
-  // sparkles in the cleaned trail
-  [[980, 60], [1080, 30], [1190, 70], [1290, 40], [1390, 66]].forEach(([dx, dy], i) => {
-    const u = seg(rxSweep, bx + dx + 60, bx + dx + 140); if (u <= 0) return;
-    star(x, bx + dx, gy - dy - 10, eBack(u) * 34 * (0.85 + 0.15 * Math.sin(lt * 9 + i)), lt * 1.5 + i);
+  GLINTS.forEach(([dx, dy], i) => {
+    const u = span(broom, ox + dx + 60, ox + dx + 140);
+    if (u > 0) sparkle(ox + dx, groundY - dy - 10, 34 * backOut(u) * (0.85 + 0.15 * Math.sin(lt * 9 + i)), lt * 1.5 + i);
   });
-  // POW burst (behind the characters)
-  if (pop > 0) {
-    const s = eBack(pop, 2.4), jit = k < 0.25 ? 18 : 0;
-    x.save(); x.translate(cx, cy); x.scale(s, s); x.rotate(-0.06);
-    x.fillStyle = YE; burstPath(x, 0, 0, 230, 13, 5, jit); x.fill(); burstPath(x, 0, 0, 230, 13, 5, jit); inkStroke(x, 11);
-    x.fillStyle = MG; burstPath(x, 0, 0, 165, 11, 9, jit); x.fill(); dots(x, xx => burstPath(xx, 0, 0, 165, 11, 9, jit), YE, 4, 14, 45); burstPath(x, 0, 0, 165, 11, 9, jit); inkStroke(x, 7);
-    x.restore();
+  if (flash > 0) {                                                              // POW burst, behind both characters
+    const grow = backOut(flash, 2.4), shake = since < 0.25 ? 18 : 0;
+    pen.save(); pen.translate(ex, ey); pen.rotate(-0.06); pen.scale(grow, grow);
+    starburst(230, 13, 5, shake); pen.fillStyle = YELLOW; pen.fill(); outline(11);
+    const inner = () => starburst(165, 11, 9, shake);
+    inner(); pen.fillStyle = MAGENTA; pen.fill();
+    screenFill(inner, YELLOW, 4, 14, 45);
+    inner(); outline(7);
+    pen.restore();
   }
-  // heroine: raises her palm, small push-back at the impact
-  const push = k > 0 ? -10 * Math.exp(-k * 8) * Math.cos(k * 25) : 0;
-  x.save(); x.translate(bx + 330 + push, gy); x.scale(1.06, 1.06); hero(x, standPose(lt, seg(lt, 5.4, 5.7))); x.restore();
-  // robot: charges, leaps, POW, bounces back, calms, sweeps
-  let rx, ry, tilt = 0, sq = 1, lift = false;
-  const Xc = bx + 1060, Xi = bx + 700, Yi = by + 330, Xl = bx + 930;
-  if (lt < 5.62) { const u = seg(lt, 5.3, 5.62); rx = lerp(bx + bw + 240, Xc, u); ry = gy; tilt = 0.05; }
-  else if (lt < T0) { const u = seg(lt, 5.62, T0); rx = lerp(Xc, Xi, u); ry = lerp(gy, Yi, u) - Math.sin(u * Math.PI) * 60; tilt = -0.5 * u; lift = true; sq = 1 + 0.12 * u; }
-  else if (lt < 6.2) { const u = seg(lt, T0, 6.2); rx = lerp(Xi, Xl, u); ry = lerp(Yi, gy, u * u) - Math.sin(u * Math.PI) * 50; tilt = lerp(-0.5, 0.25, u) + Math.sin(u * 14) * 0.1; sq = 1 - 0.25 * Math.exp(-u * 6); lift = true; }
-  else { const u = seg(lt, 6.2, 6.45); rx = sw > 0 ? rxSweep : Xl; ry = gy; sq = 1 - 0.25 * Math.exp(-u * 5) * Math.cos(u * 18); tilt = sw > 0 ? Math.sin(lt * 12) * 0.03 : 0.25 * Math.exp(-u * 5) * Math.cos(u * 14); }
-  const mood = seg(lt, 6.3, 6.42);
-  if (lift) dots(x, xx => { xx.beginPath(); xx.ellipse(rx, gy + 4, 110, 32, 0, 0, Math.PI * 2); }, INK, 3.4, 12, 45);
-  robot(x, rx, ry, 0.8, { mood, tilt, squash: sq, brush: lt * (sw > 0 && sw < 1 ? 28 : 6), ant: mood < 1 ? Math.sin(lt * 26) * 0.6 : Math.sin(lt * 6) * 0.3, noShadow: lift });
-  // dizzy stars after landing
-  if (lt > 6.1 && lt < 6.45) for (let i = 0; i < 3; i++) { const a = lt * 9 + i * 2.1; star(x, rx + Math.cos(a) * 90, gy - 205 + Math.sin(a) * 20, 18, a); }
-  sfx(x, 'POW!', cx + 10, cy + 14, 210, -0.08, seg(lt, T0 + 0.03, T0 + 0.4), YE);
-  caption(x, bx + 1180, by + 34, 'ONE GENTLE "POW!" LATER...', 46, seg(lt, 6.3, 6.55));
-  balloon(x, bx + 1620, by + 390, 210, 86, [-150, 150, 2.0, 2.45], ['BEEP BOOP!', 'ALL CLEAN!'], 50, seg(lt, 7.0, 7.3));
-  x.restore();
+  const recoil = since > 0 ? -10 * Math.exp(-since * 8) * Math.cos(since * 25) : 0;
+  pen.save(); pen.translate(ox + 330 + recoil, groundY); pen.scale(1.06, 1.06);
+  hero(standPose(lt, span(lt, 5.4, 5.7)));
+  pen.restore();
+  // robot: charge, leap into the palm, bounce back down, settle, then sweep
+  const chargeX = ox + 1060, hitX = ox + 700, hitY = oy + 330, landX = ox + 930;
+  let rx = landX, ry = groundY, tilt = 0, squash = 1, airborne = false;
+  if (lt < 5.62) {
+    rx = mixN(ox + pw + 240, chargeX, span(lt, 5.3, 5.62)); tilt = 0.05;
+  } else if (lt < HIT) {
+    const u = span(lt, 5.62, HIT);
+    rx = mixN(chargeX, hitX, u); ry = mixN(groundY, hitY, u) - 60 * Math.sin(u * Math.PI);
+    tilt = -0.5 * u; squash = 1 + 0.12 * u; airborne = true;
+  } else if (lt < 6.2) {
+    const u = span(lt, HIT, 6.2);
+    rx = mixN(hitX, landX, u); ry = mixN(hitY, groundY, u * u) - 50 * Math.sin(u * Math.PI);
+    tilt = mixN(-0.5, 0.25, u) + 0.1 * Math.sin(u * 14); squash = 1 - 0.25 * Math.exp(-u * 6); airborne = true;
+  } else {
+    const u = span(lt, 6.2, 6.45), sweeping = sweep > 0;
+    if (sweeping) rx = broom;
+    squash = 1 - 0.25 * Math.exp(-u * 5) * Math.cos(u * 18);
+    tilt = sweeping ? 0.03 * Math.sin(lt * 12) : 0.25 * Math.exp(-u * 5) * Math.cos(u * 14);
+  }
+  const mood = span(lt, 6.3, 6.42);
+  if (airborne) screenFill(() => { pen.beginPath(); pen.ellipse(rx, groundY + 4, 110, 32, 0, 0, TAU); }, INK, 3.4, 12, 45);
+  robot(rx, ry, 0.8, {
+    mood, tilt, squash, shadow: !airborne,
+    brush: lt * (sweep > 0 && sweep < 1 ? 28 : 6),
+    antenna: mood < 1 ? 0.6 * Math.sin(lt * 26) : 0.3 * Math.sin(lt * 6),
+  });
+  if (lt > 6.1 && lt < 6.45) {                                                  // dizzy stars
+    for (let i = 0; i < 3; i++) { const a = lt * 9 + i * 2.1; sparkle(rx + 90 * Math.cos(a), groundY - 205 + 20 * Math.sin(a), 18, a); }
+  }
+  boom('POW!', [ex + 10, ey + 14], 210, -0.08, span(lt, HIT + 0.03, HIT + 0.4), YELLOW);
+  captionBox([ox + 1180, oy + 34], 'ONE GENTLE "POW!" LATER...', 46, span(lt, 6.3, 6.55));
+  speech({ at: [ox + 1620, oy + 390], rx: 210, ry: 86, tail: [-150, 150, 2.0, 2.45], lines: ['BEEP BOOP!', 'ALL CLEAN!'], size: 50 }, span(lt, 7.0, 7.3));
 }
-function panel4(x, t) {
-  const [bx, by, bw, bh] = PAN.P4;
-  x.save(); x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
-  x.fillStyle = CR; x.fillRect(bx, by, bw, bh);
-  dots(x, rectP(bx, by, bw, bh), MG, 7.6, 18, 75);
-  actionLines(x, bx + bw / 2, by + 330, 240, 40, 31, bx, by, bw, bh);
-  sfx(x, 'THE', bx + bw / 2, by + 220, 190, -0.05, seg(t, 8.0, 8.3), YE);
-  sfx(x, 'END?', bx + bw / 2 + 10, by + 420, 220, -0.05, seg(t, 8.12, 8.45), YE);
-  // ...a second robot peeks in from the bottom edge
-  const u = seg(t, 8.45, 8.75), blink = t > 8.9 && Math.abs(Math.sin((t - 8.8) * 5)) < 0.12;
-  if (u > 0) robot(x, bx + 600, by + bh + 150 - 200 * eBack(u, 1.8), 0.95, { mood: blink ? 0.5 : 0, tilt: -0.12, ant: Math.sin(t * 8) * 0.4, noShadow: true });
-  x.restore();
+// 4 · "THE END?" with a second robot rising into view from the bottom edge.
+function finaleScene(t) {
+  const { x: ox, y: oy, w: pw, h: ph } = BOX.P4, mid = ox + pw / 2;
+  speedBurst([mid, oy + 330], 240, 40, 31);
+  boom('THE', [mid, oy + 220], 190, -0.05, span(t, 8.0, 8.3), YELLOW);
+  boom('END?', [mid + 10, oy + 420], 220, -0.05, span(t, 8.12, 8.45), YELLOW);
+  const peek = span(t, 8.45, 8.75), blink = t > 8.9 && Math.abs(Math.sin((t - 8.8) * 5)) < 0.12;
+  if (peek > 0) robot(ox + 600, oy + ph + 150 - 200 * backOut(peek, 1.8), 0.95, { mood: blink ? 0.5 : 0, tilt: -0.12, antenna: 0.4 * Math.sin(t * 8), shadow: false });
 }
-// Title strip across the top of the page.
-function masthead(x, t) {
-  sfx(x, 'CAPTAIN CLARITY', 800, 180, 180, -0.02, seg(t, 0.15, 0.6), MG);
-  x.save();
-  x.globalAlpha = seg(t, 0.4, 0.7);
-  sfx(x, 'VS. THE RUNAWAY ROBOT!', 1860, 196, 84, -0.02, 1, CY);
-  x.fillStyle = INK; x.font = `400 44px ${HAND}`; x.textBaseline = 'middle'; x.textAlign = 'right';
-  x.fillText('ISSUE No. 16 · 10¢', 2850, 205);
-  for (const [y, w] of [[290, 5], [302, 2]]) { x.beginPath(); x.moveTo(100, y); x.lineTo(2850, y); inkStroke(x, w); }   // double rule
-  x.restore();
+// Each panel fades in on its own paper and base screens, then its border is inked. screens: screenFill args.
+const PANELS = [
+  { box: BOX.P1, start: 0.3, screens: [[YELLOW, 7, 18, 45], [MAGENTA, 2.2, 18, 75]], paint: museumScene },
+  { box: BOX.P2, start: 0.4, screens: [[CYAN, 6.5, 18, 15]], paint: cityScene },
+  { box: BOX.P3, start: 0.5, screens: [[CYAN, 6, 18, 15]], paint: showdownScene },
+  { box: BOX.P4, start: 0.6, screens: [[MAGENTA, 7.6, 18, 75]], paint: finaleScene },
+];
+function paintPanel(p, t) {
+  const fill = areaShape(p.box);
+  pen.save();
+  fill(); pen.clip();
+  pen.fillStyle = CREAM; fill(); pen.fill();
+  for (const s of p.screens) screenFill(fill, ...s);
+  p.paint(t);
+  pen.restore();
 }
-// Panels fade in one after another, each followed by its border being inked: [box, painter, start time].
-const PANEL_ORDER = [['P1', panel1, 0.3], ['P2', panel2, 0.4], ['P3', panel3, 0.5], ['P4', panel4, 0.6]];
-function drawPage(x, t) {
-  x.save();
-  x.shadowColor = 'rgba(0,0,0,0.55)'; x.shadowBlur = 60; x.shadowOffsetY = 20;   // page lifted off the desk
-  x.fillStyle = PAPER; x.fillRect(0, 0, PW, PH);
-  x.restore();
-  x.drawImage(PAPERC, 0, 0, PW, PH);
-  masthead(x, t);
-  for (const [box, paint, start] of PANEL_ORDER) {
-    const u = seg(t, start, start + 0.45);
+function titleBlock(t) {
+  boom('CAPTAIN CLARITY', [800, 180], 180, -0.02, span(t, 0.15, 0.6), MAGENTA);
+  pen.save();
+  pen.globalAlpha *= span(t, 0.4, 0.7);
+  boom('VS. THE RUNAWAY ROBOT!', [1860, 196], 84, -0.02, 1, CYAN);
+  pen.fillStyle = INK; pen.font = `400 44px ${FONT_HAND}`; pen.textAlign = 'right'; pen.textBaseline = 'middle';
+  pen.fillText('ISSUE No. 16 · 10¢', 2850, 205);
+  pen.beginPath(); pen.moveTo(100, 290); pen.lineTo(2850, 290); outline(5);   // double rule
+  pen.beginPath(); pen.moveTo(100, 302); pen.lineTo(2850, 302); outline(2);
+  pen.restore();
+}
+function page(t) {
+  pen.save();                                                                   // sheet lifted off the desk
+  pen.shadowColor = 'rgba(0,0,0,0.55)'; pen.shadowBlur = 60; pen.shadowOffsetY = 20;
+  pen.fillStyle = PAPER; pen.fillRect(0, 0, PAGE.w, PAGE.h);
+  pen.restore();
+  pen.drawImage(NEWSPRINT, 0, 0, PAGE.w, PAGE.h);
+  titleBlock(t);
+  for (const p of PANELS) {
+    const u = span(t, p.start, p.start + 0.45);
     if (u <= 0) continue;
-    x.save(); x.globalAlpha = clamp(u * 2.5); paint(x, t); x.restore();
-    panelFrame(x, PAN[box], u);
+    pen.save(); pen.globalAlpha *= clamp01(u * 2.5); paintPanel(p, t); pen.restore();
+    inkBorder(p.box, u);
   }
-  x.save();                                       // newsprint texture over the ink, which also knocks it back a little
-  x.globalCompositeOperation = 'multiply'; x.globalAlpha = 0.55; x.drawImage(PAPERC, 0, 0, PW, PH);
-  x.restore();
+  pen.save();                                                                   // paper texture multiplied over the ink
+  pen.globalCompositeOperation = 'multiply'; pen.globalAlpha *= 0.55;
+  pen.drawImage(NEWSPRINT, 0, 0, PAGE.w, PAGE.h);
+  pen.restore();
 }
 
 // ── camera ──
-// Keyframes [time, [page x, page y, zoom]]. Even-numbered intervals are holds (linear drift),
-// odd ones are moves (eased); zoom is interpolated in log space so it feels even.
-const FULL = [1475, 1030, 0.52];
-const KEYS = [
-  // holds stay still (static newsprint dots compress far better); only the closing hold drifts
-  [0, FULL], [0.95, FULL], [1.4, [775, 710, 1.32]], [3.1, [775, 710, 1.32]], [3.55, [2175, 710, 1.32]], [5.0, [2175, 710, 1.32]],
-  [5.45, [1050, 1530, 0.99]], [7.65, [1050, 1530, 0.99]], [8.2, [1475, 1030, 0.53]], [10, [1475, 1030, 0.545]]
+// Stops in page coordinates (x, y, zoom). A stop marked `ease` is reached with an eased move, the others
+// with a linear drift (only the final one actually moves). Zoom is blended in log space.
+const WIDE = { x: 1475, y: 1030, z: 0.52 };
+const MUSEUM = { x: 775, y: 710, z: 1.32 }, CITY = { x: 2175, y: 710, z: 1.32 }, SHOWDOWN = { x: 1050, y: 1530, z: 0.99 };
+const STOPS = [
+  { t: 0, v: WIDE }, { t: 0.95, v: WIDE },
+  { t: 1.4, v: MUSEUM, ease: true }, { t: 3.1, v: MUSEUM },
+  { t: 3.55, v: CITY, ease: true }, { t: 5.0, v: CITY },
+  { t: 5.45, v: SHOWDOWN, ease: true }, { t: 7.65, v: SHOWDOWN },
+  { t: 8.2, v: { x: 1475, y: 1030, z: 0.53 }, ease: true }, { t: 10, v: { x: 1475, y: 1030, z: 0.545 } },
 ];
-function cam(t) {
-  const i = KEYS.findIndex(([start], k) => k < KEYS.length - 1 && t >= start && t <= KEYS[k + 1][0]);
-  if (i < 0) return KEYS[KEYS.length - 1][1];
-  const [start, from] = KEYS[i], [end, to] = KEYS[i + 1];
-  const k = (t - start) / (end - start), u = i % 2 === 0 ? k : eInOut(k);
-  return [lerp(from[0], to[0], u), lerp(from[1], to[1], u), Math.exp(lerp(Math.log(from[2]), Math.log(to[2]), u))];
+function camera(t) {
+  let i = 1;
+  while (i < STOPS.length - 1 && t > STOPS[i].t) i++;
+  const a = STOPS[i - 1], b = STOPS[i];
+  let u = clamp01((t - a.t) / (b.t - a.t));
+  if (b.ease) u = easeInOut(u);
+  return { x: mixN(a.v.x, b.v.x, u), y: mixN(a.v.y, b.v.y, u), z: Math.exp(mixN(Math.log(a.v.z), Math.log(b.v.z), u)) };
 }
-function renderAt(t, alpha) {
-  const [cx, cy, z] = cam(t);
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.setTransform(z, 0, 0, z, W / 2 - cx * z, H / 2 - cy * z);
-  drawPage(ctx, t);
-  ctx.restore();
-}
-// Screen-space speed of the camera over the last 1/60 s (pan in pixels plus a zoom term).
-function camSpeed(t) {
-  const now = cam(t), prev = cam(t - 1 / 60);
-  return Math.hypot((now[0] - prev[0]) * now[2], (now[1] - prev[1]) * now[2]) + Math.abs(Math.log(now[2] / prev[2])) * 2000;
-}
-function render(t) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#2e2622'; ctx.fillRect(0, 0, W, H);   // desk
-  if (camSpeed(t) > 8) for (let j = 0; j < 3; j++) renderAt(t - j / 90, 1 / (j + 1));   // fast moves: three blended sub-frames
-  else renderAt(t, 1);
-  const out = seg(t, 9.5, 9.97);                  // ends on black ink
-  if (out > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(20,16,14,${eInOut(out)})`; ctx.fillRect(0, 0, W, H); }
+// Every frame is a single sharp exposure: the halftone screens turn to mush under multi-exposure blur.
+function compose(t) {
+  const cam = camera(t);
+  pen.setTransform(1, 0, 0, 1, 0, 0);
+  pen.fillStyle = DESK; pen.fillRect(0, 0, FRAME.w, FRAME.h);
+  pen.save();
+  pen.setTransform(cam.z, 0, 0, cam.z, FRAME.w / 2 - cam.x * cam.z, FRAME.h / 2 - cam.y * cam.z);
+  page(t);
+  pen.restore();
+  const dark = span(t, 9.5, 9.97);                                              // fade out to black ink
+  if (dark > 0) { pen.fillStyle = `rgba(20,16,14,${easeInOut(dark)})`; pen.fillRect(0, 0, FRAME.w, FRAME.h); }
 }
 
-// Newsprint at half resolution: warm noise with faint banding, scattered fibres, darker towards the edges.
-function buildPaper() {
-  const w = PW / 2 | 0, h = PH / 2 | 0, sheet = mk(w, h), g = sheet.getContext('2d'), rand = rng(9);
-  const img = g.createImageData(w, h), px = img.data;
-  for (let row = 0, i = 0; row < h; row++) {
-    for (let col = 0; col < w; col++, i += 4) {
-      const n = (rand() - 0.5) * 16 + Math.sin(col * 0.05 + row * 0.002) * 2;
-      px[i] = 239 + n; px[i + 1] = 226 + n; px[i + 2] = 192 + n * 1.2; px[i + 3] = 255;
+// Newsprint texture at half page size: warm per-pixel noise with a faint wave, stray fibres, darker edges.
+function newsprint() {
+  const w = Math.floor(PAGE.w / 2), h = Math.floor(PAGE.h / 2), out = sheet(w, h), g = out.getContext('2d'), rnd = seeded(9);
+  const img = g.createImageData(w, h), d = img.data;
+  let o = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++, o += 4) {
+      const grain = (rnd() - 0.5) * 16 + 2 * Math.sin(0.05 * x + 0.002 * y);
+      d[o] = 239 + grain; d[o + 1] = 226 + grain; d[o + 2] = 192 + 1.2 * grain; d[o + 3] = 255;
     }
   }
   g.putImageData(img, 0, 0);
-  g.strokeStyle = 'rgba(150,120,70,0.10)'; g.lineWidth = 1;
+  g.lineWidth = 1; g.strokeStyle = 'rgba(150,120,70,0.10)';
   for (let n = 0; n < 900; n++) {
-    const fx = rand() * w, fy = rand() * h, len = 6 + rand() * 20, ang = rand() * 6.28;
-    g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx + Math.cos(ang) * len, fy + Math.sin(ang) * len); g.stroke();
+    const sx = rnd() * w, sy = rnd() * h, len = 6 + rnd() * 20, a = rnd() * TAU;
+    g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + len * Math.cos(a), sy + len * Math.sin(a)); g.stroke();
   }
-  const edge = g.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, w * 0.75);
-  edge.addColorStop(0, 'rgba(255,250,235,0)'); edge.addColorStop(1, 'rgba(170,130,70,0.28)');
-  g.fillStyle = edge; g.fillRect(0, 0, w, h);
-  return sheet;
+  const vignette = g.createRadialGradient(w / 2, h / 2, 0.3 * h, w / 2, h / 2, 0.75 * w);
+  vignette.addColorStop(0, 'rgba(255,250,235,0)');
+  vignette.addColorStop(1, 'rgba(170,130,70,0.28)');
+  g.fillStyle = vignette; g.fillRect(0, 0, w, h);
+  return out;
 }
 
-const GLYPHS = 'CAPTAIN CLARITY VS. THE RUNAWAY ROBOT! ISSUE No. 16 · 10¢ MEANWHILE, AT CITY MUSEUM... BZZT! BEEP! DUST DETECTED! VROOOM! BONK! WHOOSH! POW! "';
-window.ready = Promise.all([BANG, HAND].map(fam => document.fonts.load(`400 100px ${fam}`, GLYPHS)))
-  .then(() => document.fonts.ready)
-  .then(() => { PAPERC = buildPaper(); return true; });
+const TEXT_SAMPLE = 'CAPTAIN CLARITY VS. THE RUNAWAY ROBOT! ISSUE No. 16 · 10¢ MEANWHILE, AT CITY MUSEUM... BZZT! BEEP! DUST DETECTED! VROOOM! BONK! WHOOSH! POW! ONE GENTLE LATER BOOP ALL CLEAN NOT ON MY WATCH END? "';
+async function prepare() {
+  const loads = [FONT_BANG, FONT_HAND].map(f => document.fonts.load(`400 100px ${f}`, TEXT_SAMPLE));
+  await Promise.all([...loads, document.fonts.ready]);
+  NEWSPRINT = newsprint();
+  return true;
+}
+window.ready = prepare();
 window.draw = ({ t }) => {
-  render(t);
-  const url = cv.toDataURL('image/jpeg', 0.92);
-  return url.slice(url.indexOf(',') + 1);
+  compose(t);
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
 };
-window.events = () => [
-  ...[0.3, 0.4, 0.5, 0.6].map(t => ({ t, k: 'paper' })),
-  { t: 1.35, k: 'vroom' }, { t: 1.95, k: 'bonk' }, { t: 2.25, k: 'beep' },
-  { t: 3.45, k: 'whoosh' }, { t: 4.05, k: 'boing' },
-  { t: 5.3, k: 'vroom2' }, { t: 5.85, k: 'pow' }, { t: 6.2, k: 'bonk' }, { t: 6.32, k: 'boop' },
-  { t: 6.5, k: 'sweep' }, { t: 6.9, k: 'sparkle' }, { t: 7.2, k: 'sparkle' }, { t: 7.0, k: 'boing' },
-  { t: 8.0, k: 'ding' }, { t: 8.5, k: 'beepq' }
+// sound cues for audio.py: [time, kind]
+const CUES = [
+  [0.3, 'paper'], [0.4, 'paper'], [0.5, 'paper'], [0.6, 'paper'],
+  [1.35, 'vroom'], [1.95, 'bonk'], [2.25, 'beep'],
+  [3.45, 'whoosh'], [4.05, 'boing'],
+  [5.3, 'vroom2'], [5.85, 'pow'], [6.2, 'bonk'], [6.32, 'boop'],
+  [6.5, 'sweep'], [6.9, 'sparkle'], [7.2, 'sparkle'], [7.0, 'boing'],
+  [8.0, 'ding'], [8.5, 'beepq'],
 ];
+window.events = () => CUES.map(([t, k]) => ({ t, k }));
 </script>
-</body></html>
+</body>
+</html>
