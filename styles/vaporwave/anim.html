@@ -1,0 +1,179 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+</head><body>
+<canvas id="out" width="1920" height="1080"></canvas>
+<script>
+// Vaporwave: pastel gradients, marble bust (raymarched SDF, original sculpture), checkerboard floor,
+// floating 95-style windows, palms, rotating checkered orb, low-res JPEG crunch + VHS post, "PLAZA 95" lockup.
+const W = 1920, H = 1080, DUR = 10;
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const ease = u => u * u * (3 - 2 * u);
+const easeOut = u => 1 - Math.pow(1 - u, 3);
+const easeInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+// back-out overshoot: 0 → ~1.1 → 1
+const backOut = (u, s = 1.9) => { u = clamp(u); const v = u - 1; return 1 + (s + 1) * v * v * v + s * v * v; };
+function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+// ---------- timeline ----------
+const T = {
+  fadeIn: [0, 0.6],
+  title0: 0.35, titleStag: 0.085, titleDur: 0.5,
+  winA: 0.9, prog: [1.25, 3.85], winB: 1.5, dlg: 2.5,
+  cursor: [3.0, 3.9], click: 4.0,
+  glitch: [4.12, 4.5, 5.0, 5.45], mix: [4.45, 5.05],
+  sceneB: 4.4, taskbar: 5.45, plaza: 6.0, n95: 6.6, tagBar: 7.0, tag0: 7.2, tagStag: 0.035,
+  fadeOut: [9.1, 10.0],
+};
+const TITLE = 'WELCOME BACK';
+const TAG = 'OPEN ALL NIGHT';
+
+// ---------- raymarch GL: marble bust + checkered orb ----------
+const GLW = 960, GLH = 1280;
+const glc = mk(GLW, GLH);
+const gl = glc.getContext('webgl2', { premultipliedAlpha: true, preserveDrawingBuffer: true, antialias: false });
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p,0.,1.); }`;
+const FS_OBJ = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform float uYaw, uMode, uT, uSpin, uWarm;
+out vec4 o;
+float smin(float a,float b,float k){ float h=clamp(.5+.5*(b-a)/k,0.,1.); return mix(b,a,h)-k*h*(1.-h); }
+float smax(float a,float b,float k){ return -smin(-a,-b,k); }
+float sdEll(vec3 p, vec3 r){ float k0=length(p/r); float k1=length(p/(r*r)); return k0*(k0-1.)/k1; }
+float sdCap(vec3 p, vec3 a, vec3 b, float r){ vec3 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/dot(ba,ba),0.,1.); return length(pa-ba*h)-r; }
+float sdCylY(vec3 p, float r, float h){ vec2 d=abs(vec2(length(p.xz),p.y))-vec2(r,h); return min(max(d.x,d.y),0.)+length(max(d,0.)); }
+float hash3(vec3 p){ p=fract(p*.3183099+.1); p*=17.; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+float noise(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.-2.*f);
+  return mix(mix(mix(hash3(i),hash3(i+vec3(1,0,0)),f.x),mix(hash3(i+vec3(0,1,0)),hash3(i+vec3(1,1,0)),f.x),f.y),
+             mix(mix(hash3(i+vec3(0,0,1)),hash3(i+vec3(1,0,1)),f.x),mix(hash3(i+vec3(0,1,1)),hash3(i+vec3(1,1,1)),f.x),f.y),f.z); }
+float fbm(vec3 p){ float a=.5, s=0.; for(int i=0;i<5;i++){ s+=a*noise(p); p=p*2.03+vec3(1.7,9.2,3.1); a*=.5; } return s; }
+// curls: rounded lumps from 3D cellular noise (one jittered point per cell)
+vec3 hash33(vec3 p){ return fract(sin(vec3(dot(p,vec3(127.1,311.7,74.7)),dot(p,vec3(269.5,183.3,246.1)),dot(p,vec3(113.5,271.9,124.6))))*43758.5453); }
+float curls(vec3 p){
+  const float C=.085; vec3 g=p/C, id=floor(g), f=fract(g); float F=9.;
+  for(int k=0;k<27;k++){ vec3 o=vec3(k%3-1,(k/3)%3-1,k/9-1); vec3 r=o+.2+.6*hash33(id+o)-f; F=min(F,dot(r,r)); }
+  float u=sqrt(F)*C/.07; return .03*sqrt(max(0.,1.-u*u));
+}
+float bust(vec3 p){
+  vec3 q=vec3(abs(p.x),p.y,p.z);
+  float d=sdEll(p-vec3(0.,.56,-.04),vec3(.335,.40,.42));                     // cranium
+  d=smin(d,sdEll(p-vec3(0.,.34,.08),vec3(.27,.35,.31)),.10);               // face mass
+  d=smin(d,sdEll(p-vec3(0.,.085,.17),vec3(.16,.12,.16)),.10);               // chin / jaw
+  d=smin(d,sdEll(q-vec3(.15,.30,.21),vec3(.10,.08,.10)),.08);               // cheekbones
+  d=smin(d,sdCap(q,vec3(.215,.24,-.01),vec3(.075,.07,.15),.065),.08);       // jawline
+  d=smin(d,sdCap(q,vec3(0.,.475,.33),vec3(.17,.465,.28),.042),.05);          // brow ridge
+  d=smax(d,-sdEll(q-vec3(.112,.405,.365),vec3(.075,.048,.06)),.035);         // eye sockets
+  d=smin(d,sdEll(q-vec3(.112,.40,.305),vec3(.058,.038,.05)),.015);           // blank classical eyes
+  d=smin(d,sdCap(p,vec3(0.,.445,.355),vec3(0.,.255,.438),.032),.04);         // nose bridge to tip
+  d=smin(d,sdEll(q-vec3(.036,.238,.398),vec3(.03,.022,.03)),.02);            // nostril wings
+  d=smin(d,sdEll(p-vec3(0.,.158,.362),vec3(.074,.021,.036)),.018);           // upper lip
+  d=smin(d,sdEll(p-vec3(0.,.117,.356),vec3(.064,.023,.036)),.018);           // lower lip
+  d=smax(d,-sdEll(p-vec3(0.,.137,.395),vec3(.066,.0045,.05)),.006);          // mouth line
+  d=smin(d,sdEll(q-vec3(.30,.36,-.02),vec3(.026,.078,.05)),.03);               // ears
+  // hair: curled cap with a hairline
+  float hd=sdEll(p-vec3(0.,.575,-.07),vec3(.345,.40,.44)); if(hd<.08) hd-=curls(p);
+  float line=(.60-.5*clamp(.16-p.z,0.,1.))-p.y;
+  hd=smax(hd,line,.04);
+  d=smin(d,hd,.025);
+  // neck, chest, truncated shoulders
+  d=smin(d,sdCap(p,vec3(0.,-.17,-.03),vec3(0.,.14,-.01),.155),.09);
+  float ch=sdEll(p-vec3(0.,-.40,-.03),vec3(.60,.26,.30));
+  ch=smin(ch,sdEll(q-vec3(.17,-.37,.12),vec3(.18,.13,.16)),.1);             // pectoral mass
+  d=smin(d,ch,.12);
+  d=max(d,-(p.y+.56)); d=smax(d,abs(p.x)-.55,.02);
+  // socle
+  float s=sdCylY(p-vec3(0.,-.61,-.03),.13,.06);
+  s=min(s,sdCylY(p-vec3(0.,-.71,-.03),.24,.04)-.01);
+  s=min(s,sdCylY(p-vec3(0.,-.80,-.03),.29,.05)-.01);
+  return min(d,s);
+}
+vec3 rotY(vec3 p,float a){ float c=cos(a), s=sin(a); return vec3(c*p.x+s*p.z,p.y,-s*p.x+c*p.z); }
+float map(vec3 p){ return bust(rotY(p,-uYaw)); }
+vec3 nrm(vec3 p){ const vec2 k=vec2(1,-1); float e=.0012;
+  return normalize(k.xyy*map(p+k.xyy*e)+k.yyx*map(p+k.yyx*e)+k.yxy*map(p+k.yxy*e)+k.xxx*map(p+k.xxx*e)); }
+float ao(vec3 p, vec3 n){ float o=0., s=1.; for(int i=1;i<6;i++){ float h=.02*float(i)*float(i)*.5+.01; o+=(h-map(p+n*h))*s; s*=.7; } return clamp(1.-2.2*o,0.,1.); }
+vec3 marble(vec3 pw){
+  float v=fbm(pw*2.2);
+  float vein=abs(sin(pw.x*3.1+pw.y*5.3+pw.z*1.7+v*7.));
+  float thin=1.-smoothstep(0.,.07,vein);
+  float soft=1.-smoothstep(0.,.35,abs(sin(pw.y*2.+pw.x*1.3+v*4.)));
+  vec3 base=vec3(.95,.935,.965)-vec3(.05,.05,.03)*fbm(pw*6.);
+  base=mix(base,vec3(.70,.68,.80),thin*.55); base=mix(base,vec3(.86,.84,.92),soft*.25);
+  return base;
+}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*uRes)/uRes.y;
+  if(uMode<.5){
+    // orthographic view of the bust
+    vec3 ro=vec3(uv.x*2.1, uv.y*2.1+.02, 3.), rd=vec3(0.,0.,-1.);
+    float t=0.; bool hit=false;
+    for(int i=0;i<140;i++){ float d=map(ro+rd*t); if(d<.0008){hit=true;break;} t+=d*.9; if(t>5.) break; }
+    if(!hit){ o=vec4(0.); return; }
+    vec3 p=ro+rd*t, n=nrm(p), v=-rd, pw=rotY(p,-uYaw);
+    vec3 alb=marble(pw);
+    // cool pastel set (scene A) vs warm dusk set (scene B)
+    vec3 L1=normalize(mix(vec3(-.65,.55,.65),vec3(.75,.35,.6),uWarm)), C1=mix(vec3(1.,.80,.92),vec3(1.,.78,.62),uWarm);
+    vec3 L2=normalize(mix(vec3(.85,.25,-.45),vec3(-.8,.3,-.4),uWarm)), C2=mix(vec3(.45,1.,.95),vec3(.55,.75,1.),uWarm);
+    vec3 amb=mix(vec3(.62,.55,.85),vec3(.55,.40,.75),uWarm);
+    float a=ao(p,n);
+    float d1=(dot(n,L1)+.25)/1.25, d2=max(dot(n,L2),0.);
+    vec3 col=alb*(C1*max(d1,0.)*1.05 + amb*.42*a) + C2*pow(d2,1.5)*.55*alb;
+    float sp=pow(max(dot(reflect(-L1,n),v),0.),28.); col+=C1*sp*.22;
+    float fr=pow(1.-max(dot(n,v),0.),3.); col+=C2*fr*.35;
+    col*=mix(.75,1.,a);
+    o=vec4(col,1.);
+  } else {
+    // glossy checkered orb
+    vec3 ro=vec3(uv*2.2,3.), rd=vec3(0.,0.,-1.);
+    float b=dot(ro,rd), c=dot(ro,ro)-1., h=b*b-c;
+    if(h<0.){ o=vec4(0.); return; }
+    vec3 p=ro+rd*(-b-sqrt(h)), n=p;
+    // edge antialias
+    float r=length(uv*2.2); float aa=clamp((1.-r)*uRes.y*.45,0.,1.);
+    // tilted spin axis
+    vec3 q=p; float tl=.35; q=vec3(q.x, cos(tl)*q.y-sin(tl)*q.z, sin(tl)*q.y+cos(tl)*q.z);
+    float u=atan(q.z,q.x)/6.28318+uSpin, w=acos(clamp(q.y,-1.,1.))/3.14159;
+    float chk=mod(floor(u*14.)+floor(w*7.),2.);
+    vec3 A=mix(vec3(1.,.55,.82),vec3(1.,.62,.70),uWarm), B=mix(vec3(.45,.92,.88),vec3(.55,.45,.95),uWarm);
+    vec3 alb=mix(A,B,chk);
+    vec3 L=normalize(vec3(-.6,.7,.8)); float df=max(dot(n,L),0.)*.8+.35;
+    vec3 col=alb*df;
+    vec3 R=reflect(rd,n); float sky=R.y*.5+.5;
+    vec3 env=mix(vec3(.95,.75,.9),vec3(.7,.6,1.),sky);
+    float fr=.12+.6*pow(1.-max(dot(n,-rd),0.),3.);
+    col=mix(col,env,fr);
+    col+=pow(max(dot(R,L),0.),60.)*.9;
+    o=vec4(col*aa,aa);
+  }
+}`;
+function prog(vs, fs) {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p;
+}
+const P_OBJ = prog(VS, FS_OBJ);
+{ const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const l = gl.getAttribLocation(P_OBJ, 'p'); gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, 2, gl.FLOAT, false, 0, 0); }
+const U = n => gl.getUniformLocation(P_OBJ, n);
+// renders into glc and returns it; caller must drawImage right away
+function renderBust(yaw, warm) {
+  gl.viewport(0, 0, GLW, GLH); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.useProgram(P_OBJ);
+  gl.uniform2f(U('uRes'), GLW, GLH); gl.uniform1f(U('uYaw'), yaw); gl.uniform1f(U('uMode'), 0); gl.uniform1f(U('uWarm'), warm);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+// orb occupies the bottom-left GLW×GLW square of the GL canvas → source rect (0, GLH-GLW, GLW, GLW)
+function renderOrb(spin, warm) {
+  gl.viewport(0, 0, GLW, GLH); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.useProgram(P_OBJ);
+  gl.viewport(0, 0, GLW, GLW);
+  gl.uniform2f(U('uRes'), GLW, GLW); gl.uniform1f(U('uMode'), 1); gl.uniform1f(U('uSpin'), spin); gl.uniform1f(U('uWarm'), warm);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+const ORB_SRC = [0, GLH - GLW, GLW, GLW];
+</script>
+<script src="scene.js"></script>
+</body></html>
