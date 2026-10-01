@@ -2,9 +2,9 @@
 
 Short HTML canvas films demonstrate different animation styles. Each example is a self-contained clip of roughly 9–10 seconds. Choose a style before commissioning a new animation: “Explain this topic in the `blueprint` style.”
 
-Watch the [complete catalog reel](catalog/catalog.mp4) (116 styles in shuffled order, ~22 min), or browse by use case or visual family, or open a style below to see its translated video, animated preview, and HTML source.
+Watch the [complete catalog reel](catalog/catalog.mp4) (116 styles in shuffled order, ~22 min), or browse by use case or visual family, or open a style below to see its video, animated preview, and HTML source.
 
-This English adaptation is based on [Yasin Özmen’s original Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which was made for [irticalen](https://irticalen.yasinozmeen.me). The first 20 styles were originally developed there; their clips have since been re-made with new subjects in the same styles, and each style page credits its origin. Source: commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593).
+The catalog began as an English adaptation of [Yasin Özmen’s Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu) (see [Acknowledgements](#acknowledgements)). Its first 20 styles were originally developed there and have since been re-made with new subjects; each style page credits its origin.
 
 <!-- styles:start -->
 **By use case:** [Explainers](categories/use-cases/explainer.md) (36) · [Tutorials & Training](categories/use-cases/tutorial.md) (8) · [Product & Launches](categories/use-cases/product.md) (19) · [Social & Short-Form](categories/use-cases/social.md) (55) · [Storytelling & Brand](categories/use-cases/story.md) (63) · [Data & Results](categories/use-cases/data.md) (11) · [News & Current Affairs](categories/use-cases/news.md) (10) · [Intros, Titles & Transitions](categories/use-cases/titles.md) (40)
@@ -340,15 +340,33 @@ This English adaptation is based on [Yasin Özmen’s original Turkish catalog](
 
 The gallery above is shuffled so no family or era clusters together; the category pages list styles alphabetically. Each linked directory has its own page with the clip, preview GIF, `anim.html` source, and credits.
 
-## How the original was made
+## How the clips are made
 
-The [original brief](BRIEF.md) gave Claude Code (Opus 5.5) a goal, style, and technical constraints for each film, leaving the motion design to the model.
+Each film was written by Claude Code (Opus 5.5) against the [production brief](BRIEF.md), which sets the quality bar, the technical contract and the review steps; the motion design is left to the model, and every clip is checked on a contact sheet and full-resolution key frames before it is merged.
 
-- Each `anim.html` draws on a 1920 × 1080 canvas. `window.draw({t})` returns a JPEG frame for time `t`.
-- Playwright renders frames in headless Chromium. ffmpeg turns them into H.264 video; optional sounds are synthesized with ffmpeg or Python.
-- To reproduce a clip, install Node.js, `@playwright/test`, Chromium headless shell, and ffmpeg, then run that style’s `build.sh` when present, or its `render.mjs` directly.
+- Each `anim.html` draws on a 1920 × 1080 canvas. `window.ready` resolves once fonts and textures are prepared, and `window.draw({t})` returns the JPEG frame for time `t`; frames depend only on `t`.
+- Every style folder carries identical copies of [`tools/render.mjs`](tools/render.mjs), which renders frames in headless Chromium through Playwright, and [`tools/events.mjs`](tools/events.mjs), which exports the sound cues. An optional `render.json` selects GPU rendering or in-order frame blocks for simulations.
+- Each style's `audio.py` synthesizes its soundtrack from those cues, and ffmpeg encodes H.264 video with AAC audio and the GIF preview.
+- To reproduce a clip, install Node.js, `@playwright/test`, the Chromium headless shell, Python 3 with NumPy, and ffmpeg, then run that style’s `build.sh`.
 - To regenerate the previews, run `python3 make_previews.py`. To assemble the catalog, install Pillow and run `python3 combine.py`. Both commands require ffmpeg on your path.
-- Each style's metadata (number, name, visual family, use cases, and optional `credits`: `role`, `name`, `url`) lives in `styles/<slug>/meta.json`; the use-case and family definitions live in `styles.json`. After editing either, run `python3 build_index.py` to regenerate this gallery, the pages under `categories/`, and each `styles/<slug>/README.md`, then `python3 check_catalog.py` to verify every style has a valid clip, preview, and index entries.
-- Fonts are stored under each style’s `fonts/` directory. The original README identifies them as Google Fonts under the SIL Open Font License.
+- Each style's metadata (number, name, visual family, use cases, and optional `credits`: `role`, `name`, `url`) lives in `styles/<slug>/meta.json`; the use-case and family definitions live in `styles.json`. After editing either, run `python3 build_index.py` to regenerate this gallery, the pages under `categories/`, and each `styles/<slug>/README.md`, then `python3 check_catalog.py` to verify every style has a valid clip, preview, index entries and unmodified shared scripts.
+- Fonts are self-hosted under each style’s `fonts/` directory; [FONTS.md](FONTS.md) lists every family and its license.
 
-The source repository does not include a general software license. This adaptation does not claim a new license for the original code or media.
+## License
+
+The code, videos, GIF previews, generated audio and documentation in this repository are released under the [MIT License](LICENSE), © 2026 Victor González-Pacheco.
+
+Third-party components keep their own licenses: the fonts are under the SIL Open Font License 1.1, the Apache License 2.0 or the MIT License as listed in [FONTS.md](FONTS.md), and vendored or adapted code is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+**Rewrite in progress:** the `anim.html` of 14 styles still contains code derived from the [original catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which has no license. That code is being rewritten, and until then those derived portions are not offered under the MIT License: bauhaus, clay, data-visualization, documentary-16mm, isometric, kinetic-typography, kurzgesagt, linocut, memphis, paper-cutout, pencil-sketch, pixel-art, retro-1970s, sci-fi-interface.
+
+## Disclaimer
+
+This project is not affiliated with, sponsored by or endorsed by any of the creators, studios, publications, games or brands named in the style credits. Those names only describe the visual tradition a style draws on. All characters, products, brands and places shown in the clips are invented.
+
+## Acknowledgements
+
+- [Yasin Özmen](https://github.com/yasinozmeen), for the original idea and the [Turkish animation style catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu) made for [irticalen](https://irticalen.yasinozmeen.me). The first 20 styles here began in that catalog (adapted from commit [`09e451d`](https://github.com/yasinozmeen/animasyon-stil-katalogu/commit/09e451d8b64ec85c1ec035fd39e00725c1ed5593)) and have since been re-made.
+- Techartist, for [“Memory Fading Into Watercolor”](https://github.com/iamtechartist/memory-fading-into-watercolor), whose watercolour simulation the `watercolor-memory` style adapts.
+- The [three.js](https://threejs.org) and [Rough.js](https://roughjs.com) projects, [Google Fonts](https://fonts.google.com) and the type designers whose fonts are listed in [FONTS.md](FONTS.md), and [Playwright](https://playwright.dev).
+- Styles marked “Inspired by” credit the artist, studio or tradition they draw on, on the style’s own page.
