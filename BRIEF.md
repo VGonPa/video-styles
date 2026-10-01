@@ -30,7 +30,7 @@ and how it is checked before it is merged.
 |---|---|
 | `anim.html` | Draws the film on a 1920 × 1080 `<canvas id="c">`. Exposes `window.ready` (a promise that settles once fonts and precomputed textures are ready) and `window.draw({ t })`, which paints the frame for time `t` in seconds and returns it as base64 JPEG data (`toDataURL('image/jpeg', 0.92)`). Frames depend only on `t`: seeded random numbers only, no clock. |
 | `render.mjs`, `events.mjs` | Identical copies of [`tools/render.mjs`](tools/render.mjs) and [`tools/events.mjs`](tools/events.mjs). Never edit the copies; `check_catalog.py` rejects a copy that differs. |
-| `render.json` | Optional. `gpu: "metal"` or `"full"` for WebGL styles, `schedule: "contiguous"` for path-dependent simulations, `eventsGpu` if `events.mjs` needs a GPU mode. |
+| `render.json` | Optional. `gpu: "metal"` or `"full"` for WebGL styles, `schedule: "contiguous"` for path-dependent simulations, `eventsGpu` if `events.mjs` needs a GPU mode, `signal` to have `events.mjs` save a raw sample stream from `window.signal()` instead of `events.json`. |
 | `audio.py` | Synthesises the soundtrack from `events.json` (the cue list `window.events()` returns). Sounds are generated, never sampled. A silent stereo track is acceptable. |
 | `build.sh` | Rebuilds the clip end to end: frames into a temporary folder → `events.json` → `audio.wav` → `<slug>.mp4` → `preview.gif`, then deletes the frames and the wav. |
 | `meta.json` | Number, name, `feel` (six words or fewer), `best_for` (ten words or fewer), `family`, `use_cases` and optional `credits` (`role`, `name`, `url`). |
