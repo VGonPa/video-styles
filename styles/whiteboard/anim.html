@@ -1,6 +1,11 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><style>html,body{margin:0;background:#f6f6f3}canvas{display:block}</style></head>
-<body><canvas id="c" width="1920" height="1080"></canvas>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>html, body { margin: 0; background: #f6f6f3; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
 <script src="common.js"></script>
 <script>
 // WHITEBOARD — "How do bees make honey?": marker draws each step, camera trails the long arrow, zoom out to the summary board
@@ -8,53 +13,91 @@ const INK = '#18181b', RED = '#d4352a', AMBER = '#e9a21f', BOARD = '#f6f6f3';
 const FONT = "'Kalam'";
 const BX = 1760, BY = 420;                        // world offset of second panel
 const A_C = [960, 540], B_C = [BX + 860, BY + 600];
-const SUM = { c: [0, 0], s: 1 };                  // summary framing, fitted to the drawings in prepText
+const SUM = { c: [0, 0], s: 1 };                  // summary framing, fitted to the drawings in measureLabels
 
-// ---------- Whiteboard texture (once, half resolution) ----------
+// ---------- board surface: painted once at half resolution, scaled up under the camera ----------
 const WB = { x0: -700, y0: -700, w: 5400, h: 3600, k: 0.5 };
-const board = mk(WB.w * WB.k, WB.h * WB.k);
-{ const c = board.getContext('2d'), r = rng(3);
-  c.fillStyle = BOARD; c.fillRect(0, 0, board.width, board.height);
-  // large, soft glare bands (board reflection)
-  for (let i = 0; i < 5; i++) { const x = r() * board.width, g = c.createLinearGradient(x - 500, 0, x + 500, board.height * .4);
-    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(.5, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = g; c.fillRect(0, 0, board.width, board.height); }
-  const g2 = c.createLinearGradient(0, 0, 0, board.height); g2.addColorStop(0, 'rgba(0,0,0,0)'); g2.addColorStop(1, 'rgba(90,95,100,0.06)'); c.fillStyle = g2; c.fillRect(0, 0, board.width, board.height);
-  // old, erased marker ghosts
-  c.filter = 'blur(2px)'; c.lineCap = 'round';
-  for (let i = 0; i < 40; i++) { const x = r() * board.width, y = r() * board.height; c.strokeStyle = `rgba(60,70,80,${0.018 + r() * 0.03})`; c.lineWidth = 2 + r() * 3; c.beginPath(); c.moveTo(x, y);
-    let px = x, py = y; for (let j = 0; j < 14; j++) { px += 10 + r() * 22; py += (r() - .5) * 26; c.lineTo(px, py); } c.stroke(); }
-  for (let i = 0; i < 16; i++) { const x = r() * board.width, y = r() * board.height; c.fillStyle = `rgba(80,90,100,${0.008 + r() * 0.01})`; c.beginPath(); c.ellipse(x, y, 60 + r() * 140, 16 + r() * 30, (r() - .5) * .6, 0, 7); c.fill(); }
-  c.filter = 'none';
-  const id = c.getImageData(0, 0, board.width, board.height), d = id.data;
-  for (let q = 0; q < d.length; q += 4) { const n = (r() - .5) * 4; d[q] += n; d[q + 1] += n; d[q + 2] += n; } c.putImageData(id, 0, 0);
+const board = paintBoard(mk(WB.w * WB.k, WB.h * WB.k), rng(3));
+function paintBoard(cnv, rand) {
+  const g = cnv.getContext('2d'), w = cnv.width, h = cnv.height;
+  const cover = fill => { g.fillStyle = fill; g.fillRect(0, 0, w, h); };
+  cover(BOARD);
+  for (let band = 0; band < 5; band++) {          // diagonal glare from the room lights
+    const x = rand() * w, glare = g.createLinearGradient(x - 500, 0, x + 500, h * .4);
+    glare.addColorStop(0, 'rgba(255,255,255,0)'); glare.addColorStop(.5, 'rgba(255,255,255,0.55)'); glare.addColorStop(1, 'rgba(255,255,255,0)');
+    cover(glare);
+  }
+  const shade = g.createLinearGradient(0, 0, 0, h);   // slightly darker toward the tray
+  shade.addColorStop(0, 'rgba(0,0,0,0)'); shade.addColorStop(1, 'rgba(90,95,100,0.06)');
+  cover(shade);
+  g.filter = 'blur(2px)'; g.lineCap = 'round';
+  for (let n = 0; n < 40; n++) {                  // faint scribbles left by earlier erasing
+    let x = rand() * w, y = rand() * h;
+    g.strokeStyle = `rgba(60,70,80,${0.018 + rand() * 0.03})`; g.lineWidth = 2 + rand() * 3;
+    g.beginPath(); g.moveTo(x, y);
+    for (let step = 0; step < 14; step++) { x += 10 + rand() * 22; y += (rand() - .5) * 26; g.lineTo(x, y); }
+    g.stroke();
+  }
+  for (let n = 0; n < 16; n++) {                  // wiped smears
+    const x = rand() * w, y = rand() * h;
+    g.fillStyle = `rgba(80,90,100,${0.008 + rand() * 0.01})`;
+    g.beginPath(); g.ellipse(x, y, 60 + rand() * 140, 16 + rand() * 30, (rand() - .5) * .6, 0, 7); g.fill();
+  }
+  g.filter = 'none';
+  const img = g.getImageData(0, 0, w, h), px = img.data;   // fine grey grain
+  for (let i = 0; i < px.length; i += 4) { const n = (rand() - .5) * 4; for (let ch = 0; ch < 3; ch++) px[i + ch] += n; }
+  g.putImageData(img, 0, 0);
+  return cnv;
 }
 
-// ---------- Felt pen sprite (body + shadow separate) ----------
-const MK = { L: 440, D: 58, ang: 0.62 };          // body orientation: right-down
-const mSprite = mk(700, 700), mShadow = mk(700, 700), PIV = [120, 120];
-function drawMarker(c) {
-  c.save(); c.translate(PIV[0], PIV[1]); c.rotate(MK.ang);
-  const D = MK.D;
-  const cyl = (x0, x1, w, cols) => { const g = c.createLinearGradient(0, -w / 2, 0, w / 2); cols.forEach((col, i) => g.addColorStop(i / (cols.length - 1), col)); c.fillStyle = g; c.fillRect(x0, -w / 2, x1 - x0, w); };
-  c.fillStyle = '#111'; c.beginPath(); c.moveTo(0, -4); c.lineTo(24, -9); c.lineTo(24, 9); c.lineTo(0, 4); c.closePath(); c.fill();
-  { const g = c.createLinearGradient(0, -26, 0, 26); g.addColorStop(0, '#5a5a5e'); g.addColorStop(.35, '#2c2c30'); g.addColorStop(1, '#0d0d10'); c.fillStyle = g;
-    c.beginPath(); c.moveTo(22, -11); c.bezierCurveTo(48, -14, 60, -D / 2, 78, -D / 2); c.lineTo(78, D / 2); c.bezierCurveTo(60, D / 2, 48, 14, 22, 11); c.closePath(); c.fill(); }
-  c.save(); c.beginPath(); c.roundRect(76, -D / 2, MK.L - 76, D, [4, 18, 18, 4]); c.clip();
-  cyl(76, MK.L, D, ['#d9d9d6', '#ffffff', '#f1f1ee', '#c9c9c5', '#9d9d99']);
-  cyl(96, 112, D, ['#555', '#2a2a2d', '#1a1a1d', '#0b0b0d', '#050506']);          // color ring
-  cyl(170, 330, D, ['#3b3b40', '#1d1d21', '#141417', '#0c0c0e', '#060607']);       // label tape (no text)
-  c.fillStyle = 'rgba(255,255,255,0.18)'; c.fillRect(170, -D / 2 + 9, 160, 4);
-  cyl(MK.L - 36, MK.L, D, ['#4a4a4f', '#232327', '#18181b', '#0e0e10', '#060607']); // rear cap
-  c.restore();
-  c.restore();
+// ---------- the marker: sprite and soft shadow, both drawn tip-at-pivot ----------
+const MK = { L: 440, D: 58, ang: 0.62 };          // barrel length, diameter, tilt (pointing down-right)
+const PIV = [120, 120];
+const mSprite = mk(700, 700), mShadow = mk(700, 700);
+function paintMarker(g) {
+  const D = MK.D, half = D / 2;
+  // a lit cylinder section from x0 to x1: vertical gradient through the given colours
+  const barrel = (x0, x1, colours) => {
+    const grad = g.createLinearGradient(0, -half, 0, half);
+    colours.forEach((col, i) => grad.addColorStop(i / (colours.length - 1), col));
+    g.fillStyle = grad; g.fillRect(x0, -half, x1 - x0, D);
+  };
+  g.save(); g.translate(PIV[0], PIV[1]); g.rotate(MK.ang);
+  g.fillStyle = '#111';                           // felt nib
+  g.beginPath(); g.moveTo(0, -4); g.lineTo(24, -9); g.lineTo(24, 9); g.lineTo(0, 4); g.closePath(); g.fill();
+  const nose = g.createLinearGradient(0, -26, 0, 26);
+  nose.addColorStop(0, '#5a5a5e'); nose.addColorStop(.35, '#2c2c30'); nose.addColorStop(1, '#0d0d10');
+  g.fillStyle = nose;
+  g.beginPath(); g.moveTo(22, -11);
+  g.bezierCurveTo(48, -14, 60, -half, 78, -half); g.lineTo(78, half); g.bezierCurveTo(60, half, 48, 14, 22, 11);
+  g.closePath(); g.fill();
+  g.save();
+  g.beginPath(); g.roundRect(76, -half, MK.L - 76, D, [4, 18, 18, 4]); g.clip();
+  barrel(76, MK.L, ['#d9d9d6', '#ffffff', '#f1f1ee', '#c9c9c5', '#9d9d99']);      // white body
+  barrel(96, 112, ['#555', '#2a2a2d', '#1a1a1d', '#0b0b0d', '#050506']);          // ink-colour ring
+  barrel(170, 330, ['#3b3b40', '#1d1d21', '#141417', '#0c0c0e', '#060607']);      // blank label
+  g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(170, -half + 9, 160, 4);
+  barrel(MK.L - 36, MK.L, ['#4a4a4f', '#232327', '#18181b', '#0e0e10', '#060607']); // end cap
+  g.restore();
+  g.restore();
 }
-{ drawMarker(mSprite.getContext('2d'));
-  const c = mShadow.getContext('2d'); c.filter = 'blur(10px)'; c.globalAlpha = 0.28; c.drawImage(mSprite, 0, 0); c.globalCompositeOperation = 'source-in'; c.fillStyle = '#2b3036'; c.fillRect(0, 0, 700, 700); }
+paintMarker(mSprite.getContext('2d'));
+{ const g = mShadow.getContext('2d');           // blurred, tinted silhouette of the sprite
+  g.filter = 'blur(10px)'; g.globalAlpha = 0.28; g.drawImage(mSprite, 0, 0);
+  g.globalCompositeOperation = 'source-in'; g.fillStyle = '#2b3036'; g.fillRect(0, 0, 700, 700); }
 
-// ---------- Drawing actions (timeline) ----------
+// ---------- timeline: every stroke and label the marker draws, with its time window ----------
 const acts = [];
-function stroke(path, t0, t1, o = {}) { path.jitter(o.jit ?? 1.6, acts.length * 17 + 5); const a = { kind: 'path', path, t0, t1, color: o.color || INK, width: o.width || 7, clip: o.clip, dash: o.dash, ease: o.ease || (u => u), flap: o.flap, drift: o.drift }; acts.push(a); return a; }
-function text(str, x, y, size, t0, t1, o = {}) { acts.push({ kind: 'text', str, x, y, size, t0, t1, color: o.color || INK, align: o.align || 'center', rot: o.rot || 0 }); }
+function stroke(path, t0, t1, o = {}) {
+  path.jitter(o.jit ?? 1.6, acts.length * 17 + 5);
+  const act = { kind: 'path', path, t0, t1, color: o.color || INK, width: o.width || 7, clip: o.clip, dash: o.dash,
+                ease: o.ease || (u => u), flap: o.flap, drift: o.drift };
+  acts.push(act);
+  return act;
+}
+function text(str, x, y, size, t0, t1, o = {}) {
+  acts.push({ kind: 'text', str, x, y, size, t0, t1, color: o.color || INK, align: o.align || 'center', rot: o.rot || 0 });
+}
 const ell = (cx, cy, rx, ry, a0, a1, rot = 0, n = 48) => Array.from({ length: n + 1 }, (_, i) => { const a = lerp(a0, a1, i / n), x = Math.cos(a) * rx, y = Math.sin(a) * ry; return [cx + x * Math.cos(rot) - y * Math.sin(rot), cy + x * Math.sin(rot) + y * Math.cos(rot)]; });
 const poly = pts => { const p = P().M(...pts[0]); for (let i = 1; i < pts.length; i++) p.L(...pts[i]); return p; };
 const clipOf = pts => { const c = new Path2D(); c.moveTo(...pts[0]); pts.slice(1).forEach(q => c.lineTo(...q)); c.closePath(); return c; };
@@ -62,11 +105,14 @@ const clipOf = pts => { const c = new Path2D(); c.moveTo(...pts[0]); pts.slice(1
 function hatch(x0, y0, x1, y1, step) { const p = P().M(x0, y0); let y = y0, k = 0; while (y < y1) { const yn = Math.min(y1, y + step); p.L(k % 2 ? x0 : x1, yn); y = yn; k++; } return p; }
 // flat-top hexagon corner points
 const hexPts = (cx, cy, r, a0 = 0) => Array.from({ length: 7 }, (_, i) => { const a = a0 + i * Math.PI / 3; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
+// point `len` away from (x, y) in direction `ang`
+const toward = (x, y, ang, len) => [x + Math.cos(ang) * len, y + Math.sin(ang) * len];
+// gently bowed arrow: the shaft first, then a two-barb head in the last 0.06 s
 function arrow(x0, y0, x1, y1, t0, t1, bend = -24, o = {}) {
-  const mx = (x0 + x1) / 2, my = (y0 + y1) / 2 + bend;
-  stroke(P().M(x0, y0).Q(mx, my, x1, y1, 30), t0, t1 - 0.06, o);
-  const a = Math.atan2(y1 - (my + y1) / 2, x1 - (mx + x1) / 2), s = o.head || 30;
-  stroke(P().M(x1 + Math.cos(a + 2.55) * s, y1 + Math.sin(a + 2.55) * s).L(x1, y1).L(x1 + Math.cos(a - 2.55) * s, y1 + Math.sin(a - 2.55) * s), t1 - 0.06, t1, o);
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2 + bend, barb = o.head || 30;
+  stroke(P().M(x0, y0).Q(cx, cy, x1, y1, 30), t0, t1 - 0.06, o);
+  const ang = Math.atan2(y1 - (cy + y1) / 2, x1 - (cx + x1) / 2);
+  stroke(P().M(...toward(x1, y1, ang + 2.55, barb)).L(x1, y1).L(...toward(x1, y1, ang - 2.55, barb)), t1 - 0.06, t1, o);
 }
 // A bee: body with stripes, head, antennae, stinger, legs, two flapping wings. flip=-1 faces left.
 const BEES = [];
@@ -153,14 +199,18 @@ arrow(BX + 820, BY + 700, BX + 1000, BY + 700, 7.26, 7.42);
   stroke(P().M(J - 150, Y + 968).S([[J - 50, Y + 960], [J + 60, Y + 956], [J + 150, Y + 962]], 20), 8.35, 8.46, { color: RED, width: 10, ease: eout });
   stroke(P().M(J - 110, Y + 994).S([[J - 20, Y + 988], [J + 70, Y + 986], [J + 126, Y + 990]], 20), 8.48, 8.56, { color: RED, width: 8, ease: eout }); }
 
-acts.forEach(a => { if (a.kind === 'path') a.path.done(); });
+
+for (const a of acts) if (a.kind === 'path') a.path.done();
 acts.sort((a, b) => a.t0 - b.t0);
 
-// font measurements (once font is loaded)
-function prepText() {
-  for (const a of acts) if (a.kind === 'text') {
-    ctx.font = `700 ${a.size}px ${FONT}`; a.w = ctx.measureText(a.str).width;
-    a.xs = [0]; for (let i = 1; i <= a.str.length; i++) a.xs.push(ctx.measureText(a.str.slice(0, i)).width);
+// Label widths (needs the font): full width, width of every prefix for the write-on, left edge.
+function measureLabels() {
+  for (const a of acts) {
+    if (a.kind !== 'text') continue;
+    ctx.font = `700 ${a.size}px ${FONT}`;
+    a.w = ctx.measureText(a.str).width;
+    a.xs = [0];
+    for (let n = 1; n <= a.str.length; n++) a.xs.push(ctx.measureText(a.str.slice(0, n)).width);
     a.left = a.align === 'center' ? a.x - a.w / 2 : a.x;
   }
   // summary framing: fit every drawing and label with a margin
@@ -168,85 +218,99 @@ function prepText() {
   for (const a of acts) if (a.kind === 'text') { add(a.left, a.y - a.size * 0.8); add(a.left + a.w, a.y + a.size * 0.25); } else a.path.p.forEach(q => add(...q));
   SUM.c = [(x0 + x1) / 2, (y0 + y1) / 2]; SUM.s = Math.min(1720 / (x1 - x0), 940 / (y1 - y0));
 }
-function textReveal(a, t) {  // opening in pixels + pen tip
-  const u = seg(t, a.t0, a.t1); const n = a.str.length, f = u * n, i = Math.min(n - 1, Math.floor(f)), fr = f - i;
-  const rx = lerp(a.xs[i], a.xs[i + 1], fr);
-  const hy = a.y - a.size * (0.28 + 0.2 * Math.sin(fr * Math.PI * 3 + i));
-  return { rx, head: [a.left + rx, hy] };
-}
-function actHead(a, t) {
-  if (a.kind === 'text') return textReveal(a, t).head;
-  const u = a.ease(seg(t, a.t0, a.t1)), q = a.path.at(u * a.path.len); return [q.x, q.y];
-}
-function actStart(a) { return a.kind === 'text' ? [a.left, a.y - a.size * .3] : a.path.p[0]; }
-function actEnd(a) { return a.kind === 'text' ? [a.left + a.w, a.y - a.size * .3] : a.path.p[a.path.p.length - 1]; }
 
-// pen position + lift amount
+// Write-on of a label at time t: how many pixels are revealed, and where the nib is (it bobs per letter).
+function writing(a, t) {
+  const pos = seg(t, a.t0, a.t1) * a.str.length;
+  const letter = Math.min(a.str.length - 1, Math.floor(pos)), within = pos - letter;
+  const shown = lerp(a.xs[letter], a.xs[letter + 1], within);
+  const nibY = a.y - a.size * (0.28 + 0.2 * Math.sin(within * Math.PI * 3 + letter));
+  return { shown, nib: [a.left + shown, nibY] };
+}
+const midline = a => a.y - a.size * .3;
+const firstPoint = a => (a.kind === 'text' ? [a.left, midline(a)] : a.path.p[0]);
+const lastPoint = a => (a.kind === 'text' ? [a.left + a.w, midline(a)] : a.path.p[a.path.p.length - 1]);
+function nibOn(a, t) {
+  if (a.kind === 'text') return writing(a, t).nib;
+  const q = a.path.at(a.ease(seg(t, a.t0, a.t1)) * a.path.len);
+  return [q.x, q.y];
+}
+const mix2 = (p, q, u) => [lerp(p[0], q[0], u), lerp(p[1], q[1], u)];
+
+// Where the marker is and how far it is lifted off the board: on an act while it draws,
+// gliding (and hopping, for longer gaps) between acts, then leaving the frame after the last one.
 const ENTER = [1500, 1300], EXIT = [BX + 1900, BY + 1500], PEN_OUT = 0.4;
 function markerAt(t) {
-  let prev = null;
+  let before = null;
   for (const a of acts) {
-    if (t >= a.t0 && t <= a.t1) return { p: actHead(a, t), lift: 0 };
-    if (a.t0 > t) { const from = prev ? actEnd(prev) : ENTER, t0 = prev ? prev.t1 : 0, gap = a.t0 - t0, u = eio2(seg(t, t0, a.t0)), to = actStart(a);
-      return { p: [lerp(from[0], to[0], u), lerp(from[1], to[1], u)], lift: Math.sin(u * Math.PI) * Math.min(1, gap * 6) }; }
-    prev = a;
+    if (t >= a.t0 && t <= a.t1) return { p: nibOn(a, t), lift: 0 };
+    if (t < a.t0) {
+      const from = before ? lastPoint(before) : ENTER, leave = before ? before.t1 : 0;
+      const u = eio2(seg(t, leave, a.t0));
+      return { p: mix2(from, firstPoint(a), u), lift: Math.sin(u * Math.PI) * Math.min(1, (a.t0 - leave) * 6) };
+    }
+    before = a;
   }
-  const u = eio2(seg(t, prev.t1, prev.t1 + PEN_OUT)), from = actEnd(prev);
-  return { p: [lerp(from[0], EXIT[0], u), lerp(from[1], EXIT[1], u)], lift: u, gone: u >= 1 };
+  const u = eio2(seg(t, before.t1, before.t1 + PEN_OUT));
+  return { p: mix2(lastPoint(before), EXIT, u), lift: u, gone: u >= 1 };
 }
 
+// Camera centre and zoom: slow push on panel A, glide along the long arrow to panel B, then pull back to the summary.
 const Z0 = 8.6, Z1 = 9.3;
 function camAt(t) {
-  let c = A_C, s = 1 + 0.02 * seg(t, 0, CONN.t0);
-  if (t >= CONN.t0) { const u = eio(seg(t, CONN.t0 - 0.05, CONN.t1 + 0.05)); c = [lerp(A_C[0], B_C[0], u), lerp(A_C[1], B_C[1], u)]; s = lerp(1.02, 1, u); }
-  if (t >= CONN.t1) s = 1 + 0.02 * seg(t, CONN.t1, Z0);
-  if (t >= Z0) { const u = eio(seg(t, Z0, Z1)); c = [lerp(B_C[0], SUM.c[0], u), lerp(B_C[1], SUM.c[1], u)]; s = lerp(1.02, SUM.s, u) * (1 - 0.012 * seg(t, Z1, 10)); }
-  return { c, s };
+  if (t < CONN.t0) return { c: A_C, s: 1 + 0.02 * seg(t, 0, CONN.t0) };
+  const glide = eio(seg(t, CONN.t0 - 0.05, CONN.t1 + 0.05));
+  if (t < CONN.t1) return { c: mix2(A_C, B_C, glide), s: lerp(1.02, 1, glide) };
+  if (t < Z0) return { c: mix2(A_C, B_C, glide), s: 1 + 0.02 * seg(t, CONN.t1, Z0) };
+  const out = eio(seg(t, Z0, Z1));
+  return { c: mix2(B_C, SUM.c, out), s: lerp(1.02, SUM.s, out) * (1 - 0.012 * seg(t, Z1, 10)) };
 }
 
-function drawAct(a, t) {
-  if (t < a.t0) return;
-  ctx.save();
-  if (a.kind === 'text') {
-    const done = t >= a.t1, rx = done ? a.w + 20 : textReveal(a, t).rx;
-    ctx.translate(a.x, a.y); ctx.rotate(a.rot); ctx.translate(-a.x, -a.y);
-    ctx.beginPath(); ctx.rect(a.left - 20, a.y - a.size * 1.3, rx + 20, a.size * 1.8); ctx.clip();
-    ctx.font = `700 ${a.size}px ${FONT}`; ctx.fillStyle = a.color; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText(a.str, a.left, a.y);
-  } else {
-    if (a.clip) ctx.clip(a.clip);
-    if (a.flap && t > a.t1) {        // wings beat once drawn
-      const k = seg(t, a.t1, a.t1 + 0.25), ang = a.flap.sgn * 0.2 * k * Math.sin((t - a.t1) * 2 * Math.PI * 7 + a.flap.ph);
-      ctx.translate(...a.flap.p); ctx.rotate(ang); ctx.translate(-a.flap.p[0], -a.flap.p[1]);
-    }
-    if (a.drift !== undefined && t > a.t1) {   // vapour keeps rising and wavering
-      const k = t - a.t1; ctx.translate(Math.sin(k * 3 + a.drift) * 5, -Math.min(20, k * 14));
-    }
-    const u = a.ease(seg(t, a.t0, a.t1));
-    ctx.strokeStyle = a.color; ctx.lineWidth = a.width; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    if (a.dash) ctx.setLineDash(a.dash);
-    ctx.beginPath(); a.path.trace(ctx, 0, u * a.path.len); ctx.stroke();
+function drawLabel(a, t) {
+  const shown = t >= a.t1 ? a.w + 20 : writing(a, t).shown;
+  ctx.translate(a.x, a.y); ctx.rotate(a.rot); ctx.translate(-a.x, -a.y);
+  ctx.beginPath(); ctx.rect(a.left - 20, a.y - a.size * 1.3, shown + 20, a.size * 1.8); ctx.clip();
+  ctx.font = `700 ${a.size}px ${FONT}`; ctx.fillStyle = a.color; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(a.str, a.left, a.y);
+}
+function drawStroke(a, t) {
+  if (a.clip) ctx.clip(a.clip);
+  if (a.flap && t > a.t1) {        // wings beat once drawn
+    const k = seg(t, a.t1, a.t1 + 0.25), ang = a.flap.sgn * 0.2 * k * Math.sin((t - a.t1) * 2 * Math.PI * 7 + a.flap.ph);
+    ctx.translate(...a.flap.p); ctx.rotate(ang); ctx.translate(-a.flap.p[0], -a.flap.p[1]);
   }
-  ctx.restore();
+  if (a.drift !== undefined && t > a.t1) {   // vapour keeps rising and wavering
+    const k = t - a.t1; ctx.translate(Math.sin(k * 3 + a.drift) * 5, -Math.min(20, k * 14));
+  }
+  const drawn = a.ease(seg(t, a.t0, a.t1)) * a.path.len;
+  ctx.strokeStyle = a.color; ctx.lineWidth = a.width; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (a.dash) ctx.setLineDash(a.dash);
+  ctx.beginPath(); a.path.trace(ctx, 0, drawn); ctx.stroke();
+}
+function drawMarker(m) {
+  const sc = 1 + m.lift * 0.05;
+  const stamp = (img, x, y) => { ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc); ctx.drawImage(img, -PIV[0], -PIV[1]); ctx.restore(); };
+  stamp(mShadow, m.p[0] + 14 + m.lift * 26, m.p[1] + 20 + m.lift * 34);   // shadow falls further as the pen lifts
+  stamp(mSprite, m.p[0], m.p[1]);
 }
 
 function render(t) {
-  const { c, s } = camAt(t);
-  ctx.setTransform(s, 0, 0, s, 960 - c[0] * s, 540 - c[1] * s);
+  const cam = camAt(t);
+  ctx.setTransform(cam.s, 0, 0, cam.s, 960 - cam.c[0] * cam.s, 540 - cam.c[1] * cam.s);
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(board, WB.x0, WB.y0, WB.w, WB.h);
-  for (const a of acts) drawAct(a, t);
-  // pen
-  const m = markerAt(t);
-  if (!m.gone) {
-    const lift = m.lift, sc = 1 + lift * 0.05;
-    ctx.save(); ctx.translate(m.p[0] + 14 + lift * 26, m.p[1] + 20 + lift * 34); ctx.scale(sc, sc); ctx.drawImage(mShadow, -PIV[0], -PIV[1]); ctx.restore();
-    ctx.save(); ctx.translate(m.p[0], m.p[1]); ctx.scale(sc, sc); ctx.drawImage(mSprite, -PIV[0], -PIV[1]); ctx.restore();
+  for (const a of acts) {
+    if (t < a.t0) continue;
+    ctx.save();
+    if (a.kind === 'text') drawLabel(a, t); else drawStroke(a, t);
+    ctx.restore();
   }
+  const m = markerAt(t);
+  if (!m.gone) drawMarker(m);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // screen-space slight light fall
-  const g = ctx.createRadialGradient(960, 420, 400, 960, 540, 1250); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(70,80,90,0.10)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const falloff = ctx.createRadialGradient(960, 420, 400, 960, 540, 1250);   // light falls off toward the corners
+  falloff.addColorStop(0, 'rgba(255,255,255,0)'); falloff.addColorStop(1, 'rgba(70,80,90,0.10)');
+  ctx.fillStyle = falloff; ctx.fillRect(0, 0, W, H);
   const fo = seg(t, 9.62, 10); if (fo > 0) { ctx.fillStyle = `rgba(246,246,243,${eio2(fo)})`; ctx.fillRect(0, 0, W, H); }
 }
 // sound cues for audio.py
@@ -257,6 +321,12 @@ window.events = () => {
   ev.push({ t: CONN.t0, k: 'whoosh', d: CONN.t1 - CONN.t0 + 0.2 }, { t: Z0, k: 'whoosh', d: Z1 - Z0 + 0.2 }, { t: Z1 - 0.1, k: 'chord' });
   return ev.sort((a, b) => a.t - b.t);
 };
-window.ready = loadFont('Kalam', 'Kalam-700', 700).then(() => document.fonts.load(`700 80px ${FONT}`, 'How do bees make honey?')).then(prepText);
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
-</script></body></html>
+window.ready = loadFont('Kalam', 'Kalam-700', 700).then(() => document.fonts.load(`700 80px ${FONT}`, 'How do bees make honey?')).then(measureLabels);
+window.draw = ({ t }) => {
+  render(t);
+  const url = cv.toDataURL('image/jpeg', 0.92);
+  return url.slice(url.indexOf(',') + 1);
+};
+</script>
+</body>
+</html>
