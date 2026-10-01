@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── impasto · post-impressionist thick oil paint (WebGL2) ──────────────────────────────
+// A primed linen canvas with a loose umber underdrawing → the sky is laid in with directional
+// strokes that keep flowing as currents (two whorls orbit, the rest drifts in wave bands) →
+// hills, a night village (windows light up one by one), a flame-like cypress pair → crescent moon
+// and stars pulse with rings → slow camera push → a hand-painted title and signature → hold → fade.
+// Every stroke is an instanced quad that writes colour + height into two float targets; a final
+// pass derives normals from the height field and lights the ridges (diffuse + oil gloss).
+// The painted world advances on a 12 fps cadence, like frame-by-frame painted animation; fades stay smooth.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const sstep = (a, b, x) => { const u = clamp((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const R = rng(1889);
+const hex = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
+const mixc = (a, b, u) => [lerp(a[0], b[0], u), lerp(a[1], b[1], u), lerp(a[2], b[2], u)];
+const jit = (c, k) => { const d = (R() - .5) * k; return [clamp(c[0] + d + (R() - .5) * k * .5), clamp(c[1] + d + (R() - .5) * k * .5), clamp(c[2] + d + (R() - .5) * k * .5)]; };
+const pick = a => a[Math.floor(R() * a.length)];
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+// ── timeline ──────────────────────────────────────────────────────────────────────────
+const T_SKY0 = 0.45, T_SKY1 = 3.0, T_LAND0 = 1.7, T_VIL0 = 2.7, T_CYP0 = 3.3, T_STAR0 = 4.3;
+const T_PUSH0 = 4.7, T_PUSH1 = 8.0, T_TITLE0 = 7.0, T_TITLE1 = 8.0, T_SIGN0 = 7.95, T_SIGN1 = 8.35;
+const T_FADE0 = 9.35;
+const ZOOM1 = 1.14, FX = 860, FY = 560;           // camera push: focus on the village
+const cam = t => lerp(1, ZOOM1, eInOut(seg(t, T_PUSH0, T_PUSH1)));
+
+// ── landscape geometry (world = 1920×1080 at zoom 1) ────────────────────────────────────
+const yF = x => 636 + 26 * Math.sin(x * 0.0045 + 0.6) + 14 * Math.sin(x * 0.013 + 2.0);   // far hills
+const yM = x => 728 + 32 * Math.sin(x * 0.0032 + 2.2) + 11 * Math.sin(x * 0.017);          // village slope
+const yG = x => 912 + 22 * Math.sin(x * 0.004 + 0.3) + 8 * Math.sin(x * 0.019 + 1);        // foreground field
+const VORT = [{ x: 1060, y: 330, r: 240, w: 0.23, dir: 1 }, { x: 455, y: 470, r: 120, w: 0.30, dir: -1 }];
+const MOON = { x: 300, y: 200, r: 58 };
+const STARS = [[640, 138, 1.0], [180, 410, .8], [520, 300, .75], [1420, 140, 1.0], [1360, 470, .85], [1760, 160, .9], [1860, 360, .7], [1150, 610, .55], ];
+const CYP = [{ x: 1580, base: 1110, top: 120, hw: 92, ph: 0 }, { x: 1775, base: 1110, top: 400, hw: 58, ph: 1.7 }];
+// houses: x, base, w, wall h, roof h, roof kind, wall tint, windows
+const HOUSES = [
+  [372, 806, 92, 62, 40, 0, 0, 2], [470, 792, 74, 54, 34, 1, 1, 1], [552, 800, 110, 66, 44, 0, 2, 3], [835, 786, 86, 58, 36, 1, 0, 2],
+  [932, 778, 96, 60, 40, 0, 1, 2], [1040, 784, 80, 54, 34, 1, 2, 1], [1128, 796, 70, 52, 32, 0, 0, 1],
+  [420, 880, 104, 70, 46, 1, 2, 2], [540, 886, 86, 60, 38, 0, 0, 2], [880, 876, 112, 68, 44, 0, 1, 3], [1002, 870, 82, 56, 36, 1, 2, 1], [1096, 884, 96, 64, 42, 0, 0, 2]];
+const CHURCH = { x: 700, base: 820, w: 84, h: 92, sx: 726, sw: 34, stop: 498 };
+const PAL = {
+  skyTop: hex('#11245e'), skyMid: hex('#1f3f96'), skyLow: hex('#3a6bb4'), skyHor: hex('#6d97c2'),
+  pale: hex('#c4d9ec'), cobalt: hex('#2c55ad'), light: hex('#86acd9'), deep: hex('#162c72'), teal: hex('#3f7f9a'),
+  far: [hex('#29336e'), hex('#3a478a'), hex('#21295a'), hex('#4c5c9c')], mid: [hex('#2b5266'), hex('#3a6870'), hex('#24465a'), hex('#4d7a72')],
+  field: [hex('#4a5a2c'), hex('#6c7234'), hex('#2f3f28'), hex('#8a7a3c'), hex('#3c5a46'), hex('#5f6a3a')],
+  wall: [[hex('#7086ac'), hex('#9aa8c0')], [hex('#8c8a78'), hex('#b4ab88')], [hex('#5f7398'), hex('#8195b6')]],
+  roof: [hex('#2a2c58'), hex('#5a3b40')], outline: hex('#101a3c'), win: hex('#f7c843'), win2: hex('#ee8f2a'),
+  cyp: [hex('#10241a'), hex('#1d3b26'), hex('#2c5230'), hex('#173020')], cypHi: [hex('#4c7a3c'), hex('#6f8d3c'), hex('#3d6a4a')], cypDk: hex('#0b1530'),
+  moon: [hex('#f3c13a'), hex('#f8de70'), hex('#e99a2a')], star: [hex('#fff6c8'), hex('#f6e27a'), hex('#f2c84b')], halo: hex('#d9d48a'), halo2: hex('#a9c3b0'),
+};
+function skyCol(x, y) {
+  const u = clamp(y / 640);
+  let c = u < .45 ? mixc(PAL.skyTop, PAL.skyMid, u / .45) : u < .8 ? mixc(PAL.skyMid, PAL.skyLow, (u - .45) / .35) : mixc(PAL.skyLow, PAL.skyHor, (u - .8) / .2);
+  return c;
+}
+// flow field of the sky (unit angle) for static strokes
+function vortexAt(x, y) { for (const v of VORT) { const d = Math.hypot(x - v.x, y - v.y); if (d < v.r) return v; } return null; }
+function bandY(x, y0, t) { return y0 + 16 * Math.sin(x * 0.0062 + y0 * 0.021) + 6 * Math.sin(x * 0.017 + y0 * 0.05 + t * 0.6); }
+function bandAng(x, y0, t) { const dy = 16 * 0.0062 * Math.cos(x * 0.0062 + y0 * 0.021) + 6 * 0.017 * Math.cos(x * 0.017 + y0 * 0.05 + t * 0.6); return Math.atan(dy); }
+
+// ── strokes ───────────────────────────────────────────────────────────────────────────
+// static: {x,y,a,len,wid,c,c2,thick,seed,tb,gd, kind}  — per frame positions for moving kinds
+const S = [];
+function add(o) { o.seed = o.seed ?? R() * 100; o.c2 = o.c2 ?? jit(o.c, .12); o.thick = o.thick ?? (0.7 + R() * .5); o.gd = o.gd ?? (0.22 + R() * .14); o.alpha = o.alpha ?? 1; S.push(o); return o; }
+function genSky() {
+  // 1) static underlayer
+  for (let y = -10; y < 700; y += 19) for (let x = -20; x < W + 20; x += 21) {
+    const px = x + (R() - .5) * 18, py = y + (R() - .5) * 16; if (py > yF(px) + 30) continue;
+    const v = vortexAt(px, py); let a;
+    if (v) a = Math.atan2(py - v.y, px - v.x) + v.dir * (Math.PI / 2 + 0.22); else a = bandAng(px, py, 0);
+    a += (R() - .5) * .3;
+    const c = jit(mixc(skyCol(px, py), PAL.deep, .25), .06);
+    add({ x: px, y: py, a, len: 56 + R() * 34, wid: 22 + R() * 7, c, tb: T_SKY0 + 1.3 * clamp(px / W * .65 + py / 700 * .2 + R() * .15), kind: 0 });
+  }
+  // 2) moving currents: band strokes (drift right along wave rows) and whorl strokes (orbit)
+  for (let pass = 0; pass < 2; pass++) for (let y0 = 8 + pass * 12; y0 < 690; y0 += 24) {
+    const row = Math.floor(y0 / 24), light = (row * 7 + pass * 3) % 5 === 0 || (row % 3 === 1 && pass);
+    for (let x0 = -160; x0 < W + 160; x0 += 30 + R() * 14) {
+      const base = skyCol(x0, y0);
+      const c = light ? jit(mixc(base, PAL.pale, .45 + R() * .2), .05) : jit(mixc(base, pick([PAL.cobalt, PAL.light, PAL.deep, PAL.teal]), .35), .07);
+      add({ x0, y0, len: 40 + R() * 44, wid: 13 + R() * 6, c, c2: light ? jit(PAL.pale, .05) : jit(mixc(base, PAL.light, .3), .08),
+        tb: T_SKY0 + 0.7 + 1.5 * clamp((x0 + 160) / (W + 320) * .7 + y0 / 700 * .15 + R() * .15), kind: 1, sp: (light || R() < .2) ? 38 + R() * 16 : 0, aj: (R() - .5) * .22 });
+    }
+  }
+  for (const v of VORT) {
+    const n = Math.floor(v.r * v.r * Math.PI / 260);
+    for (let i = 0; i < n; i++) {
+      const r = v.r * Math.sqrt(.03 + .97 * (i + R()) / n) * 1.06, th = R() * TAU;
+      const band = .5 + .5 * Math.sin(th * 2 * v.dir - r * 0.045);
+      const core = 1 - clamp(r / (v.r * .45));
+      let c = mixc(mixc(PAL.deep, PAL.cobalt, band), PAL.light, band * band * .8);
+      c = mixc(c, PAL.pale, core * .8 + (band > .85 ? .35 : 0));
+      if (i < 60) {   // pale eye of the whorl
+        const rc = v.r * .22 * Math.sqrt(R()), cc = jit(mixc(PAL.pale, PAL.light, R() * .5), .05);
+        add({ vr: rc, th0: R() * TAU, v, len: 18 + R() * 16, wid: 11 + R() * 5, c: cc, tb: T_SKY0 + 1.1 + R() * .8, kind: 2 });
+      }
+      add({ vr: r, th0: th, v, len: 30 + R() * 38 * Math.min(1, r / 80 + .3), wid: 12 + R() * 6, c: jit(c, .06), c2: jit(mixc(c, PAL.pale, .3), .05),
+        tb: T_SKY0 + 1.0 + 1.6 * clamp((th / TAU) * .5 + r / v.r * .3 + R() * .2), kind: 2 });
+    }
+  }
+}
+function genLand() {
+  // far hills: strokes along contour
+  for (let y = 560; y < 800; y += 11) for (let x = -10; x < W + 10; x += 24) {
+    const px = x + (R() - .5) * 20, py = y + (R() - .5) * 10; if (py < yF(px) + 4 || py > yM(px) + 30) continue;
+    const a = Math.atan(26 * .0045 * Math.cos(px * .0045 + .6) + 14 * .013 * Math.cos(px * .013 + 2)) * (1 - (py - yF(px)) / 140);
+    add({ x: px, y: py, a, len: 36 + R() * 26, wid: 13 + R() * 5, c: jit(pick(PAL.far), .06), tb: T_LAND0 + .9 * clamp(px / W * .8 + R() * .2), kind: 0 });
+  }
+  // village slope
+  for (let y = 680; y < 960; y += 9) for (let x = -10; x < W + 10; x += 20) {
+    const px = x + (R() - .5) * 18, py = y + (R() - .5) * 10; if (py < yM(px) - 4 || py > yG(px) + 16) continue;
+    const a = Math.atan(32 * .0032 * Math.cos(px * .0032 + 2.2) + 11 * .017 * Math.cos(px * .017)) * .8 + (R() - .5) * .25;
+    add({ x: px, y: py, a, len: 30 + R() * 24, wid: 14 + R() * 5, c: jit(pick(PAL.mid), .06), tb: T_LAND0 + .3 + .9 * clamp(px / W * .8 + R() * .2), kind: 0 });
+  }
+  // dark ridge contours along the far hills
+  for (let x = -20; x < W + 20; x += 26) line(x, yF(x) + 2, x + 26, yF(x + 26) + 2, PAL.outline, 6, T_LAND0 + .4 + x / W * .8, .18);
+  // foreground field: curving windswept strokes (sway as currents)
+  for (let y = 860; y < 1100; y += 13) for (let x = -20; x < W + 20; x += 24) {
+    const px = x + (R() - .5) * 20, py = y + (R() - .5) * 12; if (py < yG(px) + 2) continue;
+    const a = -0.35 + 0.5 * Math.sin(px * 0.006 + py * 0.02) + (R() - .5) * .3;
+    add({ x: px, y: py, a, len: 36 + R() * 34, wid: 14 + R() * 6, c: jit(pick(PAL.field), .07), tb: T_LAND0 + .5 + 1.0 * clamp(px / W * .7 + R() * .3), kind: 3 });
+  }
+}
+function quadStrokes(x0, y0, x1, y1, a, cols, step, len, wid, tb0, span, extra = {}) {
+  for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step * 1.4) {
+    add(Object.assign({ x: x + (R() - .5) * step * .6 + step * .5, y: y + (R() - .5) * step * .4 + step * .4, a: a + (R() - .5) * .25, len: len * (.8 + R() * .4), wid: wid * (.8 + R() * .4),
+      c: jit(pick(cols), .05), tb: tb0 + span * R(), kind: 0, gd: .16 }, extra));
+  }
+}
+function line(xa, ya, xb, yb, c, wid, tb, gd = .14) {
+  const L = Math.hypot(xb - xa, yb - ya), n = Math.max(1, Math.round(L / 26));
+  for (let i = 0; i < n; i++) { const u0 = i / n, u1 = (i + 1) / n;
+    add({ x: lerp(xa, xb, (u0 + u1) / 2), y: lerp(ya, yb, (u0 + u1) / 2), a: Math.atan2(yb - ya, xb - xa), len: L / n + 6, wid: wid * (.85 + R() * .3), c: jit(c, .04), c2: jit(c, .06), tb: tb + i * .03, gd, kind: 0, thick: .9 }); }
+}
+const WINDOWS = [];
+function genVillage() {
+  const all = HOUSES.map(h => ({ h, x: h[0] })).sort((a, b) => a.h[1] - b.h[1]);
+  let k = 0;
+  for (const { h } of all) {
+    const [x, b, w, wh, rh, kind, tint, nw] = h; const tb = T_VIL0 + k * .07 + (h[1] > 850 ? .3 : 0); k++;
+    const wc = PAL.wall[tint];
+    quadStrokes(x - w / 2 + 4, b - wh + 2, x + w / 2 - 8, b - 6, (R() - .5) * .3, wc, 8, 16, 11, tb, .35);
+    // roof: strokes along the slopes
+    const rc = PAL.roof[kind];
+    for (let i = 0; i < Math.ceil(w / 9); i++) {
+      const u = (i + .5) / Math.ceil(w / 9), px = x - w / 2 - 4 + u * (w + 8), py = b - wh - rh * (1 - Math.abs(u - .5) * 2) * .55;
+      add({ x: px, y: py, a: (u < .5 ? -1 : 1) * Math.atan2(rh, w / 2) + Math.PI / 2 * 0, len: 22, wid: 8, c: jit(rc, .06), tb: tb + .3 + u * .15, kind: 0, gd: .15 });
+      add({ x: px, y: py + rh * .22 * (1 - Math.abs(u - .5) * 2), a: (u < .5 ? -1 : 1) * Math.atan2(rh, w / 2), len: 18, wid: 7, c: jit(rc, .08), tb: tb + .32 + u * .15, kind: 0, gd: .15 });
+    }
+    // dark contours
+    const oc = PAL.outline, top = b - wh;
+    line(x - w / 2, b, x - w / 2, top, oc, 6, tb + .45); line(x + w / 2, b, x + w / 2, top, oc, 6, tb + .5);
+    line(x - w / 2 - 6, top + 2, x, top - rh, oc, 7, tb + .55); line(x, top - rh, x + w / 2 + 6, top + 2, oc, 7, tb + .6);
+    line(x - w / 2, b, x + w / 2, b, oc, 4, tb + .5);
+    // windows
+    for (let j = 0; j < nw; j++) {
+      const wx = x - w / 2 + (j + .5) * w / nw, wy = b - wh * .52 + (j % 2 ? 4 : -2);
+      WINDOWS.push({ x: wx, y: wy, tb: T_VIL0 + 1.1 + WINDOWS.length * 0.045 + R() * .06 });
+    }
+  }
+  // church
+  const c = CHURCH, tb = T_VIL0 + .2;
+  quadStrokes(c.x - c.w / 2 + 4, c.base - c.h + 2, c.x + c.w / 2 - 8, c.base - 6, 0, PAL.wall[0], 8, 16, 11, tb, .3);
+  quadStrokes(c.sx - c.sw / 2 + 3, c.stop + 60, c.sx + c.sw / 2 - 6, c.base - c.h, Math.PI / 2, PAL.wall[2], 7, 16, 9, tb + .2, .3);
+  for (let i = 0; i < 6; i++) { const u = (i + .5) / 6; add({ x: c.sx + (u - .5) * c.sw * (1 - u * .2) * .6, y: lerp(c.stop + 60, c.stop + 6, u), a: -Math.PI / 2, len: 22, wid: 7 * (1 - u * .6), c: jit(PAL.roof[0], .05), tb: tb + .4 + u * .1, kind: 0, gd: .15 }); }
+  const oc = PAL.outline;
+  line(c.x - c.w / 2, c.base, c.x - c.w / 2, c.base - c.h, oc, 4.5, tb + .5); line(c.x + c.w / 2, c.base, c.x + c.w / 2, c.base - c.h, oc, 4.5, tb + .5);
+  line(c.x - c.w / 2 - 6, c.base - c.h, c.x + c.w / 2 + 6, c.base - c.h, oc, 5, tb + .55);
+  line(c.sx - c.sw / 2, c.base - c.h, c.sx - c.sw / 2, c.stop + 60, oc, 4, tb + .6); line(c.sx + c.sw / 2, c.base - c.h, c.sx + c.sw / 2, c.stop + 60, oc, 4, tb + .6);
+  line(c.sx - c.sw / 2 - 4, c.stop + 62, c.sx, c.stop, oc, 4.5, tb + .7); line(c.sx, c.stop, c.sx + c.sw / 2 + 4, c.stop + 62, oc, 4.5, tb + .72);
+  WINDOWS.push({ x: c.x - 18, y: c.base - c.h * .5, tb: T_VIL0 + 1.2, tall: 1 }, { x: c.x + 18, y: c.base - c.h * .5, tb: T_VIL0 + 1.35, tall: 1 });
+  WINDOWS.push({ x: c.sx, y: c.stop + 92, tb: T_VIL0 + 1.5, tall: 1 });
+}
+// cypress: flame silhouette, licking strokes
+// flame tongues travel upward: phase within the current tongue
+const tongue = (cy, s, t) => { const f = s * 8 - t * .45 + cy.ph; return f - Math.floor(f); };
+function cypHalf(cy, s, t = 0) {   // columnar body, rounded base, long flame tip; lobes ride the travelling tongues
+  const f = tongue(cy, s, t), prof = s < .22 ? .78 + .22 * Math.sin(s / .22 * Math.PI / 2) : 1 - .94 * Math.pow((s - .22) / .78, 1.7);
+  return cy.hw * prof * (.86 + .22 * Math.sin(Math.PI * f) ** 1.5); }
+function cypCx(cy, s, t) { return cy.x + 22 * Math.sin(s * 4.5 + cy.ph) + 9 * s * s * Math.sin(t * 1.3 + cy.ph); }
+const CYPS = [];
+function genCypress() {
+  for (const cy of CYP) {
+    const hgt = cy.base - cy.top, n = Math.floor(hgt * cy.hw * 1.5 / 110);
+    for (let i = 0; i < n; i++) {
+      const s = Math.pow(R(), 1.05), side = (R() * 2 - 1);
+      const hi = side < -.45 && R() < .6;
+      const o = add({ cy, s, side, len: 40 + R() * 34 * (1 - s * .5), wid: 11 + R() * 6 * (1 - s * .5), c: hi ? jit(pick(PAL.cypHi), .05) : jit(pick(PAL.cyp), .04),
+        tb: T_CYP0 + 1.4 * clamp(s * .85 + R() * .15) + (cy.ph ? .25 : 0), kind: 4, ap: (R() - .5) * .5, gd: .2 });
+      CYPS.push(o);
+    }
+    // dark crevices + contour
+    for (let i = 0; i < 110; i++) { const s = i / 110, side = i % 2 ? 1 : -1;
+      add({ cy, s, side: side * 1.0, len: 26, wid: 7, c: jit(PAL.cypDk, .03), c2: jit(PAL.cypDk, .04), tb: T_CYP0 + 1.4 * s + .2 + (cy.ph ? .25 : 0), kind: 4, ap: side * .35, gd: .18, thick: .8 }); }
+  }
+}
+function ringStrokes(cx, cy, r, n, len, wid, c, extra) {
+  const out = [];
+  for (let i = 0; i < n; i++) { const th = (i + R() * .3) / n * TAU; out.push(add(Object.assign({ cx, cy, rr: r * (1 + (R() - .5) * .08), th, len: len * (.85 + R() * .3), wid, c: jit(c, .05), kind: 5 }, extra))); }
+  return out;
+}
+function genSkyLights() {
+  // moon: crescent + halo rings
+  const m = MOON, tb = T_STAR0 - .2;
+  for (const [rr, cc, n] of [[m.r * 2.3, PAL.halo2, 34], [m.r * 1.88, mixc(PAL.halo2, PAL.halo, .5), 28], [m.r * 1.5, PAL.halo, 24], [m.r * 1.18, mixc(PAL.halo, PAL.moon[1], .5), 20]]) ringStrokes(m.x, m.y, rr, n, TAU * rr / n * 1.5, 22, cc, { tb: tb + rr / 600, gd: .3, pulse: .03, ph: 0 });
+  for (let i = 0; i < 220; i++) {
+    const r = m.r * Math.sqrt(R()), th = R() * TAU, px = m.x + r * Math.cos(th), py = m.y + r * Math.sin(th);
+    const crescent = Math.hypot(px - (m.x + 30), py - (m.y - 18)) > m.r * .86;
+    add({ cx: m.x, cy: m.y, rr: r, th, len: 20 + R() * 16, wid: 8 + R() * 4, c: crescent ? jit(pick(PAL.moon), .05) : jit(mixc(PAL.cobalt, PAL.halo2, .38), .05), tb: tb + .1 + R() * .5, kind: 5, gd: .22, pulse: 0, ph: 0, thick: 1.2 });
+  }
+  STARS.forEach(([x, y, s], k) => {
+    const tb = T_STAR0 + k * .09, ph = k * 1.37;
+    s *= 1.1;
+    ringStrokes(x, y, 50 * s, 16, TAU * 50 * s / 16 * 1.4, 13 * s, PAL.halo2, { tb: tb + .18, gd: .25, pulse: .07, ph });
+    ringStrokes(x, y, 34 * s, 12, TAU * 34 * s / 12 * 1.45, 13 * s, PAL.halo, { tb: tb + .1, gd: .22, pulse: .09, ph });
+    ringStrokes(x, y, 20 * s, 9, TAU * 20 * s / 9 * 1.5, 12 * s, mixc(PAL.halo, PAL.star[1], .6), { tb: tb + .05, gd: .2, pulse: .1, ph, thick: 1.1 });
+    for (let i = 0; i < 9; i++) add({ cx: x, cy: y, rr: 5 * s, th: i / 9 * TAU, len: 15 * s, wid: 10 * s, c: jit(pick(PAL.star), .03), tb: tb + R() * .1, kind: 5, radial: 1, gd: .18, pulse: .12, ph, thick: 1.4 });
+    // expanding pulse rings (two in flight, staggered)
+    for (let q = 0; q < 2; q++) ringStrokes(x, y, 0, 26, 16 * s, 12 * s, mixc(PAL.star[1], PAL.halo, .4), { tb, gd: .2, emit: { s, q, ph }, thick: .9 });
+  });
+}
+// window lights (drawn as thick strokes on top of the village)
+function genWindowStrokes() {
+  for (const w of WINDOWS) {
+    const tall = w.tall ? 1.6 : 1;
+    w.ss = [add({ x: w.x, y: w.y, a: Math.PI / 2, len: 14 * tall, wid: 14, c: PAL.win, c2: PAL.win2, tb: w.tb, gd: .12, kind: 6, w, thick: 1.5 })];
+  }
+}
+genSky(); genSkyLights(); genLand(); genVillage(); genWindowStrokes(); genCypress();
+// draw order = array order except the land must cover the sky and cypress the land; reorder groups
+// (sky, lights, land, village, windows, cypress) — already generated in that order.
+
+// ── per-frame stroke state ────────────────────────────────────────────────────────────
+const NF = 16, N = S.length, inst = new Float32Array(N * NF);
+function strokeState(o, t) {
+  let x = o.x, y = o.y, a = o.a, alpha = o.alpha, len = o.len, wid = o.wid;
+  if (o.kind === 1) {               // drifting current, wraps off-screen; fades inside the whorls
+    const span = W + 320, tm = o.sp ? t : 0; x = ((o.x0 + 160 + o.sp * t) % span + span) % span - 160;
+    y = bandY(x, o.y0, tm); a = bandAng(x, o.y0, tm) + o.aj;
+    for (const v of VORT) { const d = Math.hypot(x - v.x, y - v.y) / v.r; alpha *= sstep(.92, 1.12, d); }
+    alpha *= sstep(-150, -100, x) * (1 - sstep(W + 100, W + 150, x));
+    if (y > yF(x) + 24) alpha = 0;
+  } else if (o.kind === 2) {        // whorl: differential rotation, spiral pitch
+    const v = o.v, om = v.dir * (v.w + .22 * (1 - o.vr / v.r)), th = o.th0 + om * t;
+    x = v.x + o.vr * Math.cos(th); y = v.y + o.vr * Math.sin(th) * .92;
+    a = th + v.dir * (Math.PI / 2 + .25);
+    if (y > yF(x) + 24) alpha = 0;
+  } else if (o.kind === 3) {        // field: a travelling wind gust bends the strokes
+    const gx = (t * 330) % 2700 - 400, g = Math.exp(-Math.pow((o.x - gx + (o.y - 980) * .6) / 240, 2));   // a gust sweeps across
+    a = o.a + .3 * g * Math.sin(t * 3 - o.x * .02); x = o.x + 6 * g;
+  } else if (o.kind === 4) {        // cypress flame licks
+    const cy = o.cy, s = o.s, hw = cypHalf(cy, s, t), f = tongue(cy, s, t);
+    y = lerp(cy.base, cy.top, s); x = cypCx(cy, s, t) + o.side * hw * .9;
+    // chevron flames: strokes lean in toward the axis, most strongly at the base of each tongue
+    a = -Math.PI / 2 + .42 * Math.sin(s * 22 - t * 1.6 + o.side * 2.2 + cy.ph) + .3 * o.side * f + o.ap * .4;
+  } else if (o.kind === 5) {        // ring / star strokes
+    let rr = o.rr;
+    if (o.emit) {
+      const P = 2.2, ph = ((t - o.tb) / P + o.emit.q * .5 + o.emit.ph * .03) % 1, u = t < o.tb ? 0 : ph;
+      rr = (50 + 46 * eOut(u)) * o.emit.s; alpha = t < o.tb + .4 ? 0 : clamp(Math.sin(Math.PI * u) * Math.pow(1 - u, 1.8) * 2.4);
+      len = TAU * rr / 26 * 1.25; wid = o.wid * (1 - u * .45);
+    } else if (o.pulse && o.radial) rr *= 1 + o.pulse * Math.sin(TAU * (t * .55) + o.ph);
+    x = o.cx + rr * Math.cos(o.th); y = o.cy + rr * Math.sin(o.th);
+    a = o.radial ? o.th : o.th + Math.PI / 2;
+  }
+  return [x, y, a, alpha, len, wid];
+}
+function fillInstances(t) {
+  let n = 0;
+  for (let i = 0; i < N; i++) {
+    const o = S[i]; if (t < o.tb) continue;
+    const [x, y, a, alpha, len, wid] = strokeState(o, t); if (alpha <= .004) continue;
+    const g = eOut(seg(t, o.tb, o.tb + o.gd));
+    let bright = 1;
+    if (o.kind === 6) bright = 1 + .25 * Math.sin(t * 3 + o.x * .1);           // lamps flicker
+    if (o.kind === 5 && o.pulse) bright = 1 + .12 * Math.sin(TAU * t * .55 + o.ph);
+    const k = n * NF;
+    inst[k] = x; inst[k + 1] = y; inst[k + 2] = a; inst[k + 3] = len; inst[k + 4] = wid * (o.kind === 6 ? (1 + .35 * Math.sin(Math.PI * seg(t, o.tb, o.tb + .25))) : 1);
+    inst[k + 5] = o.c[0] * bright; inst[k + 6] = o.c[1] * bright; inst[k + 7] = o.c[2] * bright;
+    inst[k + 8] = o.c2[0] * bright; inst[k + 9] = o.c2[1] * bright; inst[k + 10] = o.c2[2] * bright;
+    inst[k + 11] = alpha; inst[k + 12] = o.thick; inst[k + 13] = o.seed; inst[k + 14] = g; inst[k + 15] = 0;
+    n++;
+  }
+  return n;
+}
+
+// ── WebGL2 ────────────────────────────────────────────────────────────────────────────
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false, alpha: false });
+gl.getExtension('EXT_color_buffer_float'); gl.getExtension('EXT_float_blend');
+function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+function prog(vs, fs) { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; }
+const NOISE = `
+float h11(float p){ p = fract(p * .1031); p *= p + 33.33; p *= p + p; return fract(p); }
+float n11(float x){ float i = floor(x), f = fract(x); f = f*f*(3.-2.*f); return mix(h11(i), h11(i+1.), f); }
+float h21(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+float n21(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.-2.*f); return mix(mix(h21(i), h21(i+vec2(1,0)), f.x), mix(h21(i+vec2(0,1)), h21(i+1.), f.x), f.y); }`;
+const strokeVS = `#version 300 es
+layout(location=0) in vec2 q;            // quad corner: x in [0,1] along, y in [-1,1] across
+layout(location=1) in vec4 i0;           // x y angle len
+layout(location=2) in vec4 i1;           // wid r g b
+layout(location=3) in vec4 i2;           // r2 g2 b2 alpha
+layout(location=4) in vec4 i3;           // thick seed grow -
+uniform float zoom; uniform vec2 focus;
+out vec2 uv; out vec3 c1; out vec3 c2; out float al; out float th; out float sd; out float aspect; out float wpx;
+void main(){
+  float L = max(i0.w * i3.z, 1.0), Wd = i1.x;
+  vec2 dir = vec2(cos(i0.z), sin(i0.z)), nrm = vec2(-dir.y, dir.x);
+  vec2 lp = vec2((q.x - .5) * (L + Wd * .6), q.y * Wd * .62);
+  vec2 wp = i0.xy + dir * lp.x + nrm * lp.y;
+  vec2 sp = (wp - focus) * zoom + focus;
+  gl_Position = vec4(sp.x / 960. - 1., 1. - sp.y / 540., 0, 1);
+  // the quad is 1.24x wider than the nominal stroke
+  uv = vec2(q.x, q.y * 1.24); c1 = i1.yzw; c2 = i2.xyz; al = i2.w; th = i3.x; sd = i3.y; aspect = L / Wd; wpx = Wd * zoom;
+}`;
+const strokeFS = `#version 300 es
+precision highp float;
+in vec2 uv; in vec3 c1; in vec3 c2; in float al; in float th; in float sd; in float aspect; in float wpx;
+layout(location=0) out vec4 oc; layout(location=1) out vec4 oh;
+${NOISE}
+void main(){
+  float u = uv.x, v = uv.y;                       // v: ±1 = ±half the nominal width
+  float xw = u * (aspect + .6) - .3;              // along, in stroke-width units (body 0..aspect)
+  // bristle profile across (grooves run along the stroke), about one groove per 4 px so it never aliases
+  float bri = n11(v * max(1.5, wpx / 11.) + sd * 13.);
+  float br2 = n11(v * max(2.5, wpx / 6.) + sd * 7.);
+  float bristle = .5 * bri + .5 * br2;
+  float rag = n11(v * max(2., wpx / 8.) + sd * 3.);
+  // envelope: loaded round head, slight belly, tail tapering into dry bristles
+  float hx = clamp((.45 - xw) / .75, 0., 1.);
+  float head = sqrt(max(0., 1. - hx * hx));
+  float tu = clamp((xw - aspect * .45) / (aspect * .55 + .3), 0., 1.);
+  float tail = 1. - pow(tu, 1.6 + rag);
+  float hw = .92 * head * (.25 + .75 * tail) * (1. + .07 * sin(xw * 1.3 + sd));
+  hw += .06 * (n11(xw * 2. + sd) - .5);
+  float d = abs(v) / max(hw, .001);
+  float aa = fwidth(d) * 1.5 + .03;
+  float m = 1. - smoothstep(1. - aa, 1. + aa, d);
+  // dry brush: bristles break up along the tail
+  m *= 1. - smoothstep(.1, .6, tu) * smoothstep(.55, .25, bristle);
+  if (m < .01) discard;
+  // height: rounded body, grooves along the bristles, a pile where the brush lifted, raised edge lips
+  float body = sqrt(max(0., 1. - d * d));
+  float pile = exp(-pow((tu - .12) / .16, 2.)) * (1. - d * .5);
+  float hgt = th * (body * (.5 + .5 * bristle) + .45 * pile + .22 * exp(-pow((d - .8) / .14, 2.)));
+  hgt *= .85 + .3 * n11(xw * .9 + sd * 5.);
+  vec3 col = mix(c1, c2, smoothstep(.35, .75, br2 + .25 * n11(xw * 1.5 + sd)));
+  col *= .92 + .16 * bri;
+  float a = m * al;
+  float ah = (1. - smoothstep(.45, 1.05, d)) * m * al;   // feathered height: overlaps blend into ridges, not seams
+  oc = vec4(col, a); oh = vec4(hgt, 0., 0., ah);
+}`;
+const fsVS = `#version 300 es
+layout(location=0) in vec2 q; out vec2 p; void main(){ p = q * .5 + .5; gl_Position = vec4(q, 0, 1); }`;
+// title decal pass: writes into the same paint targets, wiped in by a brush edge
+const titleFS = `#version 300 es
+precision highp float;
+in vec2 p; uniform sampler2D tcol; uniform sampler2D thgt; uniform vec2 rev; uniform vec2 rev2;
+layout(location=0) out vec4 oc; layout(location=1) out vec4 oh;
+${NOISE}
+void main(){
+  vec2 px = vec2(p.x * 1920., (1. - p.y) * 1080.);
+  vec4 c = texture(tcol, vec2(p.x, 1. - p.y));
+  float hb = texture(thgt, vec2(p.x, 1. - p.y)).r;
+  float edge = px.x + 18. * sin(px.y * .07) + 10. * n11(px.y * .2);
+  // title wipes in left to right; the signature (x > 1500) gets its own quick flourish
+  float rx = px.x > 1500. ? rev2.x : rev.x;
+  float reveal = 1. - smoothstep(rx - 26., rx, edge);
+  float a = c.a * reveal;
+  if (a < .01) discard;
+  float streak = n21(vec2(px.x * .09 + px.y * .05, px.y * .16));
+  oc = vec4(c.rgb * (.95 + .1 * streak), a);
+  oh = vec4(1.1 * hb * (.7 + .3 * streak) + .2, 0., 0., a);
+}`;
+const compFS = `#version 300 es
+precision highp float;
+in vec2 p; uniform sampler2D pc; uniform sampler2D ph; uniform sampler2D lin; uniform sampler2D sk;
+uniform float sketchA; uniform float fade; uniform float zoom; uniform vec2 focus;
+out vec4 o;
+void main(){
+  ivec2 ip = ivec2(gl_FragCoord.xy);
+  vec4 c = texelFetch(pc, ip, 0);
+  float h = texelFetch(ph, ip, 0).r;
+  float hx = (texelFetch(ph, ip + ivec2(2, 0), 0).r - texelFetch(ph, ip - ivec2(2, 0), 0).r) * .5;
+  float hy = (texelFetch(ph, ip + ivec2(0, 2), 0).r - texelFetch(ph, ip - ivec2(0, 2), 0).r) * .5;
+  vec2 tc = vec2(gl_FragCoord.x / 1920., 1. - gl_FragCoord.y / 1080.);
+  vec2 wp = (tc * vec2(1920., 1080.) - focus) / zoom + focus;     // world pos for the canvas texture
+  vec2 wt = wp / vec2(1920., 1080.);
+  vec4 ln = texture(lin, wt);
+  vec4 skc = texture(sk, wt);
+  vec3 base = mix(ln.rgb, skc.rgb, skc.a * sketchA);
+  vec3 N = normalize(vec3(-hx * 5., -hy * 5., 1.));
+  vec3 Lg = normalize(vec3(-.55, .62, .58));                     // light from upper left (GL y is up)
+  float dif = dot(N, Lg) - Lg.z;
+  float spec = pow(max(dot(N, normalize(Lg + vec3(0, 0, 1))), 0.), 46.) * .42;
+  float ao = .86 + .14 * clamp(h * .8, 0., 1.);
+  // canvas weave bump for bare linen
+  float wb = (ln.a - .5);
+  vec3 bare = base * (1. + wb * .25);
+  vec3 paint = c.a > .001 ? c.rgb / c.a : vec3(0);
+  vec3 lit = paint * (1. + 1.25 * dif) * ao + spec * vec3(1., .97, .9) * smoothstep(.0, .4, c.a);
+  lit += paint * wb * .05;
+  vec3 col = mix(bare, lit, clamp(c.a, 0., 1.));
+  // gentle vignette + fade
+  vec2 q = tc - .5; col *= 1. - .28 * dot(q, q) * 1.6;
+  o = vec4(col * fade, 1.);
+}`;
+const pS = prog(strokeVS, strokeFS), pT = prog(fsVS, titleFS), pC = prog(fsVS, compFS);
+// geometry
+const quadBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 1, -1, 0, 1, 1, 1]), gl.STATIC_DRAW);
+const instBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, instBuf); gl.bufferData(gl.ARRAY_BUFFER, inst.byteLength, gl.DYNAMIC_DRAW);
+const vaoS = gl.createVertexArray(); gl.bindVertexArray(vaoS);
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, instBuf);
+for (let k = 0; k < 4; k++) { gl.enableVertexAttribArray(1 + k); gl.vertexAttribPointer(1 + k, 4, gl.FLOAT, false, NF * 4, k * 16); gl.vertexAttribDivisor(1 + k, 1); }
+const fsBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, fsBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+const vaoF = gl.createVertexArray(); gl.bindVertexArray(vaoF); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+function tex(w, h, ifmt, fmt, type, data = null, filt = gl.LINEAR) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t); gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, h, 0, fmt, type, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filt); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filt);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); return t;
+}
+const texC = tex(W, H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, null, gl.NEAREST), texH = tex(W, H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, null, gl.NEAREST);
+const fbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texC, 0);
+gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, texH, 0);
+gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+const imgTex = c => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); return t; };
+
+// ── offscreen textures: linen (rgb + weave in alpha), underdrawing, title ────────────────
+function makeLinen() {
+  const c = mk(W, H), x = c.getContext('2d'), im = x.createImageData(W, H), d = im.data, r = rng(7);
+  const rowN = new Float32Array(H), colN = new Float32Array(W);
+  for (let i = 0; i < H; i++) rowN[i] = r(); for (let i = 0; i < W; i++) colN[i] = r();
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) {
+    const wx = Math.sin(xx * 1.7) * .5 + .5, wy = Math.sin(y * 1.7) * .5 + .5;
+    const weave = ((Math.floor(xx / 2) + Math.floor(y / 2)) & 1) ? wx * (.6 + .4 * colN[xx]) : wy * (.6 + .4 * rowN[y]);
+    const blot = r() * .04, i = (y * W + xx) * 4;
+    d[i] = 226 - blot * 255 + weave * 10; d[i + 1] = 214 - blot * 255 + weave * 9; d[i + 2] = 190 - blot * 255 + weave * 7; d[i + 3] = 90 + weave * 120;
+  }
+  x.putImageData(im, 0, 0); return c;
+}
+function makeSketch() {
+  const c = mk(W, H), x = c.getContext('2d'), r = rng(31);
+  x.strokeStyle = 'rgba(92,60,34,1)'; x.lineCap = 'round'; x.lineJoin = 'round';
+  const wob = (pts, w) => { for (let pass = 0; pass < 2; pass++) { x.lineWidth = w * (pass ? .6 : 1); x.globalAlpha = pass ? .5 : .85; x.beginPath();
+    pts.forEach(([px, py], i) => { const jx = (r() - .5) * 3, jy = (r() - .5) * 3; i ? x.lineTo(px + jx, py + jy) : x.moveTo(px + jx, py + jy); }); x.stroke(); } };
+  const curve = (f, x0, x1) => { const p = []; for (let xx = x0; xx <= x1; xx += 24) p.push([xx, f(xx)]); return p; };
+  wob(curve(yF, -10, W + 10), 3); wob(curve(yM, -10, W + 10), 3); wob(curve(yG, -10, W + 10), 3);
+  for (const v of VORT) for (let k = 0; k < 3; k++) { const p = []; for (let a = 0; a < TAU * 1.6; a += .12) { const rr = v.r * (1 - a / (TAU * 2)) * (.95 - k * .2); p.push([v.x + rr * Math.cos(a * v.dir + k), v.y + rr * Math.sin(a * v.dir + k) * .9]); } wob(p, 2.4); }
+  { const p = []; for (let a = 0; a <= TAU + .1; a += .2) p.push([MOON.x + MOON.r * Math.cos(a), MOON.y + MOON.r * Math.sin(a)]); wob(p, 2.5); }
+  for (const cy of CYP) { for (const sd of [-1, 1]) { const p = []; for (let s = 0; s <= 1.001; s += .03) p.push([cypCx(cy, s, 0) + sd * cypHalf(cy, s), lerp(cy.base, cy.top, s)]); wob(p, 2.8); } }
+  for (const h of HOUSES) { const [hx, b, w, wh, rh] = h; wob([[hx - w / 2, b], [hx - w / 2, b - wh], [hx, b - wh - rh], [hx + w / 2, b - wh], [hx + w / 2, b], [hx - w / 2, b]], 2.2); }
+  const C = CHURCH; wob([[C.x - C.w / 2, C.base], [C.x - C.w / 2, C.base - C.h], [C.x + C.w / 2, C.base - C.h], [C.x + C.w / 2, C.base]], 2.2);
+  wob([[C.sx - C.sw / 2, C.base - C.h], [C.sx - C.sw / 2, C.stop + 60], [C.sx, C.stop], [C.sx + C.sw / 2, C.stop + 60], [C.sx + C.sw / 2, C.base - C.h]], 2.2);
+  STARS.forEach(([sx, sy, s]) => { const p = []; for (let a = 0; a <= TAU + .1; a += .4) p.push([sx + 12 * s * Math.cos(a), sy + 12 * s * Math.sin(a)]); wob(p, 1.8); });
+  x.globalAlpha = 1; return c;
+}
+const TITLE = 'Nocturne over Vellmere', SIGN = 'Aurel';
+function makeTitle() {
+  const c = mk(W, H), x = c.getContext('2d'), hc = mk(W, H), hx = hc.getContext('2d');
+  const draw = (ctx, fill) => {
+    ctx.font = '400 96px "Kaushan Script"'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = fill; ctx.fillText(TITLE, 92, 1022);
+    ctx.font = '400 74px "Caveat Brush"'; ctx.fillText(SIGN, 1640, 1046);
+  };
+  // dark under-glaze so the cream letters read on the field
+  x.save(); x.shadowColor = 'rgba(14,22,40,.95)'; x.shadowBlur = 14; x.lineWidth = 12; x.lineJoin = 'round'; x.strokeStyle = 'rgba(18,26,46,.9)';
+  x.font = '400 96px "Kaushan Script"'; x.strokeText(TITLE, 92, 1022); x.font = '400 74px "Caveat Brush"'; x.strokeText(SIGN, 1640, 1046); x.restore();
+  // letters: cream with streaks of yellow, then a vermilion signature
+  const t = mk(W, H), tx = t.getContext('2d'); draw(tx, '#f2e2ae');
+  tx.globalCompositeOperation = 'source-atop'; const r = rng(77);
+  for (let i = 0; i < 700; i++) { tx.fillStyle = pick2(r, ['#f7d35a', '#fff3cf', '#e9c46a', '#f4e9c2']); tx.globalAlpha = .3; tx.save(); tx.translate(r() * 1500, 910 + r() * 130); tx.rotate(-.5 + r() * .3); tx.fillRect(0, 0, 18 + r() * 26, 5 + r() * 5); tx.restore(); }
+  tx.globalAlpha = 1; tx.fillStyle = '#d2452a'; tx.fillRect(1600, 980, 320, 100);
+  x.drawImage(t, 0, 0);
+  hx.filter = 'blur(2.5px)'; draw(hx, '#fff'); hx.filter = 'none';
+  return [c, hc];
+}
+function pick2(r, a) { return a[Math.floor(r() * a.length)]; }
+
+let texLin, texSk, texTC, texTH;
+window.ready = (async () => {
+  await document.fonts.load('400 96px "Kaushan Script"'); await document.fonts.load('400 74px "Caveat Brush"'); await document.fonts.ready;
+  texLin = imgTex(makeLinen()); texSk = imgTex(makeSketch());
+  const [tc, th] = makeTitle(); texTC = imgTex(tc); texTH = imgTex(th);
+})();
+
+// ── frame ─────────────────────────────────────────────────────────────────────────────
+const STEP = 12;                                   // painted-animation cadence: the canvas changes 12×/s
+window.draw = ({ t: tr }) => {
+  const t = Math.floor(tr * STEP + 1e-4) / STEP, z = cam(t);
+  const n = fillInstances(t);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.viewport(0, 0, W, H);
+  gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]); gl.clearBufferfv(gl.COLOR, 1, [0, 0, 0, 0]);
+  gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  if (n) {
+    gl.useProgram(pS); gl.uniform1f(gl.getUniformLocation(pS, 'zoom'), z); gl.uniform2f(gl.getUniformLocation(pS, 'focus'), FX, FY);
+    gl.bindBuffer(gl.ARRAY_BUFFER, instBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, inst, 0, n * NF);
+    gl.bindVertexArray(vaoS); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);
+  }
+  if (t > T_TITLE0) {
+    gl.useProgram(pT); gl.bindVertexArray(vaoF);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texTC); gl.uniform1i(gl.getUniformLocation(pT, 'tcol'), 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texTH); gl.uniform1i(gl.getUniformLocation(pT, 'thgt'), 1);
+    gl.uniform2f(gl.getUniformLocation(pT, 'rev'), lerp(40, 1560, eInOut(seg(t, T_TITLE0, T_TITLE1))), 0);
+    gl.uniform2f(gl.getUniformLocation(pT, 'rev2'), lerp(1600, 1900, eOut(seg(t, T_SIGN0, T_SIGN1))), 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  gl.disable(gl.BLEND);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H);
+  gl.useProgram(pC); gl.bindVertexArray(vaoF);
+  [[texC, 'pc'], [texH, 'ph'], [texLin, 'lin'], [texSk, 'sk']].forEach(([tx, nm], i) => { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, tx); gl.uniform1i(gl.getUniformLocation(pC, nm), i); });
+  gl.uniform1f(gl.getUniformLocation(pC, 'sketchA'), .55 * (1 - seg(t, 1.2, 3.5) * .4));
+  gl.uniform1f(gl.getUniformLocation(pC, 'fade'), Math.min(eOut(seg(tr, 0, .45)), 1 - Math.pow(seg(tr, T_FADE0, DUR - .04), 1.4)));
+  gl.uniform1f(gl.getUniformLocation(pC, 'zoom'), z); gl.uniform2f(gl.getUniformLocation(pC, 'focus'), FX, FY);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+// sound cues for audio.py
+window.events = () => {
+  const ev = [], tb = S.map(o => o.tb).sort((a, b) => a - b);
+  // brush swishes: density of stroke births per 70 ms bucket
+  for (let b = 0; b < DUR / .07; b++) { const a = b * .07, cnt = tb.filter(x => x >= a && x < a + .07).length; if (cnt > 2) ev.push({ k: 'brush', t: a, v: Math.min(1, cnt / 120) }); }
+  WINDOWS.forEach(w => ev.push({ k: 'lamp', t: w.tb, v: .7 }));
+  STARS.forEach((s, i) => ev.push({ k: 'star', t: T_STAR0 + i * .09, v: s[2], f: [880, 988, 1175, 1319, 1480, 1760][i % 6] }));
+  ev.push({ k: 'push', t: T_PUSH0, d: T_PUSH1 - T_PUSH0 });
+  ev.push({ k: 'title', t: T_TITLE0, d: T_TITLE1 - T_TITLE0 }, { k: 'sign', t: T_SIGN0, d: T_SIGN1 - T_SIGN0 }, { k: 'chord', t: T_SIGN1 });
+  return ev;
+};
+</script></body></html>
