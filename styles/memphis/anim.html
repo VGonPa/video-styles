@@ -1,310 +1,740 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="en">
+<head>
+<meta charset="utf-8">
 <link rel="stylesheet" href="fonts.css">
-<style>html,body{margin:0;background:#ffd9ea}</style></head>
-<body><canvas id="c" width="1920" height="1080"></canvas>
+<style>
+  html, body { margin: 0; background: #ffd9ea; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="stage" width="1920" height="1080"></canvas>
 <script>
-// 80s Memphis: "PIZZA FRIDAY!" office party invite. Terrazzo, squiggles and zigzags bounce in, a patterned
-// pizza slice spins and flips, a zigzag band wipes to a bold invitation card whose details pop with overshoot.
-const W = 1920, H = 1080, cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const DUR = 9.5, FR = "'Rubik', sans-serif", FS = "'Shrikhand', cursive";
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const lerp = (a, b, t) => a + (b - a) * t;
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eOut = x => 1 - Math.pow(1 - x, 3), eIn = x => x * x * x;
-const eOutQ = x => 1 - Math.pow(1 - x, 4);
-const eIO = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-const eBack = (x, s = 2.6) => { const c = s + 1; return 1 + c * Math.pow(x - 1, 3) + s * Math.pow(x - 1, 2); };
-const eElastic = x => x <= 0 ? 0 : x >= 1 ? 1 : Math.pow(2, -9 * x) * Math.sin((x * 10 - 0.75) * (2 * Math.PI) / 3) + 1;
-function off(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
-function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-const C = { ink: '#161616', cream: '#fff8ec', pink: '#ff71ce', yellow: '#ffce5c', teal: '#86ccca', purple: '#6a7bb4', neon: '#ff2e88', blue: '#2d5bff', lime: '#d7ff3c', orange: '#ff8a3d', bg1: '#ffd9ea', bg2: '#c4eedf' };
-const LW = 7;
+// Memphis (1980s Milan design): an office "PIZZA FRIDAY!" invite.
+// Act 1: terrazzo chips, squiggles and zigzags spring in around a spinning, flipping pizza slice and a bouncy title.
+// A slanted zigzag band sweeps across; act 2 is a cream invitation card whose details pop in with overshoot.
 
-// ---------- patterns + terrazzo ----------
-let PAT = {}, BGP1, BGP2, CONF_COLS;
-function mkPat(w, h, draw) { const c = off(w, h), g = c.getContext('2d'); draw(g); return ctx.createPattern(c, 'repeat'); }
-// terrazzo: irregular chips scattered on a base, drawn wrapped so the tile repeats without seams
-function terrazzoTile(size, base, cols, n, rMin, rMax, seed) {
-  const c = off(size, size), g = c.getContext('2d'), r = rng(seed);
-  g.fillStyle = base; g.fillRect(0, 0, size, size);
-  for (let i = 0; i < n; i++) {
-    const x = r() * size, y = r() * size, rad = rMin + r() * (rMax - rMin), k = 4 + Math.floor(r() * 3), rot = r() * 7, col = cols[Math.floor(r() * cols.length)];
-    const pts = Array.from({ length: k }, (_, j) => { const a = rot + j / k * Math.PI * 2 + (r() - 0.5) * 0.8, rr = rad * (0.55 + r() * 0.5); return [Math.cos(a) * rr, Math.sin(a) * rr]; });
-    for (const ox of [-size, 0, size]) for (const oy of [-size, 0, size]) {
-      g.beginPath(); pts.forEach(([px, py], j) => j ? g.lineTo(x + ox + px, y + oy + py) : g.moveTo(x + ox + px, y + oy + py)); g.closePath();
-      g.fillStyle = col; g.fill();
+const stage = document.getElementById('stage');
+const g = stage.getContext('2d');
+const WIDTH = stage.width, HEIGHT = stage.height;
+const SANS = "'Rubik', sans-serif";
+const SCRIPT = "'Shrikhand', cursive";
+const INK_W = 7;
+
+const PAL = {
+  ink: '#161616', cream: '#fff8ec', pink: '#ff71ce', sun: '#ffce5c', mint: '#86ccca',
+  violet: '#6a7bb4', hot: '#ff2e88', cobalt: '#2d5bff', lime: '#d7ff3c', tang: '#ff8a3d',
+  roseBg: '#ffd9ea', mintBg: '#c4eedf'
+};
+const CONFETTI_HUES = [PAL.pink, PAL.sun, PAL.mint, PAL.cobalt, PAL.hot, PAL.violet];
+
+// ---------- small maths ----------
+const TAU = Math.PI * 2;
+function unit(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+function mix(from, to, k) { return from * (1 - k) + to * k; }
+// normalised progress of t through the window [start, end]
+function phase(t, start, end) { return unit((t - start) / (end - start)); }
+const ease = {
+  cubicOut: k => { const r = 1 - k; return 1 - r * r * r; },
+  cubicIn: k => k * k * k,
+  quartOut: k => { const r = 1 - k; return 1 - r * r * r * r; },
+  cubicInOut: k => (k < 0.5 ? 4 * k * k * k : 1 - ((2 - 2 * k) ** 3) / 2),
+  quadInOut: k => (k < 0.5 ? 2 * k * k : 1 - ((2 - 2 * k) ** 2) / 2),
+  // overshoot past 1 then settle; `pull` sets how far it overshoots
+  back: (k, pull = 2.6) => { const m = k - 1; return 1 + m * m * ((pull + 1) * m + pull); },
+  // springy settle with a few decaying wobbles
+  spring: k => {
+    if (k <= 0) return 0;
+    if (k >= 1) return 1;
+    return 1 + Math.pow(2, -9 * k) * Math.sin(TAU * (10 * k - 0.75) / 3);
+  }
+};
+// decaying wobble that starts at `since` (seconds ago); 0 before
+function jiggle(since, decay, freq, amp) {
+  return since > 0 ? amp * Math.exp(-since * decay) * Math.sin(since * freq) : 0;
+}
+
+// deterministic generator (splitmix-like) so every frame depends only on t
+function seeded(seed) {
+  let s = (seed * 2654435761) >>> 0;
+  return function () {
+    s = (s + 0x9e3779b9) >>> 0;
+    let z = s;
+    z = Math.imul(z ^ (z >>> 16), 0x85ebca6b) >>> 0;
+    z = Math.imul(z ^ (z >>> 13), 0xc2b2ae35) >>> 0;
+    return ((z ^ (z >>> 16)) >>> 0) / 4294967296;
+  };
+}
+
+function canvasOf(w, h) {
+  const el = document.createElement('canvas');
+  el.width = w; el.height = h;
+  return el;
+}
+
+// ---------- textures (built once in ready) ----------
+const TEX = {};
+let BACKDROP_A, BACKDROP_B;
+
+function tile(w, h, paint) {
+  const el = canvasOf(w, h);
+  paint(el.getContext('2d'), w, h);
+  return g.createPattern(el, 'repeat');
+}
+function polkaTile(base, spot = PAL.ink, rad = 4.5) {
+  return tile(34, 34, (c, w, h) => {
+    c.fillStyle = base; c.fillRect(0, 0, w, h);
+    c.fillStyle = spot;
+    for (const [px, py] of [[8, 8], [25, 25]]) { c.beginPath(); c.arc(px, py, rad, 0, TAU); c.fill(); }
+  });
+}
+function hatchTile(base) {
+  return tile(40, 40, (c, w, h) => {
+    c.fillStyle = base; c.fillRect(0, 0, w, h);
+    c.strokeStyle = PAL.ink; c.lineWidth = 7;
+    // three diagonals so the hatch wraps cleanly over the tile edge
+    for (let shift = -w; shift <= w; shift += w) { c.beginPath(); c.moveTo(shift, h); c.lineTo(shift + w, 0); c.stroke(); }
+  });
+}
+function chevronTile(base, line = PAL.ink) {
+  return tile(60, 36, (c, w, h) => {
+    c.fillStyle = base; c.fillRect(0, 0, w, h);
+    c.strokeStyle = line; c.lineWidth = 5; c.beginPath();
+    for (let step = 0; step <= 4; step++) c.lineTo(step * 15, step % 2 ? 10 : 26);
+    c.stroke();
+  });
+}
+// terrazzo: random angular chips over a base colour, every chip stamped at 9 offsets so the tile has no seams
+function terrazzo(size, base, chipHues, count, minR, maxR, seed) {
+  const el = canvasOf(size, size), c = el.getContext('2d'), rnd = seeded(seed);
+  c.fillStyle = base; c.fillRect(0, 0, size, size);
+  for (let n = 0; n < count; n++) {
+    const cx = rnd() * size, cy = rnd() * size;
+    const radius = minR + (maxR - minR) * rnd();
+    const corners = 4 + ((rnd() * 3) | 0);
+    const spin = rnd() * TAU;
+    const hue = chipHues[(rnd() * chipHues.length) | 0];
+    const poly = [];
+    for (let v = 0; v < corners; v++) {
+      const ang = spin + (TAU * v) / corners + 0.8 * (rnd() - 0.5);
+      const len = radius * (0.55 + 0.5 * rnd());
+      poly.push(Math.cos(ang) * len, Math.sin(ang) * len);
+    }
+    c.fillStyle = hue;
+    for (let ox = -size; ox <= size; ox += size) {
+      for (let oy = -size; oy <= size; oy += size) {
+        c.beginPath();
+        for (let v = 0; v < poly.length; v += 2) c.lineTo(cx + ox + poly[v], cy + oy + poly[v + 1]);
+        c.closePath(); c.fill();
+      }
     }
   }
-  g.fillStyle = C.ink; for (let i = 0; i < n * 2; i++) { const x = r() * size, y = r() * size; g.beginPath(); g.arc(x, y, 1.5 + r() * 2.5, 0, 7); g.fill(); }
-  return c;
-}
-function buildAssets() {
-  PAT.dots = (col, dot = C.ink, r = 4.5) => mkPat(34, 34, g => { g.fillStyle = col; g.fillRect(0, 0, 34, 34); g.fillStyle = dot; g.beginPath(); g.arc(8, 8, r, 0, 7); g.arc(25, 25, r, 0, 7); g.fill(); });
-  PAT.stripe = (col) => mkPat(40, 40, g => { g.fillStyle = col; g.fillRect(0, 0, 40, 40); g.strokeStyle = C.ink; g.lineWidth = 7; for (const o of [-40, 0, 40]) { g.beginPath(); g.moveTo(o, 40); g.lineTo(o + 40, 0); g.stroke(); } });
-  PAT.zig = (col, line = C.ink) => mkPat(60, 36, g => { g.fillStyle = col; g.fillRect(0, 0, 60, 36); g.strokeStyle = line; g.lineWidth = 5; g.beginPath(); g.moveTo(0, 26); g.lineTo(15, 10); g.lineTo(30, 26); g.lineTo(45, 10); g.lineTo(60, 26); g.stroke(); });
-  PAT.w = { dotsY: PAT.dots(C.yellow), stripeT: PAT.stripe(C.teal), zigP: PAT.zig(C.pink), dotsC: PAT.dots(C.cream), stripeY: PAT.stripe(C.yellow),
-    pep: PAT.dots(C.neon, C.cream, 4), crust: PAT.zig(C.orange, C.cream) };
-  const chips = [C.pink, C.teal, C.blue, C.yellow, C.purple, C.neon];
-  PAT.terr = ctx.createPattern(terrazzoTile(300, C.cream, chips, 46, 7, 22, 7), 'repeat');
-  PAT.terrPink = ctx.createPattern(terrazzoTile(300, C.pink, [C.cream, C.teal, C.yellow, C.blue, C.ink], 40, 6, 20, 19), 'repeat');
-  PAT.cheese = ctx.createPattern(terrazzoTile(220, C.yellow, [C.cream, C.orange, C.teal, C.pink], 26, 4, 11, 31), 'repeat');
-  // backgrounds with a subtle grid of dots (pre-rendered)
-  const bg = (col, dot) => { const c = off(W, H), g = c.getContext('2d'); g.fillStyle = col; g.fillRect(0, 0, W, H); g.fillStyle = dot;
-    for (let y = 30; y < H; y += 48) for (let x = 30 + ((y / 48) % 2) * 24; x < W; x += 48) { g.beginPath(); g.arc(x, y, 3.2, 0, 7); g.fill(); } return c; };
-  BGP1 = bg(C.bg1, 'rgba(255,113,206,0.35)'); BGP2 = bg(C.bg2, 'rgba(106,123,180,0.25)');
-  CONF_COLS = [C.pink, C.yellow, C.teal, C.blue, C.neon, C.purple];
-}
-
-// ---------- drawing helpers ----------
-function hard(pathFn, fill, sh = C.ink, dx = 12, dy = 12, stroke = true) {
-  ctx.save(); ctx.translate(dx, dy); pathFn(); ctx.fillStyle = sh; ctx.fill(); ctx.restore();
-  pathFn(); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.lineWidth = LW; ctx.strokeStyle = C.ink; ctx.lineJoin = 'round'; ctx.stroke(); }
-}
-function hardText(str, x, y, px, fill, fam = FR, w = 900, sh = C.ink, d = 10, sw = 9) {
-  ctx.font = `${w} ${px}px ${fam}`; ctx.lineJoin = 'round'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = sh; ctx.strokeStyle = sh; ctx.lineWidth = sw; ctx.strokeText(str, x + d, y + d); ctx.fillText(str, x + d, y + d);
-  ctx.strokeStyle = C.ink; ctx.strokeText(str, x, y); ctx.fillStyle = fill; ctx.fillText(str, x, y);
-}
-function squiggle(len, amp, n) { ctx.beginPath(); for (let i = 0; i <= 60; i++) { const u = i / 60; const x = (u - 0.5) * len, y = Math.sin(u * n * Math.PI * 2) * amp; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } }
-function zigPath(len, amp, n) { ctx.beginPath(); for (let i = 0; i <= n * 2; i++) { const x = (i / (n * 2) - 0.5) * len, y = (i % 2 ? -amp : amp); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } }
-function strokeCol(col, w, shDx = 8) { ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.save(); ctx.translate(shDx, shDx); ctx.strokeStyle = C.ink; ctx.lineWidth = w; ctx.stroke(); ctx.restore(); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); }
-function blob(r, k, wob, ph) { ctx.beginPath(); for (let i = 0; i <= 48; i++) { const a = i / 48 * Math.PI * 2, rr = r * (1 + wob * Math.sin(a * k + ph)); i ? ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); } ctx.closePath(); }
-const outScale = (t, k) => { if (k == null) return 1; const o = seg(t, k, k + 0.35); return o <= 0 ? 1 : o < 0.3 ? 1 + Math.sin(o / 0.3 * Math.PI) * 0.15 : 1 - eIn((o - 0.3) / 0.7); };
-function confPiece(k, col, sc) {
-  ctx.fillStyle = col; ctx.strokeStyle = C.ink; ctx.lineWidth = 4; ctx.beginPath();
-  if (k === 0) ctx.rect(-12 * sc, -12 * sc, 24 * sc, 24 * sc); else if (k === 1) ctx.arc(0, 0, 12 * sc, 0, 7);
-  else { ctx.moveTo(0, -15 * sc); ctx.lineTo(14 * sc, 11 * sc); ctx.lineTo(-14 * sc, 11 * sc); ctx.closePath(); }
-  ctx.fill(); ctx.stroke();
-}
-function deco(d, t) {
-  const p = seg(t, d.t0, d.t0 + 0.45); if (p <= 0) return; const s = eBack(p) * outScale(t, d.out); if (s <= 0.001) return;
-  const hop = Math.abs(Math.sin(t * 3.2 + d.ph)) * 10, wig = Math.sin(t * 2.4 + d.ph) * 0.12;
-  ctx.save(); ctx.translate(d.x, d.y - hop); ctx.rotate(d.r + wig + (1 - p) * 1.4); ctx.scale(s * d.s, s * d.s);
-  switch (d.k) {
-    case 'squig': squiggle(180, 18, 2.5); strokeCol(d.c, 16); break;
-    case 'zig': zigPath(190, 22, 4); strokeCol(d.c, 14); break;
-    case 'tri': hard(() => { ctx.beginPath(); ctx.moveTo(0, -60); ctx.lineTo(56, 44); ctx.lineTo(-56, 44); ctx.closePath(); }, d.c, C.ink, 9, 9); break;
-    case 'ring': ctx.beginPath(); ctx.arc(0, 0, 52, 0, 7); ctx.save(); ctx.translate(8, 8); ctx.strokeStyle = C.ink; ctx.lineWidth = 22; ctx.stroke(); ctx.restore(); ctx.strokeStyle = d.c; ctx.lineWidth = 22; ctx.stroke(); ctx.lineWidth = 4; ctx.strokeStyle = C.ink; ctx.beginPath(); ctx.arc(0, 0, 63, 0, 7); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, 41, 0, 7); ctx.stroke(); break;
-    case 'half': hard(() => { ctx.beginPath(); ctx.arc(0, 20, 70, Math.PI, 0); ctx.closePath(); }, PAT.w.stripeY, C.ink, 9, 9); break;
-    case 'dots': ctx.fillStyle = C.ink; for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { ctx.beginPath(); ctx.arc(-54 + i * 36, -54 + j * 36, 8, 0, 7); ctx.fill(); } break;
-    case 'plus': hard(() => { ctx.beginPath(); ctx.rect(-14, -48, 28, 96); ctx.rect(-48, -14, 96, 28); }, d.c, C.ink, 8, 8, false); break;
-    case 'pill': hard(() => { ctx.beginPath(); ctx.roundRect(-80, -26, 160, 52, 26); }, PAT.w.dotsC, C.ink, 9, 9); break;
-    case 'terr': hard(() => blob(62, 3, 0.1, d.ph), PAT.terrPink, C.ink, 9, 9); break;
-    case 'conf': for (let i = 0; i < 5; i++) { const a = i * 1.26 + d.ph, rr = 34 + (i % 2) * 22; ctx.save(); ctx.translate(Math.cos(a) * rr, Math.sin(a) * rr); ctx.rotate(a * 2); confPiece(i % 3, CONF_COLS[(i + d.i) % 6], 1); ctx.restore(); } break;
+  // fine ink specks
+  c.fillStyle = PAL.ink;
+  for (let n = 0; n < count * 2; n++) {
+    const sx = rnd() * size, sy = rnd() * size;
+    c.beginPath(); c.arc(sx, sy, 1.5 + 2.5 * rnd(), 0, TAU); c.fill();
   }
-  ctx.restore();
+  return g.createPattern(el, 'repeat');
 }
-const mkDeco = (arr, s, t0, dt, outs) => arr.map((d, i) => ({ ...d, s, i, ph: i * 1.3 + s, t0: t0 + i * dt, out: outs ? outs(i) : null }));
-const DECO1 = mkDeco([
-  { k: 'squig', x: 170, y: 130, c: C.teal, r: -0.2 }, { k: 'terr', x: 1110, y: 140, r: 0 }, { k: 'dots', x: 1800, y: 140, r: 0.2 },
-  { k: 'ring', x: 1180, y: 960, c: C.pink, r: 0 }, { k: 'zig', x: 1730, y: 950, c: C.purple, r: -0.15 }, { k: 'half', x: 140, y: 960, c: C.yellow, r: 0.2 },
-  { k: 'plus', x: 1860, y: 470, c: C.blue, r: 0.3 }, { k: 'pill', x: 470, y: 80, r: -0.12 }, { k: 'squig', x: 1560, y: 100, c: C.neon, r: 0.15 },
-  { k: 'tri', x: 110, y: 560, c: C.teal, r: -0.5 }, { k: 'conf', x: 900, y: 990, r: -0.3 }, { k: 'conf', x: 1010, y: 460, r: 0.4 }
-], 1, 0.12, 0.05);
-const DECO2 = mkDeco([
-  { k: 'zig', x: 170, y: 110, c: C.pink, r: 0.1 }, { k: 'ring', x: 1810, y: 120, c: C.yellow, r: 0 }, { k: 'dots', x: 80, y: 560, r: 0.4 },
-  { k: 'tri', x: 1840, y: 700, c: C.purple, r: 0.4 }, { k: 'squig', x: 150, y: 1000, c: C.blue, r: -0.3 }, { k: 'plus', x: 1830, y: 980, c: C.neon, r: 0.2 },
-  { k: 'terr', x: 90, y: 330, r: 0 }, { k: 'conf', x: 1850, y: 420, r: 0.2 }, { k: 'half', x: 700, y: 1030, c: C.yellow, r: -0.1 }, { k: 'pill', x: 1260, y: 1030, r: 0.08 }
-], 0.85, 4.55, 0.045, i => [0, 1, 5].includes(i) ? null : 8.5 + i * 0.03);
+// full-frame backdrop: flat colour plus a staggered grid of soft dots
+function backdrop(base, dotColour) {
+  const el = canvasOf(WIDTH, HEIGHT), c = el.getContext('2d');
+  c.fillStyle = base; c.fillRect(0, 0, WIDTH, HEIGHT);
+  c.fillStyle = dotColour;
+  const pitch = 48;
+  for (let row = 0; 30 + row * pitch < HEIGHT; row++) {
+    const y = 30 + row * pitch;
+    for (let x = 30 + (row % 2) * (pitch / 2); x < WIDTH; x += pitch) { c.beginPath(); c.arc(x, y, 3.2, 0, TAU); c.fill(); }
+  }
+  return el;
+}
+function buildTextures() {
+  TEX.polkaSun = polkaTile(PAL.sun);
+  TEX.polkaCream = polkaTile(PAL.cream);
+  TEX.pepperoni = polkaTile(PAL.hot, PAL.cream, 4);
+  TEX.hatchMint = hatchTile(PAL.mint);
+  TEX.hatchSun = hatchTile(PAL.sun);
+  TEX.chevronPink = chevronTile(PAL.pink);
+  TEX.crust = chevronTile(PAL.tang, PAL.cream);
+  TEX.terrazzo = terrazzo(300, PAL.cream, [PAL.pink, PAL.mint, PAL.cobalt, PAL.sun, PAL.violet, PAL.hot], 46, 7, 22, 7);
+  TEX.terrazzoPink = terrazzo(300, PAL.pink, [PAL.cream, PAL.mint, PAL.sun, PAL.cobalt, PAL.ink], 40, 6, 20, 19);
+  TEX.cheese = terrazzo(220, PAL.sun, [PAL.cream, PAL.tang, PAL.mint, PAL.pink], 26, 4, 11, 31);
+  BACKDROP_A = backdrop(PAL.roseBg, 'rgba(255,113,206,0.35)');
+  BACKDROP_B = backdrop(PAL.mintBg, 'rgba(106,123,180,0.25)');
+}
 
-// ---------- the pizza slice (local coords: crust on top, tip at +270) ----------
-const PEPS = [[-92, -96, 44], [72, -118, 40], [-6, -8, 46], [98, -22, 28], [-58, 88, 32], [22, 150, 24]];
-function slicePath() { ctx.beginPath(); ctx.moveTo(-200, -190); ctx.lineTo(200, -190); ctx.lineTo(0, 270); ctx.closePath(); }
-function crustPath() { ctx.beginPath(); ctx.roundRect(-238, -262, 476, 96, 48); }
-function drawSlice() {
-  // hard ink shadow of the whole slice
-  ctx.save(); ctx.translate(16, 16); ctx.fillStyle = C.ink; slicePath(); ctx.fill(); crustPath(); ctx.fill(); ctx.restore();
-  slicePath(); ctx.fillStyle = PAT.cheese; ctx.fill();
-  ctx.save(); slicePath(); ctx.clip();
-  // melty cheese drips below the crust
-  ctx.fillStyle = C.cream; ctx.beginPath(); ctx.moveTo(-220, -200);
-  for (let i = 0; i <= 8; i++) { const x = -200 + i * 50, dy = [30, 58, 26, 70, 34, 50, 22, 62, 28][i]; ctx.lineTo(x, -190 + dy); }
-  ctx.lineTo(220, -200); ctx.closePath(); ctx.globalAlpha = 0.9; ctx.fill(); ctx.globalAlpha = 1;
-  // pepperoni with Memphis dots
-  for (const [x, y, r] of PEPS) { ctx.save(); ctx.translate(x, y); ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(6, 6, r, 0, 7); ctx.fill();
-    ctx.fillStyle = PAT.w.pep; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.stroke(); ctx.restore(); }
-  // olives as tiny ink triangles and basil squiggles
-  for (const [x, y, a] of [[40, -70, 0.3], [-120, -30, 1.2], [58, 60, 2.1], [-30, 200, 0.8]]) { ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillStyle = C.ink; ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(13, 10); ctx.lineTo(-13, 10); ctx.closePath(); ctx.fill(); ctx.restore(); }
-  for (const [x, y, a] of [[-40, -130, -0.3], [40, 30, 0.5], [-10, 100, -0.8]]) { ctx.save(); ctx.translate(x, y); ctx.rotate(a); squiggle(64, 7, 1.5); ctx.lineCap = 'round'; ctx.strokeStyle = C.ink; ctx.lineWidth = 12; ctx.stroke(); ctx.strokeStyle = C.lime; ctx.lineWidth = 6; ctx.stroke(); ctx.restore(); }
-  ctx.restore();
-  slicePath(); ctx.lineWidth = LW + 1; ctx.strokeStyle = C.ink; ctx.lineJoin = 'round'; ctx.stroke();
-  crustPath(); ctx.fillStyle = PAT.w.crust; ctx.fill(); ctx.lineWidth = LW + 1; ctx.stroke();
+// ---------- drawing primitives ----------
+// Fill a shape with a solid offset drop shadow (the Memphis "sticker" look) and an ink outline.
+function sticker(trace, fill, { shadow = PAL.ink, off = 12, outline = true } = {}) {
+  g.save();
+  g.translate(off, off); trace();
+  g.fillStyle = shadow; g.fill();
+  g.restore();
+  trace();
+  g.fillStyle = fill; g.fill();
+  if (outline) { g.lineJoin = 'round'; g.lineWidth = INK_W; g.strokeStyle = PAL.ink; g.stroke(); }
+}
+// Centred text with an outlined offset shadow and an ink outline.
+function shoutText(txt, x, y, size, fill, opts = {}) {
+  const { family = SANS, weight = 900, shadow = PAL.ink, off = 10, edge = 9 } = opts;
+  g.font = `${weight} ${size}px ${family}`;
+  g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.lineJoin = 'round'; g.lineWidth = edge;
+  g.fillStyle = g.strokeStyle = shadow;
+  g.strokeText(txt, x + off, y + off); g.fillText(txt, x + off, y + off);
+  g.strokeStyle = PAL.ink; g.strokeText(txt, x, y);
+  g.fillStyle = fill; g.fillText(txt, x, y);
+}
+// sine wave path centred on the origin
+function wavePath(length, height, cycles, steps = 60, upto = steps) {
+  g.beginPath();
+  for (let s = 0; s <= upto; s++) {
+    const u = s / steps;
+    g.lineTo(length * (u - 0.5), height * Math.sin(TAU * cycles * u));
+  }
+}
+// zigzag path centred on the origin
+function sawPath(length, height, teeth) {
+  g.beginPath();
+  const n = teeth * 2;
+  for (let s = 0; s <= n; s++) g.lineTo(length * (s / n - 0.5), s % 2 ? -height : height);
+}
+// stroke the current path as a fat rounded line with an ink shadow
+function fatLine(colour, width, drop = 8) {
+  g.lineCap = g.lineJoin = 'round'; g.lineWidth = width;
+  g.save(); g.translate(drop, drop); g.strokeStyle = PAL.ink; g.stroke(); g.restore();
+  g.strokeStyle = colour; g.stroke();
+}
+// wobbly closed blob of radius r with k lobes
+function lumpPath(r, lobes, wobble, offset) {
+  g.beginPath();
+  for (let s = 0; s < 48; s++) {
+    const a = (s / 48) * TAU, rr = r * (1 + wobble * Math.sin(lobes * a + offset));
+    g.lineTo(rr * Math.cos(a), rr * Math.sin(a));
+  }
+  g.closePath();
+}
+// small confetti shape: 0 square, 1 dot, 2 triangle
+function confetto(shape, colour, size = 1) {
+  g.beginPath();
+  if (shape === 0) g.rect(-12 * size, -12 * size, 24 * size, 24 * size);
+  else if (shape === 1) g.arc(0, 0, 12 * size, 0, TAU);
+  else { g.moveTo(0, -15 * size); g.lineTo(14 * size, 11 * size); g.lineTo(-14 * size, 11 * size); g.closePath(); }
+  g.fillStyle = colour; g.fill();
+  g.lineWidth = 4; g.strokeStyle = PAL.ink; g.stroke();
+}
+
+// ---------- floating decorations ----------
+// A quick "pop" bump then shrink to nothing, starting at `leaveAt`.
+function exitScale(t, leaveAt) {
+  if (leaveAt == null) return 1;
+  const k = phase(t, leaveAt, leaveAt + 0.35);
+  if (k <= 0) return 1;
+  if (k < 0.3) return 1 + 0.15 * Math.sin(Math.PI * k / 0.3);
+  return 1 - ease.cubicIn((k - 0.3) / 0.7);
+}
+const ORNAMENT = {
+  squiggle(o) { wavePath(180, 18, 2.5); fatLine(o.colour, 16); },
+  zigzag(o) { sawPath(190, 22, 4); fatLine(o.colour, 14); },
+  triangle(o) {
+    sticker(() => { g.beginPath(); g.moveTo(0, -60); g.lineTo(56, 44); g.lineTo(-56, 44); g.closePath(); }, o.colour, { off: 9 });
+  },
+  ring(o) {
+    g.beginPath(); g.arc(0, 0, 52, 0, TAU);
+    g.lineWidth = 22;
+    g.save(); g.translate(8, 8); g.strokeStyle = PAL.ink; g.stroke(); g.restore();
+    g.strokeStyle = o.colour; g.stroke();
+    g.lineWidth = 4; g.strokeStyle = PAL.ink;
+    for (const rad of [63, 41]) { g.beginPath(); g.arc(0, 0, rad, 0, TAU); g.stroke(); }
+  },
+  dome(o) {
+    sticker(() => { g.beginPath(); g.arc(0, 20, 70, Math.PI, TAU); g.closePath(); }, TEX.hatchSun, { off: 9 });
+  },
+  grid(o) {
+    g.fillStyle = PAL.ink;
+    for (let col = 0; col < 4; col++) for (let row = 0; row < 4; row++) {
+      g.beginPath(); g.arc(36 * col - 54, 36 * row - 54, 8, 0, TAU); g.fill();
+    }
+  },
+  cross(o) {
+    sticker(() => { g.beginPath(); g.rect(-14, -48, 28, 96); g.rect(-48, -14, 96, 28); }, o.colour, { off: 8, outline: false });
+  },
+  capsule(o) {
+    sticker(() => { g.beginPath(); g.roundRect(-80, -26, 160, 52, 26); }, TEX.polkaCream, { off: 9 });
+  },
+  pebble(o) { sticker(() => lumpPath(62, 3, 0.1, o.phase), TEX.terrazzoPink, { off: 9 }); },
+  sprinkle(o) {
+    for (let n = 0; n < 5; n++) {
+      const a = o.phase + 1.26 * n, dist = n % 2 ? 56 : 34;
+      g.save(); g.translate(dist * Math.cos(a), dist * Math.sin(a)); g.rotate(2 * a);
+      confetto(n % 3, CONFETTI_HUES[(n + o.index) % CONFETTI_HUES.length]);
+      g.restore();
+    }
+  }
+};
+function drawOrnament(o, t) {
+  const k = phase(t, o.start, o.start + 0.45);
+  if (k <= 0) return;
+  const size = ease.back(k) * exitScale(t, o.leave);
+  if (size <= 0.001) return;
+  const bob = 10 * Math.abs(Math.sin(3.2 * t + o.phase));
+  const sway = 0.12 * Math.sin(2.4 * t + o.phase);
+  g.save();
+  g.translate(o.x, o.y - bob);
+  g.rotate(o.tilt + sway + 1.4 * (1 - k));
+  g.scale(size * o.scale, size * o.scale);
+  ORNAMENT[o.kind](o);
+  g.restore();
+}
+// [kind, x, y, colour, tilt]
+function layout(list, scale, first, stagger, leaveFor) {
+  return list.map(([kind, x, y, colour, tilt], index) => ({
+    kind, x, y, colour, tilt, scale, index,
+    phase: 1.3 * index + scale,
+    start: first + stagger * index,
+    leave: leaveFor ? leaveFor(index) : null
+  }));
+}
+const ACT1_ORNAMENTS = layout([
+  ['squiggle', 170, 130, PAL.mint, -0.2], ['pebble', 1110, 140, null, 0], ['grid', 1800, 140, null, 0.2],
+  ['ring', 1180, 960, PAL.pink, 0], ['zigzag', 1730, 950, PAL.violet, -0.15], ['dome', 140, 960, PAL.sun, 0.2],
+  ['cross', 1860, 470, PAL.cobalt, 0.3], ['capsule', 470, 80, null, -0.12], ['squiggle', 1560, 100, PAL.hot, 0.15],
+  ['triangle', 110, 560, PAL.mint, -0.5], ['sprinkle', 900, 990, null, -0.3], ['sprinkle', 1010, 460, null, 0.4]
+], 1, 0.12, 0.05);
+const ACT2_ORNAMENTS = layout([
+  ['zigzag', 170, 110, PAL.pink, 0.1], ['ring', 1810, 120, PAL.sun, 0], ['grid', 80, 560, null, 0.4],
+  ['triangle', 1840, 700, PAL.violet, 0.4], ['squiggle', 150, 1000, PAL.cobalt, -0.3], ['cross', 1830, 980, PAL.hot, 0.2],
+  ['pebble', 90, 330, null, 0], ['sprinkle', 1850, 420, null, 0.2], ['dome', 700, 1030, PAL.sun, -0.1], ['capsule', 1260, 1030, null, 0.08]
+], 0.85, 4.55, 0.045, i => (i === 0 || i === 1 || i === 5 ? null : 8.5 + 0.03 * i));
+
+// ---------- pizza slice (local space: crust along the top, tip pointing down) ----------
+const TOPPINGS = {
+  pepperoni: [[-92, -96, 44], [72, -118, 40], [-6, -8, 46], [98, -22, 28], [-58, 88, 32], [22, 150, 24]],
+  olives: [[40, -70, 0.3], [-120, -30, 1.2], [58, 60, 2.1], [-30, 200, 0.8]],
+  basil: [[-40, -130, -0.3], [40, 30, 0.5], [-10, 100, -0.8]],
+  drips: [30, 58, 26, 70, 34, 50, 22, 62, 28]
+};
+function wedge() { g.beginPath(); g.moveTo(-200, -190); g.lineTo(200, -190); g.lineTo(0, 270); g.closePath(); }
+function crustBar() { g.beginPath(); g.roundRect(-238, -262, 476, 96, 48); }
+function paintSlice() {
+  g.save();
+  g.translate(16, 16); g.fillStyle = PAL.ink;
+  wedge(); g.fill(); crustBar(); g.fill();
+  g.restore();
+
+  wedge(); g.fillStyle = TEX.cheese; g.fill();
+  g.save();
+  wedge(); g.clip();
+  // melted cheese hanging from under the crust
+  g.beginPath(); g.moveTo(-220, -200);
+  TOPPINGS.drips.forEach((drop, n) => g.lineTo(-200 + 50 * n, drop - 190));
+  g.lineTo(220, -200); g.closePath();
+  g.globalAlpha = 0.9; g.fillStyle = PAL.cream; g.fill(); g.globalAlpha = 1;
+  for (const [x, y, r] of TOPPINGS.pepperoni) {
+    g.fillStyle = PAL.ink; g.beginPath(); g.arc(x + 6, y + 6, r, 0, TAU); g.fill();
+    g.save(); g.translate(x, y);
+    g.beginPath(); g.arc(0, 0, r, 0, TAU);
+    g.fillStyle = TEX.pepperoni; g.fill();
+    g.lineWidth = 5; g.strokeStyle = PAL.ink; g.stroke();
+    g.restore();
+  }
+  g.fillStyle = PAL.ink;
+  for (const [x, y, a] of TOPPINGS.olives) {
+    g.save(); g.translate(x, y); g.rotate(a);
+    g.beginPath(); g.moveTo(0, -14); g.lineTo(13, 10); g.lineTo(-13, 10); g.closePath(); g.fill();
+    g.restore();
+  }
+  for (const [x, y, a] of TOPPINGS.basil) {
+    g.save(); g.translate(x, y); g.rotate(a);
+    wavePath(64, 7, 1.5); g.lineCap = 'round';
+    g.lineWidth = 12; g.strokeStyle = PAL.ink; g.stroke();
+    g.lineWidth = 6; g.strokeStyle = PAL.lime; g.stroke();
+    g.restore();
+  }
+  g.restore();
+
+  g.lineJoin = 'round'; g.lineWidth = INK_W + 1; g.strokeStyle = PAL.ink;
+  wedge(); g.stroke();
+  crustBar(); g.fillStyle = TEX.crust; g.fill(); g.stroke();
 }
 
 // ---------- confetti ----------
-const BURST = Array.from({ length: 34 }, (_, i) => { const a = -Math.PI / 2 + (i / 34 - 0.5) * 2.8 + Math.sin(i * 12.9) * 0.2, v = 650 + (i * 97 % 520);
-  return { vx: Math.cos(a) * v, vy: Math.sin(a) * v, c: i % 6, k: i % 3, rs: (i % 5 - 2) * 4 }; });
-function burst(t, t0, x0, y0) {
-  const dt = t - t0; if (dt <= 0 || dt > 1.6) return;
-  for (const b of BURST) { const x = x0 + b.vx * dt, y = y0 + b.vy * dt + 1400 * dt * dt; if (y > H + 40) continue;
-    ctx.save(); ctx.translate(x, y); ctx.rotate(b.rs * dt); ctx.globalAlpha = 1 - seg(dt, 1.2, 1.6); confPiece(b.k, CONF_COLS[b.c], 1); ctx.restore(); }
-  ctx.globalAlpha = 1;
+const POPPER = [];
+for (let n = 0; n < 34; n++) {
+  const heading = -Math.PI / 2 + 2.8 * (n / 34 - 0.5) + 0.2 * Math.sin(12.9 * n);
+  const speed = 650 + ((97 * n) % 520);
+  POPPER.push({ vx: speed * Math.cos(heading), vy: speed * Math.sin(heading), hue: n % 6, shape: n % 3, spin: 4 * ((n % 5) - 2) });
 }
-const RAIN = Array.from({ length: 46 }, (_, i) => { const r = rng(100 + i); return { x: r() * W, ts: 4.4 + r() * 3.9, v: 260 + r() * 220, sw: 20 + r() * 40, ph: r() * 7, k: i % 3, c: i % 6, sc: 0.7 + r() * 0.5 }; });
-function rain(t) {
-  for (const p of RAIN) { const dt = t - p.ts; if (dt <= 0) continue; const y = -40 + dt * p.v; if (y > H + 40) continue;
-    ctx.save(); ctx.translate(p.x + Math.sin(dt * 2.2 + p.ph) * p.sw, y); ctx.rotate(dt * 2 + p.ph); ctx.scale(Math.cos(dt * 4 + p.ph), 1); confPiece(p.k, CONF_COLS[p.c], p.sc); ctx.restore(); }
+// a ballistic confetti burst fired at t0 from (ox, oy)
+function popConfetti(t, t0, ox, oy) {
+  const age = t - t0;
+  if (age <= 0 || age > 1.6) return;
+  g.globalAlpha = 1 - phase(age, 1.2, 1.6);
+  for (const bit of POPPER) {
+    const y = oy + bit.vy * age + 1400 * age * age;
+    if (y > HEIGHT + 40) continue;
+    g.save(); g.translate(ox + bit.vx * age, y); g.rotate(bit.spin * age);
+    confetto(bit.shape, CONFETTI_HUES[bit.hue]);
+    g.restore();
+  }
+  g.globalAlpha = 1;
 }
-
-// ---------- scene 1: terrazzo disc + spinning slice + title ----------
-const SL = { x: 610, y: 560 };
-function sliceTransform(t) {
-  // entry: elastic scale, whirl in 2D; then an anticipation squash and a full flip around the vertical axis
-  const pe = seg(t, 0.35, 1.35), s = eElastic(pe);
-  const rot = -Math.PI * 3 * (1 - eOutQ(pe)) - 0.14 + Math.sin(t * 2.1) * 0.05;
-  const ant = seg(t, 2.15, 2.45), fl = seg(t, 2.45, 3.25);
-  const squash = Math.sin(ant * Math.PI / 2) * 0.12 * (1 - fl);
-  const flip = Math.cos(eIO(fl) * Math.PI * 2);
-  const land = t - 3.25, wob = land > 0 ? Math.exp(-land * 8) * Math.sin(land * 26) * 0.1 : 0;
-  const lift = Math.sin(fl * Math.PI) * 60;
-  return { s, rot, sx: flip * (1 + squash * 0.6) * (1 + wob), sy: (1 - squash) * (1 - wob), lift };
-}
-function titleWord(t, word, cx, by, px, tStart, cols, hopFrom) {
-  ctx.font = `900 ${px}px ${FR}`; const kern = -6, tw = [...word].reduce((a, ch) => a + ctx.measureText(ch).width + kern, -kern); let x = cx - tw / 2;
-  for (let i = 0; i < word.length; i++) {
-    ctx.font = `900 ${px}px ${FR}`; const ch = word[i], w = ctx.measureText(ch).width, t0 = tStart + i * 0.07, p = seg(t, t0, t0 + 0.5);
-    if (p > 0) { const y = by - (1 - eOut(Math.min(1, p * 1.4))) * 180;
-      const land = t - (t0 + 0.36), sq = land > 0 ? Math.exp(-land * 10) * Math.sin(land * 30) * 0.18 : 0;
-      const hop = t > hopFrom && t < 3.75 ? Math.max(0, Math.sin((t - hopFrom) * 9 - i * 0.7)) * 24 * seg(t, hopFrom, hopFrom + 0.2) : 0;
-      ctx.save(); ctx.translate(x + w / 2, y - hop); ctx.scale(1 + sq, 1 - sq); ctx.rotate((i % 2 ? 1 : -1) * 0.05);
-      hardText(ch, 0, 0, px, cols[i % cols.length], FR, 900, C.blue, 12, 10); ctx.restore(); }
-    x += w + kern;
+const DRIFT = (() => {
+  const rnd = seeded(4040), out = [];
+  for (let n = 0; n < 46; n++) {
+    out.push({ x: rnd() * WIDTH, begin: 4.4 + 3.9 * rnd(), fall: 260 + 220 * rnd(), swing: 20 + 40 * rnd(),
+      offset: TAU * rnd(), shape: n % 3, hue: n % 6, size: 0.7 + 0.5 * rnd() });
+  }
+  return out;
+})();
+// confetti that flutters down from the top edge during act 2
+function confettiRain(t) {
+  for (const p of DRIFT) {
+    const age = t - p.begin;
+    if (age <= 0) continue;
+    const y = p.fall * age - 40;
+    if (y > HEIGHT + 40) continue;
+    g.save();
+    g.translate(p.x + p.swing * Math.sin(2.2 * age + p.offset), y);
+    g.rotate(2 * age + p.offset);
+    g.scale(Math.cos(4 * age + p.offset), 1);   // tumbling flip
+    confetto(p.shape, CONFETTI_HUES[p.hue], p.size);
+    g.restore();
   }
 }
-function scene1(t) {
-  ctx.drawImage(BGP1, 0, 0);
-  DECO1.forEach(d => deco(d, t));
-  // terrazzo disc behind the slice
-  const dp = eElastic(seg(t, 0.15, 0.95));
-  if (dp > 0) { ctx.save(); ctx.translate(SL.x, SL.y); ctx.scale(dp, dp); ctx.rotate(t * 0.15);
-    hard(() => blob(345, 5, 0.035, 0.6), PAT.terr, C.neon, 20, 20);
-    ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.setLineDash([6, 18]); ctx.lineCap = 'round'; blob(300, 5, 0.035, 0.6); ctx.stroke(); ctx.setLineDash([]);
-    ctx.restore(); }
-  const st = sliceTransform(t);
-  if (st.s > 0.001) { ctx.save(); ctx.translate(SL.x, SL.y + 10 - st.lift); ctx.rotate(st.rot); ctx.scale(st.s * st.sx * 0.95, st.s * st.sy * 0.95); drawSlice(); ctx.restore(); }
-  // title
-  const kp = eBack(seg(t, 0.5, 0.9));
-  if (kp > 0) { ctx.save(); ctx.translate(1390, 285); ctx.rotate(-0.08); ctx.scale(kp, kp); hardText('Office party', 0, 0, 104, C.pink, FS, 400, C.ink, 8, 8); ctx.restore(); }
-  titleWord(t, 'PIZZA', 1400, 530, 220, 0.62, [C.yellow, C.teal, C.neon, C.yellow, C.teal], 1.7);
-  titleWord(t, 'FRIDAY!', 1400, 760, 180, 0.95, [C.neon, C.yellow, C.teal, C.neon, C.yellow, C.teal, C.pink], 1.9);
-  burst(t, 1.05, SL.x, SL.y - 260);
-  burst(t, 3.25, SL.x + 80, SL.y - 200);
+
+// ---------- act 1: terrazzo disc, spinning slice, title ----------
+const SLICE_AT = { x: 610, y: 560 };
+// spring + whirl entrance, then a squash, a full flip around the vertical axis and a wobbly landing
+function slicePose(t) {
+  const enter = phase(t, 0.35, 1.35);
+  const windup = phase(t, 2.15, 2.45), flip = phase(t, 2.45, 3.25);
+  const squash = 0.12 * Math.sin(windup * Math.PI / 2) * (1 - flip);
+  const wobble = jiggle(t - 3.25, 8, 26, 0.1);
+  const turn = Math.cos(TAU * ease.cubicInOut(flip));
+  return {
+    size: ease.spring(enter),
+    angle: -3 * Math.PI * (1 - ease.quartOut(enter)) - 0.14 + 0.05 * Math.sin(2.1 * t),
+    sx: turn * (1 + 0.6 * squash) * (1 + wobble),
+    sy: (1 - squash) * (1 - wobble),
+    rise: 60 * Math.sin(Math.PI * flip)
+  };
+}
+// a word whose letters fall in one by one, squash on landing, then hop in a wave
+function bouncyWord(t, word, centreX, baseY, size, firstAt, hues, hopAt) {
+  const tracking = -6;
+  g.font = `900 ${size}px ${SANS}`;
+  const widths = Array.from(word, ch => g.measureText(ch).width);
+  const total = widths.reduce((sum, w) => sum + w + tracking, -tracking);
+  let left = centreX - total / 2;
+  widths.forEach((w, n) => {
+    const at = firstAt + 0.07 * n, k = phase(t, at, at + 0.5);
+    if (k > 0) {
+      const drop = 180 * (1 - ease.cubicOut(Math.min(1, 1.4 * k)));
+      const squish = jiggle(t - at - 0.36, 10, 30, 0.18);
+      let hop = 0;
+      if (t > hopAt && t < 3.75) hop = 24 * Math.max(0, Math.sin(9 * (t - hopAt) - 0.7 * n)) * phase(t, hopAt, hopAt + 0.2);
+      g.save();
+      g.translate(left + w / 2, baseY - drop - hop);
+      g.scale(1 + squish, 1 - squish);
+      g.rotate(n % 2 ? 0.05 : -0.05);
+      shoutText(word[n], 0, 0, size, hues[n % hues.length], { shadow: PAL.cobalt, off: 12, edge: 10 });
+      g.restore();
+    }
+    left += w + tracking;
+  });
+}
+function actOne(t) {
+  g.drawImage(BACKDROP_A, 0, 0);
+  for (const o of ACT1_ORNAMENTS) drawOrnament(o, t);
+
+  const disc = ease.spring(phase(t, 0.15, 0.95));
+  if (disc > 0) {
+    g.save();
+    g.translate(SLICE_AT.x, SLICE_AT.y); g.scale(disc, disc); g.rotate(0.15 * t);
+    sticker(() => lumpPath(345, 5, 0.035, 0.6), TEX.terrazzo, { shadow: PAL.hot, off: 20 });
+    g.setLineDash([6, 18]); g.lineCap = 'round'; g.lineWidth = 5; g.strokeStyle = PAL.ink;
+    lumpPath(300, 5, 0.035, 0.6); g.stroke();
+    g.setLineDash([]);
+    g.restore();
+  }
+
+  const pose = slicePose(t);
+  if (pose.size > 0.001) {
+    g.save();
+    g.translate(SLICE_AT.x, SLICE_AT.y + 10 - pose.rise);
+    g.rotate(pose.angle);
+    g.scale(0.95 * pose.size * pose.sx, 0.95 * pose.size * pose.sy);
+    paintSlice();
+    g.restore();
+  }
+
+  const tag = ease.back(phase(t, 0.5, 0.9));
+  if (tag > 0) {
+    g.save(); g.translate(1390, 285); g.rotate(-0.08); g.scale(tag, tag);
+    shoutText('Office party', 0, 0, 104, PAL.pink, { family: SCRIPT, weight: 400, off: 8, edge: 8 });
+    g.restore();
+  }
+  bouncyWord(t, 'PIZZA', 1400, 530, 220, 0.62, [PAL.sun, PAL.mint, PAL.hot, PAL.sun, PAL.mint], 1.7);
+  bouncyWord(t, 'FRIDAY!', 1400, 760, 180, 0.95, [PAL.hot, PAL.sun, PAL.mint, PAL.hot, PAL.sun, PAL.mint, PAL.pink], 1.9);
+  popConfetti(t, 1.05, SLICE_AT.x, SLICE_AT.y - 260);
+  popConfetti(t, 3.25, SLICE_AT.x + 80, SLICE_AT.y - 200);
 }
 
-// ---------- transition: triple zigzag band with a terrazzo core ----------
-function zigBand(t) {
-  const p = seg(t, 3.85, 4.75); if (p <= 0 || p >= 1) return;
-  const cx = lerp(-1700, W + 1700, (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2));
-  ctx.save(); ctx.translate(cx, H / 2); ctx.rotate(-0.22);
-  const band = (x0, x1, col) => { const amp = 34, per = 70, top = -1300, bot = 1300; ctx.beginPath();
-    ctx.moveTo(x0, top); for (let y = top, k = 0; y <= bot; y += per / 2, k++) ctx.lineTo(x0 + (k % 2 ? amp : -amp), y);
-    for (let y = bot, k = 0; y >= top; y -= per / 2, k++) ctx.lineTo(x1 + (k % 2 ? amp : -amp), y); ctx.closePath();
-    ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = 9; ctx.strokeStyle = C.ink; ctx.lineJoin = 'miter'; ctx.stroke(); };
-  band(-1250, -1000, C.neon); band(-1000, 1000, PAT.terr); band(1000, 1250, C.yellow);
-  ctx.save(); ctx.rotate(Math.PI / 2); ctx.translate(0, 560); squiggle(1400, 40, 5); strokeCol(C.teal, 30, 10); ctx.restore();
-  ctx.save(); ctx.rotate(Math.PI / 2); ctx.translate(0, -560); zigPath(1400, 26, 12); strokeCol(C.pink, 22, 8); ctx.restore();
-  ctx.restore();
+// ---------- transition: tilted band of three zigzag-edged stripes ----------
+function stripe(left, right, fill) {
+  const tooth = 34, half = 35, top = -1300, bottom = 1300;
+  g.beginPath();
+  let n = 0;
+  for (let y = top; y <= bottom; y += half, n++) g.lineTo(left + (n % 2 ? tooth : -tooth), y);
+  n = 0;
+  for (let y = bottom; y >= top; y -= half, n++) g.lineTo(right + (n % 2 ? tooth : -tooth), y);
+  g.closePath();
+  g.fillStyle = fill; g.fill();
+  g.lineJoin = 'miter'; g.lineWidth = 9; g.strokeStyle = PAL.ink; g.stroke();
+}
+function sweep(t) {
+  const k = phase(t, 3.85, 4.75);
+  if (k <= 0 || k >= 1) return;
+  g.save();
+  g.translate(mix(-1700, WIDTH + 1700, ease.quadInOut(k)), HEIGHT / 2);
+  g.rotate(-0.22);
+  stripe(-1250, -1000, PAL.hot);
+  stripe(-1000, 1000, TEX.terrazzo);
+  stripe(1000, 1250, PAL.sun);
+  g.rotate(Math.PI / 2);
+  g.save(); g.translate(0, 560); wavePath(1400, 40, 5); fatLine(PAL.mint, 30, 10); g.restore();
+  g.save(); g.translate(0, -560); sawPath(1400, 26, 12); fatLine(PAL.pink, 22, 8); g.restore();
+  g.restore();
 }
 
-// ---------- scene 2: the invitation card ----------
-const CARD = { x: 960, y: 544, w: 1300, h: 770 };
-const PILLS = [{ w: 'FRIDAY', f: () => PAT.w.dotsY, t0: 6.15 }, { w: '6 PM', f: () => PAT.w.stripeT, t0: 6.42 }, { w: 'ROOFTOP', f: () => PAT.w.zigP, t0: 6.69 }];
-const TILT = [-0.06, 0.05, -0.03, 0.06, -0.05, 0, 0.04, -0.05, 0.03, -0.06, 0.05, -0.03, 0.07];
-function scene2(t) {
-  ctx.drawImage(BGP2, 0, 0);
-  rain(t);
-  DECO2.forEach(d => deco(d, t));
-  burst(t, 6.95, CARD.x - 20, CARD.y - CARD.h / 2 + 40);   // behind the card: pieces fly out over its top edge
-  const bp = seg(t, 4.35, 5.05); if (bp <= 0) return;
-  const settle = t - 8.75, bump = settle > 0 ? Math.exp(-settle * 7) * Math.sin(settle * 22) * 0.025 : 0;
-  const s = eElastic(bp) * (1 + bump);
-  const hw = CARD.w / 2, hh = CARD.h / 2;
-  ctx.save(); ctx.translate(CARD.x, CARD.y); ctx.rotate(-0.025 + Math.sin(t * 1.8) * 0.006 * (1 - seg(t, 8.6, 9))); ctx.scale(s, s);
-  hard(() => { ctx.beginPath(); ctx.roundRect(-hw, -hh, CARD.w, CARD.h, 56); }, C.cream, C.neon, 26, 26);
-  // terrazzo header strip
-  ctx.save(); ctx.beginPath(); ctx.roundRect(-hw, -hh, CARD.w, CARD.h, 56); ctx.clip();
-  ctx.fillStyle = PAT.terr; ctx.fillRect(-hw, -hh, CARD.w, 150);
-  ctx.restore();
-  ctx.beginPath(); ctx.moveTo(-hw, -hh + 150); ctx.lineTo(hw, -hh + 150); ctx.lineWidth = LW; ctx.strokeStyle = C.ink; ctx.stroke();
-  ctx.beginPath(); ctx.roundRect(-hw, -hh, CARD.w, CARD.h, 56); ctx.stroke();
-  // header label on the strip
-  const lp = eBack(seg(t, 4.85, 5.2));
-  if (lp > 0) { ctx.save(); ctx.translate(-40, -hh + 78); ctx.rotate(-0.03); ctx.scale(lp, lp);
-    ctx.font = `400 70px ${FS}`; const lw = ctx.measureText('You’re invited to').width + 80;
-    hard(() => { ctx.beginPath(); ctx.roundRect(-lw / 2, -54, lw, 108, 54); }, C.purple, C.ink, 9, 9);
-    hardText('You’re invited to', 0, 24, 70, C.cream, FS, 400, C.ink, 5, 6); ctx.restore(); }
-  // PIZZA FRIDAY! letters drop in, then a yellow squiggle underline draws on
-  const word = 'PIZZA FRIDAY!', px = 158; ctx.font = `900 ${px}px ${FR}`; const tw = ctx.measureText(word).width; let x = -tw / 2 - 10;
-  const hp = seg(t, 5.95, 6.3);
-  if (hp > 0) { ctx.save(); ctx.translate(-10, 25); ctx.beginPath(); const n = Math.round(80 * hp); for (let i = 0; i <= n; i++) { const u = i / 80; const X = (u - 0.5) * (tw + 20), Y = Math.sin(u * 7 * Math.PI) * 13; i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); } strokeCol(C.yellow, 22, 6); ctx.restore(); }
-  for (let i = 0; i < word.length; i++) { ctx.font = `900 ${px}px ${FR}`; const ch = word[i], w = ctx.measureText(ch).width, t0 = 5.05 + i * 0.055, p = seg(t, t0, t0 + 0.35);
-    if (p > 0 && ch !== ' ') { const land = t - t0 - 0.35, sq = land > 0 ? Math.exp(-land * 10) * Math.sin(land * 32) * 0.2 : 0;
-      const ps = eBack(Math.min(1, p * 1.25), 3); const wv = seg(t, 7.85 + i * 0.045, 8.15 + i * 0.045), wave = Math.sin(wv * Math.PI) * 26;   // closing wave through the title
-      ctx.save(); ctx.translate(x + w / 2, -25 - (1 - eOut(p)) * 110 - wave); ctx.scale((1 + sq) * ps, (1 - sq) * ps); ctx.rotate(TILT[i] + (1 - p) * (i % 2 ? 0.5 : -0.5));
-      hardText(ch, 0, 0, px, C.ink, FR, 900, C.teal, 10, 1); ctx.restore(); }
-    x += w; }
-  // detail pills with overshoot: FRIDAY · 6 PM · ROOFTOP
-  ctx.font = `900 66px ${FR}`; const pw = PILLS.map(p => ctx.measureText(p.w).width + 84), gap = 70, total = pw.reduce((a, b) => a + b, 0) + gap * 2; let px0 = -total / 2;
-  PILLS.forEach((pl, i) => { const pp = seg(t, pl.t0, pl.t0 + 0.42), cxp = px0 + pw[i] / 2;
-    if (pp > 0) { const sc = eBack(pp, 3.4), land = t - pl.t0 - 0.42, wig = land > 0 ? Math.exp(-land * 6) * Math.sin(land * 20) * 0.06 : (1 - pp) * 0.5;
-      ctx.save(); ctx.translate(cxp, 175 - (1 - eOut(pp)) * 40 - Math.sin(seg(t, 8.3 + i * 0.09, 8.6 + i * 0.09) * Math.PI) * 22); ctx.rotate([-0.04, 0.03, -0.02][i] + wig); ctx.scale(sc, sc);
-      hard(() => { ctx.beginPath(); ctx.roundRect(-pw[i] / 2, -54, pw[i], 108, 54); }, pl.f(), C.ink, 10, 10);
-      ctx.font = `900 66px ${FR}`; const tw2 = ctx.measureText(pl.w).width + 36; ctx.fillStyle = C.cream; ctx.beginPath(); ctx.roundRect(-tw2 / 2, -40, tw2, 80, 40); ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.stroke();
-      ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(pl.w, 0, 4); ctx.restore(); }
-    if (i < 2) { const dp = eBack(seg(t, pl.t0 + 0.18, pl.t0 + 0.4), 3); if (dp > 0) { ctx.save(); ctx.translate(px0 + pw[i] + gap / 2, 175); ctx.scale(dp, dp);
-      hard(() => { ctx.beginPath(); ctx.arc(0, 0, 13, 0, 7); }, C.neon, C.ink, 4, 4, false); ctx.restore(); } }
-    px0 += pw[i] + gap; });
-  // footer line slides up
-  const fp = seg(t, 7.2, 7.6);
-  if (fp > 0) { ctx.save(); ctx.globalAlpha = eOut(fp); ctx.translate(0, 300 + (1 - eBack(fp)) * 30); ctx.font = `800 44px ${FR}`; ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText('Bring your appetite  ·  RSVP by Thursday', 0, 0); ctx.restore(); ctx.globalAlpha = 1; }
-  // starburst sticker (top-left corner)
-  const sp = seg(t, 6.95, 7.45);
-  if (sp > 0) { const rot = (1 - sp) * -2 + Math.floor(t * 4) * 0.05; ctx.save(); ctx.translate(-hw + 20, -hh + 30); ctx.scale(eBack(sp, 3) * 0.8, eBack(sp, 3) * 0.8); ctx.rotate(rot);
-    hard(() => { ctx.beginPath(); for (let i = 0; i < 36; i++) { const a = i / 36 * Math.PI * 2, r = i % 2 ? 124 : 150; i ? ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r) : ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); }, C.yellow, C.purple, 12, 12);
-    ctx.rotate(-rot - 0.12);
-    hardText('FREE!', 0, 12, 74, C.neon, FR, 900, C.ink, 6, 8);
-    ctx.font = `800 32px ${FR}`; ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.fillText('SLICES', 0, 58); ctx.restore(); }
-  // spinning slice sticker (top-right corner)
-  const kp = seg(t, 5.5, 6.2);
-  if (kp > 0) { const ks = eElastic(kp); ctx.save(); ctx.translate(hw - 30, -hh + 10); ctx.rotate(0.5 + (1 - eOutQ(kp)) * -Math.PI * 4 + Math.sin(t * 2.3) * 0.12 + eIO(seg(t, 8.0, 8.7)) * Math.PI * 2); ctx.scale(0.42 * ks, 0.42 * ks); drawSlice(); ctx.restore(); }
-  ctx.restore();
+// ---------- act 2: the invitation card ----------
+const CARD = { x: 960, y: 544, w: 1300, h: 770, round: 56, header: 150 };
+const CHIPS = [
+  { label: 'FRIDAY', tex: 'polkaSun', at: 6.15, tilt: -0.04 },
+  { label: '6 PM', tex: 'hatchMint', at: 6.42, tilt: 0.03 },
+  { label: 'ROOFTOP', tex: 'chevronPink', at: 6.69, tilt: -0.02 }
+];
+const HEADLINE = 'PIZZA FRIDAY!';
+const LETTER_TILT = [-0.06, 0.05, -0.03, 0.06, -0.05, 0, 0.04, -0.05, 0.03, -0.06, 0.05, -0.03, 0.07];
+function cardShape() { g.beginPath(); g.roundRect(-CARD.w / 2, -CARD.h / 2, CARD.w, CARD.h, CARD.round); }
+
+function cardHeader(t) {
+  const top = -CARD.h / 2;
+  g.save(); cardShape(); g.clip();
+  g.fillStyle = TEX.terrazzo; g.fillRect(-CARD.w / 2, top, CARD.w, CARD.header);
+  g.restore();
+  g.lineWidth = INK_W; g.strokeStyle = PAL.ink;
+  g.beginPath(); g.moveTo(-CARD.w / 2, top + CARD.header); g.lineTo(CARD.w / 2, top + CARD.header); g.stroke();
+  cardShape(); g.stroke();
+
+  const k = ease.back(phase(t, 4.85, 5.2));
+  if (k <= 0) return;
+  const words = 'You’re invited to';
+  g.save(); g.translate(-40, top + 78); g.rotate(-0.03); g.scale(k, k);
+  g.font = `400 70px ${SCRIPT}`;
+  const span = g.measureText(words).width + 80;
+  sticker(() => { g.beginPath(); g.roundRect(-span / 2, -54, span, 108, 54); }, PAL.violet, { off: 9 });
+  shoutText(words, 0, 24, 70, PAL.cream, { family: SCRIPT, weight: 400, off: 5, edge: 6 });
+  g.restore();
+}
+function cardHeadline(t) {
+  const size = 158;
+  g.font = `900 ${size}px ${SANS}`;
+  const full = g.measureText(HEADLINE).width;
+  // squiggle underline that draws itself on
+  const under = phase(t, 5.95, 6.3);
+  if (under > 0) {
+    g.save(); g.translate(-10, 25);
+    wavePath(full + 20, 13, 3.5, 80, Math.round(80 * under));
+    fatLine(PAL.sun, 22, 6);
+    g.restore();
+  }
+  let left = -full / 2 - 10;
+  for (let n = 0; n < HEADLINE.length; n++) {
+    const ch = HEADLINE[n];
+    g.font = `900 ${size}px ${SANS}`;
+    const w = g.measureText(ch).width;
+    const at = 5.05 + 0.055 * n, k = phase(t, at, at + 0.35);
+    if (k > 0 && ch !== ' ') {
+      const squish = jiggle(t - at - 0.35, 10, 32, 0.2);
+      const grow = ease.back(Math.min(1, 1.25 * k), 3);
+      // a ripple that runs through the letters near the end
+      const ripple = 26 * Math.sin(Math.PI * phase(t, 7.85 + 0.045 * n, 8.15 + 0.045 * n));
+      g.save();
+      g.translate(left + w / 2, -25 - 110 * (1 - ease.cubicOut(k)) - ripple);
+      g.scale(grow * (1 + squish), grow * (1 - squish));
+      g.rotate(LETTER_TILT[n] + (1 - k) * (n % 2 ? 0.5 : -0.5));
+      shoutText(ch, 0, 0, size, PAL.ink, { shadow: PAL.mint, off: 10, edge: 1 });
+      g.restore();
+    }
+    left += w;
+  }
+}
+function cardChips(t) {
+  const row = 175, spacing = 70;
+  g.font = `900 66px ${SANS}`;
+  const widths = CHIPS.map(c => g.measureText(c.label).width + 84);
+  let left = -(widths.reduce((a, b) => a + b, 0) + spacing * (CHIPS.length - 1)) / 2;
+  CHIPS.forEach((chip, n) => {
+    const w = widths[n], k = phase(t, chip.at, chip.at + 0.42);
+    if (k > 0) {
+      const grow = ease.back(k, 3.4);
+      const shake = k < 1 ? 0.5 * (1 - k) : jiggle(t - chip.at - 0.42, 6, 20, 0.06);
+      const hop = 22 * Math.sin(Math.PI * phase(t, 8.3 + 0.09 * n, 8.6 + 0.09 * n));
+      g.save();
+      g.translate(left + w / 2, row - 40 * (1 - ease.cubicOut(k)) - hop);
+      g.rotate(chip.tilt + shake); g.scale(grow, grow);
+      sticker(() => { g.beginPath(); g.roundRect(-w / 2, -54, w, 108, 54); }, TEX[chip.tex], { off: 10 });
+      g.font = `900 66px ${SANS}`;
+      const inner = g.measureText(chip.label).width + 36;
+      g.beginPath(); g.roundRect(-inner / 2, -40, inner, 80, 40);
+      g.fillStyle = PAL.cream; g.fill();
+      g.lineWidth = 5; g.strokeStyle = PAL.ink; g.stroke();
+      g.fillStyle = PAL.ink; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(chip.label, 0, 4);
+      g.restore();
+    }
+    if (n < CHIPS.length - 1) {
+      const dot = ease.back(phase(t, chip.at + 0.18, chip.at + 0.4), 3);
+      if (dot > 0) {
+        g.save(); g.translate(left + w + spacing / 2, row); g.scale(dot, dot);
+        sticker(() => { g.beginPath(); g.arc(0, 0, 13, 0, TAU); }, PAL.hot, { off: 4, outline: false });
+        g.restore();
+      }
+    }
+    left += w + spacing;
+  });
+}
+function cardFooter(t) {
+  const k = phase(t, 7.2, 7.6);
+  if (k <= 0) return;
+  g.save();
+  g.globalAlpha = ease.cubicOut(k);
+  g.font = `800 44px ${SANS}`; g.fillStyle = PAL.ink; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  g.fillText('Bring your appetite  ·  RSVP by Thursday', 0, 300 + 30 * (1 - ease.back(k)));
+  g.restore();
+}
+// star-shaped "FREE! SLICES" sticker that ticks round on the top-left corner
+function freeBadge(t) {
+  const k = phase(t, 6.95, 7.45);
+  if (k <= 0) return;
+  const spin = -2 * (1 - k) + 0.05 * Math.floor(4 * t), grow = 0.8 * ease.back(k, 3);
+  g.save();
+  g.translate(-CARD.w / 2 + 20, -CARD.h / 2 + 30); g.scale(grow, grow); g.rotate(spin);
+  sticker(() => {
+    g.beginPath();
+    for (let p = 0; p < 36; p++) { const a = (p / 36) * TAU, r = p % 2 ? 124 : 150; g.lineTo(r * Math.cos(a), r * Math.sin(a)); }
+    g.closePath();
+  }, PAL.sun, { shadow: PAL.violet, off: 12 });
+  g.rotate(-spin - 0.12);
+  shoutText('FREE!', 0, 12, 74, PAL.hot, { off: 6, edge: 8 });
+  g.font = `800 32px ${SANS}`; g.fillStyle = PAL.ink; g.textAlign = 'center';
+  g.fillText('SLICES', 0, 58);
+  g.restore();
+}
+// mini slice that whirls onto the top-right corner and does a final spin
+function sliceBadge(t) {
+  const k = phase(t, 5.5, 6.2);
+  if (k <= 0) return;
+  const s = 0.42 * ease.spring(k);
+  g.save();
+  g.translate(CARD.w / 2 - 30, -CARD.h / 2 + 10);
+  g.rotate(0.5 - 4 * Math.PI * (1 - ease.quartOut(k)) + 0.12 * Math.sin(2.3 * t) + TAU * ease.cubicInOut(phase(t, 8.0, 8.7)));
+  g.scale(s, s);
+  paintSlice();
+  g.restore();
+}
+function actTwo(t) {
+  g.drawImage(BACKDROP_B, 0, 0);
+  confettiRain(t);
+  for (const o of ACT2_ORNAMENTS) drawOrnament(o, t);
+  popConfetti(t, 6.95, CARD.x - 20, CARD.y - CARD.h / 2 + 40);   // fired from behind the card, over its top edge
+  const k = phase(t, 4.35, 5.05);
+  if (k <= 0) return;
+  const s = ease.spring(k) * (1 + jiggle(t - 8.75, 7, 22, 0.025));
+  g.save();
+  g.translate(CARD.x, CARD.y);
+  g.rotate(-0.025 + 0.006 * Math.sin(1.8 * t) * (1 - phase(t, 8.6, 9)));
+  g.scale(s, s);
+  sticker(cardShape, PAL.cream, { shadow: PAL.hot, off: 26 });
+  cardHeader(t);
+  cardHeadline(t);
+  cardChips(t);
+  cardFooter(t);
+  freeBadge(t);
+  sliceBadge(t);
+  g.restore();
 }
 
-function frame(t) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
-  if (t < 4.3) scene1(t); else scene2(t);
-  zigBand(t);
-  const fade = Math.max(1 - seg(t, 0, 0.2), eIn(seg(t, 9.1, 9.5)));
-  if (fade > 0) { ctx.globalAlpha = fade; ctx.fillStyle = t < 1 ? C.bg1 : C.bg2; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+function render(t) {
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalAlpha = 1;
+  (t < 4.3 ? actOne : actTwo)(t);
+  sweep(t);
+  // fade up from the backdrop colour, and out at the end
+  const veil = Math.max(1 - phase(t, 0, 0.2), ease.cubicIn(phase(t, 9.1, 9.5)));
+  if (veil > 0) {
+    g.globalAlpha = veil;
+    g.fillStyle = t < 1 ? PAL.roseBg : PAL.mintBg;
+    g.fillRect(0, 0, WIDTH, HEIGHT);
+    g.globalAlpha = 1;
+  }
 }
 
-// sound design timeline for audio.py
+// sound cue list consumed by events.mjs -> audio.py
 window.events = function () {
-  const ev = [], add = (t, k, o = {}) => ev.push({ t: +t.toFixed(3), k, ...o });
-  DECO1.forEach((d, i) => add(d.t0 + 0.05, 'pop', { f: 700 + (i % 5) * 140, v: 0.35 }));
-  add(0.2, 'boing', { f: 180, v: 0.7 }); add(0.4, 'whoosh', { d: 0.9 }); add(1.05, 'boing', { f: 240 }); add(1.05, 'confetti');
-  add(0.55, 'bloop', { f: 420 });
-  [...'PIZZA'].forEach((_, i) => add(0.62 + i * 0.07 + 0.36, 'thud', { f: 150 + i * 12 }));
-  [...'FRIDAY!'].forEach((_, i) => add(0.95 + i * 0.07 + 0.36, 'thud', { f: 170 + i * 10 }));
-  add(2.15, 'bloopdn', { f: 500 }); add(2.45, 'whoosh', { d: 0.8 }); add(3.25, 'boing', { f: 300 }); add(3.25, 'confetti');
-  add(3.8, 'whoosh', { d: 1.0 }); add(4.35, 'boing', { f: 200 });
-  DECO2.forEach((d, i) => add(d.t0 + 0.05, 'pop', { f: 800 + (i % 4) * 160, v: 0.3 }));
-  add(4.9, 'bloop', { f: 380 });
-  [...'PIZZA FRIDAY!'].forEach((ch, i) => { if (ch !== ' ') add(5.05 + i * 0.055 + 0.35, 'tick', { f: 900 + i * 60 }); });
-  add(5.5, 'whoosh', { d: 0.6 }); add(5.95, 'squeak', { d: 0.35 });
-  PILLS.forEach((p, i) => { add(p.t0 + 0.1, 'clack', { f: 1200 + i * 200 }); add(p.t0 + 0.3, 'pop', { f: 600 + i * 220, v: 0.6 }); });
-  add(6.95, 'boing', { f: 340, v: 0.9 }); add(6.95, 'confetti'); add(7.2, 'bloop', { f: 520 });
-  DECO2.forEach((d, i) => { if (d.out) add(d.out + 0.1, 'bloopdn', { f: 900 - i * 30, v: 0.3 }); });
-  [...'PIZZAFRIDAY!'].forEach((_, i) => add(7.95 + i * 0.045 + (i > 4 ? 0.045 : 0), 'tick', { f: 1400 + i * 50, v: 0.7 }));
-  PILLS.forEach((_, i) => add(8.35 + i * 0.09, 'pop', { f: 900 + i * 200, v: 0.5 })); add(8.0, 'whoosh', { d: 0.7 });
-  add(8.75, 'chime', { f: 784 });
-  return ev;
+  const cues = [];
+  const cue = (t, k, extra) => cues.push(Object.assign({ t: Math.round(t * 1000) / 1000, k }, extra));
+  ACT1_ORNAMENTS.forEach((o, n) => cue(o.start + 0.05, 'pop', { f: 700 + 140 * (n % 5), v: 0.35 }));
+  cue(0.2, 'boing', { f: 180, v: 0.7 });
+  cue(0.4, 'whoosh', { d: 0.9 });
+  cue(1.05, 'boing', { f: 240 });
+  cue(1.05, 'confetti');
+  cue(0.55, 'bloop', { f: 420 });
+  for (let n = 0; n < 5; n++) cue(0.98 + 0.07 * n, 'thud', { f: 150 + 12 * n });
+  for (let n = 0; n < 7; n++) cue(1.31 + 0.07 * n, 'thud', { f: 170 + 10 * n });
+  cue(2.15, 'bloopdn', { f: 500 });
+  cue(2.45, 'whoosh', { d: 0.8 });
+  cue(3.25, 'boing', { f: 300 });
+  cue(3.25, 'confetti');
+  cue(3.8, 'whoosh', { d: 1 });
+  cue(4.35, 'boing', { f: 200 });
+  ACT2_ORNAMENTS.forEach((o, n) => cue(o.start + 0.05, 'pop', { f: 800 + 160 * (n % 4), v: 0.3 }));
+  cue(4.9, 'bloop', { f: 380 });
+  Array.from(HEADLINE).forEach((ch, n) => { if (ch !== ' ') cue(5.4 + 0.055 * n, 'tick', { f: 900 + 60 * n }); });
+  cue(5.5, 'whoosh', { d: 0.6 });
+  cue(5.95, 'squeak', { d: 0.35 });
+  CHIPS.forEach((chip, n) => {
+    cue(chip.at + 0.1, 'clack', { f: 1200 + 200 * n });
+    cue(chip.at + 0.3, 'pop', { f: 600 + 220 * n, v: 0.6 });
+  });
+  cue(6.95, 'boing', { f: 340, v: 0.9 });
+  cue(6.95, 'confetti');
+  cue(7.2, 'bloop', { f: 520 });
+  ACT2_ORNAMENTS.forEach((o, n) => { if (o.leave) cue(o.leave + 0.1, 'bloopdn', { f: 900 - 30 * n, v: 0.3 }); });
+  for (let n = 0; n < 12; n++) cue(7.95 + 0.045 * n + (n > 4 ? 0.045 : 0), 'tick', { f: 1400 + 50 * n, v: 0.7 });
+  CHIPS.forEach((chip, n) => cue(8.35 + 0.09 * n, 'pop', { f: 900 + 200 * n, v: 0.5 }));
+  cue(8.0, 'whoosh', { d: 0.7 });
+  cue(8.75, 'chime', { f: 784 });
+  return cues;
 };
-window.draw = function (job) { frame(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
-window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`900 100px 'Rubik'`, 'PIZZA FRIDAY! 6 PM ROOFTOP FREE!'),
-  document.fonts.load(`800 40px 'Rubik'`, 'SLICES Bring your appetite · RSVP by Thursday'),
-  document.fonts.load(`400 80px 'Shrikhand'`, 'Office party You’re invited to')])).then(buildAssets);
-</script></body></html>
+
+window.draw = function ({ t, q }) {
+  render(t);
+  return stage.toDataURL('image/jpeg', q || 0.92).split(',')[1];
+};
+
+window.ready = (async () => {
+  await document.fonts.ready;
+  await Promise.all([
+    ['900 100px', SANS, 'PIZZA FRIDAY! 6 PM ROOFTOP FREE!'],
+    ['800 40px', SANS, 'SLICES Bring your appetite · RSVP by Thursday'],
+    ['400 80px', SCRIPT, 'Office party You’re invited to']
+  ].map(([spec, family, sample]) => document.fonts.load(`${spec} ${family}`, sample)));
+  buildTextures();
+})();
+</script>
+</body>
+</html>
