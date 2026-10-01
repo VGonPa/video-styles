@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── teletext · CEEVIEW morning bulletin ─────────────────────────────────────────────────
+// A 40×25 character page on a CRT: 8 flat colours, 2×3 mosaic sixels, double-height titles, a running clock.
+// TV warms up on a rolling header search → P100 index loads row by row → digits 4-0-0 typed, header rolls to
+// the weather map (mosaic island, temperatures revealed one by one) → yellow fastext → P302 football results,
+// subpage flips 1/3 → 2/3 (league table) → red fastext → P104 news in brief with a stepping ticker → hold → CRT off.
+// Everything lives on the character grid: a 480×500 buffer (12×20 per cell) scaled 4×2 onto the screen.
+const W = 1920, H = 1080, DUR = 10.0;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eIn = u => u * u * u, eOut = u => 1 - Math.pow(1 - u, 3);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+const COLS = 40, ROWS = 25, CW = 12, CH = 20, BW = COLS * CW, BH = ROWS * CH, OY = 40;
+// 0 black 1 red 2 green 3 yellow 4 blue 5 magenta 6 cyan 7 white
+const PAL = ['#000000', '#ff2a1a', '#20f030', '#fff21a', '#1f3cff', '#ff2cf0', '#1ff0ff', '#ffffff'];
+const K = 0, R = 1, G = 2, Y = 3, B = 4, M = 5, C = 6, Wh = 7;
+
+// ── timeline ──
+const ROWDT = 0.026;                                  // one row arrives every 26 ms (≈0.62 s per page)
+const LOADS = [                                        // when each page (or subpage) starts arriving
+  { t: 0.62, pg: 'index' }, { t: 2.62, pg: 'weather' }, { t: 4.98, pg: 'sport1' },
+  { t: 6.34, pg: 'sport2' }, { t: 7.82, pg: 'news' }];
+const INPUT = [                                        // page number shown in the header input field
+  { t: 0, s: 'P100' }, { t: 1.78, s: 'P4  ' }, { t: 1.93, s: 'P40 ' }, { t: 2.08, s: 'P400' },
+  { t: 4.46, s: 'P302' }, { t: 7.30, s: 'P104' }];
+const SEARCH = [[0.0, 0.62, 100], [2.08, 2.62, 400], [4.46, 4.98, 302], [7.30, 7.82, 104]];  // header rolls
+const FASTEXT = [[4.30, 4.56, 2], [7.14, 7.40, 0]];  // [t0, t1, button] highlight when pressed
+const OFF0 = 9.36;                                     // CRT switch-off starts (final page fully loaded at ~8.45)
+
+// ── character generator: rasterise Inter into 12×20 (and 12×40 double-height) masks ──
+const GLYPHS = []; for (let i = 32; i < 127; i++) GLYPHS.push(String.fromCharCode(i));
+let ATLAS = [];                                        // per colour: canvas 1140×60 (rows 0-19 single, 20-59 double)
+function buildAtlas() {
+  const n = GLYPHS.length, masks = new Uint8Array(n * CW * 60);
+  const t = mk(CW * 4, 40), q = t.getContext('2d');
+  GLYPHS.forEach((ch, gi) => {
+    for (const [sz, sx0, base, oy, hh] of [[19, 1.05, 16, 0, 20], [38, 0.525, 32, 20, 40]]) {
+      q.setTransform(1, 0, 0, 1, 0, 0); q.clearRect(0, 0, t.width, t.height);
+      q.font = `600 ${sz}px Inter`;
+      q.textAlign = 'center'; q.textBaseline = 'alphabetic'; q.fillStyle = '#fff';
+      const mt = q.measureText(ch), ink = mt.actualBoundingBoxLeft + mt.actualBoundingBoxRight;
+      const sx = Math.min(sx0, 10.6 / Math.max(1, ink));              // wide letters (M, W) squeezed to fit the cell
+      q.setTransform(sx, 0, 0, 1, 0, 0); q.fillText(ch, (CW * 0.5 + 0.5) / sx, base);
+      const d = q.getImageData(0, 0, CW, hh).data;
+      for (let y = 0; y < hh; y++) for (let x = 0; x < CW; x++) masks[(gi * 60 + oy + y) * CW + x] = d[(y * CW + x) * 4 + 3] > 110 ? 1 : 0;
+    }
+  });
+  ATLAS = PAL.map((hex, ci) => {
+    const c = mk(n * CW, 60);
+    const g = c.getContext('2d'), im = g.createImageData(n * CW, 60);
+    const r = parseInt(hex.slice(1, 3), 16), gg = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    for (let gi = 0; gi < n; gi++) for (let y = 0; y < 60; y++) for (let x = 0; x < CW; x++) if (masks[(gi * 60 + y) * CW + x]) {
+      const o = (y * n * CW + gi * CW + x) * 4; im.data[o] = r; im.data[o + 1] = gg; im.data[o + 2] = b; im.data[o + 3] = 255; }
+    g.putImageData(im, 0, 0); return c;
+  });
+}
+
+// ── page model: 25×40 cells {c, f, b, m (mosaic bits or -1), dh (0 / 1 top / 2 bottom)} ──
+const blank = () => Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => ({ c: ' ', f: Wh, b: K, m: -1, dh: 0 })));
+function put(pg, r, c, s, f = Wh, b) { for (let i = 0; i < s.length && c + i < COLS; i++) { const e = pg[r][c + i]; e.c = s[i]; e.f = f; e.m = -1; e.dh = 0; if (b !== undefined) e.b = b; } }
+function dh(pg, r, c, s, f = Wh, b) { put(pg, r, c, s, f, b); put(pg, r + 1, c, s, f, b); for (let i = 0; i < s.length && c + i < COLS; i++) { pg[r][c + i].dh = 1; pg[r + 1][c + i].dh = 2; } }
+function bg(pg, r0, r1, c0, c1, b) { for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) pg[r][c].b = b; }
+function rpad(s, n) { s = String(s); return ' '.repeat(Math.max(0, n - s.length)) + s; }
+// set one sixel; (sx, sy) in sixel units, 80×75 per page
+function six(pg, sx, sy, f) {
+  const c = sx >> 1, r = Math.floor(sy / 3); if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return;
+  const e = pg[r][c]; if (e.m < 0) { e.m = 0; e.c = ' '; } e.m |= 1 << ((sy % 3) * 2 + (sx & 1)); e.f = f;
+}
+function mosaicCells(pg, r0, r1, c0, c1) { for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) { const e = pg[r][c]; e.m = 0; e.c = ' '; e.dh = 0; } }
+function sprite(pg, sx0, sy0, rows, f) { rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] === '#') six(pg, sx0 + x, sy0 + y, f); }); }
+function fastext(pg, t) {
+  const labels = [['News', R], ['Weather', G], ['Sport', Y], ['Index', C]];
+  labels.forEach(([s, f], i) => {
+    const on = FASTEXT.some(([a, b, k]) => k === i && t >= a && t < b);
+    const c0 = i * 10; if (on) { bg(pg, 24, 24, c0, c0 + 9, f); put(pg, 24, c0 + 1, s, K); } else put(pg, 24, c0 + 1, s, f);
+  });
+}
+
+// ── mosaic lettering for the CEEVIEW logo (sixels, 2-wide stems, 2-tall bars) ──
+const LOGO = {
+  C: ['.#####', '######', '##....', '##....', '##....', '##....', '##....', '##....', '##....', '##....', '######', '.#####'],
+  E: ['######', '######', '##....', '##....', '##....', '#####.', '#####.', '##....', '##....', '##....', '######', '######'],
+  V: ['##..##', '##..##', '##..##', '##..##', '##..##', '##..##', '##..##', '.####.', '.####.', '.####.', '..##..', '..##..'],
+  I: ['##', '##', '##', '##', '##', '##', '##', '##', '##', '##', '##', '##'],
+  W: ['##....##', '##....##', '##....##', '##....##', '##....##', '##.##.##', '##.##.##', '##.##.##', '##.##.##', '########', '.##..##.', '.##..##.'],
+};
+
+// ── pages ──
+function pageIndex(lt) {
+  const pg = blank();
+  bg(pg, 1, 6, 0, 39, B);
+  // rising sun (yellow) over a red horizon, cols 2-10
+  for (let sy = 3; sy < 16; sy++) for (let sx = 2; sx < 24; sx++) {         // sixels are 24×13 px on screen
+    const dx = (sx + 0.5 - 13) * 24, dy = (sy + 0.5 - 16) * 13.3;
+    const d = Math.hypot(dx, dy), a = Math.atan2(dy, dx), ray = Math.abs(((a * 7 / Math.PI) % 2 + 2) % 2 - 1) < 0.34;
+    if (d < 92 || (d > 118 && d < 160 && ray)) six(pg, sx, sy, Y);
+  }
+  for (let sx = 2; sx < 24; sx++) { six(pg, sx, 16, R); six(pg, sx, 17, R); }
+  let x = 26; for (const ch of 'CEEVIEW') { sprite(pg, x, 4, LOGO[ch], Y); x += LOGO[ch][0].length + 1; }
+  dh(pg, 8, 2, 'MORNING BULLETIN', Wh); put(pg, 9, 30, ' ', Wh); put(pg, 8, 31, 'Page 100', C);
+  const items = [['News in brief', 104], ['Weather & travel', 400], ['Football results', 302], ['Markets', 200], ['TV & radio', 600]];
+  items.forEach(([s, n], i) => {
+    const r = 11 + i * 2;
+    put(pg, r, 2, s, C); put(pg, r, 3 + s.length, '.'.repeat(33 - 3 - s.length), B); put(pg, r, 34, String(n), Wh);
+  });
+  bg(pg, 21, 21, 0, 39, R); put(pg, 21, 1, 'Top story: Kellan Bridge reopens', Wh); put(pg, 21, 34, '104', Y);
+  fastext(pg, T); return pg;
+}
+// island map in sixels: sea = blue background, land = green
+const MAPC0 = 2, MAPC1 = 25, MAPR0 = 4, MAPR1 = 21;
+const landAt = (() => {
+  const w = (MAPC1 - MAPC0 + 1) * 2, h = (MAPR1 - MAPR0 + 1) * 3, grid = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const u = (x + 0.5) / w, v = (y + 0.5) / h;
+    const th = Math.atan2(v - 0.52, (u - 0.5) * 1.4);
+    const rr = 1 + 0.16 * Math.sin(3 * th + 0.8) + 0.09 * Math.sin(5 * th + 2.1) + 0.06 * Math.sin(9 * th + 0.3) + 0.035 * Math.sin(15 * th + 1.7);
+    const main = Math.hypot((u - 0.5 - 0.1 * (v - 0.5)) / 0.33, (v - 0.53) / 0.43) < rr;
+    const isle = Math.hypot((u - 0.86) / 0.07, (v - 0.2) / 0.075) < 1 + 0.2 * Math.sin(4 * Math.atan2(v - 0.2, u - 0.86));
+    const isle2 = Math.hypot((u - 0.12) / 0.05, (v - 0.8) / 0.06) < 1;
+    grid[y * w + x] = main || isle || isle2 ? 1 : 0;
+  }
+  return { w, h, grid };
+})();
+const SUN = (() => { const rows = [];                    // 8×9 sixels: disc + eight rays
+  for (let y = 0; y < 9; y++) { let s = ''; for (let x = 0; x < 8; x++) {
+    const dx = (x + 0.5 - 4) * 24, dy = (y + 0.5 - 4.5) * 13.3, d = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+    const ray = Math.abs(((a * 4 / Math.PI) % 1 + 1) % 1 - 0.5) > 0.36;
+    s += d < 52 ? '#' : '.'; } rows.push(s); } return rows; })();
+const CLOUD = ['...##...', '..####..', '.######.', '########', '########', '.######.'];
+const RAIN = [['.#...#..', '...#...#', '#...#...'], ['...#...#', '#...#...', '.#...#..']];
+function pageWeather(lt) {
+  const pg = blank();
+  bg(pg, 1, 2, 0, 39, B); dh(pg, 1, 2, 'WEATHER', Y); dh(pg, 1, 11, 'TODAY', Wh); put(pg, 1, 30, 'Page 400', C); put(pg, 2, 30, '        ', C);
+  bg(pg, MAPR0, MAPR1, MAPC0, MAPC1, B); mosaicCells(pg, MAPR0, MAPR1, MAPC0, MAPC1);
+  for (let y = 0; y < landAt.h; y++) for (let x = 0; x < landAt.w; x++) if (landAt.grid[y * landAt.w + x]) six(pg, MAPC0 * 2 + x, MAPR0 * 3 + y, G);
+  // symbols: each takes over whole cells (one foreground colour per cell, like the real thing)
+  const icon = (c0, r0, cols, rws, rowsBits, f) => { mosaicCells(pg, r0, r0 + rws - 1, c0, c0 + cols - 1); bg(pg, r0, r0 + rws - 1, c0, c0 + cols - 1, K); sprite(pg, c0 * 2 + (cols * 2 - rowsBits[0].length >> 1), r0 * 3 + (rws * 3 - rowsBits.length >> 1), rowsBits, f); };
+  icon(14, 12, 4, 3, SUN, Y); icon(6, 15, 4, 3, SUN, Y);
+  icon(9, 6, 4, 2, CLOUD, Wh);
+  const rp = RAIN[Math.floor(lt * 5) % 2]; mosaicCells(pg, 8, 8, 9, 12); bg(pg, 8, 8, 9, 12, K); sprite(pg, 18, 24, rp, C);
+  icon(20, 5, 4, 2, CLOUD, Wh);
+  // temperatures revealed one by one: inverse flash, then settle
+  const temps = [[5, 14, '11'], [11, 6, '14'], [15, 19, '17'], [18, 11, '15'], [11, 20, '13']];
+  temps.forEach(([r, c, s], i) => {
+    const t0 = 0.72 + i * 0.13; if (lt < t0) return;
+    const inv = lt < t0 + 0.14;
+    put(pg, r, c - 1, ' ' + s + ' ', inv ? K : Y, inv ? Y : K);
+  });
+  const text = [[5, 'MORNING', Y], [7, 'Frost clears', Wh], [8, 'by ten, then', Wh], [9, 'bright and', Wh], [10, 'dry. Showers', Wh],
+    [11, 'reach the', Wh], [12, 'north later.', Wh], [15, 'Max  17C', C], [16, 'Min   4C', C], [18, 'Wind SW 3', G], [20, '5-day: 401', Wh]];
+  text.forEach(([r, s, f]) => put(pg, r, 27, s, f));
+  fastext(pg, T); return pg;
+}
+const RESULTS = [['Harbour Utd', '2-1', 'Millbrook', 'Doyle 12, 67', 'Ashe 80'], ['Kestrel City', '0-0', 'Oakhaven', '', ''],
+  ['Lowmoor', '3-2', 'Fenwick Ath', 'Rahim 5, 41, 88', 'Cole 30, Marr 72'], ['Stonebridge', '1-4', 'Ellery Town', 'Pike 60', 'Nash 2, 9, 77'],
+  ['Brackley Vale', '1-0', 'Dunmere', 'Osei 90', '']];
+const TABLE = [['Oakhaven', 9, 2, 1], ['Harbour Utd', 8, 2, 2], ['Lowmoor', 7, 3, 2], ['Ellery Town', 6, 3, 3], ['Kestrel City', 5, 4, 3],
+  ['Millbrook', 4, 1, 7], ['Fenwick Ath', 3, 2, 7], ['Dunmere', 2, 4, 6], ['Stonebridge', 1, 4, 7], ['Brackley Vale', 1, 3, 8]];
+function sportHead(pg, sub) {
+  // mosaic pitch stripes, then a double-height title
+  mosaicCells(pg, 1, 2, 0, 8);
+  for (let sy = 3; sy < 9; sy++) for (let sx = 0; sx < 18; sx++) if (((sx >> 2) + (sy >> 1)) % 2 === 0) six(pg, sx, sy, G);
+  dh(pg, 1, 10, 'FOOTBALL', Y); put(pg, 1, 28, 'COUNTY', G); put(pg, 2, 28, 'LEAGUE', G);
+  put(pg, 1, 36, sub, Wh); pg[1][36].dh = 0;
+}
+function pageSport1(lt) {
+  const pg = blank(); sportHead(pg, '1/3');
+  put(pg, 4, 1, 'RESULTS', C); put(pg, 4, 9, 'Saturday', Wh);
+  RESULTS.forEach(([h, s, a, hs, as], i) => {
+    const r = 6 + i * 3;
+    put(pg, r, 1, h, Wh); put(pg, r, 16, s, Y); put(pg, r, 21, a, Wh);
+    if (hs) put(pg, r + 1, 1, hs, G); if (as) put(pg, r + 1, 21, as, G);
+  });
+  bg(pg, 22, 22, 0, 39, B); put(pg, 22, 1, 'League table follows', Wh); put(pg, 22, 35, '2/3', Y);
+  fastext(pg, T); return pg;
+}
+function pageSport2(lt) {
+  const pg = blank(); sportHead(pg, '2/3');
+  put(pg, 4, 1, 'LEAGUE TABLE', C); put(pg, 4, 14, 'after 12 games', Wh);
+  put(pg, 6, 5, 'Team', Y); ['P', 'W', 'D', 'L', 'Pts'].forEach((s, i) => put(pg, 6, [20, 24, 28, 32, 35][i], rpad(s, i === 4 ? 3 : 2), Y));
+  TABLE.forEach(([n, w, d, l], i) => {
+    const r = 8 + i + (i >= 8 ? 1 : 0), f = i === 0 ? Y : Wh;
+    put(pg, r, 1, rpad(i + 1, 2), C); put(pg, r, 5, n, f);
+    [12, w, d, l].forEach((v, k) => put(pg, r, [20, 24, 28, 32][k], rpad(v, 2), f));
+    put(pg, r, 35, rpad(w * 3 + d, 3), i === 0 ? Y : G);
+  });
+  for (let c = 1; c < 39; c++) { pg[16][c].m = 0; six(pg, c * 2, 49, R); six(pg, c * 2 + 1, 49, R); }  // relegation line under 8th
+  put(pg, 20, 1, 'Top scorer', C); put(pg, 20, 12, 'Rahim (Lowmoor) 14', Wh);
+  bg(pg, 22, 22, 0, 39, B); put(pg, 22, 1, 'Fixtures follow', Wh); put(pg, 22, 35, '3/3', Y);
+  fastext(pg, T); return pg;
+}
+const TICKER = ' +++ Rail: all lines running on time  +++ Markets open slightly higher  +++ Ferry to the Isle of Wren resumes  +++ Bright, max 17C';
+function pageNews(lt) {
+  const pg = blank();
+  bg(pg, 1, 2, 0, 39, R); dh(pg, 1, 2, 'NEWS IN BRIEF', Wh); put(pg, 1, 31, 'Page 104', Y); put(pg, 2, 31, '        ', Y);
+  dh(pg, 4, 1, 'KELLAN BRIDGE REOPENS', Y);
+  ['The Kellan Street bridge reopened at', 'dawn, two weeks ahead of schedule.', 'Buses return to normal routes from', 'today, the council said.']
+    .forEach((s, i) => put(pg, 7 + i, 1, s, Wh));
+  put(pg, 12, 1, 'Libraries open later', C);
+  ['Four branches will stay open until', '9pm on weekdays from next month.'].forEach((s, i) => put(pg, 13 + i, 1, s, Wh));
+  put(pg, 16, 1, 'Frost warning lifted', C); put(pg, 17, 1, 'Roads are clear across the region.', Wh);
+  bg(pg, 20, 20, 0, 39, B); put(pg, 20, 1, 'LATEST', Wh, R); put(pg, 20, 7, ' ', Wh, B);
+  const off = 14 + Math.floor(lt / 0.05), win = 31;
+  const strip = (' '.repeat(win) + TICKER + ' '.repeat(win)).substr(off, win);
+  put(pg, 20, 8, strip, Y);
+  put(pg, 22, 1, 'More news', C); put(pg, 22, 11, '105', Wh); put(pg, 22, 17, 'Local', C); put(pg, 22, 23, '110', Wh);
+  fastext(pg, T); return pg;
+}
+const BUILD = { index: pageIndex, weather: pageWeather, sport1: pageSport1, sport2: pageSport2, news: pageNews };
+
+// ── header row ──
+let T = 0;
+function header(t) {
+  const row = Array.from({ length: COLS }, () => ({ c: ' ', f: Wh, b: K, m: -1, dh: 0 }));
+  const set = (c, s, f) => { for (let i = 0; i < s.length; i++) { row[c + i].c = s[i]; row[c + i].f = f; } };
+  let inp = INPUT[0].s; for (const e of INPUT) if (t >= e.t) inp = e.s;
+  set(1, inp, Wh);
+  let num = null, searching = false;
+  for (const [a, b, target] of SEARCH) {
+    if (t >= a && t < b) { searching = true; const fr = Math.floor(t * 30), rr = rng(fr * 7 + 3);
+      num = 100 + Math.floor(rr() * 800); }                // any page going past in the carousel
+    if (t >= b) num = target;
+  }
+  if (num !== null) { set(7, 'CEEVIEW', Y); set(15, String(num), searching ? G : Wh); }
+  set(19, 'Mon 04 Oct', Wh);
+  const s = 28 + Math.floor(t);
+  set(31, '07:14:' + String(s).padStart(2, '0'), Y);
+  return row;
+}
+
+// ── compositor ──
+let buf, bctx, bloom, blctx, scan, vign, noise = [];
+function drawCell(e, x, y) {
+  if (e.b) { bctx.fillStyle = PAL[e.b]; bctx.fillRect(x, y, CW, CH); }
+  if (e.m >= 0) {
+    if (!e.m) return; bctx.fillStyle = PAL[e.f];
+    const ys = [0, 7, 13, 20];
+    for (let k = 0; k < 6; k++) if (e.m & (1 << k)) { const cx = k & 1, cy = k >> 1; bctx.fillRect(x + cx * 6, y + ys[cy], 6, ys[cy + 1] - ys[cy]); }
+    return;
+  }
+  if (e.c === ' ') return;
+  const gi = e.c.charCodeAt(0) - 32; if (gi < 0 || gi >= GLYPHS.length) return;
+  bctx.drawImage(ATLAS[e.f], gi * CW, e.dh === 0 ? 0 : e.dh === 1 ? 20 : 40, CW, CH, x, y, CW, CH);
+}
+function composeBuffer(t) {
+  bctx.fillStyle = '#000'; bctx.fillRect(0, 0, BW, BH);
+  const hdr = header(t); for (let c = 0; c < COLS; c++) drawCell(hdr[c], c * CW, 0);
+  const cache = {};
+  for (let r = 1; r < ROWS; r++) {
+    let L = null; for (const e of LOADS) if (t >= e.t + (r - 1) * ROWDT) L = e;
+    if (!L) continue;
+    if (!cache[L.pg]) cache[L.pg] = BUILD[L.pg](t - L.t);
+    const row = cache[L.pg][r];
+    for (let c = 0; c < COLS; c++) drawCell(row[c], c * CW, r * CH);
+  }
+}
+function prep() {
+  buf = mk(BW, BH); bctx = buf.getContext('2d');
+  bloom = mk(240, 125); blctx = bloom.getContext('2d');
+  scan = mk(W, 1000); const s = scan.getContext('2d');
+  for (let y = 0; y < 1000; y += 4) { s.fillStyle = 'rgba(0,0,0,0.34)'; s.fillRect(0, y + 3, W, 1); s.fillStyle = 'rgba(0,0,0,0.12)'; s.fillRect(0, y + 2, W, 1); }
+  vign = mk(W, H); const v = vign.getContext('2d');
+  const g = v.createRadialGradient(W / 2, H / 2, 300, W / 2, H / 2, 1250);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.7, 'rgba(0,0,0,0.18)'); g.addColorStop(1, 'rgba(0,0,0,0.62)');
+  v.fillStyle = g; v.fillRect(0, 0, W, H);
+  const glass = v.createRadialGradient(W * 0.42, H * 0.38, 0, W * 0.42, H * 0.38, 900);
+  glass.addColorStop(0, 'rgba(120,150,140,0.045)'); glass.addColorStop(1, 'rgba(120,150,140,0)');
+  v.fillStyle = glass; v.fillRect(0, 0, W, H);
+  const rr = rng(99);
+  for (let k = 0; k < 4; k++) { const n = mk(480, 270), q = n.getContext('2d'), im = q.createImageData(480, 270);
+    for (let i = 0; i < im.data.length; i += 4) { const a = rr() * 255; im.data[i] = im.data[i + 1] = im.data[i + 2] = a; im.data[i + 3] = 255; }
+    q.putImageData(im, 0, 0); noise.push(n); }
+}
+function draw({ t }) {
+  T = t;
+  composeBuffer(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  // CRT power: warm-up brightness, then vertical collapse to a line and a fading dot
+  const warm = eOut(seg(t, 0.0, 0.4));
+  const uc = seg(t, OFF0, OFF0 + 0.24), ud = seg(t, OFF0 + 0.24, OFF0 + 0.46), uf = seg(t, OFF0 + 0.4, OFF0 + 0.62);
+  const sy = uc > 0 ? Math.max(0.006, 1 - eIn(uc)) : 1, sx = ud > 0 ? Math.max(0.004, 1 - eIn(ud)) : 1;
+  const bright = 1 + 1.6 * uc;
+  ctx.save();
+  ctx.translate(W / 2, OY + 500); ctx.scale(sx, sy); ctx.translate(-W / 2, -(OY + 500));
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = warm; ctx.drawImage(buf, 0, 0, BW, BH, 0, OY, W, 1000);
+  ctx.globalAlpha = 1; ctx.drawImage(scan, 0, OY);
+  // phosphor bloom from a blurred quarter-size copy
+  blctx.filter = 'blur(2px)'; blctx.clearRect(0, 0, 240, 125); blctx.drawImage(buf, 0, 0, BW, BH, 0, 0, 240, 125); blctx.filter = 'none';
+  ctx.imageSmoothingEnabled = true; ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.42 * warm * Math.min(bright, 1.8); ctx.drawImage(bloom, 0, OY, W, 1000);
+  if (uc > 0) { ctx.globalAlpha = 0.7 * uc; ctx.fillStyle = '#dfe8ff'; ctx.fillRect(0, OY, W, 1000); }
+  ctx.restore();
+  ctx.globalCompositeOperation = 'source-over';
+  if (uc > 0 && uf < 1) {                       // the last bright dot fades out
+    const a = (1 - uf) * (ud > 0.6 ? 1 : 0);
+    if (a > 0) { const g = ctx.createRadialGradient(W / 2, OY + 500, 0, W / 2, OY + 500, 60); g.addColorStop(0, `rgba(235,240,255,${a})`); g.addColorStop(1, 'rgba(235,240,255,0)'); ctx.fillStyle = g; ctx.fillRect(W / 2 - 80, OY + 420, 160, 160); }
+  }
+  if (t >= OFF0 + 0.62) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
+  // faint static (refreshed at 15 fps) and tube vignette
+  ctx.globalAlpha = 0.035; ctx.globalCompositeOperation = 'screen'; ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(noise[Math.floor(t * 15) % 4], 0, 0, W, H);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.drawImage(vign, 0, 0);
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+}
+// sound events for audio.py
+window.events = () => {
+  const ev = [{ k: 'on', t: 0.0 }];
+  for (const e of INPUT.slice(1, 4)) ev.push({ k: 'key', t: e.t - 0.03 });                  // typed digits 4-0-0
+  for (const [a] of FASTEXT) ev.push({ k: 'key', t: a - 0.02, v: 1.2 });
+  for (const [a, b] of SEARCH) ev.push({ k: 'search', t: a, d: b - a });
+  for (const L of LOADS) ev.push({ k: 'load', t: L.t, d: 24 * ROWDT });
+  const W0 = LOADS[1].t; for (let i = 0; i < 5; i++) ev.push({ k: 'blip', t: W0 + 0.72 + i * 0.13, v: i });
+  ev.push({ k: 'off', t: OFF0 });
+  return ev;
+};
+window.draw = draw;
+window.ready = (async () => { await document.fonts.load('600 19px Inter'); await document.fonts.ready; buildAtlas(); prep(); })();
+</script></body></html>
