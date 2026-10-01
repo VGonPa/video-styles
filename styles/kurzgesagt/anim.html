@@ -216,10 +216,11 @@ function ghostMoon(x, y, r, alpha) {
 
 /* ===== type ===== */
 // Headline whose words pop in one after another (overshooting scale, rising from below)
-// and shrink away from time `out` on. Centred on x.
+// and shrink away from time `out` on. Centred on x. Words sit at their final positions and scale about
+// their own centres; the overshoot is capped in pixels so two neighbours at peak still keep 60% of the gap, about one plain space.
 function popText(str, x, y, size, t0, t, { w = 600, stag = 0.09, out = 99, col = '#fff', glow: halo = 'rgba(120,200,255,0.5)' } = {}) {
   ctx.font = `${w} ${size}px ${FT}`;
-  const words = str.split(' '), gap = ctx.measureText(' ').width;
+  const words = str.split(' '), gap = ctx.measureText(" ").width + 0.15 * size, reach = 0.2 * gap;
   const widths = words.map(word => ctx.measureText(word).width);
   let left = x - (widths.reduce((sum, v) => sum + v + gap, 0) - gap) / 2;
   for (let i = 0; i < words.length; i++) {
@@ -227,7 +228,8 @@ function popText(str, x, y, size, t0, t, { w = 600, stag = 0.09, out = 99, col =
     left += widths[i] + gap;
     const inK = seg(t, t0 + i * stag, t0 + i * stag + 0.5), outK = seg(t, out + 0.04 * i, out + 0.04 * i + 0.3);
     if (inK <= 0 || outK >= 1) continue;
-    const scale = eBack(inK) * (1 - 0.4 * eIn(outK));
+    const pop = eBack(inK), grow = Math.min(Math.max(pop - 1, 0), reach / (widths[i] / 2));
+    const scale = (pop > 1 ? 1 + grow : pop) * (1 - 0.4 * eIn(outK));
     ctx.save();
     ctx.translate(centre, y + 0.35 * size * (1 - eOut(inK))); ctx.scale(scale, scale);
     ctx.globalAlpha = clamp(2.5 * inK) * (1 - outK);
