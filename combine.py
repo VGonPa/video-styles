@@ -75,7 +75,7 @@ def main():
     playlist.write_text("".join(f"file '{p}'\n" for p in parts))
     joined = WORK / "master.mp4"
     ffmpeg("-f", "concat", "-safe", 0, "-i", playlist, "-c", "copy", joined)
-    ffmpeg("-i", joined, "-vf", "scale=1280:720,format=yuv420p", "-c:v", "libx264", "-crf", 33,
+    ffmpeg("-i", joined, "-vf", "scale=1280:720,format=yuv420p", "-c:v", "libx264", "-crf", 34,
            "-preset", "slow", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", REEL)
     print(f"Created {REEL} ({REEL.stat().st_size / 2**20:.1f} MiB)")
 
