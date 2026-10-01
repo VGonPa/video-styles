@@ -1,6 +1,11 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><style>html,body{margin:0;background:#15437f}canvas{display:block}</style></head>
-<body><canvas id="c" width="1920" height="1080"></canvas>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>html, body { margin: 0; background: #15437f; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
 <script src="common.js"></script>
 <script>
 // BLUEPRINT — Model MP-7 mechanical pencil: front view, end view, section A–A, exploded view, parts list, title block
@@ -8,18 +13,29 @@ const LN = '232,241,255';                      // line color (rgb)
 const COND = "'Barlow Condensed'", MONO = "'IBM Plex Mono'";
 const evs = [];                                // sound events (read by events.mjs)
 
-// ---------- Paper (once) ----------
+// ---------- cyanotype sheet, painted once ----------
 const paper = mk(W, H);
-{ const c = paper.getContext('2d'), r = rng(4);
-  const g = c.createRadialGradient(900, 480, 100, 960, 540, 1200); g.addColorStop(0, '#1f5aa6'); g.addColorStop(1, '#123b75'); c.fillStyle = g; c.fillRect(0, 0, W, H);
-  for (let i = 0; i < 120; i++) { const x = r() * W, y = r() * H, rr = 60 + r() * 300, lt = r() < .5;
-    const gg = c.createRadialGradient(x, y, 0, x, y, rr); gg.addColorStop(0, lt ? 'rgba(90,150,230,0.07)' : 'rgba(5,20,60,0.08)'); gg.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gg; c.fillRect(x - rr, y - rr, rr * 2, rr * 2); }
-  const id = c.getImageData(0, 0, W, H), d = id.data;
-  for (let q = 0; q < d.length; q += 4) { const n = (r() - .5) * 10; d[q] += n; d[q + 1] += n; d[q + 2] += n * 1.2; } c.putImageData(id, 0, 0);
-  c.strokeStyle = 'rgba(200,225,255,0.05)'; c.lineWidth = 1;
-  for (let i = 0; i < 700; i++) { const x = r() * W, y = r() * H, a = r() * Math.PI, l = 5 + r() * 20; c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); c.stroke(); }
-}
-const L = mk(W, H), lc = L.getContext('2d'), GL = mk(W / 4, H / 4), gc = GL.getContext('2d');
+{ const g = paper.getContext('2d'), rand = rng(4);
+  const wash = g.createRadialGradient(900, 480, 100, 960, 540, 1200);
+  wash.addColorStop(0, '#1f5aa6'); wash.addColorStop(1, '#123b75');
+  g.fillStyle = wash; g.fillRect(0, 0, W, H);
+  for (let n = 0; n < 120; n++) {                 // uneven exposure: soft light and dark blotches
+    const x = rand() * W, y = rand() * H, rad = 60 + rand() * 300, light = rand() < .5;
+    const blot = g.createRadialGradient(x, y, 0, x, y, rad);
+    blot.addColorStop(0, light ? 'rgba(90,150,230,0.07)' : 'rgba(5,20,60,0.08)'); blot.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = blot; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  const img = g.getImageData(0, 0, W, H), px = img.data;   // grain, slightly stronger in blue
+  for (let i = 0; i < px.length; i += 4) { const n = (rand() - .5) * 10; px[i] += n; px[i + 1] += n; px[i + 2] += n * 1.2; }
+  g.putImageData(img, 0, 0);
+  g.strokeStyle = 'rgba(200,225,255,0.05)'; g.lineWidth = 1;
+  for (let n = 0; n < 700; n++) {                 // paper fibres
+    const x = rand() * W, y = rand() * H, ang = rand() * Math.PI, len = 5 + rand() * 20;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len); g.stroke();
+  } }
+// L: everything drawn in ink this frame; GL: a quarter-size copy blurred for the glow
+const L = mk(W, H), lc = L.getContext('2d');
+const GL = mk(W / 4, H / 4), gc = GL.getContext('2d');
 
 // ---------- Action system ----------
 const acts = [];
@@ -35,28 +51,30 @@ function hatch(clipFn, t0, t1, o = {}) { acts.push({ kind: 'hatch', clipFn, t0, 
 const CEN = [26, 6, 4, 6];                     // axis line (dash-dot)
 const HID = [8, 6];                            // hidden line
 
+// Dimension: two extension lines from the part, a dimension line drawn outward from its middle with
+// arrowheads at both ends, then the value. dimV measures y0..y1 at column x; dimH measures x0..x1 at row y.
 function dimV(x, y0, y1, fromX, t0, label, o = {}) {
-  const side = Math.sign(x - fromX) || -1;
-  line(P().M(fromX + side * 6, y0).L(x + side * 12, y0), t0, t0 + 0.2, { w: 1.1, a: .8 });
-  line(P().M(fromX + side * 6, y1).L(x + side * 12, y1), t0 + 0.05, t0 + 0.25, { w: 1.1, a: .8 });
-  const ym = (y0 + y1) / 2;
-  line(P().M(x, ym).L(x, y0 + 1), t0 + 0.2, t0 + 0.45, { w: 1.2 }); line(P().M(x, ym).L(x, y1 - 1), t0 + 0.2, t0 + 0.45, { w: 1.2 });
+  const side = Math.sign(x - fromX) || -1, mid = (y0 + y1) / 2;
+  const extend = (y, start) => line(P().M(fromX + side * 6, y).L(x + side * 12, y), start, start + 0.2, { w: 1.1, a: .8 });
+  extend(y0, t0); extend(y1, t0 + 0.05);
+  for (const end of [y0 + 1, y1 - 1]) line(P().M(x, mid).L(x, end), t0 + 0.2, t0 + 0.45, { w: 1.2 });
   arrowHead(x, y0, -Math.PI / 2, t0 + 0.43); arrowHead(x, y1, Math.PI / 2, t0 + 0.43);
-  txt(label, x - 12, ym, o.size || 30, t0 + 0.5, { rot: -Math.PI / 2 });
+  txt(label, x - 12, mid, o.size || 30, t0 + 0.5, { rot: -Math.PI / 2 });
 }
 function dimH(y, x0, x1, fromY, t0, label, o = {}) {
-  const side = Math.sign(y - fromY) || -1;
-  line(P().M(x0, fromY + side * 6).L(x0, y + side * 12), t0, t0 + 0.2, { w: 1.1, a: .8 });
-  line(P().M(x1, fromY + side * 6).L(x1, y + side * 12), t0 + 0.05, t0 + 0.25, { w: 1.1, a: .8 });
-  const xm = (x0 + x1) / 2;
-  line(P().M(xm, y).L(x0 + 1, y), t0 + 0.2, t0 + 0.45, { w: 1.2 }); line(P().M(xm, y).L(x1 - 1, y), t0 + 0.2, t0 + 0.45, { w: 1.2 });
+  const side = Math.sign(y - fromY) || -1, mid = (x0 + x1) / 2;
+  const extend = (x, start) => line(P().M(x, fromY + side * 6).L(x, y + side * 12), start, start + 0.2, { w: 1.1, a: .8 });
+  extend(x0, t0); extend(x1, t0 + 0.05);
+  for (const end of [x0 + 1, x1 - 1]) line(P().M(mid, y).L(end, y), t0 + 0.2, t0 + 0.45, { w: 1.2 });
   arrowHead(x0, y, Math.PI, t0 + 0.43); arrowHead(x1, y, 0, t0 + 0.43);
-  txt(label, xm + (o.dx || 0), y - 12, o.size || 30, t0 + 0.5);
+  txt(label, mid + (o.dx || 0), y - 12, o.size || 30, t0 + 0.5);
 }
+// Callout: dot on the part, a kinked leader line, then the note.
 function leader(x0, y0, x1, y1, x2, label, t0, align = 'left') {
   dot(x0, y0, t0);
   line(P().M(x0, y0).L(x1, y1).L(x2, y1), t0 + 0.05, t0 + 0.4, { w: 1.1 });
-  txt(label, align === 'left' ? x2 + 10 : x2 - 10, y1 + 8, 23, t0 + 0.38, { align, font: MONO, it: false, w8: 400, ls: 0.5 });
+  const textX = align === 'left' ? x2 + 10 : x2 - 10;
+  txt(label, textX, y1 + 8, 23, t0 + 0.38, { align, font: MONO, it: false, w8: 400, ls: 0.5 });
 }
 function polyPath(pts, close = true) { const p = P().M(...pts[0]); for (let i = 1; i < pts.length; i++) p.L(...pts[i]); if (close) p.L(...pts[0]); return p; }
 function tracePoly(c, pts) { c.moveTo(...pts[0]); for (let i = 1; i < pts.length; i++) c.lineTo(...pts[i]); c.closePath(); }
@@ -254,43 +272,77 @@ evs.push({ k: 'whoosh', t: 2.95, d: 1.3 }, { k: 'chord', t: 8.55 });
 
 acts.sort((a, b) => a.t0 - b.t0);
 
-// ---------- Drawing ----------
+// ---------- drawing ----------
+const ink = a => `rgba(${LN},${a})`;
+function drawLine(c, a, u) {
+  const reach = a.ease(u) * a.path.len;
+  c.strokeStyle = ink(a.a); c.lineWidth = a.w; c.lineCap = a.dash ? 'butt' : 'round'; c.lineJoin = 'round';
+  if (a.dash) c.setLineDash(a.dash);
+  c.beginPath(); a.path.trace(c, 0, reach); c.stroke();
+  const drawing = u > 0 && u < 1, scriber = !a.dash && a.w > 2;   // bright tip on heavy outlines while they draw
+  if (drawing && scriber) {
+    const tip = a.path.at(reach);
+    c.fillStyle = ink(0.9); c.beginPath(); c.arc(tip.x, tip.y, 3.2, 0, 7); c.fill();
+  }
+}
+// Lettering appears character by character; centred and right-aligned text is laid out from its full width
+// so it does not shift while typing.
+function drawText(c, a, u) {
+  const shown = Math.ceil(u * a.str.length);
+  if (shown <= 0) return;
+  c.translate(a.x, a.y); c.rotate(a.rot);
+  c.font = `${a.it ? 'italic ' : ''}${a.w8} ${a.size}px ${a.font}`; c.letterSpacing = a.ls + 'px';
+  c.textAlign = a.align; c.textBaseline = a.rot ? 'bottom' : 'alphabetic'; c.fillStyle = ink(a.a);
+  const part = a.str.slice(0, shown);
+  if (a.align === 'center' || a.align === 'right') {
+    const full = c.measureText(a.str).width;
+    c.textAlign = 'left';
+    c.fillText(part, a.align === 'center' ? -full / 2 : -full, 0);
+  } else {
+    c.fillText(part, 0, 0);
+  }
+}
+function drawArrow(c, a, u) {
+  const pop = eback(u, 3);
+  c.translate(a.x, a.y); c.rotate(a.ang); c.scale(pop, pop);
+  c.fillStyle = ink(0.95);
+  c.beginPath(); c.moveTo(0, 0); c.lineTo(-20, -5.5); c.lineTo(-20, 5.5); c.closePath(); c.fill();
+}
+function drawDot(c, a, u) {
+  c.fillStyle = ink(0.95);
+  c.beginPath(); c.arc(a.x, a.y, a.r * eback(u, 3), 0, 7); c.fill();
+}
+// Section hatching: parallel lines inside the clip shape, revealed by a slanted edge sweeping left to right.
+function drawHatch(c, a, u) {
+  const [x0, y0, x1, y1] = a.box, h = y1 - y0;
+  a.clipFn(c);
+  const edge = lerp(x0 - 300, x1 + 700, eio2(u));
+  c.beginPath();
+  c.moveTo(x0 - 400, y0 - 400); c.lineTo(edge + h * 0.5, y0 - 400); c.lineTo(edge - h * 0.5 - 200, y1 + 400); c.lineTo(x0 - 400, y1 + 400);
+  c.closePath(); c.clip();
+  c.strokeStyle = ink(a.a); c.lineWidth = 1.1;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, R = Math.hypot(x1 - x0, y1 - y0);
+  for (const ang of a.cross ? [a.ang, -a.ang] : [a.ang]) {
+    const dx = Math.cos(ang), dy = Math.sin(ang), nx = -dy, ny = dx;
+    c.beginPath();
+    for (let k = -R; k <= R; k += a.gap) {
+      const ox = cx + nx * k, oy = cy + ny * k;
+      c.moveTo(ox - dx * R, oy - dy * R); c.lineTo(ox + dx * R, oy + dy * R);
+    }
+    c.stroke();
+  }
+}
+const DRAWERS = { path: drawLine, text: drawText, arrow: drawArrow, dot: drawDot, hatch: drawHatch };
 function drawAct(c, a, t) {
   if (t < a.t0) return;
-  const u = seg(t, a.t0, a.t1);
-  c.save();
-  if (a.kind === 'path') {
-    const e = a.ease(u); c.strokeStyle = `rgba(${LN},${a.a})`; c.lineWidth = a.w; c.lineCap = a.dash ? 'butt' : 'round'; c.lineJoin = 'round';
-    if (a.dash) c.setLineDash(a.dash);
-    c.beginPath(); a.path.trace(c, 0, e * a.path.len); c.stroke();
-    if (u < 1 && u > 0 && !a.dash && a.w > 2) { const q = a.path.at(e * a.path.len); c.fillStyle = `rgba(${LN},0.9)`; c.beginPath(); c.arc(q.x, q.y, 3.2, 0, 7); c.fill(); }   // scriber tip
-  } else if (a.kind === 'text') {
-    const n = Math.ceil(u * a.str.length); if (n <= 0) { c.restore(); return; }
-    c.translate(a.x, a.y); c.rotate(a.rot); c.font = `${a.it ? 'italic ' : ''}${a.w8} ${a.size}px ${a.font}`; c.letterSpacing = a.ls + 'px';
-    c.textAlign = a.align; c.textBaseline = a.rot ? 'bottom' : 'alphabetic'; c.fillStyle = `rgba(${LN},${a.a})`;
-    if (a.align === 'center') { const w = c.measureText(a.str).width; c.textAlign = 'left'; c.fillText(a.str.slice(0, n), -w / 2, 0); }
-    else if (a.align === 'right') { const w = c.measureText(a.str).width; c.textAlign = 'left'; c.fillText(a.str.slice(0, n), -w, 0); }
-    else c.fillText(a.str.slice(0, n), 0, 0);
-  } else if (a.kind === 'arrow') {
-    const s = eback(u, 3); c.translate(a.x, a.y); c.rotate(a.ang); c.scale(s, s); c.fillStyle = `rgba(${LN},0.95)`;
-    c.beginPath(); c.moveTo(0, 0); c.lineTo(-20, -5.5); c.lineTo(-20, 5.5); c.closePath(); c.fill();
-  } else if (a.kind === 'dot') {
-    const s = eback(u, 3); c.fillStyle = `rgba(${LN},0.95)`; c.beginPath(); c.arc(a.x, a.y, a.r * s, 0, 7); c.fill();
-  } else if (a.kind === 'hatch') {
-    const [x0, y0, x1, y1] = a.box; a.clipFn(c);
-    const e = eio2(u), sweep = lerp(x0 - 300, x1 + 700, e);
-    c.beginPath(); c.moveTo(x0 - 400, y0 - 400); c.lineTo(sweep + (y1 - y0) * 0.5, y0 - 400); c.lineTo(sweep - (y1 - y0) * 0.5 - 200, y1 + 400); c.lineTo(x0 - 400, y1 + 400); c.closePath(); c.clip();
-    c.strokeStyle = `rgba(${LN},${a.a})`; c.lineWidth = 1.1;
-    const dirs = a.cross ? [a.ang, -a.ang] : [a.ang];
-    for (const ang of dirs) { const dx = Math.cos(ang), dy = Math.sin(ang), nx = -dy, ny = dx, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, R = Math.hypot(x1 - x0, y1 - y0);
-      c.beginPath(); for (let k = -R; k <= R; k += a.gap) { c.moveTo(cx + nx * k - dx * R, cy + ny * k - dy * R); c.lineTo(cx + nx * k + dx * R, cy + ny * k + dy * R); } c.stroke(); }
-  }
-  c.restore();
+  c.save(); DRAWERS[a.kind](c, a, seg(t, a.t0, a.t1)); c.restore();
 }
+// Drafting grid: 24 px squares, every fifth line stronger; extends past the sheet for camera moves.
 function drawGrid(c) {
   c.lineWidth = 1;
-  for (let x = -240; x <= W + 240; x += 24) { c.strokeStyle = ((x % 120) + 120) % 120 === 0 ? 'rgba(200,225,255,0.13)' : 'rgba(200,225,255,0.055)'; c.beginPath(); c.moveTo(x + .5, -240); c.lineTo(x + .5, H + 240); c.stroke(); }
-  for (let y = -240; y <= H + 240; y += 24) { c.strokeStyle = ((y % 120) + 120) % 120 === 0 ? 'rgba(200,225,255,0.13)' : 'rgba(200,225,255,0.055)'; c.beginPath(); c.moveTo(-240, y + .5); c.lineTo(W + 240, y + .5); c.stroke(); }
+  const style = v => (((v % 120) + 120) % 120 === 0 ? 'rgba(200,225,255,0.13)' : 'rgba(200,225,255,0.055)');
+  for (let x = -240; x <= W + 240; x += 24) { c.strokeStyle = style(x); c.beginPath(); c.moveTo(x + .5, -240); c.lineTo(x + .5, H + 240); c.stroke(); }
+  for (let y = -240; y <= H + 240; y += 24) { c.strokeStyle = style(y); c.beginPath(); c.moveTo(-240, y + .5); c.lineTo(W + 240, y + .5); c.stroke(); }
 }
 function cam(t) {
   const u = eio(seg(t, 2.95, 4.25)); let s = lerp(1.58, 1.0, u), cx = lerp(680, 960, u), cy = lerp(262, 540, u);
@@ -300,21 +352,41 @@ function cam(t) {
   return [s * (1 + 0.22 * p), lerp(cx, 660, p), lerp(cy, 455, p)];
 }
 function render(t) {
-  const [s, cx, cy] = cam(t), tf = [s, 0, 0, s, 960 - cx * s, 540 - cy * s];
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#123b75'; ctx.fillRect(0, 0, W, H); ctx.setTransform(...tf); ctx.drawImage(paper, -160, -90, W + 320, H + 180); drawGrid(ctx);
-  lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, W, H); lc.setTransform(...tf);
+  const [s, cx, cy] = cam(t), view = [s, 0, 0, s, 960 - cx * s, 540 - cy * s];
+  // sheet and grid
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#123b75'; ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(...view); ctx.drawImage(paper, -160, -90, W + 320, H + 180); drawGrid(ctx);
+  // ink layer
+  lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, W, H); lc.setTransform(...view);
   for (const a of acts) drawAct(lc, a, t);
   drawExploded(lc, t); drawBalloons(lc, t);
   // cyanotype glow: a reduced, blurred copy of the line layer added on top
   gc.clearRect(0, 0, GL.width, GL.height); gc.filter = 'blur(2px)'; gc.drawImage(L, 0, 0, GL.width, GL.height); gc.filter = 'none';
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalAlpha = 0.55; ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(GL, 0, 0, W, H); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55; ctx.drawImage(GL, 0, 0, W, H);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   ctx.drawImage(L, 0, 0);
-  const v = ctx.createRadialGradient(960, 540, 600, 960, 540, 1200); v.addColorStop(0, 'rgba(0,10,40,0)'); v.addColorStop(1, 'rgba(0,10,40,0.35)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
-  const a = Math.max(1 - seg(t, 0, 0.35), eio2(seg(t, 9.45, 10))); if (a > 0) { ctx.fillStyle = `rgba(9,33,70,${a})`; ctx.fillRect(0, 0, W, H); }
+  const edge = ctx.createRadialGradient(960, 540, 600, 960, 540, 1200);
+  edge.addColorStop(0, 'rgba(0,10,40,0)'); edge.addColorStop(1, 'rgba(0,10,40,0.35)');
+  ctx.fillStyle = edge; ctx.fillRect(0, 0, W, H);
+  const dark = Math.max(1 - seg(t, 0, 0.35), eio2(seg(t, 9.45, 10)));   // fade in and out
+  if (dark > 0) { ctx.fillStyle = `rgba(9,33,70,${dark})`; ctx.fillRect(0, 0, W, H); }
 }
-window.ready = Promise.all([loadFont('Barlow Condensed', 'BarlowCondensed-500i', 500, 'italic').catch(() => {}), loadFont('Barlow Condensed', 'BarlowCondensed-500', 500), loadFont('Barlow Condensed', 'BarlowCondensed-600', 600), loadFont('IBM Plex Mono', 'IBMPlexMono-400', 400), loadFont('IBM Plex Mono', 'IBMPlexMono-500', 500)])
+const FACES = [
+  ['Barlow Condensed', 'BarlowCondensed-500i', 500, 'italic'],
+  ['Barlow Condensed', 'BarlowCondensed-500', 500],
+  ['Barlow Condensed', 'BarlowCondensed-600', 600],
+  ['IBM Plex Mono', 'IBMPlexMono-400', 400],
+  ['IBM Plex Mono', 'IBMPlexMono-500', 500],
+];
+window.ready = Promise.all(FACES.map((f, i) => (i === 0 ? loadFont(...f).catch(() => {}) : loadFont(...f))))
   .then(() => document.fonts.load(`600 30px ${COND}`, 'DRAWING SCALE'));
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.draw = ({ t }) => {
+  render(t);
+  const url = cv.toDataURL('image/jpeg', 0.92);
+  return url.slice(url.indexOf(',') + 1);
+};
 window.events = () => evs.slice().sort((a, b) => a.t - b.t);
-</script></body></html>
+</script>
+</body>
+</html>
