@@ -4,9 +4,9 @@ Use case · Metrics, before/after comparisons, and reports.
 
 [← All styles](../../README.md)
 
-**By use case:** [Explainers](../../categories/use-cases/explainer.md) (34) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (8) · [Product & Launches](../../categories/use-cases/product.md) (18) · [Social & Short-Form](../../categories/use-cases/social.md) (52) · [Storytelling & Brand](../../categories/use-cases/story.md) (60) · [Data & Results](../../categories/use-cases/data.md) (9) · [News & Current Affairs](../../categories/use-cases/news.md) (7) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (36)
+**By use case:** [Explainers](../../categories/use-cases/explainer.md) (34) · [Tutorials & Training](../../categories/use-cases/tutorial.md) (8) · [Product & Launches](../../categories/use-cases/product.md) (18) · [Social & Short-Form](../../categories/use-cases/social.md) (52) · [Storytelling & Brand](../../categories/use-cases/story.md) (60) · [Data & Results](../../categories/use-cases/data.md) (10) · [News & Current Affairs](../../categories/use-cases/news.md) (8) · [Intros, Titles & Transitions](../../categories/use-cases/titles.md) (36)
 
-**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (8) · [Art Movements](../../categories/families/art-movements.md) (8) · [Hand Drawn](../../categories/families/hand-drawn.md) (9) · [Texture & Craft](../../categories/families/texture-craft.md) (16) · [Nostalgia](../../categories/families/nostalgia.md) (10) · [Technical](../../categories/families/technical.md) (9) · [Experimental](../../categories/families/experimental.md) (9) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (8) · [Comics & Cartoons](../../categories/families/comics.md) (18) · [Games](../../categories/families/games.md) (8) · [World & History](../../categories/families/world-history.md) (14)
+**By visual family:** [Flat Graphics](../../categories/families/flat-graphics.md) (8) · [Art Movements](../../categories/families/art-movements.md) (8) · [Hand Drawn](../../categories/families/hand-drawn.md) (9) · [Texture & Craft](../../categories/families/texture-craft.md) (16) · [Nostalgia](../../categories/families/nostalgia.md) (11) · [Technical](../../categories/families/technical.md) (9) · [Experimental](../../categories/families/experimental.md) (9) · [Polished & Premium](../../categories/families/polished.md) (2) · [Generative & 3D](../../categories/families/generative-3d.md) (8) · [Comics & Cartoons](../../categories/families/comics.md) (18) · [Games](../../categories/families/games.md) (8) · [World & History](../../categories/families/world-history.md) (14)
 
 <table>
 <tr>
@@ -23,6 +23,7 @@ Use case · Metrics, before/after comparisons, and reports.
 </tr>
 <tr>
 <td width="25%" align="center"><a href="../../styles/stick-webcomic/stick-webcomic.mp4"><img src="../../styles/stick-webcomic/preview.gif" alt="Stick-Figure Webcomic" width="100%"></a><br><b>Stick-Figure Webcomic</b><br><sub>Inspired by <a href="https://xkcd.com">xkcd (Randall Munroe)</a></sub><br><a href="../../styles/stick-webcomic/stick-webcomic.mp4">video</a> · <a href="../../styles/stick-webcomic">source</a></td>
+<td width="25%" align="center"><a href="../../styles/teletext/teletext.mp4"><img src="../../styles/teletext/preview.gif" alt="Teletext" width="100%"></a><br><b>Teletext</b><br><a href="../../styles/teletext/teletext.mp4">video</a> · <a href="../../styles/teletext">source</a></td>
 </tr>
 </table>
 
@@ -37,3 +38,4 @@ Use case · Metrics, before/after comparisons, and reports.
 | [Pixel Art](../../styles/pixel-art/) | 16-bit video game level | Progress, milestones, and game-like scenes | [Games](../../categories/families/games.md) | [Social & Short-Form](../../categories/use-cases/social.md), [Storytelling & Brand](../../categories/use-cases/story.md), [Data & Results](../../categories/use-cases/data.md) |
 | [Sci-Fi Interface](../../styles/sci-fi-interface/) | Cool HUD, radar, and analysis | Measurement, scoring, and diagnostics | [Technical](../../categories/families/technical.md) | [Data & Results](../../categories/use-cases/data.md), [Product & Launches](../../categories/use-cases/product.md) |
 | [Stick-Figure Webcomic](../../styles/stick-webcomic/) | Dry nerdy wit in black ink | Wry explainers, tradeoffs, and charts with a punchline | [Comics & Cartoons](../../categories/families/comics.md) | [Explainers](../../categories/use-cases/explainer.md), [Data & Results](../../categories/use-cases/data.md) |
+| [Teletext](../../styles/teletext/) | Blocky broadcast pages on a CRT | News roundups, scores, forecasts and data at a glance | [Nostalgia](../../categories/families/nostalgia.md) | [News & Current Affairs](../../categories/use-cases/news.md), [Data & Results](../../categories/use-cases/data.md) |
