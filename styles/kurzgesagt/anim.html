@@ -7,26 +7,45 @@
 // Space → the Moon dissolves → zoom to a coastline where the tides flatten → night falls, a critter lights a lantern
 // → iris out to Earth, its axis wobbling and the seasons shaking → Earth alone with the question as a title card.
 // window.draw({t}) → JPEG base64, window.events() → sound cues for audio.py. Duration 10 s.
-const W = 1920, H = 1080, cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const W = 1920;
+const H = 1080;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
 const DUR = 10;
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const lerp = (a, b, t) => a + (b - a) * t;
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eOut = x => 1 - Math.pow(1 - x, 3);
-const eIn = x => x * x * x;
-const eInOut = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-const eBack = (x, s = 1.9) => { const c = s + 1; return 1 + c * Math.pow(x - 1, 3) + s * Math.pow(x - 1, 2); };
+const TAU = Math.PI * 2;
+
+/* ===== math ===== */
+function clamp(v, lo = 0, hi = 1) { return v < lo ? lo : v > hi ? hi : v; }
+function lerp(from, to, k) { return from * (1 - k) + to * k; }
+// 0→1 progress of t through the window [t0, t1]
+function seg(t, t0, t1) { return clamp((t - t0) / (t1 - t0)); }
+function eOut(k) { const u = 1 - k; return 1 - u * u * u; }
+function eIn(k) { return k * k * k; }
+function eInOut(k) { return k < 0.5 ? 4 * k * k * k : 1 - 4 * Math.pow(1 - k, 3); }
+// cubic ease-out that overshoots past 1 before settling; `over` sets how far
+function eBack(k, over = 1.9) { const u = k - 1; return 1 + u * u * ((over + 1) * u + over); }
 const smooth = x => x * x * (3 - 2 * x);
-function rng(seed) { let s = seed; return () => ((s = (s * 16807) % 2147483647) / 2147483647); }
-function off(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
-function hexA(h, a) { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+// Lehmer / Park–Miller generator, values in (0, 1)
+function rng(seed) {
+  let state = seed % 2147483647;
+  return function next() { state = state * 16807 % 2147483647; return state / 2147483647; };
+}
+function canvasOf(w, h) { return Object.assign(document.createElement('canvas'), { width: w, height: h }); }
+function hexA(hex, alpha) {
+  const v = parseInt(hex.slice(1), 16);
+  return 'rgba(' + [(v >> 16) & 255, (v >> 8) & 255, v & 255, alpha].join(',') + ')';
+}
 function mix(a, b, k) { const p = parseInt(a.slice(1), 16), q = parseInt(b.slice(1), 16);
   const ch = s => Math.round(lerp((p >> s) & 255, (q >> s) & 255, k)); return `rgb(${ch(16)},${ch(8)},${ch(0)})`; }
 const FT = "'Fredoka', sans-serif";
 
-// ---------- palette ----------
+/* ===== colours ===== */
 const C = {
-  sky0: '#0a1030', sky1: '#1c1552', star: '#fff4d8',
+  // deep space
+  sky0: '#0a1030',
+  sky1: '#1c1552',
+  star: '#fff4d8',
+  // Earth
   oceanD: '#145a9c', land: '#ffc94d', land2: '#5cd07a',
   moon: '#c7b3f5', moonD: '#8a6fcf', crest: '#86e8ff', navy: '#27265e', red: '#ff5a4e', gold: '#ffd36b'
 };
@@ -39,103 +58,184 @@ const K = {
   grass: ['#5cd07a', '#1d4648'], grassD: ['#3aa860', '#153538'], tree: ['#46c06e', '#18403f'], trunk: ['#8a5236', '#2a1a2c'],
   hut: ['#ff7a6b', '#3a2346'], roof: ['#27265e', '#0d0c26']
 };
-const kc = (key, n) => mix(K[key][0], K[key][1], n);
+function kc(name, night) { const [day, dark] = K[name]; return mix(day, dark, night); }
 
-// ---------- pre-rendered assets ----------
+/* ===== sprites, built once in window.ready ===== */
 let STARS, NEB, ATMO, GLOW, WARM, VIG;
-function buildAssets() {
-  const r = rng(7);
-  STARS = [];
-  for (let i = 0; i < 320; i++) STARS.push({ x: r() * W, y: r() * H, s: Math.pow(r(), 3) * 2.6 + 0.6, ph: r() * 6.28, sp: 0.8 + r() * 2.2, layer: r() < 0.7 ? 0 : 1 });
-  NEB = off(W, H); { const g = NEB.getContext('2d');
-    const blob = (x, y, rad, col, a) => { const gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, col.replace('A', a)); gr.addColorStop(1, col.replace('A', 0)); g.fillStyle = gr; g.fillRect(0, 0, W, H); };
-    blob(300, 260, 700, 'rgba(196,52,150,A)', 0.22); blob(1650, 180, 650, 'rgba(40,190,200,A)', 0.14); blob(960, 1100, 900, 'rgba(120,70,220,A)', 0.30); }
-  ATMO = off(900, 900); { const g = ATMO.getContext('2d'); const gr = g.createRadialGradient(450, 450, 250, 450, 450, 440);
-    gr.addColorStop(0, 'rgba(99,214,255,0.55)'); gr.addColorStop(0.18, 'rgba(99,214,255,0.28)'); gr.addColorStop(0.5, 'rgba(90,140,255,0.08)'); gr.addColorStop(1, 'rgba(90,140,255,0)');
-    g.fillStyle = gr; g.fillRect(0, 0, 900, 900); }
-  GLOW = off(256, 256); { const g = GLOW.getContext('2d'); const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128);
-    gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.25, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 256, 256); }
-  WARM = off(512, 512); { const g = WARM.getContext('2d'); const gr = g.createRadialGradient(256, 256, 0, 256, 256, 256);
-    gr.addColorStop(0, 'rgba(255,214,120,0.95)'); gr.addColorStop(0.12, 'rgba(255,190,90,0.55)'); gr.addColorStop(0.45, 'rgba(255,140,70,0.16)'); gr.addColorStop(1, 'rgba(255,120,60,0)');
-    g.fillStyle = gr; g.fillRect(0, 0, 512, 512); }
-  VIG = off(W, H); { const g = VIG.getContext('2d'); const gr = g.createRadialGradient(W / 2, H / 2, 500, W / 2, H / 2, 1250);
-    gr.addColorStop(0, 'rgba(5,5,25,0)'); gr.addColorStop(1, 'rgba(5,5,25,0.55)'); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
+const ATMO_R = 300; // planet radius the atmosphere sprite is drawn for
+function radialSprite(w, h, inner, outer, stops) {
+  const c = canvasOf(w, h), g = c.getContext('2d');
+  const grad = g.createRadialGradient(w / 2, h / 2, inner, w / 2, h / 2, outer);
+  for (const [at, col] of stops) grad.addColorStop(at, col);
+  g.fillStyle = grad; g.fillRect(0, 0, w, h);
+  return c;
 }
-
-// ---------- primitives ----------
-// Kurzgesagt-like shading: dark crescent away from light (light = top-left), thin bright rim toward light
-function shadeCircle(x, y, r, dark = 'rgba(15,8,60,0.42)', lite = 'rgba(255,255,255,0.28)', k = 0.2) {
-  ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.clip();
-  ctx.fillStyle = dark; ctx.beginPath(); ctx.rect(x - r - 2, y - r - 2, 2 * r + 4, 2 * r + 4); ctx.moveTo(x - r * k + r * 1.04, y - r * k); ctx.arc(x - r * k, y - r * k, r * 1.04, 0, Math.PI * 2, true); ctx.fill('evenodd');
-  ctx.fillStyle = lite; ctx.beginPath(); ctx.rect(x - r - 2, y - r - 2, 2 * r + 4, 2 * r + 4); ctx.moveTo(x + r * 0.06 + r * 0.985, y + r * 0.06); ctx.arc(x + r * 0.06, y + r * 0.06, r * 0.985, 0, Math.PI * 2, true); ctx.fill('evenodd');
-  ctx.restore();
-}
-function glow(x, y, r, a, img = GLOW) {
-  ctx.save(); ctx.globalAlpha = a; ctx.globalCompositeOperation = 'lighter';
-  ctx.drawImage(img, x - r, y - r, 2 * r, 2 * r); ctx.restore();
-}
-function sparkle(x, y, k) { ctx.beginPath(); ctx.moveTo(x, y - k); ctx.quadraticCurveTo(x, y, x + k, y); ctx.quadraticCurveTo(x, y, x, y + k); ctx.quadraticCurveTo(x, y, x - k, y); ctx.quadraticCurveTo(x, y, x, y - k); ctx.fill(); }
-
-// ---------- planet ----------
-const CONT = []; { const r = rng(4242);
-  const mk = (lo, la, rad, col) => { const pts = []; const n = 16; for (let i = 0; i < n; i++) { const a = i / n * 6.283, k = rad * (0.72 + r() * 0.5); pts.push([lo + Math.cos(a) * k * 1.25, la + Math.sin(a) * k]); } CONT.push({ pts, col }); };
-  for (const [lo, la, rad] of [[0.3, 0.3, 0.42], [2.2, -0.25, 0.48], [3.8, 0.35, 0.38], [5.1, -0.35, 0.4], [1.2, 0.72, 0.22], [4.6, 0.75, 0.2]]) {
-    mk(lo, la, rad, 'land2'); mk(lo + 0.08, la + 0.06, rad * 0.45, 'land'); } }
-const CLOUDS = [[0.7, -0.45, 0.42, 0.05], [1.9, 0.18, 0.34, 0.045], [3.0, -0.12, 0.5, 0.05], [4.3, 0.42, 0.38, 0.045], [5.6, -0.08, 0.3, 0.04], [2.6, 0.55, 0.26, 0.035]];
-// tilt rotates the surface only; light and atmosphere stay fixed
-function drawPlanet(cx, cy, R, rot, tilt = 0) {
-  ctx.drawImage(ATMO, cx - R * 450 / 270, cy - R * 450 / 270, R * 900 / 270, R * 900 / 270);
-  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.clip();
-  const og = ctx.createRadialGradient(cx - R * .35, cy - R * .4, R * .1, cx, cy, R * 1.1); og.addColorStop(0, '#2aa3e0'); og.addColorStop(1, C.oceanD);
-  ctx.fillStyle = og; ctx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
-  ctx.translate(cx, cy); ctx.rotate(tilt); ctx.translate(-cx, -cy);
-  for (const c of CONT) {
-    const P = c.pts.map(([lo, la]) => { let u = lo - rot; u = Math.atan2(Math.sin(u), Math.cos(u)); const vis = Math.cos(u) > 0; if (!vis) u = u > 0 ? Math.PI / 2 : -Math.PI / 2;
-      return [cx + R * Math.cos(la) * Math.sin(u), cy - R * Math.sin(la), vis]; });
-    if (!P.some(q => q[2])) continue;
-    ctx.fillStyle = C[c.col]; ctx.beginPath();
-    const n = P.length, mid = i => [(P[i][0] + P[(i + 1) % n][0]) / 2, (P[i][1] + P[(i + 1) % n][1]) / 2];
-    let m = mid(n - 1); ctx.moveTo(m[0], m[1]);
-    for (let i = 0; i < n; i++) { const q = mid(i); ctx.quadraticCurveTo(P[i][0], P[i][1], q[0], q[1]); }
-    ctx.fill();
-  }
-  ctx.fillStyle = 'rgba(240,250,255,0.92)';
-  for (const [lo, la, len, th] of CLOUDS) { const u = lo - rot * 1.3; const cu = Math.cos(u); if (cu < 0.05) continue;
-    const px = cx + R * Math.cos(la) * Math.sin(u), py = cy - R * Math.sin(la), wv = R * len * cu * Math.cos(la), hv = R * th;
-    ctx.beginPath(); ctx.roundRect(px - wv / 2, py - hv / 2, wv, hv, hv / 2); ctx.fill();
-    ctx.beginPath(); ctx.roundRect(px - wv * 0.15, py - hv * 1.25, wv * 0.5, hv * 0.9, hv * 0.45); ctx.fill(); }
-  ctx.fillStyle = 'rgba(240,250,255,0.95)'; ctx.beginPath(); ctx.ellipse(cx, cy - R * 0.99, R * 0.34, R * 0.1, 0, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(cx, cy + R * 1.0, R * 0.28, R * 0.08, 0, 0, 7); ctx.fill();
-  ctx.restore();
-  shadeCircle(cx, cy, R, 'rgba(12,6,58,0.5)', 'rgba(200,245,255,0.35)', 0.26);
-  ctx.save(); ctx.strokeStyle = 'rgba(140,230,255,0.55)'; ctx.lineWidth = R * 0.018; ctx.beginPath(); ctx.arc(cx, cy, R * 1.005, Math.PI * 0.95, Math.PI * 1.75); ctx.stroke(); ctx.restore();
-}
-function drawMoon(x, y, r) {
-  ctx.fillStyle = C.moon; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
-  ctx.fillStyle = C.moonD; for (const [a, b, s] of [[-.3, -.2, .28], [.35, .25, .2], [-.1, .45, .14]]) { ctx.beginPath(); ctx.arc(x + a * r, y + b * r, s * r, 0, 7); ctx.fill(); }
-  shadeCircle(x, y, r, 'rgba(25,10,70,0.45)', 'rgba(255,255,255,0.35)', 0.28);
-}
-function ghostMoon(x, y, r, a) {
-  if (a <= 0) return;
-  ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = 'rgba(199,179,245,0.8)'; ctx.lineWidth = 4; ctx.setLineDash([10, 12]); ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.stroke(); ctx.restore();
-}
-
-// ---------- text ----------
-function popText(str, x, y, size, t0, t, opt = {}) {
-  const words = str.split(' '); ctx.font = `${opt.w || 600} ${size}px ${FT}`;
-  const sp = ctx.measureText(' ').width, ws = words.map(w => ctx.measureText(w).width), tot = ws.reduce((a, b) => a + b, 0) + sp * (words.length - 1);
-  let cx = x - tot / 2; const out = opt.out != null ? opt.out : 99;
-  words.forEach((w, i) => {
-    const st = opt.stag || 0.09, p = seg(t, t0 + i * st, t0 + i * st + 0.5), q = seg(t, out + i * 0.04, out + i * 0.04 + 0.3);
-    if (p <= 0 || q >= 1) { cx += ws[i] + sp; return; }
-    const sc = eBack(p) * (1 - eIn(q) * 0.4);
-    ctx.save(); ctx.translate(cx + ws[i] / 2, y + (1 - eOut(p)) * size * 0.35); ctx.scale(sc, sc);
-    ctx.globalAlpha = clamp(p * 2.5) * (1 - q);
-    ctx.fillStyle = opt.col || '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = opt.glow || 'rgba(120,200,255,0.5)'; ctx.shadowBlur = 28;
-    ctx.fillText(w, 0, 0); ctx.restore(); cx += ws[i] + sp;
+function buildSprites() {
+  const rand = rng(7);
+  STARS = Array.from({ length: 320 }, () => {
+    const x = rand() * W, y = rand() * H, size = 0.6 + 2.6 * rand() ** 3;
+    return { x, y, size, phase: rand() * TAU, rate: 0.8 + 2.2 * rand(), near: rand() >= 0.7 };
   });
+  // three soft colour clouds behind the stars
+  NEB = canvasOf(W, H);
+  const ng = NEB.getContext('2d');
+  for (const [x, y, rad, rgb, a] of [[300, 260, 700, '196,52,150', 0.22], [1650, 180, 650, '40,190,200', 0.14], [960, 1100, 900, '120,70,220', 0.3]]) {
+    const grad = ng.createRadialGradient(x, y, 0, x, y, rad);
+    grad.addColorStop(0, `rgba(${rgb},${a})`); grad.addColorStop(1, `rgba(${rgb},0)`);
+    ng.fillStyle = grad; ng.fillRect(0, 0, W, H);
+  }
+  const half = 512;
+  ATMO = radialSprite(2 * half, 2 * half, ATMO_R * 0.926, ATMO_R * 1.63,
+    [[0, 'rgba(99,214,255,0.55)'], [0.18, 'rgba(99,214,255,0.28)'], [0.5, 'rgba(90,140,255,0.08)'], [1, 'rgba(90,140,255,0)']]);
+  GLOW = radialSprite(256, 256, 0, 128, [[0, 'rgba(255,255,255,0.9)'], [0.25, 'rgba(255,255,255,0.35)'], [1, 'rgba(255,255,255,0)']]);
+  WARM = radialSprite(512, 512, 0, 256,
+    [[0, 'rgba(255,214,120,0.95)'], [0.12, 'rgba(255,190,90,0.55)'], [0.45, 'rgba(255,140,70,0.16)'], [1, 'rgba(255,120,60,0)']]);
+  VIG = radialSprite(W, H, 500, 1250, [[0, 'rgba(5,5,25,0)'], [1, 'rgba(5,5,25,0.55)']]);
+}
+
+/* ===== drawing primitives ===== */
+// Flat shading: a dark crescent on the side away from the light (top-left) and a thin bright rim facing it.
+// Each layer fills the disc minus an offset copy of itself.
+function shadeCircle(x, y, r, k, dark, lite) {
+  const exceptDisc = (ox, oy, rr, col) => {
+    const p = new Path2D();
+    p.rect(x - r - 4, y - r - 4, 2 * r + 8, 2 * r + 8);
+    p.moveTo(ox + rr, oy); p.arc(ox, oy, rr, 0, TAU);
+    ctx.fillStyle = col; ctx.fill(p, 'evenodd');
+  };
+  const disc = new Path2D(); disc.arc(x, y, r, 0, TAU);
+  ctx.save(); ctx.clip(disc);
+  exceptDisc(x - r * k, y - r * k, r * 1.04, dark);
+  exceptDisc(x + r * 0.06, y + r * 0.06, r * 0.985, lite);
+  ctx.restore();
+}
+function glow(x, y, size, alpha, sprite) {
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = alpha;
+  ctx.drawImage(sprite || GLOW, x - size, y - size, size * 2, size * 2);
+  ctx.restore();
+}
+// four-pointed star whose edges curve in toward the centre
+function sparkle(x, y, k) {
+  ctx.beginPath(); ctx.moveTo(x + k, y);
+  for (let i = 1; i <= 4; i++) { const a = i * Math.PI / 2; ctx.quadraticCurveTo(x, y, x + Math.cos(a) * k, y + Math.sin(a) * k); }
+  ctx.fill();
+}
+// closed smooth outline through the midpoints of a polygon, using its corners as control points
+function blobPath(pts) {
+  const n = pts.length, midOf = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  ctx.beginPath();
+  const start = midOf(pts[n - 1], pts[0]); ctx.moveTo(start[0], start[1]);
+  pts.forEach((p, i) => { const m = midOf(p, pts[(i + 1) % n]); ctx.quadraticCurveTo(p[0], p[1], m[0], m[1]); });
+}
+
+/* ===== the planet ===== */
+// continents: a green landmass with a sandy core, as wobbly loops in (longitude, latitude) radians
+const CONT = [];
+{
+  const rand = rng(4242);
+  const loop = (lon, lat, size) => {
+    const pts = [];
+    for (let i = 0; i < 16; i++) {
+      const a = TAU * i / 16, reach = size * (0.72 + 0.5 * rand());
+      pts.push([lon + 1.25 * reach * Math.cos(a), lat + reach * Math.sin(a)]);
+    }
+    return pts;
+  };
+  const masses = [{ lon: 0.3, lat: 0.3, size: 0.42 }, { lon: 2.2, lat: -0.25, size: 0.48 }, { lon: 3.8, lat: 0.35, size: 0.38 },
+    { lon: 5.1, lat: -0.35, size: 0.4 }, { lon: 1.2, lat: 0.72, size: 0.22 }, { lon: 4.6, lat: 0.75, size: 0.2 }];
+  for (const m of masses) {
+    CONT.push({ col: 'land2', pts: loop(m.lon, m.lat, m.size) });
+    CONT.push({ col: 'land', pts: loop(m.lon + 0.08, m.lat + 0.06, m.size * 0.45) });
+  }
+}
+// cloud bands: longitude, latitude, length and thickness (fractions of the radius)
+const CLOUD_WHITE = 'rgba(240,250,255,0.92)';
+const CLOUDS = [
+  { lon: 0.7, lat: -0.45, len: 0.42, th: 0.05 }, { lon: 1.9, lat: 0.18, len: 0.34, th: 0.045 },
+  { lon: 3.0, lat: -0.12, len: 0.5, th: 0.05 }, { lon: 4.3, lat: 0.42, len: 0.38, th: 0.045 },
+  { lon: 5.6, lat: -0.08, len: 0.3, th: 0.04 }, { lon: 2.6, lat: 0.55, len: 0.26, th: 0.035 }];
+// orthographic projection; points on the far side are pinned to the limb so shapes fold over the edge
+function project(cx, cy, R, lon, lat, rot) {
+  let u = Math.atan2(Math.sin(lon - rot), Math.cos(lon - rot));
+  const front = Math.cos(u) > 0;
+  if (!front) u = Math.sign(u) * Math.PI / 2;
+  return [cx + R * Math.cos(lat) * Math.sin(u), cy - R * Math.sin(lat), front];
+}
+// `tilt` turns the surface only; the light and the atmosphere stay put
+function drawPlanet(cx, cy, R, rot, tilt = 0) {
+  const s = R / ATMO_R;
+  ctx.drawImage(ATMO, cx - ATMO.width / 2 * s, cy - ATMO.height / 2 * s, ATMO.width * s, ATMO.height * s);
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();
+  const sea = ctx.createRadialGradient(cx - 0.35 * R, cy - 0.4 * R, 0.1 * R, cx, cy, 1.1 * R);
+  sea.addColorStop(0, '#2aa3e0'); sea.addColorStop(1, C.oceanD);
+  ctx.fillStyle = sea; ctx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
+  ctx.translate(cx, cy); ctx.rotate(tilt); ctx.translate(-cx, -cy);
+  for (const land of CONT) {
+    const pts = land.pts.map(([lon, lat]) => project(cx, cy, R, lon, lat, rot));
+    if (pts.every(p => !p[2])) continue;
+    ctx.fillStyle = C[land.col]; blobPath(pts); ctx.fill();
+  }
+  ctx.fillStyle = CLOUD_WHITE;
+  for (const cl of CLOUDS) {
+    const u = cl.lon - rot * 1.3, facing = Math.cos(u);
+    if (facing < 0.05) continue;
+    const x = cx + R * Math.cos(cl.lat) * Math.sin(u), y = cy - R * Math.sin(cl.lat);
+    const w = R * cl.len * facing * Math.cos(cl.lat), h = R * cl.th;
+    ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2, w, h, h / 2); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(x - 0.15 * w, y - 1.25 * h, 0.5 * w, 0.9 * h, 0.45 * h); ctx.fill();
+  }
+  // polar caps
+  ctx.fillStyle = 'rgba(240,250,255,0.95)';
+  for (const [dy, rx, ry] of [[-0.99, 0.34, 0.1], [1.0, 0.28, 0.08]]) { ctx.beginPath(); ctx.ellipse(cx, cy + dy * R, rx * R, ry * R, 0, 0, TAU); ctx.fill(); }
+  ctx.restore();
+  shadeCircle(cx, cy, R, 0.26, 'rgba(12,6,58,0.5)', 'rgba(200,245,255,0.35)');
+  // bright atmospheric edge on the lit side
+  ctx.save();
+  ctx.lineWidth = 0.018 * R; ctx.strokeStyle = 'rgba(140,230,255,0.55)';
+  ctx.beginPath(); ctx.arc(cx, cy, 1.005 * R, 0.95 * Math.PI, 1.75 * Math.PI); ctx.stroke();
+  ctx.restore();
+}
+const CRATERS = [{ dx: -0.3, dy: -0.2, r: 0.28 }, { dx: 0.35, dy: 0.25, r: 0.2 }, { dx: -0.1, dy: 0.45, r: 0.14 }];
+function paintMoon(x, y, r) {
+  const disc = (px, py, pr) => { ctx.beginPath(); ctx.arc(px, py, pr, 0, TAU); ctx.fill(); };
+  ctx.fillStyle = C.moon; disc(x, y, r);
+  ctx.fillStyle = C.moonD;
+  for (const c of CRATERS) disc(x + c.dx * r, y + c.dy * r, c.r * r);
+  shadeCircle(x, y, r, 0.28, 'rgba(25,10,70,0.45)', 'rgba(255,255,255,0.35)');
+}
+// dashed outline marking where the Moon used to be
+function ghostMoon(x, y, r, alpha) {
+  if (!(alpha > 0)) return;
+  ctx.save();
+  ctx.globalAlpha = alpha; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.setLineDash([10, 12]);
+  ctx.strokeStyle = 'rgba(199,179,245,0.8)';
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+
+/* ===== type ===== */
+// Headline whose words pop in one after another (overshooting scale, rising from below)
+// and shrink away from time `out` on. Centred on x.
+function popText(str, x, y, size, t0, t, { w = 600, stag = 0.09, out = 99, col = '#fff', glow: halo = 'rgba(120,200,255,0.5)' } = {}) {
+  ctx.font = `${w} ${size}px ${FT}`;
+  const words = str.split(' '), gap = ctx.measureText(' ').width;
+  const widths = words.map(word => ctx.measureText(word).width);
+  let left = x - (widths.reduce((sum, v) => sum + v + gap, 0) - gap) / 2;
+  for (let i = 0; i < words.length; i++) {
+    const centre = left + widths[i] / 2;
+    left += widths[i] + gap;
+    const inK = seg(t, t0 + i * stag, t0 + i * stag + 0.5), outK = seg(t, out + 0.04 * i, out + 0.04 * i + 0.3);
+    if (inK <= 0 || outK >= 1) continue;
+    const scale = eBack(inK) * (1 - 0.4 * eIn(outK));
+    ctx.save();
+    ctx.translate(centre, y + 0.35 * size * (1 - eOut(inK))); ctx.scale(scale, scale);
+    ctx.globalAlpha = clamp(2.5 * inK) * (1 - outK);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = halo; ctx.shadowBlur = 28; ctx.fillStyle = col;
+    ctx.fillText(words[i], 0, 0);
+    ctx.restore();
+  }
 }
 const popTimes = (str, t0, st = 0.09) => str.split(' ').map((_, i) => t0 + i * st);
 function kicker(str, y, tin, tout, t, col = '#c3cfff') {
@@ -144,30 +244,38 @@ function kicker(str, y, tin, tout, t, col = '#c3cfff') {
   ctx.letterSpacing = '6px'; ctx.fillText(str, 960, y + (1 - eOut(seg(t, tin, tin + 0.4))) * 12); ctx.restore();
 }
 
-// ---------- space ----------
-function stars(t, par, alpha, maxY = H) {
-  for (const s of STARS) {
-    if (s.y > maxY) continue;
-    const tw = 0.55 + 0.45 * Math.sin(t * s.sp + s.ph);
-    const x = (s.x - par * (s.layer ? 60 : 25) + W * 4) % W, y = s.y + par * (s.layer ? 18 : 8);
-    ctx.globalAlpha = alpha * tw * (s.layer ? 1 : 0.6); ctx.fillStyle = C.star;
-    if (s.s > 2.3) sparkle(x, y, s.s * 2.4 * tw); else { ctx.beginPath(); ctx.arc(x, y, s.s, 0, 7); ctx.fill(); }
+/* ===== space ===== */
+// twinkling star field; `drift` slides the two depth layers at different speeds
+function drawStars(t, drift, alpha, maxY = H) {
+  ctx.save(); ctx.fillStyle = C.star;
+  for (const st of STARS) {
+    if (st.y > maxY) continue;
+    const twinkle = 0.55 + 0.45 * Math.sin(st.rate * t + st.phase);
+    const x = ((st.x - drift * (st.near ? 60 : 25)) % W + W) % W, y = st.y + drift * (st.near ? 18 : 8);
+    ctx.globalAlpha = alpha * twinkle * (st.near ? 1 : 0.6);
+    if (st.size > 2.3) sparkle(x, y, 2.4 * st.size * twinkle);
+    else { ctx.beginPath(); ctx.arc(x, y, st.size, 0, TAU); ctx.fill(); }
   }
-  ctx.globalAlpha = 1;
+  ctx.restore();
 }
-function spaceBg(t, nebA = 1) {
-  const bg = ctx.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, C.sky0); bg.addColorStop(1, C.sky1);
-  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
-  ctx.globalAlpha = nebA; ctx.drawImage(NEB, 0, 0); ctx.globalAlpha = 1;
+function paintSpace(nebula = 1) {
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, C.sky0); sky.addColorStop(1, C.sky1);
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.globalAlpha = nebula; ctx.drawImage(NEB, 0, 0); ctx.restore();
 }
-function orbitPos(th, rx, ry, tilt, cx, cy) { const x = rx * Math.cos(th), y = ry * Math.sin(th); return [cx + x * Math.cos(tilt) - y * Math.sin(tilt), cy + x * Math.sin(tilt) + y * Math.cos(tilt), Math.sin(th)]; }
+// point on a tilted ellipse; the third value (sin of the angle) is > 0 on the near side
+function orbitPos(angle, rx, ry, tilt, cx, cy) {
+  const ex = rx * Math.cos(angle), ey = ry * Math.sin(angle), ct = Math.cos(tilt), st = Math.sin(tilt);
+  return [cx + ex * ct - ey * st, cy + ex * st + ey * ct, Math.sin(angle)];
+}
 
 // scene A: Earth and Moon, then the Moon dissolves into sparks
 const PA = { x: 960, y: 660, r: 270 }, T_VANISH = 1.75;
 const SPARKS = (() => { const r = rng(31), s = []; for (let i = 0; i < 26; i++) s.push({ a: r() * 6.283, v: 60 + r() * 170, s: 4 + r() * 9, c: r() < 0.6 ? C.moon : r() < 0.5 ? '#fff4d8' : C.crest }); return s; })();
-function sceneSpace(t) {
-  spaceBg(t, seg(t, 0, 1.2));
-  stars(t, t * 0.15, seg(t, 0.05, 0.9));
+function drawSpaceScene(t) {
+  paintSpace(seg(t, 0, 1.2));
+  drawStars(t, 0.15 * t, seg(t, 0.05, 0.9));
   const py = lerp(1560, PA.y, eBack(seg(t, 0.2, 1.6), 1.25)), rot = t * 0.22 + 1.2;
   // the Moon stops moving as it vanishes
   const th = -0.9 + Math.min(t, T_VANISH) * 0.42 + Math.max(0, t - T_VANISH) * 0.08;
@@ -175,7 +283,7 @@ function sceneSpace(t) {
   const vin = eBack(seg(t, 0.75, 1.25)), vk = seg(t, T_VANISH, T_VANISH + 0.35);
   const swell = 1 + 0.25 * Math.sin(Math.PI * seg(t, T_VANISH - 0.18, T_VANISH + 0.12));
   const moonR = mr * vin * swell * (1 - eIn(vk));
-  const drawM = () => { if (moonR > 0.5) { drawMoon(mp[0], mp[1], moonR); if (vk > 0) { ctx.save(); ctx.globalAlpha = vk; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(mp[0], mp[1], moonR, 0, 7); ctx.fill(); ctx.restore(); } } };
+  const drawM = () => { if (moonR > 0.5) { paintMoon(mp[0], mp[1], moonR); if (vk > 0) { ctx.save(); ctx.globalAlpha = vk; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(mp[0], mp[1], moonR, 0, 7); ctx.fill(); ctx.restore(); } } };
   if (mp[2] < 0) drawM();
   drawPlanet(PA.x, py, PA.r, rot);
   if (mp[2] >= 0) drawM();
@@ -183,9 +291,10 @@ function sceneSpace(t) {
   const fk = seg(t, T_VANISH + 0.2, T_VANISH + 1.1);
   if (fk > 0 && fk < 1) {
     glow(mp[0], mp[1], 150 * (0.6 + fk), (1 - fk) * 0.8);
+    ctx.save();
     for (const s of SPARKS) { const d = s.v * eOut(fk), a = 1 - eIn(fk);
       ctx.globalAlpha = a; ctx.fillStyle = s.c; sparkle(mp[0] + Math.cos(s.a) * d, mp[1] + Math.sin(s.a) * d * 0.8, s.s * (1 - fk * 0.6)); }
-    ctx.globalAlpha = 1;
+    ctx.restore();
   }
   ghostMoon(mp[0], mp[1], mr, seg(t, T_VANISH + 0.45, T_VANISH + 0.7) * 0.9);
   popText('What if the Moon disappeared?', 960, 150, 84, 0.55, t, { out: 2.25 });
@@ -209,7 +318,7 @@ function sceneCoast(t) {
   // sky
   const sk = ctx.createLinearGradient(0, 0, 0, 760); sk.addColorStop(0, kc('skyT', n)); sk.addColorStop(0.62, kc('skyM', n)); sk.addColorStop(1, kc('skyH', n));
   ctx.fillStyle = sk; ctx.fillRect(0, 0, W, H);
-  stars(t, 0, n * 0.9, 600);
+  drawStars(t, 0, n * 0.9, 600);
   ghostMoon(360, 250, 64, 0.7 * (1 - n * 0.4));
   // far mountains, mid hills
   ctx.fillStyle = kc('mtn', n); ctx.beginPath(); ctx.moveTo(0, H);
@@ -260,7 +369,7 @@ function sceneCoast(t) {
   for (const [x, s] of TREES) { const y = groundY(x); const sway = Math.sin(t * 1.6 + x) * 3;
     ctx.fillStyle = kc('trunk', n); ctx.beginPath(); ctx.roundRect(x - 8 * s, y - 90 * s, 16 * s, 96 * s, 6); ctx.fill();
     ctx.fillStyle = kc('tree', n); ctx.beginPath(); ctx.arc(x + sway, y - 120 * s, 52 * s, 0, 7); ctx.fill();
-    shadeCircle(x + sway, y - 120 * s, 52 * s, 'rgba(10,20,50,0.28)', 'rgba(255,255,255,0.18)', 0.25); }
+    shadeCircle(x + sway, y - 120 * s, 52 * s, 0.25, 'rgba(10,20,50,0.28)', 'rgba(255,255,255,0.18)'); }
   // foam where the water meets the sand
   const fxL = (() => { let lo = 600, hi = 1350; for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (groundY(m) > L) lo = m; else hi = m; } return lo; })();
   ctx.strokeStyle = hexA('#ffffff', 0.85 - n * 0.4); ctx.lineWidth = 8; ctx.lineCap = 'round';
@@ -364,8 +473,8 @@ function seasonIcon(s, t) {
   ctx.restore();
 }
 function sceneEarth(t) {
-  spaceBg(t);
-  stars(t, t * 0.15, 1);
+  paintSpace();
+  drawStars(t, 0.15 * t, 1);
   const endK = eInOut(seg(t, 8.5, 9.4));
   const cx = PD.x, cy = lerp(PD.y, 640, endK), R = PD.r * lerp(1, 0.92, endK);
   // empty orbit where the Moon used to travel
@@ -398,30 +507,48 @@ function sceneEarth(t) {
   kicker('EARTH, ALONE', 1000, 9.1, 99, t);
 }
 
-// ---------- timeline ----------
-function frame(t) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.filter = 'none';
-  // A → B: zoom into Earth, atmosphere flash, coast settles in
-  const zA = seg(t, 2.3, 2.95), cross = seg(t, 2.85, 3.0);
+/* ===== timeline ===== */
+function zoomAbout(px, py, z) { ctx.translate(px, py); ctx.scale(z, z); ctx.translate(-px, -py); }
+function veil(color, alpha) {
+  if (alpha <= 0) return;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.fillRect(0, 0, W, H); ctx.restore();
+}
+function renderFrame(t) {
+  ctx.resetTransform(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
+  // space → coast: dive into the planet, a cyan flash covers the cut
   if (t < 3.0) {
-    ctx.save(); const z = 1 + 9 * eIn(zA); ctx.translate(1030, 600); ctx.scale(z, z); ctx.translate(-1030, -600);
-    sceneSpace(t); ctx.restore();
+    ctx.save(); zoomAbout(1030, 600, 1 + 9 * eIn(seg(t, 2.3, 2.95)));
+    drawSpaceScene(t);
+    ctx.restore();
   }
-  // C → D: iris closes onto the Earth
-  const ir = seg(t, 6.85, 7.55);
+  // coast → Earth: an iris closes onto the planet
+  const iris = seg(t, 6.85, 7.55), irisR = lerp(1250, PD.r, eInOut(iris));
   if (t >= 6.85) sceneEarth(t);
-  if (cross > 0 && t < 7.55) {
-    ctx.save(); ctx.globalAlpha = eInOut(cross);
-    if (ir > 0) { const rr = lerp(1250, PD.r, eInOut(ir)); ctx.beginPath(); ctx.arc(PD.x, PD.y, rr, 0, 7); ctx.clip(); ctx.globalAlpha *= 1 - seg(t, 7.3, 7.55); }
-    const z = 1 + 0.18 * (1 - eOut(seg(t, 2.85, 4.0))) + 0.25 * eIn(ir); ctx.translate(960, 540); ctx.scale(z, z); ctx.translate(-960, -540);
-    sceneCoast(t); ctx.restore();
-    if (ir > 0 && ir < 1) { const rr = lerp(1250, PD.r, eInOut(ir)); ctx.save(); ctx.strokeStyle = hexA(C.crest, 0.8 * (1 - seg(t, 7.3, 7.55))); ctx.lineWidth = 10;
-      ctx.shadowColor = 'rgba(134,232,255,0.9)'; ctx.shadowBlur = 30; ctx.beginPath(); ctx.arc(PD.x, PD.y, rr, 0, 7); ctx.stroke(); ctx.restore(); }
+  const coastIn = seg(t, 2.85, 3.0);
+  if (coastIn > 0 && t < 7.55) {
+    ctx.save();
+    let alpha = eInOut(coastIn);
+    if (iris > 0) {
+      ctx.beginPath(); ctx.arc(PD.x, PD.y, irisR, 0, TAU); ctx.clip();
+      alpha *= 1 - seg(t, 7.3, 7.55);
+    }
+    ctx.globalAlpha = alpha;
+    zoomAbout(960, 540, 1 + 0.18 * (1 - eOut(seg(t, 2.85, 4.0))) + 0.25 * eIn(iris));
+    sceneCoast(t);
+    ctx.restore();
+    if (iris > 0 && iris < 1) {
+      ctx.save();
+      ctx.lineWidth = 10; ctx.strokeStyle = hexA(C.crest, 0.8 * (1 - seg(t, 7.3, 7.55)));
+      ctx.shadowBlur = 30; ctx.shadowColor = 'rgba(134,232,255,0.9)';
+      ctx.beginPath(); ctx.arc(PD.x, PD.y, irisR, 0, TAU); ctx.stroke();
+      ctx.restore();
+    }
   }
-  const fl = Math.sin(Math.PI * seg(t, 2.72, 3.25)); if (fl > 0) { ctx.globalAlpha = Math.pow(fl, 1.5) * 0.85; ctx.fillStyle = '#8fe4ff'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  const flash = Math.sin(Math.PI * seg(t, 2.72, 3.25));
+  if (flash > 0) veil('#8fe4ff', 0.85 * flash ** 1.5);
   ctx.drawImage(VIG, 0, 0);
-  const fade = Math.max(1 - seg(t, 0, 0.4), seg(t, 9.65, 10.0));
-  if (fade > 0) { ctx.globalAlpha = eInOut(fade); ctx.fillStyle = '#0a1030'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  // fade up from and back down to the space colour
+  veil(C.sky0, eInOut(Math.max(1 - seg(t, 0, 0.4), seg(t, 9.65, DUR))));
 }
 
 // sound cues for audio.py
@@ -447,9 +574,14 @@ window.events = function () {
   ev.push({ t: 8.7, k: 'chord' });
   return ev.sort((a, b) => a.t - b.t);
 };
-window.draw = function (job) { frame(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
-window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`600 80px 'Fredoka'`, "What if the Moon disappeared? Earth's"), document.fonts.load(`700 80px 'Fredoka'`, '23°'),
-  document.fonts.load(`500 80px 'Fredoka'`, 'Aa')
-])).then(() => { buildAssets(); });
+window.draw = ({ t, q }) => {
+  renderFrame(t);
+  return canvas.toDataURL('image/jpeg', q || 0.92).slice('data:image/jpeg;base64,'.length);
+};
+window.ready = (async () => {
+  await document.fonts.ready;
+  const sample = "What if the Moon disappeared? Earth's 23° TILT Aa";
+  await Promise.all([500, 600, 700].map(weight => document.fonts.load(`${weight} 80px 'Fredoka'`, sample)));
+  buildSprites();
+})();
 </script></body></html>
