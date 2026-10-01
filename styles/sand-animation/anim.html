@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── sand-animation · sand art on a backlit glass table ─────────────────────────────────
+// The lightbox switches on → a sprinkle lays a thin amber veil → a pour builds a hill → a finger carves a tree
+// (light negative lines, sand piled on both rims) → fingertip dabs of sand become its leaves → the tree fills back
+// in and the leaves lift off as a flock → the birds land on a head profile, which pours in behind them → an eye
+// and a caption are carved → a palm wipe sweeps the glass clean → the light goes down.
+// Everything is a sand-thickness field (half-res alpha mask, drawn from t only) lit by transmission through grain.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eBack = u => { const c = 1.9; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const FONT = '"Caveat"';
+const MS = 0.5, MW = W * MS, MH = H * MS;          // sand mask resolution
+
+// ── timeline ──
+const T = {
+  lightOn: [0, 0.7], sprinkle: [0.2, 1.1], pour: [0.9, 2.2], tree: [2.25, 3.3], dabs: [3.2, 3.75],
+  dissolve: [3.85, 4.7], lift: 3.85, flock: [4.0, 5.3], flatten: [4.4, 5.8], land: [5.05, 5.85], head: [5.45, 6.25],
+  eye: [6.15, 6.4], ear: [6.25, 6.5], hair: [6.2, 6.6], write: [6.35, 7.45], wipe: [8.0, 8.75], lightOff: [9.6, 10.0],
+};
+
+// ── canvases ──
+const M = mk(MW, MH), m = M.getContext('2d');       // sand mask: alpha = thickness
+const B = mk(MW, MH), b = B.getContext('2d', { willReadFrequently: true }); // softened mask
+const TMP = mk(MW, MH), tm = TMP.getContext('2d');
+const out = ctx.createImageData(W, H);
+
+// ── static textures: grain, clumps, backlight, dust, sky veil, wipe streaks ──
+const G1 = new Float32Array(W * H), G2 = new Float32Array(W * H), LT = new Float32Array(W * H);
+function buildTextures() {
+  const r = rng(7);
+  for (let i = 0; i < W * H; i++) G1[i] = r();
+  // clumps: value noise on a 6px lattice, bilinear
+  const S = 6, gw = Math.ceil(W / S) + 2, gh = Math.ceil(H / S) + 2, g = new Float32Array(gw * gh);
+  for (let i = 0; i < g.length; i++) g[i] = r();
+  for (let y = 0; y < H; y++) {
+    const fy = y / S, iy = fy | 0, uy = fy - iy, sy = uy * uy * (3 - 2 * uy);
+    for (let x = 0; x < W; x++) {
+      const fx = x / S, ix = fx | 0, ux = fx - ix, sx = ux * ux * (3 - 2 * ux);
+      const a = g[iy * gw + ix], bb = g[iy * gw + ix + 1], c = g[(iy + 1) * gw + ix], d = g[(iy + 1) * gw + ix + 1];
+      G2[y * W + x] = lerp(lerp(a, bb, sx), lerp(c, d, sx), sy);
+    }
+  }
+  // backlight: warm hotspot, soft falloff to the table edge
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const dx = (x - W * 0.5) / (W * 0.62), dy = (y - H * 0.47) / (H * 0.7), rr = dx * dx + dy * dy;
+    LT[y * W + x] = 1.04 - 0.34 * rr - 0.12 * rr * rr;
+  }
+}
+const DUST = mk(MW, MH), SKY = mk(MW, MH), STREAK = mk(MW, MH);
+function buildLayers() {
+  let r = rng(21), d = DUST.getContext('2d');
+  for (let i = 0; i < 2600; i++) {
+    d.fillStyle = `rgba(0,0,0,${0.25 + 0.5 * r()})`;
+    d.beginPath(); d.arc(r() * MW, r() * MH, 0.4 + 0.8 * r() * r(), 0, TAU); d.fill();
+  }
+  // sky veil: thin uneven layer, heavier toward the top, with a few broad palm marks
+  r = rng(33); const s = SKY.getContext('2d'), id = s.createImageData(MW, MH);
+  const blobs = Array.from({ length: 14 }, () => [r() * MW, r() * MH, 60 + 160 * r(), (r() - 0.55) * 0.26]);
+  for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+    let v = 0.27 - 0.07 * (y / MH);
+    for (const [bx, by, br, ba] of blobs) { const q = ((x - bx) ** 2 + (y - by) ** 2) / (br * br); if (q < 4) v += ba * Math.exp(-q); }
+    v += 0.05 * Math.sin(x * 0.021 + y * 0.013) * Math.sin(y * 0.017 - x * 0.006);
+    id.data[(y * MW + x) * 4 + 3] = clamp(v, 0, 1) * 255;
+  }
+  s.putImageData(id, 0, 0);
+  // palm streaks left behind by the final wipe
+  r = rng(55); const st = STREAK.getContext('2d');
+  for (let i = 0; i < 38; i++) {
+    const y = r() * MH, x0 = r() * MW * 0.9 - 60, len = 160 + 520 * r(), sag = (y / MH - 0.5) * 60;
+    st.strokeStyle = `rgba(0,0,0,${0.03 + 0.07 * r()})`; st.lineWidth = 0.6 + 1.6 * r();
+    st.beginPath(); st.moveTo(x0, y); st.bezierCurveTo(x0 + len * .3, y + sag * .6, x0 + len * .7, y + sag * .6, x0 + len, y); st.stroke();
+  }
+}
+
+// ── the hill: sand deposited along a moving pour point, accumulated analytically ──
+const POUR_N = 90, pourX = u => lerp(120, 1800, u);
+const pourRate = x => 0.35 + 1.25 * Math.exp(-(((x - 700) / 260) ** 2)) + 0.22 * Math.exp(-(((x - 1450) / 300) ** 2));
+let HILL_SC = 1;
+function hillRaw(x, u) {
+  let h = 0; const k = Math.floor(u * POUR_N);
+  for (let i = 0; i <= Math.min(k, POUR_N - 1); i++) {
+    const w = i < k ? 1 : u * POUR_N - k, xp = pourX(i / POUR_N), sg = 105 + 60 * (1 - i / POUR_N) * u;
+    h += w * pourRate(xp) * Math.exp(-(((x - xp) / sg) ** 2));
+  }
+  return h;
+}
+function hillProfile(t) {
+  const u = seg(t, ...T.pour), fl = eInOut(seg(t, ...T.flatten)), pts = [];
+  for (let x = -40; x <= W + 40; x += 16) {
+    let h = hillRaw(x, u) * HILL_SC;
+    h = lerp(h, 70 + 0.22 * h + 16 * Math.sin(x * 0.006), fl);
+    pts.push([x, H - h]);
+  }
+  return pts;
+}
+const crestY = () => H - hillRaw(700, 1) * HILL_SC;
+
+// ── the tree: recursive branches, each carved after its parent ──
+const BR = [], LEAVES = [];
+function buildTree() {
+  const r = rng(91), cy = crestY() + 14;
+  function grow(x, y, ang, len, w, depth, t0) {
+    const x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len, dur = 0.12 + len / 1500;
+    const bend = (r() - 0.5) * len * 0.25;
+    BR.push({ x, y, x2, y2, cx: (x + x2) / 2 + Math.cos(ang + Math.PI / 2) * bend, cy: (y + y2) / 2 + Math.sin(ang + Math.PI / 2) * bend, w, t0, dur });
+    if (depth === 0) { LEAVES.push([x2, y2]); return; }
+    const n = depth > 1 && r() < 0.3 ? 3 : 2;
+    for (let i = 0; i < n; i++) {
+      const spread = n === 3 ? (i - 1) * 0.5 : (i ? 1 : -1) * (0.32 + 0.2 * r());
+      grow(x2, y2, ang + spread + (r() - 0.5) * 0.18, len * (0.68 + 0.12 * r()), w * 0.7, depth - 1, t0 + dur * (0.85 + 0.1 * r()));
+    }
+    if (depth <= 2) LEAVES.push([lerp(x, x2, 0.6) + (r() - .5) * 40, lerp(y, y2, 0.6) - 14 - 10 * r()]);
+  }
+  grow(700, cy + 30, -Math.PI / 2, 210, 17, 4, 0);
+  // roots
+  BR.push({ x: 700, y: cy + 30, x2: 640, y2: cy + 70, cx: 680, cy: cy + 62, w: 9, t0: 0.02, dur: 0.14 });
+  BR.push({ x: 700, y: cy + 30, x2: 765, y2: cy + 64, cx: 725, cy: cy + 60, w: 9, t0: 0.04, dur: 0.14 });
+  // normalise branch timing into the tree window
+  const end = Math.max(...BR.map(q => q.t0 + q.dur)), [a, bnd] = T.tree, k = (bnd - a) / end;
+  for (const q of BR) { q.t0 = a + q.t0 * k; q.dur *= k; }
+  const lr = rng(97);
+  LEAVES.forEach((p, i) => { p.push(lerp(T.dabs[0], T.dabs[1] - 0.2, lr()), 15 + 8 * lr(), lr()); });
+}
+const quadPt = (q, u) => [(1 - u) ** 2 * q.x + 2 * (1 - u) * u * q.cx + u * u * q.x2, (1 - u) ** 2 * q.y + 2 * (1 - u) * u * q.cy + u * u * q.y2];
+function strokeBranch(g, q, u, extra) {
+  const N = 12, n = Math.max(1, Math.ceil(N * u));
+  for (let i = 0; i < n; i++) {
+    const a = quadPt(q, (i / N) * 1), bq = quadPt(q, Math.min(u, (i + 1) / N));
+    g.lineWidth = q.w * (1 - 0.3 * (i / N)) + extra;
+    g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(bq[0], bq[1]); g.stroke();
+  }
+}
+
+// ── the head profile (facing left), closed Catmull-Rom spline ──
+const FACE = [[1420, 1110], [1455, 930], [1385, 852], [1300, 790], [1282, 690], [1322, 600], [1348, 470], [1318, 330], [1242, 246], [1140, 212],
+  [1062, 236], [1016, 290], [1000, 350], [994, 394], [1004, 418], [982, 458], [956, 500], [982, 514], [988, 528], [971, 546], [998, 560],
+  [977, 578], [1004, 598], [990, 630], [1030, 658], [1084, 670], [1098, 745], [1040, 800], [930, 850], [860, 1110]];
+function crPath(P, n = 10) {
+  const out = [], L = P.length;
+  for (let i = 0; i < L; i++) {
+    const p0 = P[(i - 1 + L) % L], p1 = P[i], p2 = P[(i + 1) % L], p3 = P[(i + 2) % L];
+    for (let j = 0; j < n; j++) {
+      const s = j / n, s2 = s * s, s3 = s2 * s;
+      out.push([0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * s + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * s2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * s3),
+                0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * s + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * s2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * s3)]);
+    }
+  }
+  return out;
+}
+const FACE_PTS = crPath(FACE);
+// landing spots for the birds: the crown and back of the skull (they become the hair line)
+const LAND = [];
+function buildLanding() {
+  const a = 5 * 10, z = 13 * 10, n = LEAVES.length;   // spline samples from the back of the skull to the brow
+  for (let i = 0; i < n; i++) LAND.push(FACE_PTS[Math.round(lerp(a, z, i / (n - 1)))]);
+  // order leaves left→right so paths don't cross much
+  const idx = LEAVES.map((p, i) => i).sort((i, j) => LEAVES[j][0] - LEAVES[i][0]);
+  BIRD = idx.map((li, k) => ({ leaf: LEAVES[li], land: LAND[k], seed: li }));
+}
+let BIRD = [];
+
+// ── helpers ──
+function sprayDots(g, x, y, rad, n, seed, a = 0.7) {
+  const r = rng(seed);
+  for (let i = 0; i < n; i++) {
+    const ang = r() * TAU, d = rad * Math.sqrt(r());
+    g.fillStyle = `rgba(0,0,0,${a * (0.4 + 0.6 * r())})`;
+    g.fillRect(x + Math.cos(ang) * d, y + Math.sin(ang) * d, 2 + 2 * r(), 2 + 2 * r());
+  }
+}
+function bird(g, x, y, s, flap, heading) {
+  g.save(); g.translate(x, y); g.rotate(heading);
+  const wy = s * 0.55 * flap, lift = s * 0.28;
+  g.beginPath();
+  g.moveTo(-s, wy);
+  g.quadraticCurveTo(-s * 0.45, wy * 0.25 - lift, 0, s * 0.12);
+  g.quadraticCurveTo(s * 0.45, wy * 0.25 - lift, s, wy);
+  g.quadraticCurveTo(s * 0.42, wy * 0.2 - lift * 0.15, 0, s * 0.34);
+  g.quadraticCurveTo(-s * 0.42, wy * 0.2 - lift * 0.15, -s, wy);
+  g.fill();
+  g.beginPath(); g.ellipse(0, s * 0.2, s * 0.13, s * 0.2, 0, 0, TAU); g.fill();
+  g.restore();
+}
+function flockCentre(t) {                         // a loose arc from the tree, up and over to the right, circling back
+  const u = seg(t, T.flock[0], T.flock[1]);
+  const x = lerp(700, 1180, eInOut(u)) + 170 * Math.sin(u * Math.PI);
+  const y = lerp(440, 300, eInOut(u)) - 190 * Math.sin(u * Math.PI);
+  return [x, y];
+}
+function birdPos(q, t) {
+  const r = rng(q.seed * 13 + 5), ph = r() * TAU, off = [(r() - .5) * 360, (r() - .5) * 200], t0 = T.lift + r() * 0.35;
+  const [lx, ly] = q.leaf, [fx, fy] = flockCentre(t);
+  const tl = T.land[0] + r() * 0.35, tlE = tl + 0.5;
+  const up = eInOut(seg(t, t0, t0 + 0.7)), land = eInOut(seg(t, tl, tlE));
+  const wob = [28 * Math.sin(t * 3.1 + ph), 18 * Math.sin(t * 4.3 + ph * 1.7)];
+  let x = lerp(lx, fx + off[0] + wob[0], up), y = lerp(ly, fy + off[1] + wob[1], up);
+  x = lerp(x, q.land[0], land); y = lerp(y, q.land[1], land);
+  return { x, y, t0, tl, tlE, ph, up, land };
+}
+
+// ── draw the sand mask for time t ──
+function drawMask(t) {
+  m.setTransform(1, 0, 0, 1, 0, 0); m.clearRect(0, 0, MW, MH);
+  m.setTransform(MS, 0, 0, MS, 0, 0); m.globalCompositeOperation = 'source-over'; m.fillStyle = '#000'; m.strokeStyle = '#000';
+  m.drawImage(DUST, 0, 0, W, H);
+  // sky veil, sprinkled on from left to right
+  const us = seg(t, ...T.sprinkle);
+  if (us > 0) {
+    tm.setTransform(1, 0, 0, 1, 0, 0); tm.clearRect(0, 0, MW, MH); tm.globalCompositeOperation = 'source-over';
+    tm.drawImage(SKY, 0, 0); tm.globalCompositeOperation = 'destination-in';
+    const fx = lerp(-300, MW + 300, eInOut(us)), gr = tm.createLinearGradient(fx - 180, 0, fx + 40, 0);
+    gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    tm.fillStyle = gr; tm.fillRect(0, 0, MW, MH); tm.globalCompositeOperation = 'source-over';
+    m.drawImage(TMP, 0, 0, W, H);
+    if (us < 1) {                                 // falling grains at the sprinkle front
+      const f = Math.floor(t * 30), r = rng(f * 7 + 3), X = fx / MS;
+      for (let i = 0; i < 260; i++) { m.globalAlpha = 0.3 + 0.5 * r(); m.fillRect(X - 260 * r() + 60, r() * H, 2.2, 2.2); }
+      m.globalAlpha = 1;
+    }
+  }
+  // hill: layered fills give a dark core and a soft, lighter slope at the top edge
+  if (t >= T.pour[0]) {
+    const P = hillProfile(t);
+    for (const [dy, a] of [[0, 0.28], [9, 0.3], [22, 0.35], [44, 0.6]]) {
+      m.globalAlpha = a; m.beginPath(); m.moveTo(-40, H + 40);
+      for (const [x, y] of P) m.lineTo(x, y + dy);
+      m.lineTo(W + 40, H + 40); m.closePath(); m.fill();
+    }
+    m.globalAlpha = 1;
+    const up = seg(t, ...T.pour);
+    if (up > 0 && up < 1) {                       // where the stream lands
+      const xp = pourX(up), yp = H - hillRaw(xp, up) * HILL_SC;
+      m.globalAlpha = 0.5; m.beginPath(); m.ellipse(xp, yp + 14, 34, 22, 0, 0, TAU); m.fill(); m.globalAlpha = 1;
+      sprayDots(m, xp, yp + 10, 40, 90, Math.floor(t * 30) * 11 + 1, 0.9);
+      sprayDots(m, xp, yp, 110, 130, Math.floor(t * 30) * 11, 0.6);
+    }
+  }
+  // tree: rims of pushed sand first, then the carved lines; both fade back as the tree dissolves
+  const dv = eInOut(seg(t, ...T.dissolve));
+  if (t >= T.tree[0] && dv < 1) {
+    m.lineCap = 'round'; m.lineJoin = 'round';
+    m.globalAlpha = 0.4 * (1 - dv);
+    for (const q of BR) { const u = seg(t, q.t0, q.t0 + q.dur); if (u > 0) strokeBranch(m, q, u, 12); }
+    m.globalCompositeOperation = 'destination-out'; m.globalAlpha = 1 - dv;
+    for (const q of BR) { const u = seg(t, q.t0, q.t0 + q.dur); if (u > 0) strokeBranch(m, q, u, 0); }
+    m.globalCompositeOperation = 'source-over'; m.globalAlpha = 1;
+  }
+  // leaves → birds
+  if (t >= T.dabs[0]) {
+    for (const q of BIRD) {
+      const [lx, ly, ts, rad] = q.leaf, pop = seg(t, ts, ts + 0.2);
+      if (pop <= 0) continue;
+      const p = birdPos(q, t), fly = seg(t, p.t0, p.t0 + 0.25);
+      if (fly < 1) {                              // dab, popping in with overshoot, shrinking as it takes off
+        const s = rad * eBack(pop) * (1 - fly);
+        const cr = rng(q.seed * 31 + 7); m.globalAlpha = 0.62;
+        for (let c = 0; c < 3; c++) { const a = cr() * TAU, o = s * 0.4 * cr(); m.beginPath(); m.ellipse(p.x + Math.cos(a) * o, p.y + Math.sin(a) * o, s * (0.7 + 0.3 * cr()), s * (0.55 + 0.3 * cr()), cr() * 3, 0, TAU); m.fill(); }
+        if (pop < 1) sprayDots(m, lx, ly, rad * 2.4, 14, q.seed * 5 + 1, 0.6 * (1 - pop));
+        m.globalAlpha = 1;
+      }
+      if (fly > 0) {
+        const settle = seg(t, p.tlE - 0.1, p.tlE + 0.25);
+        const s = (18 + 12 * eOut(fly)) * (1 - 0.5 * settle) * (1 + 0.18 * Math.sin(p.ph));
+        const flap = Math.sin(t * 17 + p.ph) * (1 - settle);
+        const [vx, vy] = [birdPos(q, t + 0.03).x - p.x, birdPos(q, t + 0.03).y - p.y];
+        m.globalAlpha = 0.95 * (1 - 0.4 * settle);
+        bird(m, p.x, p.y, s, flap, clamp(Math.atan2(vy, Math.abs(vx) + 1e-3) * 0.35, -0.4, 0.4) * Math.sign(vx || 1));
+        m.globalAlpha = 1;
+      }
+    }
+  }
+  // head: pours in from the crown downward, behind the landing birds
+  const uh = seg(t, ...T.head);
+  if (uh > 0) {
+    tm.setTransform(MS, 0, 0, MS, 0, 0); tm.clearRect(0, 0, W, H); tm.globalCompositeOperation = 'source-over'; tm.fillStyle = '#000';
+    tm.globalAlpha = 0.97; tm.beginPath(); FACE_PTS.forEach(([x, y], i) => i ? tm.lineTo(x, y) : tm.moveTo(x, y)); tm.closePath();
+    tm.moveTo(BUN[0] + BUN[2], BUN[1]); tm.arc(BUN[0], BUN[1], BUN[2], 0, TAU); tm.fill('nonzero');
+    tm.globalAlpha = 1;
+    tm.globalCompositeOperation = 'destination-in';
+    const fy = lerp(150, H + 250, eInOut(uh)), gr = tm.createLinearGradient(0, fy - 260, 0, fy);
+    gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    tm.fillStyle = gr; tm.fillRect(0, 0, W, H); tm.globalCompositeOperation = 'source-over';
+    tm.setTransform(1, 0, 0, 1, 0, 0);
+    m.drawImage(TMP, 0, 0, W, H);
+  }
+  // fingertip details: eye, ear, caption
+  m.lineCap = 'round'; m.lineJoin = 'round';
+  const ue = seg(t, ...T.eye);
+  if (ue > 0) {
+    m.globalCompositeOperation = 'destination-out';
+    m.lineWidth = 9; m.beginPath(); m.moveTo(1022, 426); m.quadraticCurveTo(1036, 414, 1052, 426 - 2 * eOut(ue)); m.stroke();
+    m.beginPath(); m.arc(1034, 428, 7 * eBack(ue), 0, TAU); m.fill();
+    m.lineWidth = 6; m.beginPath(); m.moveTo(1012, 396); m.quadraticCurveTo(1036, 382, lerp(1012, 1064, eOut(ue)), 392); m.stroke();
+    m.globalCompositeOperation = 'source-over';
+  }
+  const ua = seg(t, ...T.ear);
+  if (ua > 0) {
+    m.globalCompositeOperation = 'destination-out'; m.lineWidth = 10;
+    m.beginPath(); m.arc(1215, 470, 34, -1.9, -1.9 + 3.6 * eOut(ua)); m.stroke();
+    m.globalCompositeOperation = 'source-over';
+  }
+  const uh2 = seg(t, ...T.hair);
+  if (uh2 > 0) {                                  // hairline and a few strands, swept back with a fingertip
+    m.globalCompositeOperation = 'destination-out';
+    HAIR.forEach((c, i) => {
+      const u = eOut(seg(uh2, i * 0.12, i * 0.12 + 0.55)); if (u <= 0) return;
+      m.lineWidth = c[4]; m.beginPath(); m.moveTo(c[0][0], c[0][1]);
+      const N = 16; for (let j = 1; j <= Math.ceil(N * u); j++) { const v = Math.min(u, j / N), w = 1 - v;
+        m.lineTo(w * w * w * c[0][0] + 3 * w * w * v * c[1][0] + 3 * w * v * v * c[2][0] + v * v * v * c[3][0], w * w * w * c[0][1] + 3 * w * w * v * c[1][1] + 3 * w * v * v * c[2][1] + v * v * v * c[3][1]); }
+      m.stroke();
+    });
+    m.globalCompositeOperation = 'source-over';
+  }
+  const uw = seg(t, ...T.write);
+  if (uw > 0) {
+    tm.setTransform(MS, 0, 0, MS, 0, 0); tm.clearRect(0, 0, W, H); tm.globalCompositeOperation = 'source-over';
+    tm.font = `600 ${CAP.size}px ${FONT}`; tm.textBaseline = 'alphabetic'; tm.fillStyle = '#000'; tm.strokeStyle = '#000';
+    tm.lineJoin = 'round'; tm.lineWidth = 3;
+    for (const L of CAP.lines) { tm.fillText(L.text, L.x, L.y); tm.strokeText(L.text, L.x, L.y); }
+    tm.globalCompositeOperation = 'destination-in';
+    tm.fillStyle = '#000'; tm.beginPath();
+    CAP.lines.forEach(L => {                      // each line is written left to right, one after the other
+      const wx = L.x - 20 + (L.w + 60) * eInOut(seg(uw, L.a, L.b)); tm.rect(0, L.y - CAP.size, wx, CAP.size * 1.45);
+    });
+    tm.fill(); tm.globalCompositeOperation = 'source-over'; tm.setTransform(1, 0, 0, 1, 0, 0);
+    // rim of pushed sand around the letters, then the carve itself
+    m.globalAlpha = 0.35; m.filter = 'blur(2px)'; m.drawImage(TMP, -1.5, -1.5, W + 3, H + 3); m.filter = 'none'; m.globalAlpha = 1;
+    m.globalCompositeOperation = 'destination-out'; m.drawImage(TMP, 0, 0, W, H); m.globalCompositeOperation = 'source-over';
+  }
+  // palm wipe: clears everything behind the front and pushes a growing ridge of sand ahead of it
+  const uw2 = seg(t, ...T.wipe);
+  if (uw2 > 0) {
+    // the palm's front is a shallow arc (the heel of the hand leads in the middle)
+    const fx = lerp(-260, W + 420, 0.5 - 0.5 * Math.cos(Math.PI * uw2)), bow = y => 240 * (1 - ((y - H * 0.55) / (H * 0.7)) ** 2);
+    const front = (off, k = 1) => { m.beginPath(); m.moveTo(-40, -20); for (let y = -20; y <= H + 20; y += 20) m.lineTo(fx + bow(y) + off * k, y); m.lineTo(-40, H + 20); m.closePath(); };
+    m.globalCompositeOperation = 'destination-out';
+    for (const [off, a] of [[0, 0.45], [-40, 0.45], [-80, 0.5], [-130, 0.6], [-190, 1]]) { m.globalAlpha = a; front(off); m.fill(); }
+    m.globalAlpha = 1; m.globalCompositeOperation = 'source-over';
+    m.save(); front(-60); m.clip(); m.globalAlpha = 0.9; m.drawImage(STREAK, 0, 0, W, H); m.restore(); m.globalAlpha = 1;
+    // the ridge: layered, so it is dense just behind its lumpy leading edge and thins out toward the palm
+    const wd = 30 + 80 * eOut(uw2), edge = y => wd * (0.85 + 0.2 * Math.sin(y * 0.011 + 1.3) + 0.12 * Math.sin(y * 0.037 + uw2 * 4) + 0.06 * Math.sin(y * 0.09));
+    for (const [k, a] of [[1, 0.3], [0.8, 0.3], [0.55, 0.35], [0.3, 0.3]]) {
+      const back = y => fx + bow(y) - 20 - 80 * (1 - k);
+      m.globalAlpha = a; m.beginPath(); m.moveTo(back(-20), -20);
+      for (let y = -20; y <= H + 20; y += 8) m.lineTo(fx + bow(y) - 40 + (edge(y) + 40) * k, y);
+      for (let y = H + 20; y >= -20; y -= 40) m.lineTo(back(y), y);
+      m.closePath(); m.fill();
+    }
+    m.globalAlpha = 1;
+    for (let k = 0; k < 6; k++) sprayDots(m, fx + bow(90 + k * 180) + wd + 16, 90 + k * 180, 70, 50, Math.floor(t * 30) * 7 + k, 0.6);
+  }
+}
+
+// fingertip: a soft, out-of-focus shadow of a finger hovering over the glass where a carve is happening
+function fingertip(t) {
+  let p = null;
+  if (t > T.tree[0] - 0.15 && t < T.tree[0] + 0.35) {
+    const q = BR[0], u = seg(t, q.t0, q.t0 + q.dur); p = quadPt(q, u);
+  } else if (t > T.write[0] - 0.1 && t < T.write[1] + 0.15) {
+    const uw = seg(t, ...T.write), L = CAP.lines[uw < CAP.lines[1].a ? 0 : 1], u = eInOut(seg(uw, L.a, L.b));
+    p = [L.x + L.w * u, L.y - CAP.size * 0.3 + 12 * Math.sin(t * 38)];
+  } else if (t > T.eye[0] - 0.1 && t < T.eye[1]) p = [1034, 428];
+  if (!p) return;
+  const fade = Math.min(1, ...[[T.tree[0] - 0.15, T.tree[0] + 0.35], [T.write[0] - 0.1, T.write[1] + 0.15], [T.eye[0] - 0.1, T.eye[1]]]
+    .filter(([a, bb]) => t > a && t < bb).map(([a, bb]) => Math.sin(Math.PI * seg(t, a, bb)) * 1.6));
+  // an out-of-focus finger reaching in from the lower right, its tip just past the carve point
+  const x = p[0] + 44, y = p[1] + 58, ang = Math.atan2(1.25, 1);
+  ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.filter = 'blur(26px)';
+  ctx.translate(x, y); ctx.rotate(ang);
+  const g = ctx.createLinearGradient(0, 0, 420, 0);
+  g.addColorStop(0, `rgba(60,24,6,${0.34 * fade})`); g.addColorStop(1, `rgba(60,24,6,${0.1 * fade})`);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, -48); ctx.lineTo(520, -62); ctx.lineTo(520, 62); ctx.lineTo(0, 48); ctx.arc(0, 0, 48, Math.PI / 2, Math.PI * 1.5); ctx.fill();
+  ctx.restore();
+}
+
+// ── light: transmission through the sand, per-channel absorption (sand eats blue first → amber) ──
+const LUT_N = 1024, LUT_MAX = 1.6, LR = new Float32Array(LUT_N), LG = new Float32Array(LUT_N), LB = new Float32Array(LUT_N);
+const GLASS = [255, 216, 136], K = [1.55, 2.75, 4.4];
+for (let i = 0; i < LUT_N; i++) { const d = i / (LUT_N - 1) * LUT_MAX; LR[i] = GLASS[0] * Math.exp(-K[0] * d); LG[i] = GLASS[1] * Math.exp(-K[1] * d); LB[i] = GLASS[2] * Math.exp(-K[2] * d); }
+function shade(t) {
+  b.clearRect(0, 0, MW, MH); b.filter = 'blur(1.1px)'; b.drawImage(M, 0, 0); b.filter = 'none';
+  const A = b.getImageData(0, 0, MW, MH).data, o = out.data;
+  const lum = eOut(seg(t, ...T.lightOn)) * (1 - eInOut(seg(t, ...T.lightOff)));
+  const sc = (LUT_N - 1) / LUT_MAX;
+  for (let y = 0; y < H; y++) {
+    const fy = Math.max(0, y * MS - 0.25), iy = Math.min(MH - 2, fy | 0), vy = fy - iy, r0 = iy * MW, r1 = r0 + MW;
+    for (let x = 0; x < W; x++) {
+      const fx = Math.max(0, x * MS - 0.25), ix = Math.min(MW - 2, fx | 0), vx = fx - ix;
+      const a = A[(r0 + ix) * 4 + 3], c = A[(r0 + ix + 1) * 4 + 3], d = A[(r1 + ix) * 4 + 3], e = A[(r1 + ix + 1) * 4 + 3];
+      const D = ((a + (c - a) * vx) * (1 - vy) + (d + (e - d) * vx) * vy) / 255;
+      const i = y * W + x, edge = D * (1 - D) * 4;
+      let de = D * (0.8 + 0.4 * G2[i]) + (G1[i] - 0.5) * 0.62 * edge + (G1[i] > 0.985 ? 0.35 * D : 0);
+      if (de < 0) de = 0; else if (de > LUT_MAX) de = LUT_MAX;
+      const k = (de * sc) | 0, l = LT[i] * lum, j = i * 4;
+      o[j] = LR[k] * l; o[j + 1] = LG[k] * l; o[j + 2] = LB[k] * l; o[j + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+}
+
+const CAP = { size: 128, lines: [{ text: 'Every shape', x: 170, y: 640, a: 0, b: 0.46 }, { text: 'is borrowed.', x: 250, y: 790, a: 0.54, b: 1 }] };
+// hair: cubic curves [p0, c1, c2, p3, width], from the hairline back over the crown
+const HAIR = [
+  [[1020, 304], [1062, 318], [1128, 350], [1172, 430], 8],
+  [[1090, 250], [1170, 246], [1250, 262], [1318, 300], 5],
+  [[1262, 462], [1280, 420], [1300, 380], [1332, 356], 4.5],
+];
+const BUN = [1362, 318, 60];
+window.ready = (async () => {
+  await document.fonts.load(`600 ${CAP.size}px ${FONT}`); await document.fonts.ready;
+  buildTextures(); buildLayers();
+  const mx = Math.max(...Array.from({ length: 120 }, (_, i) => hillRaw(i * 16, 1))); HILL_SC = 400 / mx;
+  buildTree(); buildLanding();
+  m.font = `600 ${CAP.size}px ${FONT}`; for (const L of CAP.lines) L.w = m.measureText(L.text).width;
+})();
+window.draw = ({ t }) => {
+  drawMask(t); shade(t); fingertip(t);
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+// sound cues for audio.py
+window.events = () => {
+  const ev = [{ k: 'light', t: 0.05 }, { k: 'sprinkle', t: T.sprinkle[0], d: T.sprinkle[1] - T.sprinkle[0] }, { k: 'pour', t: T.pour[0], d: T.pour[1] - T.pour[0] }];
+  for (const q of BR) if (q.w > 7) ev.push({ k: 'carve', t: q.t0, d: q.dur, v: q.w / 17 });
+  for (const q of BIRD) { ev.push({ k: 'dab', t: q.leaf[2] }); const p = birdPos(q, 5); ev.push({ k: 'flap', t: p.t0 + 0.05 }); ev.push({ k: 'settle', t: p.tlE }); }
+  ev.push({ k: 'whoosh', t: T.head[0], d: T.head[1] - T.head[0] });
+  ev.push({ k: 'carve', t: T.eye[0], d: 0.25, v: 0.5 }, { k: 'carve', t: T.ear[0], d: 0.3, v: 0.5 }, { k: 'carve', t: T.hair[0], d: 0.4, v: 0.4 });
+  for (const L of CAP.lines) { const a = lerp(T.write[0], T.write[1], L.a), bb = lerp(T.write[0], T.write[1], L.b); ev.push({ k: 'write', t: a, d: bb - a }); }
+  ev.push({ k: 'wipe', t: T.wipe[0], d: T.wipe[1] - T.wipe[0] }, { k: 'chord', t: T.wipe[1] + 0.05 });
+  [[T.tree[1], 69], [T.lift + 0.1, 74], [T.lift + 0.35, 76], [T.head[1], 71], [T.write[1] + 0.05, 74]].forEach(([t, n]) => ev.push({ k: 'bell', t, n }));
+  return ev;
+};
+</script>
+</body></html>
