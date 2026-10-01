@@ -182,7 +182,7 @@ const screenAt = t => {
     }
   }
   if (t >= CAPTION) {
-    const cap = 'order #042 is live  ·  enjoy'; const n = Math.min(cap.length, Math.floor((t - CAPTION) / 0.018));
+    const cap = 'order #042 is live  ·  enjoy'; const n = Math.min(cap.length, Math.floor((t - CAPTION) / 0.016));
     put(r0 + CUPART.length + 1, Math.floor((COLS - cap.length) / 2), cap.slice(0, n), 'b');
   }
   if (t >= PROMPT_END) frame.cur = { r: ROWS - 1, c: putSegs(ROWS - 1, 0, PROMPT), blink: true };
