@@ -1,45 +1,93 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="fonts.css">
-<style>html,body{margin:0;background:#efe4d6}</style></head>
-<body><canvas id="c" width="1920" height="1080"></canvas>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>body { margin: 0; overflow: hidden; background: #efe4d6; }</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
 <script>
 // Isometric miniature world: the journey of a parcel. It is packed in a tiny workshop, rides a truck along the road,
 // gets scanned at the sorting hub, hops into a delivery van and lands on a doorstep; then the camera pulls back over the whole world.
-const W = 1920, H = 1080, cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const W = 1920, H = 1080;
+const cv = document.querySelector('canvas');
+const ctx = cv.getContext('2d');
 const DUR = 10, FF = "'Space Grotesk', sans-serif";
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const lerp = (a, b, t) => a + (b - a) * t;
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eOut = x => 1 - Math.pow(1 - x, 3), eIn = x => x * x * x;
-const eInOut = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-const eBack = (x, s = 1.7) => { const c = s + 1; return 1 + c * Math.pow(x - 1, 3) + s * Math.pow(x - 1, 2); };
-function off(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
-function hexRgb(h) { if (h[0] !== '#') return h.match(/[\d.]+/g).slice(0, 3).map(Number); const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
-function mix(a, b, k) { const A = hexRgb(a), B = hexRgb(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * k)).join(',')})`; }
-const DARK = '#3b2946';
-const sh = (c, k) => mix(c, DARK, k);
+
+// ---------- small maths ----------
+const clamp = (v, lo = 0, hi = 1) => v < lo ? lo : (v > hi ? hi : v);
+const lerp = (p, q, k) => p * (1 - k) + q * k;
+function seg(t, from, to) { return clamp((t - from) / (to - from)); }
+function eOut(k) { const r = 1 - k; return 1 - r * r * r; }
+function eInOut(k) { if (k < 0.5) return 4 * k * k * k; const r = 2 - 2 * k; return 1 - r * r * r / 2; }
+// overshooting ease-out; `o` controls how far past 1 it swings
+function eBack(k, o = 1.7) { const m = k - 1; return 1 + m * m * ((o + 1) * m + o); }
+
+// ---------- colour ----------
+const RGB_CACHE = new Map();
+function rgbOf(c) {
+  let v = RGB_CACHE.get(c);
+  if (!v) {
+    v = c.startsWith('#') ? [1, 3, 5].map(i => parseInt(c.substr(i, 2), 16)) : c.replace(/[^\d.,]/g, '').split(',').slice(0, 3).map(parseFloat);
+    RGB_CACHE.set(c, v);
+  }
+  return v;
+}
+function mix(from, to, k) {
+  const a = rgbOf(from), b = rgbOf(to);
+  const ch = j => Math.round(lerp(a[j], b[j], k));
+  return 'rgb(' + ch(0) + ',' + ch(1) + ',' + ch(2) + ')';
+}
+const SHADE_INK = '#3b2946'; // every face darkens towards this plum, never towards black
+const sh = (c, amount) => mix(c, SHADE_INK, amount);
 
 const PAL = { bg: '#efe4d6', wood: '#e9b07c', slab: '#d69a68', grass: '#9fcf8c', grassD: '#b5dc8f', concrete: '#ddd6cd', road: '#5d6178',
   wallA: '#86c3c3', wallB: '#a9d7cf', hubA: '#9aaee3', hubB: '#b3c3ee', kraft: '#d9a066', tape: '#f3d49a', cream: '#fff6ea', ink: '#23263b',
   coral: '#ff7b6b', yellow: '#f2b544', teal: '#86c3c3', green: '#5fb07a', blue: '#6d8bd8', plant: '#5fb07a', pot: '#e7d6c3', belt: '#3b3f58', steel: '#c9ccd8' };
 
-// ---------- iso camera ----------
-let S = 60, OX = 960, OY = 540; const CAM = { x: 5, y: 5, z: 1.5 };
-let OT = null, TILE = { ox: 0, oy: 0, dz: 0 }, GA = 1;
-const CS = 0.8660254;
-function P(x, y, z) {
-  if (OT) { x = OT.cx + (x - OT.cx) * OT.sxy; y = OT.cy + (y - OT.cy) * OT.sxy; z = OT.zb + (z - OT.zb) * OT.sz + OT.dz; }
-  x += TILE.ox - CAM.x; y += TILE.oy - CAM.y; z += TILE.dz - CAM.z;
-  return [OX + (x - y) * CS * S, OY + (x + y) * 0.5 * S - z * S];
+// ---------- projection ----------
+// World axes: +x runs to the lower right, +y to the lower left, +z up. One world unit is view.s pixels.
+// Two transforms stack on top of the camera: the offset of the tile being drawn, and an optional
+// per-object "local" squash/drop centred on (cx, cy, zb).
+const ISO_X = Math.sqrt(3) / 2;
+const view = { x: 5, y: 5, z: 1.5, s: 60 };
+const NO_TILE = { ox: 0, oy: 0, dz: 0 };
+let tileOff = NO_TILE, local = null, GA = 1;
+function iso(x, y, z) {
+  if (local !== null) {
+    const { cx, cy, zb, sxy, sz } = local;
+    x = cx + sxy * (x - cx);
+    y = cy + sxy * (y - cy);
+    z = zb + sz * (z - zb) + local.dz;
+  }
+  const wx = x + tileOff.ox - view.x, wy = y + tileOff.oy - view.y, wz = z + tileOff.dz - view.z;
+  return [W / 2 + ISO_X * view.s * (wx - wy), H / 2 + view.s * (0.5 * (wx + wy) - wz)];
 }
-function poly(pts, fill) { ctx.fillStyle = fill; ctx.beginPath(); pts.forEach((p, i) => { const q = P(...p); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.closePath(); ctx.fill(); }
-function edge(pts) { ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = Math.max(1, scl() * 0.03); ctx.lineJoin = 'round'; ctx.beginPath(); pts.forEach((p, i) => { const q = P(...p); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.stroke(); }
-function box(x0, y0, z0, x1, y1, z1, c, faces = {}) {
-  const top = faces.top || c, left = faces.left || sh(c, 0.16), right = faces.right || sh(c, 0.34);
-  poly([[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], left);   // +y face
-  poly([[x1, y0, z1], [x1, y1, z1], [x1, y1, z0], [x1, y0, z0]], right);  // +x face
-  poly([[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], top);
-  if (!faces.noEdge) edge([[x0, y1, z1], [x1, y1, z1], [x1, y0, z1]]); // crisp light bevel: the "maquette" look
+function zoom() { return local ? view.s * local.sxy : view.s; }
+// radii on screen of a horizontal circle of world radius r
+function flatRadii(r) { const k = r * zoom(); return [k * Math.SQRT2 * ISO_X, k * Math.SQRT1_2]; }
+function trace(pts) {
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const [sx, sy] = iso(pts[i][0], pts[i][1], pts[i][2]);
+    if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+  }
+}
+function poly(pts, fill) { trace(pts); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
+// thin light bevel along the lit edges: the "maquette" look
+function edge(pts) {
+  trace(pts);
+  ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(1, 0.03 * zoom()); ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.stroke();
+}
+// axis-aligned box; only the +y side, the +x side and the lid face the camera
+function box(x0, y0, z0, x1, y1, z1, c, o = {}) {
+  const lidC = o.top || c, yC = o.left || sh(c, 0.16), xC = o.right || sh(c, 0.34);
+  poly([[x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]], yC);
+  poly([[x1, y1, z0], [x1, y1, z1], [x1, y0, z1], [x1, y0, z0]], xC);
+  poly([[x1, y1, z1], [x0, y1, z1], [x0, y0, z1], [x1, y0, z1]], lidC);
+  if (!o.noEdge) edge([[x0, y1, z1], [x1, y1, z1], [x1, y0, z1]]);
 }
 // oriented box: centre (cx,cy), heading th; u = forward, v = left. deco.{front,back,left,right,top}(w,h) draw 2D on a face (100 px = 1 unit)
 function obox(cx, cy, th, u0, u1, v0, v1, z0, z1, c, deco = {}) {
@@ -55,58 +103,95 @@ function obox(cx, cy, th, u0, u1, v0, v1, z0, z1, c, deco = {}) {
     vis.push([A, B]);
     if (deco[f.k]) { if ((B[0] - A[0]) - (B[1] - A[1]) < 0) [A, B] = [B, A];
       const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
-      onFace(A, [(B[0] - A[0]) / L, (B[1] - A[1]) / L, 0], [0, 0, -1], () => deco[f.k](L * 100, (z1 - z0) * 100)); }
+      paintOn(A, [(B[0] - A[0]) / L, (B[1] - A[1]) / L, 0], [0, 0, -1], () => deco[f.k](L * 100, (z1 - z0) * 100)); }
   }
   poly([Wp(u0, v0, z1), Wp(u1, v0, z1), Wp(u1, v1, z1), Wp(u0, v1, z1)], deco.topC || c);
-  if (deco.top) onFace(Wp(u0, v0, z1), [cs, sn, 0], [-sn, cs, 0], () => deco.top((u1 - u0) * 100, (v1 - v0) * 100));
+  if (deco.top) paintOn(Wp(u0, v0, z1), [cs, sn, 0], [-sn, cs, 0], () => deco.top((u1 - u0) * 100, (v1 - v0) * 100));
   if (!deco.noEdge) for (const [A, B] of vis) edge([A, B]);
 }
-function scl() { return S * (OT ? OT.sxy : 1); }
-function cyl(cx, cy, z0, z1, r, c) {
-  const k = scl(), rx = r * k * 1.2247, ry = r * k * 0.7071;
-  const b = P(cx, cy, z0), tp = P(cx, cy, z1);
-  const g = ctx.createLinearGradient(b[0] - rx, 0, b[0] + rx, 0); g.addColorStop(0, sh(c, 0.1)); g.addColorStop(1, sh(c, 0.4));
-  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(tp[0] - rx, tp[1]); ctx.lineTo(b[0] - rx, b[1]); ctx.ellipse(b[0], b[1], rx, ry, 0, Math.PI, 0, true); ctx.lineTo(tp[0] + rx, tp[1]); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(tp[0], tp[1], rx, ry, 0, 0, 7); ctx.fill();
+// upright cylinder: a shaded side band closed by the bottom half-ellipse, then the lid
+function cyl(cx, cy, zBot, zTop, r, c) {
+  const [rx, ry] = flatRadii(r);
+  const [bx, by] = iso(cx, cy, zBot), [lx, ly] = iso(cx, cy, zTop);
+  const side = ctx.createLinearGradient(bx - rx, 0, bx + rx, 0);
+  side.addColorStop(0, sh(c, 0.1));
+  side.addColorStop(1, sh(c, 0.4));
+  ctx.beginPath();
+  ctx.ellipse(bx, by, rx, ry, 0, 0, Math.PI);
+  ctx.lineTo(lx - rx, ly);
+  ctx.lineTo(lx + rx, ly);
+  ctx.closePath();
+  ctx.fillStyle = side; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(lx, ly, rx, ry, 0, 0, 2 * Math.PI);
+  ctx.fillStyle = c; ctx.fill();
 }
-function sphere(x, y, z, r, c) {
-  const p = P(x, y, z), R = r * scl() * 1.2247;
-  ctx.fillStyle = c; ctx.beginPath(); ctx.arc(p[0], p[1], R, 0, 7); ctx.fill();
-  ctx.save(); ctx.beginPath(); ctx.arc(p[0], p[1], R, 0, 7); ctx.clip();
-  ctx.fillStyle = sh(c, 0.3); ctx.beginPath(); ctx.rect(p[0] - R, p[1] - R, 2 * R, 2 * R); ctx.moveTo(p[0] - R * 0.25 + R * 1.05, p[1] - R * 0.3); ctx.arc(p[0] - R * 0.25, p[1] - R * 0.3, R * 1.05, 0, Math.PI * 2, true); ctx.fill('evenodd');
+// ball: a shaded disc with a lit disc pushed towards the upper left, both clipped to the outline
+function sphere(x, y, z, r, col) {
+  const [px, py] = iso(x, y, z), R = flatRadii(r)[0];
+  ctx.save();
+  ctx.beginPath(); ctx.arc(px, py, R, 0, 2 * Math.PI); ctx.clip();
+  ctx.fillStyle = sh(col, 0.3); ctx.fillRect(px - R, py - R, 2 * R, 2 * R);
+  ctx.beginPath(); ctx.arc(px - 0.25 * R, py - 0.3 * R, 1.05 * R, 0, 2 * Math.PI);
+  ctx.fillStyle = col; ctx.fill();
   ctx.restore();
 }
-function cone(cx, cy, z0, z1, r, c) {
-  const k = scl(), rx = r * k * 1.2247, ry = r * k * 0.7071, b = P(cx, cy, z0), tp = P(cx, cy, z1);
-  ctx.fillStyle = sh(c, 0.3); ctx.beginPath(); ctx.moveTo(tp[0], tp[1]); ctx.lineTo(b[0] - rx, b[1]); ctx.ellipse(b[0], b[1], rx, ry, 0, Math.PI, 0, true); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(tp[0], tp[1]); ctx.lineTo(b[0] - rx, b[1]); ctx.ellipse(b[0], b[1], rx, ry, 0, Math.PI, Math.PI * 0.62, true); ctx.closePath(); ctx.fill();
+// cone standing on (cx, cy, zBase): dark silhouette, then the lit wedge on its left
+function cone(cx, cy, zBase, zTip, r, c) {
+  const [rx, ry] = flatRadii(r);
+  const [bx, by] = iso(cx, cy, zBase), tip = iso(cx, cy, zTip);
+  const wedge = (toAngle, fill) => {
+    ctx.beginPath();
+    ctx.moveTo(tip[0], tip[1]);
+    ctx.ellipse(bx, by, rx, ry, 0, Math.PI, toAngle, true);
+    ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill();
+  };
+  wedge(0, sh(c, 0.3));
+  wedge(0.62 * Math.PI, c);
 }
-// draw 2D content onto a plane: origin o, unit vectors u (right), v (down) in world coords; 100 local px = 1 world unit
-function onFace(o, u, v, fn) {
-  const p0 = P(...o), pu = P(o[0] + u[0], o[1] + u[1], o[2] + u[2]), pv = P(o[0] + v[0], o[1] + v[1], o[2] + v[2]);
-  ctx.save(); ctx.transform((pu[0] - p0[0]) / 100, (pu[1] - p0[1]) / 100, (pv[0] - p0[0]) / 100, (pv[1] - p0[1]) / 100, p0[0], p0[1]); fn(); ctx.restore();
+// paint 2D content on a world plane: origin o, unit axes u (right) and v (down); 100 canvas px = 1 world unit
+function paintOn(o, u, v, fn) {
+  const at = d => iso(o[0] + d[0], o[1] + d[1], o[2] + d[2]);
+  const [ox, oy] = iso(o[0], o[1], o[2]), [ux, uy] = at(u), [vx, vy] = at(v);
+  ctx.save();
+  ctx.transform((ux - ox) / 100, (uy - oy) / 100, (vx - ox) / 100, (vy - oy) / 100, ox, oy);
+  fn();
+  ctx.restore();
 }
-function shadow(x0, y0, x1, y1, h, z = 0, a = 0.16) { // crisp floor shadow, light from upper-left
-  const L = h * 0.42;
-  poly([[x0 + 0.1, y0 + 0.15, z], [x1 + 0.1, y0 + 0.15, z], [x1 + L, y0 + 0.15 + L * 0.35, z], [x1 + L, y1 + 0.15 + L * 0.35, z], [x0 + L, y1 + 0.15 + L * 0.35, z], [x0 + 0.1, y1 + 0.15, z]], `rgba(70,40,60,${a})`);
+// flat floor shadow of a w×d block of height h; the light comes from the upper left, so it falls towards +x
+const shadowFill = a => 'rgba(70,40,60,' + a + ')';
+function shadow(x0, y0, x1, y1, h, z = 0, a = 0.16) {
+  const reach = 0.42 * h, ny = y0 + 0.15, fy = ny + 0.35 * reach, nx = x0 + 0.1;
+  poly([[nx, ny, z], [x1 + 0.1, ny, z], [x1 + reach, fy, z], [x1 + reach, y1 + 0.15 + 0.35 * reach, z],
+    [x0 + reach, y1 + 0.15 + 0.35 * reach, z], [nx, y1 + 0.15, z]], shadowFill(a));
 }
 function oshadow(cx, cy, th, u0, u1, v0, v1, h, a = 0.16) { // footprint ∪ footprint pushed along the light
   const cs = Math.cos(th), sn = Math.sin(th), L = h * 0.42;
-  ctx.fillStyle = `rgba(70,40,60,${a})`; ctx.beginPath();
+  ctx.fillStyle = shadowFill(a); ctx.beginPath();
   for (const [dx, dy] of [[0.08, 0.12], [L, 0.12 + L * 0.35]]) {
-    [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].forEach(([u, v], i) => { const q = P(cx + u * cs - v * sn + dx, cy + u * sn + v * cs + dy, 0.01); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); });
+    [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].forEach(([u, v], i) => { const q = iso(cx + u * cs - v * sn + dx, cy + u * sn + v * cs + dy, 0.01); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); });
     ctx.closePath(); }
   ctx.fill('nonzero');
 }
-// per-object drop animation: falls from above, squashes on landing, settles
-function drop(t, t0, o, dur = 0.42) {
-  const p = seg(t, t0, t0 + dur); if (p <= 0) return null;
-  const land = t - (t0 + dur); let dz = (1 - p * p) * 6, sq = 0;
-  if (land > 0) sq = Math.exp(-land * 9) * Math.sin(land * 26) * 0.16;
-  return { cx: o[0], cy: o[1], zb: o[2], dz, sxy: 1 + sq * 0.5, sz: 1 - sq, alpha: clamp(p * 4) };
+// entrance of one prop: it falls in from 6 units up, then wobbles on a damped squash
+function drop(t, start, at, dur = 0.42) {
+  const k = seg(t, start, start + dur);
+  if (k === 0) return null;
+  const since = t - start - dur;
+  const wobble = since > 0 ? 0.16 * Math.sin(26 * since) / Math.exp(9 * since) : 0;
+  return { cx: at[0], cy: at[1], zb: at[2], dz: 6 * (1 - k) * (1 + k), sxy: 1 + wobble / 2, sz: 1 - wobble, alpha: Math.min(1, 4 * k) };
 }
-function withOT(o, fn) { if (!o) return; const prev = OT; OT = o; ctx.globalAlpha = GA * (o.alpha ?? 1); fn(); ctx.globalAlpha = GA; OT = prev; }
-const ALWAYS = { cx: 0, cy: 0, zb: 0, dz: 0, sxy: 1, sz: 1, alpha: 1 };
+function withLocal(o, fn) {
+  if (!o) return;
+  const saved = local;
+  local = o;
+  ctx.globalAlpha = GA * (o.alpha === undefined ? 1 : o.alpha);
+  fn();
+  local = saved;
+  ctx.globalAlpha = GA;
+}
+const IDENTITY = { cx: 0, cy: 0, zb: 0, dz: 0, sxy: 1, sz: 1, alpha: 1 };
+
 
 // ---------- the parcel ----------
 const PH = 0.42, PZ = 0.62; // half footprint, height
@@ -223,44 +308,44 @@ function tileA(t, push) { // the workshop: half room, bench, shelves, yard + loa
   const TT = t;
   push(0, () => { slab(PAL.grass, PAL.slab);
     ground([[0, 0], [10, 0], [10, 5], [0, 5]], PAL.wood);
-    ctx.strokeStyle = 'rgba(120,70,40,0.16)'; ctx.lineWidth = S * 0.035; for (let y = 1.25; y < 5; y += 1.25) { const a = P(0, y, 0.013), b = P(10, y, 0.013); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+    ctx.strokeStyle = 'rgba(120,70,40,0.16)'; ctx.lineWidth = view.s * 0.035; for (let y = 1.25; y < 5; y += 1.25) { const a = iso(0, y, 0.013), b = iso(10, y, 0.013); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
     roadX(5.0, 10, 6.5); ground([[4.6, 5.7], [5.0, 5.7], [5.0, 7.3], [4.6, 7.3]], PAL.road);
     ground([[6.2, 5.62, 0.02], [9.5, 5.62, 0.02], [9.5, 5.72, 0.02], [6.2, 5.72, 0.02]], PAL.yellow); ground([[6.2, 7.28, 0.02], [9.5, 7.28, 0.02], [9.5, 7.38, 0.02], [6.2, 7.38, 0.02]], PAL.yellow); }, true);
   const wP = eBack(seg(TT, 0.3, 0.75), 1.4);
-  if (wP > 0) { push(-100, () => withOT({ ...ALWAYS, sz: wP }, () => {
+  if (wP > 0) { push(-100, () => withLocal({ ...IDENTITY, sz: wP }, () => {
     box(-0.45, -0.45, 0, 0, 5, 4.4, PAL.wallA, { right: PAL.wallA, left: sh(PAL.wallA, 0.3), top: '#f7efe4' });
     box(0, -0.45, 0, 10, 0, 4.4, PAL.wallB, { left: PAL.wallB, right: sh(PAL.wallB, 0.3), top: '#f7efe4' });
     poly([[0.01, 0, 0], [0.01, 5, 0], [0.01, 5, 0.3], [0.01, 0, 0.3]], sh(PAL.wallA, 0.12));
     poly([[0, 0.01, 0], [10, 0.01, 0], [10, 0.01, 0.3], [0, 0.01, 0.3]], sh(PAL.wallB, 0.1));
     // pegboard with tools on wall A
-    onFace([0.02, 4.4, 3.4], [0, -1, 0], [0, 0, -1], () => { ctx.fillStyle = '#e9c9a0'; ctx.beginPath(); ctx.roundRect(0, 0, 300, 150, 12); ctx.fill();
+    paintOn([0.02, 4.4, 3.4], [0, -1, 0], [0, 0, -1], () => { ctx.fillStyle = '#e9c9a0'; ctx.beginPath(); ctx.roundRect(0, 0, 300, 150, 12); ctx.fill();
       ctx.fillStyle = 'rgba(120,70,40,0.25)'; for (let i = 0; i < 12; i++) for (let j = 0; j < 5; j++) { ctx.beginPath(); ctx.arc(18 + i * 24, 18 + j * 28, 3, 0, 7); ctx.fill(); }
       ctx.fillStyle = PAL.coral; ctx.fillRect(40, 30, 14, 90); ctx.fillRect(22, 26, 50, 22);
       ctx.fillStyle = PAL.blue; ctx.beginPath(); ctx.arc(140, 100, 20, 0, 7); ctx.fill(); ctx.fillStyle = '#e9c9a0'; ctx.beginPath(); ctx.arc(140, 100, 9, 0, 7); ctx.fill();
       ctx.fillStyle = PAL.ink; ctx.fillRect(200, 30, 10, 96); ctx.fillStyle = PAL.yellow; ctx.fillRect(196, 26, 18, 38);
       ctx.fillStyle = PAL.green; ctx.beginPath(); ctx.roundRect(240, 40, 36, 80, 8); ctx.fill(); });
     // sign on wall B
-    onFace([1.0, 0.02, 3.95], [1, 0, 0], [0, 0, -1], () => { ctx.fillStyle = PAL.cream; ctx.beginPath(); ctx.roundRect(0, 0, 330, 70, 35); ctx.fill();
+    paintOn([1.0, 0.02, 3.95], [1, 0, 0], [0, 0, -1], () => { ctx.fillStyle = PAL.cream; ctx.beginPath(); ctx.roundRect(0, 0, 330, 70, 35); ctx.fill();
       ctx.fillStyle = PAL.ink; ctx.font = `700 40px ${FF}`; ctx.textBaseline = 'middle'; ctx.letterSpacing = '6px'; ctx.fillText('WORKSHOP', 34, 38); ctx.letterSpacing = '0px'; });
   })); }
   // shelf with stacked boxes on wall B
-  push(8.6, () => withOT(drop(TT, 0.5, [8.2, 0.5, 0]), () => { shadow(6.8, 0, 9.6, 1.0, 3.4, 0, 0.12); box(6.8, 0, 0, 9.6, 1.0, 3.4, '#c98a5c');
+  push(8.6, () => withLocal(drop(TT, 0.5, [8.2, 0.5, 0]), () => { shadow(6.8, 0, 9.6, 1.0, 3.4, 0, 0.12); box(6.8, 0, 0, 9.6, 1.0, 3.4, '#c98a5c');
     for (const z of [0.2, 1.3, 2.4]) poly([[7.0, 1.01, z], [9.4, 1.01, z], [9.4, 1.01, z + 0.9], [7.0, 1.01, z + 0.9]], sh('#c98a5c', 0.55));
     const bx = [[7.1, 0.2, 0.7], [7.9, 0.2, 0.55], [8.6, 0.2, 0.75], [7.2, 1.3, 0.6], [8.2, 1.3, 0.7], [7.1, 2.4, 0.5], [7.8, 2.4, 0.75], [8.7, 2.4, 0.55]];
     for (const [x, z, s] of bx) box(x, 0.35, z, x + s, 0.95, z + s * 0.85, PAL.kraft, { noEdge: true }); }));
   // workbench (the parcel is packed on it)
-  push(7.9, () => { withOT(drop(TT, 0.45, [4.5, 3.4, 0]), () => { shadow(2.8, 2.6, 6.2, 4.2, 1.6, 0, 0.14);
+  push(7.9, () => { withLocal(drop(TT, 0.45, [4.5, 3.4, 0]), () => { shadow(2.8, 2.6, 6.2, 4.2, 1.6, 0, 0.14);
       for (const [x, y] of [[2.95, 2.75], [5.85, 2.75], [2.95, 3.85], [5.85, 3.85]]) box(x, y, 0, x + 0.2, y + 0.2, 1.35, sh('#c98a5c', 0.1), { noEdge: true });
       box(2.8, 2.6, 1.35, 6.2, 4.2, 1.55, '#e9c9a0'); });
-    withOT(drop(TT, 0.7, [3.3, 3.0, 1.55], 0.34), () => { cyl(3.3, 3.0, 1.55, 1.75, 0.3, PAL.coral); cyl(3.3, 3.0, 1.75, 1.85, 0.16, PAL.cream); });
-    if (TT >= TL.box && TT < TL.hop1[0]) withOT(drop(TT, TL.box, [4.6, 3.4, 1.55], 0.34), () => packing(TT, 4.6, 3.4, 1.55)); });
+    withLocal(drop(TT, 0.7, [3.3, 3.0, 1.55], 0.34), () => { cyl(3.3, 3.0, 1.55, 1.75, 0.3, PAL.coral); cyl(3.3, 3.0, 1.75, 1.85, 0.16, PAL.cream); });
+    if (TT >= TL.box && TT < TL.hop1[0]) withLocal(drop(TT, TL.box, [4.6, 3.4, 1.55], 0.34), () => packing(TT, 4.6, 3.4, 1.55)); });
   // hanging lamp over the bench
-  push(8.0, () => withOT(drop(TT, 0.6, [4.6, 3.4, 3.4], 0.36), () => { const a = P(4.6, 3.4, 4.4), b = P(4.6, 3.4, 3.55); ctx.strokeStyle = PAL.ink; ctx.lineWidth = S * 0.04; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  push(8.0, () => withLocal(drop(TT, 0.6, [4.6, 3.4, 3.4], 0.36), () => { const a = iso(4.6, 3.4, 4.4), b = iso(4.6, 3.4, 3.55); ctx.strokeStyle = PAL.ink; ctx.lineWidth = view.s * 0.04; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
     cone(4.6, 3.4, 3.0, 3.6, 0.45, PAL.yellow); }));
   // flat cardboard stack + yard tree + plant
-  push(5.0, () => withOT(drop(TT, 0.62, [1.2, 3.6, 0]), () => { for (let i = 0; i < 5; i++) box(0.6 + (i % 2) * 0.06, 2.9, i * 0.14, 1.9, 4.3, i * 0.14 + 0.12, i % 2 ? PAL.kraft : sh(PAL.kraft, 0.08), { noEdge: i < 4 }); }));
-  push(10.1, () => withOT(drop(TT, 0.72, [1.7, 8.4, 0]), () => tree(1.7, 8.4, 1.05)));
-  push(18.2, () => withOT(drop(TT, 0.8, [9.1, 9.1, 0]), () => { cyl(9.1, 9.1, 0, 0.8, 0.4, PAL.pot); sphere(9.1, 9.1, 1.2, 0.5, PAL.plant); sphere(8.95, 9.2, 1.65, 0.34, '#72c28b'); }));
+  push(5.0, () => withLocal(drop(TT, 0.62, [1.2, 3.6, 0]), () => { for (let i = 0; i < 5; i++) box(0.6 + (i % 2) * 0.06, 2.9, i * 0.14, 1.9, 4.3, i * 0.14 + 0.12, i % 2 ? PAL.kraft : sh(PAL.kraft, 0.08), { noEdge: i < 4 }); }));
+  push(10.1, () => withLocal(drop(TT, 0.72, [1.7, 8.4, 0]), () => tree(1.7, 8.4, 1.05)));
+  push(18.2, () => withLocal(drop(TT, 0.8, [9.1, 9.1, 0]), () => { cyl(9.1, 9.1, 0, 0.8, 0.4, PAL.pot); sphere(9.1, 9.1, 1.2, 0.5, PAL.plant); sphere(8.95, 9.2, 1.65, 0.34, '#72c28b'); }));
 }
 function tileB(t, push) { // the road: a bend, pines, lamps, a pond and a wind turbine
   push(0, () => { slab(PAL.grass, PAL.slab);
@@ -272,7 +357,7 @@ function tileB(t, push) { // the road: a bend, pines, lamps, a pond and a wind t
     ground([[0, 5.7], [0.5, 5.7], ...inner, [1.7, 0], [3.3, 0], ...outer.reverse(), [0.5, 7.3], [0, 7.3]], PAL.road);
     for (let i = 1; i < 8; i += 2) { const a0 = Math.PI / 2 * (1 - i / 8), a1 = Math.PI / 2 * (1 - (i + 0.55) / 8); const q = (a, r) => [0.5 + r * Math.cos(a), 4.5 + r * Math.sin(a), 0.02]; ground([q(a0, 1.94), q(a1, 1.94), q(a1, 2.06), q(a0, 2.06)], '#f7efe4'); }
     roadY(0, 4.5, 2.5); }, true);
-  const d = (t0, o, f, k) => push(k ?? o[0] + o[1], () => withOT(drop(t, t0, o), f));
+  const d = (t0, o, f, k) => push(k ?? o[0] + o[1], () => withLocal(drop(t, t0, o), f));
   d(1.5, [5.4, 1.6, 0], () => pine(5.4, 1.6, 1));
   d(1.58, [7.9, 1.1, 0], () => pine(7.9, 1.1, 1.2));
   d(1.66, [4.6, 3.6, 0], () => tree(4.6, 3.6, 0.9));
@@ -280,7 +365,7 @@ function tileB(t, push) { // the road: a bend, pines, lamps, a pond and a wind t
   d(1.8, [3.9, 1.2, 0], () => lamp(3.9, 1.2));
   d(1.86, [0.8, 1.2, 0], () => tree(0.8, 1.2, 0.8));
   d(1.92, [9.2, 4.6, 0], () => { box(9.1, 4.5, 0, 9.3, 4.7, 3.6, PAL.cream, { noEdge: true }); box(9.0, 4.4, 3.5, 9.4, 4.8, 3.9, PAL.cream);
-    onFace([9.42, 4.6, 3.7], [0.7071, -0.7071, 0], [0, 0, -1], () => { ctx.fillStyle = PAL.cream; for (let i = 0; i < 3; i++) { ctx.save(); ctx.rotate(t * 5 + i * 2.094); ctx.beginPath(); ctx.roundRect(-10, -150, 20, 150, 10); ctx.fill(); ctx.restore(); }
+    paintOn([9.42, 4.6, 3.7], [0.7071, -0.7071, 0], [0, 0, -1], () => { ctx.fillStyle = PAL.cream; for (let i = 0; i < 3; i++) { ctx.save(); ctx.rotate(t * 5 + i * 2.094); ctx.beginPath(); ctx.roundRect(-10, -150, 20, 150, 10); ctx.fill(); ctx.restore(); }
       ctx.fillStyle = PAL.coral; ctx.beginPath(); ctx.arc(0, 0, 14, 0, 7); ctx.fill(); }); }, 13.8);
 }
 function tileC(t, push) { // the sorting hub
@@ -289,24 +374,24 @@ function tileC(t, push) { // the sorting hub
     for (const [a, b] of [[[1.5, 4.8], [3.5, 4.95]], [[1.5, 4.8], [1.62, 8.1]], [[3.38, 4.8], [3.5, 8.1]]]) ground([[a[0], a[1], 0.02], [b[0], a[1], 0.02], [b[0], b[1], 0.02], [a[0], b[1], 0.02]], PAL.yellow);
     roadX(7.4, 10, 7.5); ground([[7.0, 6.7], [7.4, 6.7], [7.4, 8.3], [7.0, 8.3]], PAL.road); }, true);
   const wP = eBack(seg(t, 2.35, 2.8), 1.4);
-  if (wP > 0) push(-100, () => withOT({ ...ALWAYS, sz: wP }, () => {
+  if (wP > 0) push(-100, () => withLocal({ ...IDENTITY, sz: wP }, () => {
     box(-0.4, -0.4, 0, 0, 10, 3.6, PAL.hubA, { right: PAL.hubA, left: sh(PAL.hubA, 0.3), top: '#f7efe4' });
     box(0, -0.4, 0, 10, 0, 3.6, PAL.hubB, { left: PAL.hubB, right: sh(PAL.hubB, 0.3), top: '#f7efe4' });
     poly([[0, 0.01, 0], [10, 0.01, 0], [10, 0.01, 0.3], [0, 0.01, 0.3]], sh(PAL.hubB, 0.1));
     poly([[0.01, 0, 0], [0.01, 10, 0], [0.01, 10, 0.3], [0.01, 0, 0.3]], sh(PAL.hubA, 0.12));
-    onFace([0.8, 0.02, 3.3], [1, 0, 0], [0, 0, -1], () => { ctx.fillStyle = PAL.cream; ctx.beginPath(); ctx.roundRect(0, 0, 420, 76, 38); ctx.fill();
+    paintOn([0.8, 0.02, 3.3], [1, 0, 0], [0, 0, -1], () => { ctx.fillStyle = PAL.cream; ctx.beginPath(); ctx.roundRect(0, 0, 420, 76, 38); ctx.fill();
       ctx.fillStyle = PAL.ink; ctx.font = `700 42px ${FF}`; ctx.textBaseline = 'middle'; ctx.letterSpacing = '5px'; ctx.fillText('SORTING HUB', 36, 41); ctx.letterSpacing = '0px'; });
-    onFace([5.9, 0.02, 3.2], [1, 0, 0], [0, 0, -1], () => { const on = Math.floor(t * 5) % 5, cols = [PAL.coral, PAL.yellow, PAL.green, PAL.teal, PAL.coral];
+    paintOn([5.9, 0.02, 3.2], [1, 0, 0], [0, 0, -1], () => { const on = Math.floor(t * 5) % 5, cols = [PAL.coral, PAL.yellow, PAL.green, PAL.teal, PAL.coral];
       for (let i = 0; i < 5; i++) { ctx.fillStyle = sh(PAL.hubB, 0.35); ctx.beginPath(); ctx.arc(30 + i * 78, 40, 28, 0, 7); ctx.fill();
         ctx.fillStyle = i === on && t > 2.9 ? cols[i] : mix(cols[i], '#7f89a8', 0.55); ctx.beginPath(); ctx.arc(30 + i * 78, 40, 20, 0, 7); ctx.fill(); } });
     // side door on wall A
-    onFace([0.02, 8.6, 2.2], [0, -1, 0], [0, 0, -1], () => { ctx.fillStyle = sh(PAL.hubA, 0.3); ctx.beginPath(); ctx.roundRect(0, 0, 150, 220, 10); ctx.fill(); ctx.fillStyle = PAL.yellow; ctx.fillRect(118, 110, 16, 16); });
+    paintOn([0.02, 8.6, 2.2], [0, -1, 0], [0, 0, -1], () => { ctx.fillStyle = sh(PAL.hubA, 0.3); ctx.beginPath(); ctx.roundRect(0, 0, 150, 220, 10); ctx.fill(); ctx.fillStyle = PAL.yellow; ctx.fillRect(118, 110, 16, 16); });
   }));
-  const d = (t0, o, f, k) => push(k ?? o[0] + o[1], () => withOT(drop(t, t0, o), f));
+  const d = (t0, o, f, k) => push(k ?? o[0] + o[1], () => withLocal(drop(t, t0, o), f));
   // background belt with a stream of parcels
   d(2.55, [5.3, 1.6, 0], () => { belt(1.0, 9.6, 1.6, t, 1.4);
     for (let k = 0; k < 4; k++) { const x = 1.3 + ((t * 1.4 + k * 2.2) % 8.8); const s = Math.min(seg(x, 1.3, 1.8), 1 - seg(x, 9.4, 9.9)); if (s <= 0) continue;
-      const c = [PAL.kraft, '#e7b98a', PAL.kraft, '#c98a5c'][k]; withOT({ cx: x, cy: 1.6, zb: 0.95, dz: 0, sxy: s, sz: s, alpha: 1 }, () => box(x - 0.34, 1.26, 0.95, x + 0.34, 1.94, 1.45, c)); } });
+      const c = [PAL.kraft, '#e7b98a', PAL.kraft, '#c98a5c'][k]; withLocal({ cx: x, cy: 1.6, zb: 0.95, dz: 0, sxy: s, sz: s, alpha: 1 }, () => box(x - 0.34, 1.26, 0.95, x + 0.34, 1.94, 1.45, c)); } });
   // pallet of parcels by the side door
   d(2.9, [1.1, 9.0, 0], () => { box(0.4, 8.2, 0, 1.9, 9.7, 0.2, '#c98a5c'); for (const [x, y, z] of [[0.45, 8.25, 0.2], [1.2, 8.25, 0.2], [0.45, 9.0, 0.2], [1.2, 9.0, 0.2], [0.8, 8.6, 0.85]]) box(x, y, z, x + 0.66, y + 0.66, z + 0.62, PAL.kraft); });
   // main conveyor with the scanner arch (the parcel is drawn inside this group for correct overlap)
@@ -348,7 +433,7 @@ function tileD(t, push) { // the neighbourhood: two houses, a fence, a doorstep
     ground([[2.1, 4.4], [2.9, 4.4], [2.9, 6.7], [2.1, 6.7]], '#f3e3cc');
     for (let y = 4.8; y < 6.6; y += 0.45) ground([[2.1, y, 0.02], [2.9, y, 0.02], [2.9, y + 0.05, 0.02], [2.1, y + 0.05, 0.02]], '#e2cfb3');
     ground([[5.3, 0.5], [9.4, 0.5], [9.4, 4.4], [5.3, 4.4]], '#a6d27f'); }, true);
-  const d = (t0, o, f, k) => push(k ?? o[0] + o[1], () => withOT(drop(t, t0, o), f));
+  const d = (t0, o, f, k) => push(k ?? o[0] + o[1], () => withLocal(drop(t, t0, o), f));
   const glow = seg(t, TL.done, TL.done + 0.2);
   d(5.2, [2.5, 2.6, 0], () => house(0.8, 0.8, 4.2, 4.4, 2.5, '#ffe3c7', PAL.coral, true, glow));
   d(5.36, [7.3, 2.4, 0], () => house(5.8, 1.0, 8.9, 3.9, 2.2, '#bfe3dc', PAL.blue, false, 0));
@@ -371,13 +456,13 @@ function house(x0, y0, x1, y1, h, wall, roof, main, glow) {
   const win = (c) => { ctx.fillStyle = c; ctx.beginPath(); ctx.roundRect(0, 0, 60, 60, 8); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(27, 0, 6, 60); ctx.fillRect(0, 27, 60, 6); };
   const lit = mix('#8fb5d6', '#ffd36b', glow);
   if (main) {
-    onFace([x0 + 1.35, y1 + 0.01, 1.7], [1, 0, 0], [0, 0, -1], () => { ctx.fillStyle = PAL.blue; ctx.beginPath(); ctx.roundRect(0, 0, 80, 170, [12, 12, 0, 0]); ctx.fill(); ctx.fillStyle = PAL.yellow; ctx.beginPath(); ctx.arc(64, 90, 6, 0, 7); ctx.fill(); });
-    onFace([x0 + 0.35, y1 + 0.01, 1.85], [1, 0, 0], [0, 0, -1], () => win(lit));
-    onFace([x0 + 2.55, y1 + 0.01, 1.85], [1, 0, 0], [0, 0, -1], () => win(lit));
-    onFace([x1 + 0.01, y1 - 0.6, 1.85], [0, -1, 0], [0, 0, -1], () => { win(lit); ctx.translate(-130, 0); win(lit); });
+    paintOn([x0 + 1.35, y1 + 0.01, 1.7], [1, 0, 0], [0, 0, -1], () => { ctx.fillStyle = PAL.blue; ctx.beginPath(); ctx.roundRect(0, 0, 80, 170, [12, 12, 0, 0]); ctx.fill(); ctx.fillStyle = PAL.yellow; ctx.beginPath(); ctx.arc(64, 90, 6, 0, 7); ctx.fill(); });
+    paintOn([x0 + 0.35, y1 + 0.01, 1.85], [1, 0, 0], [0, 0, -1], () => win(lit));
+    paintOn([x0 + 2.55, y1 + 0.01, 1.85], [1, 0, 0], [0, 0, -1], () => win(lit));
+    paintOn([x1 + 0.01, y1 - 0.6, 1.85], [0, -1, 0], [0, 0, -1], () => { win(lit); ctx.translate(-130, 0); win(lit); });
   } else {
-    onFace([x0 + 0.5, y1 + 0.01, 1.6], [1, 0, 0], [0, 0, -1], () => { win('#8fb5d6'); ctx.translate(120, 0); win('#8fb5d6'); ctx.translate(-20, 0); });
-    onFace([x1 + 0.01, y1 - 0.8, 1.6], [0, -1, 0], [0, 0, -1], () => win('#8fb5d6'));
+    paintOn([x0 + 0.5, y1 + 0.01, 1.6], [1, 0, 0], [0, 0, -1], () => { win('#8fb5d6'); ctx.translate(120, 0); win('#8fb5d6'); ctx.translate(-20, 0); });
+    paintOn([x1 + 0.01, y1 - 0.8, 1.6], [0, -1, 0], [0, 0, -1], () => win('#8fb5d6'));
   }
 }
 
@@ -385,32 +470,58 @@ function house(x0, y0, x1, y1, h, wall, roof, main, glow) {
 const CK = [ // t, x, y, z, S, stop
   [0, 5.5, 4.6, 2.3, 60, 1], [0.95, 5.3, 4.3, 2.25, 64, 0], [1.75, 5.0, 3.9, 2.1, 76, 1], [2.35, 6.6, 5.0, 1.8, 66, 0], [3.3, 13.4, 3.0, 1.6, 60, 0], [4.45, 16.6, -6.2, 1.3, 62, 1],
   [6.05, 19.8, -6.2, 1.4, 62, 0], [7.15, 27.4, -7.4, 1.7, 64, 1], [7.45, 27.4, -7.4, 1.7, 64, 1], [8.4, 15.4, -3.4, 1.2, 33.5, 1], [10, 15.4, -3.4, 1.2, 32.5, 1]];
+// Cubic Hermite path through the keys. Zoom is interpolated in log space so dolly moves feel even.
+// A key flagged `stop` (and the first/last key) has zero velocity; the others get a centred-difference slope.
+const CAM_CH = [1, 2, 3, 4];
+const camVal = (key, ch) => ch === 4 ? Math.log(key[4]) : key[ch];
+function camSlope(j, ch) {
+  const key = CK[j];
+  if (j === 0 || j === CK.length - 1 || key[5]) return 0;
+  const before = CK[j - 1], after = CK[j + 1];
+  return (camVal(after, ch) - camVal(before, ch)) / (after[0] - before[0]);
+}
 function camAt(t) {
-  let i = 0; while (i < CK.length - 2 && t >= CK[i + 1][0]) i++;
-  const a = CK[i], b = CK[i + 1], dt = b[0] - a[0], u = clamp((t - a[0]) / dt);
-  const tan = (j, c) => { const k = CK[j]; if (k[5] || j === 0 || j === CK.length - 1) return 0; const p = CK[j - 1], n = CK[j + 1]; return (val(n, c) - val(p, c)) / (n[0] - p[0]); };
-  const val = (k, c) => c === 4 ? Math.log(k[4]) : k[c];
-  const h00 = 2 * u ** 3 - 3 * u ** 2 + 1, h10 = u ** 3 - 2 * u ** 2 + u, h01 = -2 * u ** 3 + 3 * u ** 2, h11 = u ** 3 - u ** 2;
-  const f = c => h00 * val(a, c) + h10 * dt * tan(i, c) + h01 * val(b, c) + h11 * dt * tan(i + 1, c);
-  return { x: f(1), y: f(2), z: f(3), S: Math.exp(f(4)) };
+  let j = 0;
+  while (j + 2 < CK.length && CK[j + 1][0] <= t) j++;
+  const k0 = CK[j], k1 = CK[j + 1], span = k1[0] - k0[0], u = clamp((t - k0[0]) / span);
+  const u2 = u * u, u3 = u2 * u;
+  const out = CAM_CH.map(ch => (2 * u3 - 3 * u2 + 1) * camVal(k0, ch) + (3 * u2 - 2 * u3) * camVal(k1, ch)
+    + span * ((u3 - 2 * u2 + u) * camSlope(j, ch) + (u3 - u2) * camSlope(j + 1, ch)));
+  return { x: out[0], y: out[1], z: out[2], s: Math.exp(out[3]) };
 }
 
-// ---------- background ----------
-let BG;
-function buildBG() {
-  BG = off(W, H); const g = BG.getContext('2d');
-  g.fillStyle = PAL.bg; g.fillRect(0, 0, W, H);
-  const r = g.createRadialGradient(960, 480, 100, 960, 540, 1150); r.addColorStop(0, 'rgba(255,250,242,0.9)'); r.addColorStop(1, 'rgba(214,190,170,0.5)');
-  g.fillStyle = r; g.fillRect(0, 0, W, H);
+// ---------- paper backdrop ----------
+let paper = null; // warm vignette, painted once
+function paintPaper() {
+  paper = document.createElement('canvas');
+  paper.width = W; paper.height = H;
+  const p = paper.getContext('2d');
+  p.fillStyle = PAL.bg;
+  p.fillRect(0, 0, W, H);
+  const glow = p.createRadialGradient(W / 2, 480, 100, W / 2, H / 2, 1150);
+  glow.addColorStop(0, 'rgba(255,250,242,0.9)');
+  glow.addColorStop(1, 'rgba(214,190,170,0.5)');
+  p.fillStyle = glow;
+  p.fillRect(0, 0, W, H);
 }
-function lattice(alpha) {
-  ctx.save(); ctx.strokeStyle = `rgba(120,90,80,${alpha})`; ctx.lineWidth = 1.5;
-  const step = 2.4, N = 40;
-  for (let i = -N; i <= N; i++) { const v = i * step + 11;
-    let a = P(v, -N * step, -0.8), b = P(v, N * step, -0.8); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
-    a = P(-N * step, v - 22, -0.8); b = P(N * step, v - 22, -0.8); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+// faint floor grid under the whole world, 2.4 units apart
+function floorGrid(alpha) {
+  if (alpha <= 0) return;
+  const reach = 96, z = -0.8;
+  ctx.save();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(120,90,80,' + alpha + ')';
+  ctx.beginPath();
+  for (let n = -40; n <= 40; n++) {
+    const c = 11 + 2.4 * n;
+    for (const [a, b] of [[[c, -reach], [c, reach]], [[-reach, c - 22], [reach, c - 22]]]) {
+      const p = iso(a[0], a[1], z), q = iso(b[0], b[1], z);
+      ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]);
+    }
+  }
+  ctx.stroke();
   ctx.restore();
 }
+
 
 // ---------- screen-space tags ----------
 function tag(p, s, text, col) {
@@ -431,52 +542,72 @@ function tileState(name, t) {
   return { ox: TO[name][0], oy: TO[name][1], dz, alpha: clamp(p * 3) * (1 - seg(q, 0.55, 1)) };
 }
 
-function frame(t) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; GA = 1; ctx.drawImage(BG, 0, 0);
-  const c = camAt(t); S = c.S; CAM.x = c.x; CAM.y = c.y; CAM.z = c.z;
-  TILE = { ox: 0, oy: 0, dz: 0 };
-  lattice(0.07 * seg(t, 0, 0.8) * (1 - seg(t, 9.3, 9.8)));
+// run fn with the tile transform and opacity of state s, then restore the world defaults
+function inState(s, fn) {
+  if (s.alpha <= 0) return;
+  const savedTile = tileOff, savedGA = GA;
+  tileOff = s; GA = s.alpha; ctx.globalAlpha = GA;
+  fn();
+  tileOff = savedTile; GA = savedGA; ctx.globalAlpha = GA;
+}
+function renderFrame(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  GA = 1; ctx.globalAlpha = 1;
+  ctx.drawImage(paper, 0, 0);
+  Object.assign(view, camAt(t));
+  tileOff = NO_TILE; local = null;
+  floorGrid(0.07 * seg(t, 0, 0.8) * (1 - seg(t, 9.3, 9.8)));
   const ST = {}; for (const k of 'ABCD') ST[k] = tileState(k, t);
+  // painter's lists: flat ground first, then everything else back to front by key
   const ground_ = [], items = [];
-  const inTile = (k, fn) => () => { const s = ST[k]; if (s.alpha <= 0) return; const pT = TILE, pG = GA; TILE = s; GA = s.alpha; ctx.globalAlpha = GA; fn(); TILE = pT; GA = pG; ctx.globalAlpha = GA; };
   const tiles = { A: tileA, B: tileB, C: tileC, D: tileD };
-  for (const k of ['A', 'C', 'B', 'D']) tiles[k](t, (key, fn, isGround) => (isGround ? ground_ : items).push({ k: key + TO[k][0] + TO[k][1], f: inTile(k, fn) }));
+  for (const k of ['A', 'C', 'B', 'D']) {
+    const base = TO[k][0] + TO[k][1];
+    tiles[k](t, (key, fn, isGround) => (isGround ? ground_ : items).push({ k: key + base, f: () => inState(ST[k], fn) }));
+  }
+  // world-space drawing that rides a tile's rise/sink but not its offset
+  const lifted = k => ({ ox: 0, oy: 0, dz: ST[k].dz, alpha: ST[k].alpha });
   // bridges across the gaps (grow out once both neighbours stand)
   const bridge = (k, x0, y0, x1, y1, t0) => { const p = eOut(seg(t, t0, t0 + 0.3)); if (p <= 0) return;
-    const s = ST[k]; if (s.alpha <= 0) return; ground_.push({ k: 50, f: () => { const pT = TILE; TILE = { ox: 0, oy: 0, dz: s.dz }; GA = s.alpha; ctx.globalAlpha = GA;
+    ground_.push({ k: 50, f: () => inState(lifted(k), () => {
       const X1 = lerp(x0, x1, x1 - x0 > y1 - y0 ? p : 1), Y1 = lerp(y0, y1, x1 - x0 > y1 - y0 ? 1 : p);
-      box(x0, y0, -0.35, X1, Y1, 0, PAL.road, { noEdge: true }); TILE = pT; GA = 1; ctx.globalAlpha = 1; } }); };
+      box(x0, y0, -0.35, X1, Y1, 0, PAL.road, { noEdge: true }); }) }); };
   bridge('B', 10, 5.7, 12, 7.3, 1.5); bridge('C', 13.7, -2, 15.3, 0, 2.4); bridge('D', 22, -5.3, 24, -3.7, 5.0);
   // vehicles and the flying parcel (world coordinates)
   const push = (k, fn) => items.push({ k, f: fn });
-  const inWorld = (k, fn) => () => { const s = ST[k], pT = TILE; TILE = { ox: 0, oy: 0, dz: s.dz }; GA = s.alpha; ctx.globalAlpha = GA; if (GA > 0) fn(); TILE = pT; GA = 1; ctx.globalAlpha = 1; };
+  const inWorld = (k, fn) => () => inState(lifted(k), fn);
   const tr = truckAt(t), tTile = t < TL.truck[0] ? 'A' : (t < TL.truck[1] ? 'B' : 'C');
   const truckDrop = drop(t, 0.75, [7.8, 6.5, 0], 0.4);
-  if (truckDrop) truckParts(t, tr, t >= TL.hop1[1] && t < TL.hop2[0], (k, fn) => push(k, inWorld(tTile, () => withOT(t < 1.6 ? truckDrop : ALWAYS, fn))));
+  if (truckDrop) truckParts(t, tr, t >= TL.hop1[1] && t < TL.hop2[0], (k, fn) => push(k, inWorld(tTile, () => withLocal(t < 1.6 ? truckDrop : IDENTITY, fn))));
   const vn = vanAt(t), vTile = t < TL.van[1] ? 'C' : 'D';
   const vanDrop = drop(t, 3.1, [20.5, -4.5, 0], 0.4);
-  if (vanDrop) vanParts(t, vn, (k, fn) => push(k, inWorld(vTile, () => withOT(t < 4 ? vanDrop : ALWAYS, fn))));
+  if (vanDrop) vanParts(t, vn, (k, fn) => push(k, inWorld(vTile, () => withLocal(t < 4 ? vanDrop : IDENTITY, fn))));
   const flyer = (h, th = 0) => { if (h.p <= 0 || h.p >= 1) return; push(h.x + h.y + 0.05, inWorld('A', () => {
-    const g = P(h.x, h.y, h.zg), k = S * (1 - clamp((h.z - h.zg) / 4) * 0.45); // ground shadow anchors the hop in depth
+    const g = iso(h.x, h.y, h.zg), k = view.s * (1 - clamp((h.z - h.zg) / 4) * 0.45); // ground shadow anchors the hop in depth
     ctx.fillStyle = 'rgba(70,40,60,0.18)'; ctx.beginPath(); ctx.ellipse(g[0], g[1], k * 0.62, k * 0.36, 0, 0, 7); ctx.fill();
     parcelBox(h.x, h.y, h.z, th, { sq: h.sq }); })); };
   if (t >= TL.hop1[0] && t < TL.hop1[1]) flyer(hop(t, ...TL.hop1, [4.6, 3.4, 1.55], [7.8 + BED_U, 6.5, 0.64], 1.6));
   if (t >= TL.hop2[0] && t < TL.hop2[1]) { const e = TRUCK.pts[TRUCK.pts.length - 1]; flyer(hop(t, ...TL.hop2, [e[0], e[1] - BED_U, 0.64], [16.1, -7.8, 0.95], 1.3), -Math.PI / 2 * (1 - seg(t, ...TL.hop2))); }
   if (t >= TL.hop3[0] && t < TL.hop3[1]) flyer(hop(t, ...TL.hop3, [20.5, -6.05, 0.95], [20.3, -4.6, 0.6], 1.1));
   if (t >= TL.hop4[0] && t < TL.hop4[1]) flyer(hop(t, ...TL.hop4, [26.5, -4.6, 0.6], [26.5, -7.25, 0.16], 2.0));
-  ground_.sort((a, b) => a.k - b.k).forEach(it => it.f());
-  items.sort((a, b) => a.k - b.k).forEach(it => it.f());
-  // tags: scanned + delivered
-  TILE = { ox: 0, oy: 0, dz: 0 };
-  const sT = seg(t, 5.05, 5.35) * (1 - seg(t, 6.2, 6.45)); if (sT > 0) { const p = P(18.22, -7.8, 3.3); tag([p[0], p[1] - (1 - eOut(seg(t, 5.05, 5.35))) * 20], eBack(seg(t, 5.05, 5.35), 2.4) * (1 - seg(t, 6.2, 6.45)), 'Scanned', '#4fbf78'); }
-  const dT = seg(t, TL.done, TL.done + 0.32); if (dT > 0 && t < TL.pull[1]) { const p = P(26.5, -9.4, 5.6 + ST.D.dz); const fo = 1 - seg(t, 7.95, 8.2); tag(p, eBack(dT, 2.4) * fo, 'Delivered', '#4fbf78'); }
+  for (const list of [ground_, items]) { list.sort((a, b) => a.k - b.k); for (const it of list) it.f(); }
+  // tags: scanned + delivered (screen space, anchored to world points)
+  tileOff = NO_TILE;
+  const sT = seg(t, 5.05, 5.35) * (1 - seg(t, 6.2, 6.45)); if (sT > 0) { const p = iso(18.22, -7.8, 3.3); tag([p[0], p[1] - (1 - eOut(seg(t, 5.05, 5.35))) * 20], eBack(seg(t, 5.05, 5.35), 2.4) * (1 - seg(t, 6.2, 6.45)), 'Scanned', '#4fbf78'); }
+  const dT = seg(t, TL.done, TL.done + 0.32); if (dT > 0 && t < TL.pull[1]) { const p = iso(26.5, -9.4, 5.6 + ST.D.dz); const fo = 1 - seg(t, 7.95, 8.2); tag(p, eBack(dT, 2.4) * fo, 'Delivered', '#4fbf78'); }
   // title over the whole world
   const tp = seg(t, TL.title, TL.title + 0.5), to = seg(t, 9.2, 9.5);
   if (tp > 0 && to < 1) { ctx.save(); ctx.globalAlpha = eOut(tp) * (1 - to); ctx.translate(960, 150 + (1 - eOut(tp)) * 30);
     ctx.font = `700 76px ${FF}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = PAL.ink; ctx.letterSpacing = '-1px'; ctx.fillText('The journey of a parcel', 0, 0);
     ctx.font = `500 30px ${FF}`; ctx.letterSpacing = '6px'; ctx.fillStyle = sh(PAL.coral, 0.25); ctx.fillText('PACKED  ·  CARRIED  ·  SORTED  ·  DELIVERED', 0, 72); ctx.restore(); }
-  const fade = Math.max(1 - seg(t, 0, 0.25), seg(t, 9.8, 10));
-  if (fade > 0) { ctx.globalAlpha = fade; ctx.fillStyle = PAL.bg; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  // fade in from and back out to the paper colour
+  const veil = Math.max(1 - seg(t, 0, 0.25), seg(t, 9.8, 10));
+  if (veil > 0) {
+    ctx.globalAlpha = veil;
+    ctx.fillStyle = PAL.bg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = GA;
+  }
 }
 
 // ---------- sound events (read by events.mjs → audio.py) ----------
@@ -506,8 +637,20 @@ window.events = function () {
   for (let i = 0; i < 4; i++) add(TL.sink + i * 0.08 + 0.12, 'bloopdn', { f: 700 - i * 60, v: 0.14 });
   return E.sort((a, b) => a.t - b.t);
 };
-window.draw = function (job) { frame(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
-window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`700 60px 'Space Grotesk'`, 'The journey of a parcel WORKSHOP SORTING HUB Scanned Delivered'),
-  document.fonts.load(`500 30px 'Space Grotesk'`, 'PACKED CARRIED SORTED DELIVERED ·')])).then(buildBG);
-</script></body></html>
+window.draw = function ({ t, q }) {
+  renderFrame(t);
+  const url = cv.toDataURL('image/jpeg', q || 0.92);
+  return url.slice(url.indexOf(',') + 1);
+};
+const FONT_FACES = [
+  ["700 60px 'Space Grotesk'", 'The journey of a parcel WORKSHOP SORTING HUB Scanned Delivered'],
+  ["500 30px 'Space Grotesk'", 'PACKED CARRIED SORTED DELIVERED ·'],
+];
+window.ready = (async () => {
+  await document.fonts.ready;
+  for (const [face, sample] of FONT_FACES) await document.fonts.load(face, sample);
+  paintPaper();
+})();
+</script>
+</body>
+</html>
