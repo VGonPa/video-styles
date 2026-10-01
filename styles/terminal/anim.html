@@ -1,32 +1,57 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="fonts.css"></head>
-<body style="margin:0;background:#000"><canvas id="c" width="1920" height="1080"></canvas>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// ─────────────────────────────────────────────────────────────────────────────
-//  terminal — green phosphor CRT. window.draw({t}) → JPEG base64, window.ready
-//  Story: power on → boot → `brew deploy --strength=strong` → streaming logs and
-//  ASCII progress bars → ERROR: milk not found (glitch) → fix → retry → success →
-//  roll-up clear → ASCII coffee cup with steam → blinking cursor → CRT power-off.
-// ─────────────────────────────────────────────────────────────────────────────
+/*
+ * terminal — green phosphor CRT. window.draw({t}) → JPEG base64, window.ready
+ * Story: power on → boot → `brew deploy --strength=strong` → streaming logs and
+ * ASCII progress bars → ERROR: milk not found (glitch) → fix → retry → success →
+ * roll-up clear → ASCII coffee cup with steam → blinking cursor → CRT power-off.
+ */
 const W = 1920, H = 1080, DUR = 10.0;
-const cv = document.getElementById('c'); const ctx = cv.getContext('2d');
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const lerp = (a, b, p) => a + (b - a) * p;
-const eOut = x => 1 - Math.pow(1 - x, 3), eIn = x => x * x * x;
-const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+function mk(w, h) { const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; return canvas; }
+const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
+const seg = (t, start, end) => clamp((t - start) / (end - start));
+const lerp = (from, to, k) => from + (to - from) * k;
+const eOut = k => 1 - Math.pow(1 - k, 3);
+const eIn = k => k * k * k;
+// cheap deterministic noise in [0, 1): fractional part of a large scaled sine
+const hash = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
 const rng = (s => () => { s = s + 0x6D2B79F5 | 0; let q = Math.imul(s ^ s >>> 15, 1 | s); q = q + Math.imul(q ^ q >>> 7, 61 | q) ^ q; return ((q ^ q >>> 14) >>> 0) / 4294967296; })(17);
 
 const MONO = "'JetBrains Mono', monospace";
-const FS = 32, LH = 52, X0 = 140, Y0 = 118;
-let CW = 16.8, COLS = 96; const ROWS = 16;
-const C = { n: '#8ef7aa', d: '#3d9a5b', b: '#eafff0', bg: '#041209' };
+const FS = 32;                                   // font size
+const LH = 52;                                   // line height
+const X0 = 140, Y0 = 118;                        // top-left of the text grid
+let CW = 16.8, COLS = 96;                        // cell width and columns, measured from the font in prep()
+const ROWS = 16;
+// phosphor colours: normal, dim, bright, and the background used for inverted text
+const C = {
+  n: '#8ef7aa',
+  d: '#3d9a5b',
+  b: '#eafff0',
+  bg: '#041209',
+};
 
 // ── timeline ─────────────────────────────────────────────────────────────────
-function typeTimes(str, t0, seed) { const out = []; let t = t0;
-  for (let i = 0; i < str.length; i++) { out.push(t); t += 0.017 + 0.02 * hash(i * 7.3 + seed) + (str[i] === ' ' ? 0.04 : 0); }
-  return out; }
+// Keystroke times for typing `str` from t0: uneven human rhythm, longer after spaces.
+function typeTimes(str, t0, seed) {
+  const times = [];
+  let at = t0;
+  for (let i = 0; i < str.length; i++) {
+    times.push(at);
+    at += 0.017 + 0.02 * hash(i * 7.3 + seed) + (str[i] === ' ' ? 0.04 : 0);
+  }
+  return times;
+}
 const PROMPT = [['dev@kitchen', 'n'], [':~$ ', 'd']];
 // three typed commands: [text, start time]
 const CMDS = [['brew deploy --strength=strong', 1.02], ['brew add milk --type=oat', 4.42], ['brew deploy --retry', 5.42]];
@@ -115,10 +140,12 @@ window.events = () => {
 
 // ── display content: character cells at time t ───────────────────────────────
 function build(t) {
-  const it = []; let cur = null;
-  const put = (r, c, str, st = 'n') => { it.push({ r, c, s: str, st }); return c + [...str].length; };
-  const putSegs = (r, c, segs) => { for (const [s, st] of segs) c = put(r, c, s, st); return c; };
-  if (t < 0.40) return { it, cur };
+  const it = [];                                  // text runs: { r: row, c: column, s: string, st: style }
+  let cur = null;                                 // cursor cell, if one is shown
+  // adds a run and returns the column just after it (counting code points, so ° and █ take one cell)
+  const put = (r, c, str, st = 'n') => { it.push({ r, c, s: str, st }); return c + Array.from(str).length; };
+  const putSegs = (r, c, segs) => segs.reduce((col, [s, st]) => put(r, col, s, st), c);
+  if (t < 0.40) return { it, cur };               // screen still warming up
   if (t < CUP) {
     const vis = LOG.filter(l => t >= l.t).slice(-ROWS);
     const shift = t >= ROLL ? Math.floor(eIn(seg(t, ROLL, CUP)) * (ROWS + 1)) : 0;   // roll-up clear
@@ -163,104 +190,173 @@ function build(t) {
 }
 
 // ── drawing: character grid ──────────────────────────────────────────────────
-let dith = null;
+let dith = null;                                  // colour → checkerboard pattern, made in prep()
+// One character cell. Block glyphs are painted as rectangles so bars join up seamlessly.
 function cell(g, ch, x, y, col) {
-  switch (ch) {
-    case ' ': return;
-    case '█': g.fillStyle = col; g.globalAlpha *= 0.82; g.fillRect(x, y + 12, CW + 0.6, LH - 24); g.globalAlpha /= 0.82; return;
-    case '░': g.save(); g.fillStyle = dith[col] || col; g.fillRect(x, y + 12, CW + 0.6, LH - 24); g.restore(); return;
-    case '▒': g.save(); g.fillStyle = dith[col] || col; g.fillRect(x, y, CW + 0.6, LH + 0.6); g.restore(); return;
-    default: g.fillStyle = col; g.fillText(ch, x, y + LH * 0.7);
+  if (ch === ' ') return;
+  if (ch === '█') {
+    g.fillStyle = col;
+    g.globalAlpha *= 0.82;
+    g.fillRect(x, y + 12, CW + 0.6, LH - 24);
+    g.globalAlpha /= 0.82;
+  } else if (ch === '░' || ch === '▒') {
+    const full = ch === '▒';                      // ▒ fills the whole cell, ░ only the bar band
+    g.save();
+    g.fillStyle = dith[col] || col;
+    if (full) g.fillRect(x, y, CW + 0.6, LH + 0.6); else g.fillRect(x, y + 12, CW + 0.6, LH - 24);
+    g.restore();
+  } else {
+    g.fillStyle = col;
+    g.fillText(ch, x, y + LH * 0.7);
   }
 }
 // phosphor trails only while the layout holds still (a scroll or clear would smear whole lines)
 const layout = t => t >= CUP ? -1 : t >= ROLL ? -2 - Math.floor(t * 30) : Math.max(0, LOG.filter(l => t >= l.t).length - ROWS);
 function renderScreen(g, t, alpha) {
-  const { it, cur } = build(t);
-  g.globalAlpha = alpha; g.textBaseline = 'alphabetic';
-  for (const o of it) {
-    const chars = [...o.s]; const y = Y0 + o.r * LH;
-    let st = o.st;
+  const screen = build(t);
+  g.globalAlpha = alpha;
+  g.textBaseline = 'alphabetic';
+  for (const run of screen.it) {
+    const glyphs = [...run.s], top = Y0 + run.r * LH;
+    let st = run.st;
     if (st === 'e') st = (t - ERR < 0.5 && Math.floor((t - ERR) * 12) % 2 === 1) ? 'b' : 'i';   // error flashes, then stays inverted
-    if (st === 'i') { g.fillStyle = o.st === 'e' ? C.b : C.n; g.fillRect(X0 + o.c * CW - 4, y + 5, chars.length * CW + 8, LH - 10); }
-    const col = st === 'i' ? C.bg : C[st];
-    g.font = `${st === 'b' || st === 'i' ? 700 : 400} ${FS}px ${MONO}`;
-    chars.forEach((ch, k) => cell(g, ch, X0 + (o.c + k) * CW, y, col));
+    if (st === 'i') {                             // inverted: lit box behind dark text
+      g.fillStyle = run.st === 'e' ? C.b : C.n;
+      g.fillRect(X0 + run.c * CW - 4, top + 5, glyphs.length * CW + 8, LH - 10);
+    }
+    const ink = st === 'i' ? C.bg : C[st];
+    const bold = st === 'b' || st === 'i';
+    g.font = `${bold ? 700 : 400} ${FS}px ${MONO}`;
+    glyphs.forEach((ch, k) => cell(g, ch, X0 + (run.c + k) * CW, top, ink));
   }
-  if (cur && (!cur.blink || Math.floor(t * 1.9) % 2 === 0)) { g.fillStyle = C.n; g.fillRect(X0 + cur.c * CW, Y0 + cur.r * LH + 4, CW, LH - 8); }
+  const cur = screen.cur;
+  const lit = cur && (!cur.blink || Math.floor(t * 1.9) % 2 === 0);
+  if (lit) { g.fillStyle = C.n; g.fillRect(X0 + cur.c * CW, Y0 + cur.r * LH + 4, CW, LH - 8); }
   g.globalAlpha = 1;
 }
 
-// ── CRT layers (generated once) ──────────────────────────────────────────────
+// ── CRT layers ───────────────────────────────────────────────────────────────
+// P: text with phosphor trails; B1/B2: two blurred downsamples of P for bloom; S: the composed tube image.
 const P = mk(W, H), pg = P.getContext('2d');
 const S = mk(W, H), sg = S.getContext('2d');
-const B1 = mk(480, 270), b1 = B1.getContext('2d'), B2 = mk(240, 135), b2 = B2.getContext('2d');
-let BG, SCAN, VIG, NOISE = [], LINE, DOT;
+const B1 = mk(480, 270), b1 = B1.getContext('2d');
+const B2 = mk(240, 135), b2 = B2.getContext('2d');
+// Static overlays, built in prep(): glass tint, scanlines, bezel/vignette, noise tiles, power-on line and power-off dot.
+let BG, SCAN, VIG, LINE, DOT;
+const NOISE = [];
+const stops = (grad, list) => { for (const [at, col] of list) grad.addColorStop(at, col); return grad; };
+function layer(w, h, paint) { const cnv = mk(w, h); paint(cnv.getContext('2d')); return cnv; }
 function prep() {
-  dith = {}; for (const k of ['n', 'd', 'b']) { const cp = mk(6, 6), g = cp.getContext('2d'); g.fillStyle = C[k]; g.fillRect(0, 0, 2, 2); g.fillRect(3, 3, 2, 2);
-    dith[C[k]] = ctx.createPattern(cp, 'repeat'); }
-  BG = mk(W, H); { const g = BG.getContext('2d'); const r = g.createRadialGradient(W / 2, H / 2, 100, W / 2, H / 2, 1150);
-    r.addColorStop(0, '#07170d'); r.addColorStop(0.6, '#041009'); r.addColorStop(1, '#010402'); g.fillStyle = r; g.fillRect(0, 0, W, H); }
-  SCAN = mk(W, H); { const g = SCAN.getContext('2d'); for (let y = 0; y < H; y += 4) { g.fillStyle = 'rgba(0,0,0,0.30)'; g.fillRect(0, y, W, 1.5); g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(0, y + 1.5, W, 0.8); } }
-  VIG = mk(W, H); { const g = VIG.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
-    g.globalCompositeOperation = 'destination-out'; g.filter = 'blur(18px)'; g.beginPath(); g.roundRect(34, 30, W - 68, H - 60, 90); g.fill();
+  dith = {};
+  for (const key of ['n', 'd', 'b']) {
+    const tile = layer(6, 6, g => { g.fillStyle = C[key]; g.fillRect(0, 0, 2, 2); g.fillRect(3, 3, 2, 2); });
+    dith[C[key]] = ctx.createPattern(tile, 'repeat');
+  }
+  BG = layer(W, H, g => {
+    g.fillStyle = stops(g.createRadialGradient(W / 2, H / 2, 100, W / 2, H / 2, 1150), [[0, '#07170d'], [0.6, '#041009'], [1, '#010402']]);
+    g.fillRect(0, 0, W, H);
+  });
+  SCAN = layer(W, H, g => {
+    for (let y = 0; y < H; y += 4) {
+      g.fillStyle = 'rgba(0,0,0,0.30)'; g.fillRect(0, y, W, 1.5);
+      g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(0, y + 1.5, W, 0.8);
+    }
+  });
+  VIG = layer(W, H, g => {
+    g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+    g.globalCompositeOperation = 'destination-out'; g.filter = 'blur(18px)';    // cut out the rounded screen
+    g.beginPath(); g.roundRect(34, 30, W - 68, H - 60, 90); g.fill();
     g.filter = 'none'; g.globalCompositeOperation = 'source-over';
-    const r = g.createRadialGradient(W / 2, H / 2, 380, W / 2, H / 2, 1180); r.addColorStop(0, 'rgba(0,0,0,0)'); r.addColorStop(1, 'rgba(0,0,0,0.62)');
-    g.fillStyle = r; g.fillRect(0, 0, W, H);
-    const gl = g.createRadialGradient(560, 220, 10, 560, 220, 700); gl.addColorStop(0, 'rgba(210,255,225,0.045)'); gl.addColorStop(1, 'rgba(210,255,225,0)');
-    g.fillStyle = gl; g.beginPath(); g.ellipse(560, 230, 760, 330, -0.18, 0, 7); g.fill(); }
-  for (let k = 0; k < 4; k++) { const n = mk(512, 512), g = n.getContext('2d'), im = g.createImageData(512, 512);
-    for (let i = 0; i < im.data.length; i += 4) { const v = rng() * 255; im.data[i] = v * 0.8; im.data[i + 1] = v; im.data[i + 2] = v * 0.85; im.data[i + 3] = 255; }
-    g.putImageData(im, 0, 0); NOISE.push(n); }
-  LINE = mk(W, 240); { const g = LINE.getContext('2d'); const v = g.createLinearGradient(0, 0, 0, 240);
-    v.addColorStop(0, 'rgba(140,255,170,0)'); v.addColorStop(0.44, 'rgba(140,255,170,0.25)'); v.addColorStop(0.5, 'rgba(240,255,244,1)'); v.addColorStop(0.56, 'rgba(140,255,170,0.25)'); v.addColorStop(1, 'rgba(140,255,170,0)');
-    g.fillStyle = v; g.fillRect(0, 0, W, 240);
-    g.globalCompositeOperation = 'destination-in'; const hz = g.createLinearGradient(0, 0, W, 0);
-    hz.addColorStop(0, 'rgba(0,0,0,0)'); hz.addColorStop(0.06, 'rgba(0,0,0,1)'); hz.addColorStop(0.94, 'rgba(0,0,0,1)'); hz.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = hz; g.fillRect(0, 0, W, 240); }
-  DOT = mk(300, 300); { const g = DOT.getContext('2d'); const r = g.createRadialGradient(150, 150, 0, 150, 150, 150);
-    r.addColorStop(0, 'rgba(245,255,248,1)'); r.addColorStop(0.08, 'rgba(200,255,215,0.9)'); r.addColorStop(0.3, 'rgba(120,255,160,0.25)'); r.addColorStop(1, 'rgba(120,255,160,0)');
-    g.fillStyle = r; g.fillRect(0, 0, 300, 300); }
-  ctx.font = `400 ${FS}px ${MONO}`; CW = ctx.measureText('M').width; COLS = Math.floor((W - 2 * X0) / CW);
+    g.fillStyle = stops(g.createRadialGradient(W / 2, H / 2, 380, W / 2, H / 2, 1180), [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0.62)']]);
+    g.fillRect(0, 0, W, H);
+    g.fillStyle = stops(g.createRadialGradient(560, 220, 10, 560, 220, 700), [[0, 'rgba(210,255,225,0.045)'], [1, 'rgba(210,255,225,0)']]);
+    g.beginPath(); g.ellipse(560, 230, 760, 330, -0.18, 0, 7); g.fill();       // reflection on the glass
+  });
+  for (let n = 0; n < 4; n++) {
+    NOISE.push(layer(512, 512, g => {
+      const img = g.createImageData(512, 512), px = img.data;
+      for (let i = 0; i < px.length; i += 4) { const v = rng() * 255; px[i] = v * 0.8; px[i + 1] = v; px[i + 2] = v * 0.85; px[i + 3] = 255; }
+      g.putImageData(img, 0, 0);
+    }));
+  }
+  LINE = layer(W, 240, g => {
+    g.fillStyle = stops(g.createLinearGradient(0, 0, 0, 240), [[0, 'rgba(140,255,170,0)'], [0.44, 'rgba(140,255,170,0.25)'], [0.5, 'rgba(240,255,244,1)'], [0.56, 'rgba(140,255,170,0.25)'], [1, 'rgba(140,255,170,0)']]);
+    g.fillRect(0, 0, W, 240);
+    g.globalCompositeOperation = 'destination-in';                               // taper both ends
+    g.fillStyle = stops(g.createLinearGradient(0, 0, W, 0), [[0, 'rgba(0,0,0,0)'], [0.06, 'rgba(0,0,0,1)'], [0.94, 'rgba(0,0,0,1)'], [1, 'rgba(0,0,0,0)']]);
+    g.fillRect(0, 0, W, 240);
+  });
+  DOT = layer(300, 300, g => {
+    g.fillStyle = stops(g.createRadialGradient(150, 150, 0, 150, 150, 150), [[0, 'rgba(245,255,248,1)'], [0.08, 'rgba(200,255,215,0.9)'], [0.3, 'rgba(120,255,160,0.25)'], [1, 'rgba(120,255,160,0)']]);
+    g.fillRect(0, 0, 300, 300);
+  });
+  ctx.font = `400 ${FS}px ${MONO}`;
+  CW = ctx.measureText('M').width;
+  COLS = Math.floor((W - 2 * X0) / CW);
 }
 
 // ── CRT power on/off ─────────────────────────────────────────────────────────
+// Picture scale (sx, sy) and the strength of the bright centre line, the warm-up flash and the after-glow dot.
 function crt(t) {
-  let sx = 1, sy = 1, line = 0, flash = 0, dot = 0;
-  if (t < 0.10) { sx = eOut(seg(t, 0, 0.10)); sy = 0.004; line = 1; }
-  else if (t < 0.46) { const p = seg(t, 0.10, 0.42); sy = lerp(0.004, 1, eOut(p)); line = 1 - seg(t, 0.10, 0.26); flash = 0.38 * (1 - seg(t, 0.10, 0.7)); }
-  else if (t < 0.7) flash = 0.38 * (1 - seg(t, 0.10, 0.7));
-  if (t >= OFF) {
-    const p = seg(t, OFF, OFF + 0.17); sy = lerp(1, 0.003, eIn(p)); flash = 0.7 * p; line = seg(t, OFF + 0.08, OFF + 0.17);
-    const q = seg(t, OFF + 0.19, OFF + 0.36); sx = 1 - eIn(q) * 0.998; if (q >= 1) line = 0;
-    dot = t < OFF + 0.36 ? q * q : 1 - eOut(seg(t, OFF + 0.36, DUR - 0.15));
+  const tube = { sx: 1, sy: 1, line: 0, flash: 0, dot: 0 };
+  const warmFlash = () => 0.38 * (1 - seg(t, 0.10, 0.7));
+  if (t < 0.10) {                                 // a line grows out from the centre
+    tube.sx = eOut(seg(t, 0, 0.10)); tube.sy = 0.004; tube.line = 1;
+  } else if (t < 0.46) {                          // and opens up into the picture
+    tube.sy = lerp(0.004, 1, eOut(seg(t, 0.10, 0.42))); tube.line = 1 - seg(t, 0.10, 0.26); tube.flash = warmFlash();
+  } else if (t < 0.7) {
+    tube.flash = warmFlash();
   }
-  return { sx, sy, line, flash, dot };
+  if (t >= OFF) {                                 // collapse to a line, then to a fading dot
+    const squash = seg(t, OFF, OFF + 0.17), shrink = seg(t, OFF + 0.19, OFF + 0.36);
+    tube.sy = lerp(1, 0.003, eIn(squash)); tube.flash = 0.7 * squash;
+    tube.line = shrink >= 1 ? 0 : seg(t, OFF + 0.08, OFF + 0.17);
+    tube.sx = 1 - eIn(shrink) * 0.998;
+    tube.dot = t < OFF + 0.36 ? shrink * shrink : 1 - eOut(seg(t, OFF + 0.36, DUR - 0.15));
+  }
+  return tube;
 }
+// Additive overlay helper for flashes and glows.
+function additive(g, fn) { g.globalCompositeOperation = 'lighter'; fn(); g.globalCompositeOperation = 'source-over'; }
 function render(t) {
-  // phosphor: fading trace of past frames + current frame
+  // phosphor persistence: the last few frames faintly behind the current one, only while the layout is still
   pg.clearRect(0, 0, W, H);
-  for (const [lag, a] of [[0.12, 0.10], [0.08, 0.17], [0.04, 0.30]]) if (t - lag > 0.4 && layout(t - lag) === layout(t)) renderScreen(pg, t - lag, a);
+  for (const [lag, a] of [[0.12, 0.10], [0.08, 0.17], [0.04, 0.30]]) {
+    if (t - lag > 0.4 && layout(t - lag) === layout(t)) renderScreen(pg, t - lag, a);
+  }
   renderScreen(pg, t, 1);
-  b1.clearRect(0, 0, 480, 270); b1.filter = 'blur(2px)'; b1.drawImage(P, 0, 0, 480, 270); b1.filter = 'none';
-  b2.clearRect(0, 0, 240, 135); b2.filter = 'blur(3px)'; b2.drawImage(B1, 0, 0, 240, 135); b2.filter = 'none';
-  sg.globalCompositeOperation = 'source-over'; sg.globalAlpha = 1; sg.drawImage(BG, 0, 0);
-  // rolling scan band
-  const ry = ((t * 0.18) % 1) * (H + 400) - 200; const rb = sg.createLinearGradient(0, ry - 160, 0, ry + 160);
-  rb.addColorStop(0, 'rgba(120,255,160,0)'); rb.addColorStop(0.5, 'rgba(120,255,160,0.035)'); rb.addColorStop(1, 'rgba(120,255,160,0)');
-  sg.fillStyle = rb; sg.fillRect(0, ry - 160, W, 320);
+  // bloom sources
+  const shrink = (g, src, blur) => {
+    const { width, height } = g.canvas;
+    g.clearRect(0, 0, width, height); g.filter = `blur(${blur}px)`; g.drawImage(src, 0, 0, width, height); g.filter = 'none';
+  };
+  shrink(b1, P, 2);
+  shrink(b2, B1, 3);
+  // compose the tube image
+  sg.globalCompositeOperation = 'source-over'; sg.globalAlpha = 1;
+  sg.drawImage(BG, 0, 0);
+  const bandY = ((t * 0.18) % 1) * (H + 400) - 200;                                // slow rolling refresh band
+  sg.fillStyle = stops(sg.createLinearGradient(0, bandY - 160, 0, bandY + 160), [[0, 'rgba(120,255,160,0)'], [0.5, 'rgba(120,255,160,0.035)'], [1, 'rgba(120,255,160,0)']]);
+  sg.fillRect(0, bandY - 160, W, 320);
   sg.drawImage(P, 0, 0);
-  sg.globalCompositeOperation = 'lighter';
-  sg.globalAlpha = 0.55; sg.drawImage(B1, 0, 0, W, H); sg.globalAlpha = 0.45; sg.drawImage(B2, 0, 0, W, H);
-  const f = Math.floor(t * 30); sg.globalAlpha = 0.045; const nz = NOISE[f % 4];
-  for (let y = 0; y < H; y += 512) for (let x = 0; x < W; x += 512) sg.drawImage(nz, x, y);
-  sg.globalAlpha = 1; sg.globalCompositeOperation = 'source-over';
-  sg.fillStyle = `rgba(0,0,0,${0.03 + 0.035 * hash(f)})`; sg.fillRect(0, 0, W, H);   // flicker
+  const frame = Math.floor(t * 30);
+  additive(sg, () => {
+    sg.globalAlpha = 0.55; sg.drawImage(B1, 0, 0, W, H);
+    sg.globalAlpha = 0.45; sg.drawImage(B2, 0, 0, W, H);
+    sg.globalAlpha = 0.045;
+    const tile = NOISE[frame % 4];
+    for (let y = 0; y < H; y += 512) for (let x = 0; x < W; x += 512) sg.drawImage(tile, x, y);
+    sg.globalAlpha = 1;
+  });
+  sg.fillStyle = `rgba(0,0,0,${0.03 + 0.035 * hash(frame)})`; sg.fillRect(0, 0, W, H);   // flicker
 
-  const s = crt(t);
+  // put the tube image on screen, scaled by the power on/off animation
+  const tube = crt(t);
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(s.sx, s.sy); ctx.translate(-W / 2, -H / 2);
+  ctx.save();
+  ctx.translate(W / 2, H / 2); ctx.scale(tube.sx, tube.sy); ctx.translate(-W / 2, -H / 2);
   ctx.drawImage(S, 0, 0);
+  const f = frame;
   const gl = t >= ERR && t < ERR + 0.34 ? 1 - seg(t, ERR, ERR + 0.34) : 0;          // error glitch: sliced horizontal tearing
   if (gl > 0) {
     for (let k = 0; k < 7; k++) { if (hash(f * 13 + k) < 0.3) continue;
@@ -268,14 +364,29 @@ function render(t) {
       ctx.drawImage(S, 0, y, W, hh, dx, y, W, hh); }
     ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(150,255,180,${0.10 * gl})`; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over';
   }
-  if (s.flash > 0) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(150,255,180,${s.flash})`; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over'; }
+  if (tube.flash > 0) additive(ctx, () => { ctx.fillStyle = `rgba(150,255,180,${tube.flash})`; ctx.fillRect(0, 0, W, H); });
   ctx.restore();
-  if (s.line > 0) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = s.line; const lw = W * Math.max(s.sx, 0.002);
-    ctx.drawImage(LINE, W / 2 - lw / 2, H / 2 - 120, lw, 240); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
-  if (s.dot > 0) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = s.dot; ctx.drawImage(DOT, W / 2 - 150, H / 2 - 150); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
-  ctx.drawImage(SCAN, 0, 0); ctx.drawImage(VIG, 0, 0);
+  // unscaled extras: the bright line during power on/off and the after-glow dot
+  if (tube.line > 0) additive(ctx, () => {
+    const len = W * Math.max(tube.sx, 0.002);
+    ctx.globalAlpha = tube.line; ctx.drawImage(LINE, W / 2 - len / 2, H / 2 - 120, len, 240); ctx.globalAlpha = 1;
+  });
+  if (tube.dot > 0) additive(ctx, () => { ctx.globalAlpha = tube.dot; ctx.drawImage(DOT, W / 2 - 150, H / 2 - 150); ctx.globalAlpha = 1; });
+  ctx.drawImage(SCAN, 0, 0);
+  ctx.drawImage(VIG, 0, 0);
 }
-window.draw = function (job) { render(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
-window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`400 ${FS}px 'JetBrains Mono'`, 'abcdefghijklmnopqrstuvwxyz°·»'), document.fonts.load(`700 ${FS}px 'JetBrains Mono'`, 'abcdefghijklmnopqrstuvwxyz')])).then(prep);
-</script></body></html>
+window.draw = job => {
+  render(job.t);
+  const url = cv.toDataURL('image/jpeg', job.q || 0.92);
+  return url.slice(url.indexOf(',') + 1);
+};
+const glyphProbe = 'abcdefghijklmnopqrstuvwxyz';
+window.ready = document.fonts.ready
+  .then(() => Promise.all([
+    document.fonts.load(`400 ${FS}px 'JetBrains Mono'`, glyphProbe + '°·»'),
+    document.fonts.load(`700 ${FS}px 'JetBrains Mono'`, glyphProbe),
+  ]))
+  .then(prep);
+</script>
+</body>
+</html>
