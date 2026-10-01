@@ -1,94 +1,156 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<style>html,body{margin:0;background:#000}canvas{display:block}</style>
-</head><body>
-<canvas id="c" width="1920" height="1080"></canvas>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pixel-art</title>
+<style>* { margin: 0; padding: 0 } body { background: #000; overflow: hidden } canvas { display: block }</style>
+</head>
+<body>
+<canvas id="screen" width="1920" height="1080"></canvas>
 <script>
 // ── pixels · 16-bit underwater level ──────────────────────────────────
-// Drawn at 320×180 low resolution, enlarged 6× with nearest neighbor (sharp pixels).
-// SNES mosaic in → WORLD 3-2 "CORAL DEEP": a diver swims a parallax coral reef collecting pearls,
+// Everything is painted on a 320×180 back buffer and blown up 6× with nearest-neighbour scaling.
+// Mosaic in → WORLD 3-2 "CORAL DEEP": a diver swims a parallax coral reef collecting pearls,
 // ducks under an inflating pufferfish, opens a treasure chest → "LEVEL CLEAR!" / "PEARLS 12/12"
-// (palette cycle) → mosaic + stepped fade → world map: node cleared, path dots to 3-3.
+// (colour cycling) → mosaic + stepped fade → world map: node cleared, path dots to 3-3.
 const W = 1920, H = 1080, LW = 320, LH = 180, DUR = 10.0;
-const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.imageSmoothingEnabled = false; return c; };
-const LO = mk(LW, LH), L = LO.getContext('2d');
-const MOS = mk(LW, LH);
-const P = { // limited palette
-  ink: '#0d0b1a', navy: '#1f2350', purple: '#5b3f8c', white: '#ffffff', cloud: '#e8f6ff', sky2: '#8fd0ff', silver: '#b9c2d0', gray: '#6d7891',
-  gold: '#ffd23f', orange: '#ff7a2f', red: '#d7263d', dred: '#8a1830', dirt: '#a8683a', ddirt: '#6b3e26', sand: '#e0a060',
-  w0: '#9ff0ee', w1: '#4fc3d9', w2: '#2a95c4', w3: '#1f6fa8', w4: '#185891', w5: '#123f75', w6: '#0c2a55',
-  sandL: '#f2d58e', sandM: '#e3b86c', sandD: '#b98a4c', sandS: '#8e6440',
-  pink: '#ff6f91', lpink: '#ffb3c8', magenta: '#c2408f', violet: '#7b3fa0', rock: '#2c3468', rockL: '#3f4a8a', rockD: '#1d2250',
-  kelp: '#1f7a4a', kelpD: '#14543a', kelpL: '#62c24a', skin: '#f2b27e', skinD: '#c47c52', hood: '#2a2438', lilac: '#b7a7d6', pearl: '#e6e9f5'
-};
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const R = Math.round;
-function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
-const px = (x, cx, cy, col) => { x.fillStyle = col; x.fillRect(cx | 0, cy | 0, 1, 1); };
-const easeOutBack = u => { const c = 1.9; return 1 + (c + 1) * (u - 1) ** 3 + c * (u - 1) ** 2; };
+const screenCanvas = document.querySelector('#screen');
+const ctx = screenCanvas.getContext('2d');
+ctx.imageSmoothingEnabled = false; // hard 6× pixels on the final upscale
+function mk(w, h) {
+  const cnv = Object.assign(document.createElement('canvas'), { width: w, height: h });
+  cnv.getContext('2d').imageSmoothingEnabled = false;
+  return cnv;
+}
+const LO = mk(LW, LH);          // the low-res back buffer
+const L = LO.getContext('2d');
+const BLOCKS = mk(LW, LH);      // scratch buffer for the mosaic effect
 
-// ── pixel text: hand-drawn 5×7 bold bitmap font ──
-const G = {
-  A: '.###.|#...#|#...#|#####|#...#|#...#|#...#', B: '####.|#...#|#...#|####.|#...#|#...#|####.', C: '.###.|#...#|#....|#....|#....|#...#|.###.',
-  E: '#####|#....|#....|####.|#....|#....|#####', I: '.###.|..#..|..#..|..#..|..#..|..#..|.###.', K: '#...#|#..#.|#.#..|##...|#.#..|#..#.|#...#',
-  L: '#....|#....|#....|#....|#....|#....|#####', M: '##...##|###.###|##.#.##|##...##|##...##|##...##|##...##', N: '#...#|##..#|#.#.#|#..##|#...#|#...#|#...#',
-  O: '.###.|#...#|#...#|#...#|#...#|#...#|.###.', P: '####.|#...#|#...#|####.|#....|#....|#....', R: '####.|#...#|#...#|####.|#.#..|#..#.|#...#',
-  S: '.###.|#...#|#....|.###.|....#|#...#|.###.', T: '#####|..#..|..#..|..#..|..#..|..#..|..#..', U: '#...#|#...#|#...#|#...#|#...#|#...#|.###.',
-  D: '####.|#...#|#...#|#...#|#...#|#...#|####.', F: '#####|#....|#....|####.|#....|#....|#....',
-  G: '.###.|#...#|#....|#.###|#...#|#...#|.###.', H: '#...#|#...#|#...#|#####|#...#|#...#|#...#',
-  J: '..###|...#.|...#.|...#.|#..#.|#..#.|.##..', Q: '.###.|#...#|#...#|#...#|#.#.#|#..#.|.##.#',
-  V: '#...#|#...#|#...#|#...#|#...#|.#.#.|..#..', W: '#...#|#...#|#...#|#.#.#|#.#.#|##.##|#...#',
-  X: '#...#|#...#|.#.#.|..#..|.#.#.|#...#|#...#', Y: '#...#|#...#|.#.#.|..#..|..#..|..#..|..#..',
-  Z: '#####|....#|...#.|..#..|.#...|#....|#####', '0': '.###.|#...#|#..##|#.#.#|##..#|#...#|.###.', '1': '..#..|.##..|..#..|..#..|..#..|..#..|.###.',
-  '2': '.###.|#...#|....#|..##.|.#...|#....|#####', '3': '####.|....#|....#|.###.|....#|....#|####.', '4': '...#.|..##.|.#.#.|#..#.|#####|...#.|...#.',
-  '5': '#####|#....|####.|....#|....#|#...#|.###.', '6': '.###.|#....|#....|####.|#...#|#...#|.###.', '7': '#####|....#|...#.|..#..|.#...|.#...|.#...',
-  '8': '.###.|#...#|#...#|.###.|#...#|#...#|.###.', '9': '.###.|#...#|#...#|.####|....#|....#|.###.', '-': '.....|.....|.....|####.|.....|.....|.....',
-  '+': '.....|..#..|..#..|#####|..#..|..#..|.....', '!': '.##..|.##..|.##..|.##..|.##..|.....|.##..', '/': '....#|...#.|...#.|..#..|.#...|.#...|#....'
-};
-const TXT = {};
-function textBmp(str, size, colFn, outline = P.ink, shadow = true) {
-  const key = str + size + outline + shadow + colFn.name;
-  if (TXT[key]) return TXT[key];
-  const s = size >= 16 ? 2 : 1, chars = [...str];
-  const adv = ch => ch === ' ' ? 4 : (G[ch] && G[ch].indexOf('|') > 5) ? 8 : 7;
-  const gw = chars.reduce((a, ch) => a + adv(ch), 0) - 1, gh = 11;
-  const w = gw * s + 6, h = gh * s + 6, top = 3 + 2 * s;
-  const mask = new Uint8Array(w * h), set = (i, j) => { for (let b = 0; b < s; b++) for (let a = 0; a < s; a++) { const X = 3 + i * s + a, Y = top + j * s + b; if (X >= 0 && Y >= 0 && X < w && Y < h) mask[Y * w + X] = 1; } };
-  let cx = 0;
-  chars.forEach(ch => {
-    const rows = G[ch];
-    if (rows) {
-      const wide = rows.indexOf('|') > 5;
-      rows.split('|').forEach((row, j) => [...row].forEach((c, i) => { if (c === '#') { set(cx + i, j); if (!wide) set(cx + i + 1, j); } }));
-    }
-    cx += adv(ch);
-  });
-  const on = (i, j) => i >= 0 && j >= 0 && i < w && j < h && mask[j * w + i];
-  const o = mk(w + 2, h + 2), y = o.getContext('2d');
-  if (outline) for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-    if (on(i, j)) continue; let near = false;
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if (on(i + di, j + dj)) near = true;
-    if (near) px(y, i + 1, j + 1, outline);
+// Colour families, darkest-to-lightest where it matters. Each line: name hex name hex ...
+const P = {};
+`ink 0c0b1b  navy 1f2451  purple 5a3f8d  white ffffff  cloud e7f5ff  sky2 8ed0fe  silver b8c2d1  gray 6c7892
+ gold ffd240  orange fe7a30  red d6273e  dred 89192f  dirt a7693b  ddirt 6a3f27  sand dfa161
+ w0 9eefed  w1 50c2d8  w2 2b94c3  w3 2070a7  w4 195892  w5 133f74  w6 0d2b56
+ sandL f1d58f  sandM e2b86d  sandD b88a4d  sandS 8d6541
+ pink fe6f92  lpink feb3c7  magenta c1418e  violet 7a40a1  rock 2d3469  rockL 3f4a8b  rockD 1e2251
+ kelp 207a4b  kelpD 15543b  kelpL 62c34b  skin f1b27f  skinD c37c53  hood 2b2539  lilac b6a7d7  pearl e5e9f6`
+  .trim().split(/\s+/).forEach((tok, n, all) => { if (n % 2 === 0) P[tok] = '#' + all[n + 1]; });
+
+const clamp = (v, lo = 0, hi = 1) => v < lo ? lo : v > hi ? hi : v;
+const seg = (t, t0, t1) => clamp((t - t0) / (t1 - t0));
+const R = v => Math.round(v);
+// seeded generator: xorshift32 on a scrambled seed, returns floats in [0, 1)
+function rng(seed) {
+  let s = (Math.imul(seed + 1, 0x9E3779B1) ^ 0x5bd1e995) >>> 0 || 1;
+  const next = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  for (let k = 0; k < 4; k++) next();
+  return next;
+}
+// 4×4 ordered-dither thresholds, built from the 2×2 base pattern
+const BAYER = [0, 1, 2, 3].map(j => [0, 1, 2, 3].map(i => {
+  const base = (a, b) => [[0, 2], [3, 1]][b][a];
+  return 4 * base(i & 1, j & 1) + base(i >> 1, j >> 1);
+}));
+function px(g, x, y, col) { g.fillStyle = col; g.fillRect(~~x, ~~y, 1, 1); }
+const easeOutBack = u => { const k = 1.9, v = u - 1; return 1 + v * v * ((k + 1) * v + k); };
+
+// ── bitmap type: bold 6×7 glyphs (2-px stems, 1-px bars); W is 7 wide ──
+const GLYPH_ART = `
+A .####. ##..## ##..## ###### ##..## ##..## ##..##
+C .####. ##..## ##.... ##.... ##.... ##..## .####.
+D #####. ##..## ##..## ##..## ##..## ##..## #####.
+E ###### ##.... ##.... #####. ##.... ##.... ######
+H ##..## ##..## ##..## ###### ##..## ##..## ##..##
+I .####. ..##.. ..##.. ..##.. ..##.. ..##.. .####.
+K ##..## ##.##. ####.. ###... ####.. ##.##. ##..##
+L ##.... ##.... ##.... ##.... ##.... ##.... ######
+N ##..## ###.## ###### ##.### ##..## ##..## ##..##
+O .####. ##..## ##..## ##..## ##..## ##..## .####.
+P #####. ##..## ##..## #####. ##.... ##.... ##....
+R #####. ##..## ##..## #####. ##.##. ##..## ##..##
+S .####. ##..## ##.... .####. ....## ##..## .####.
+T ###### ..##.. ..##.. ..##.. ..##.. ..##.. ..##..
+U ##..## ##..## ##..## ##..## ##..## ##..## .####.
+V ##..## ##..## ##..## ##..## ##..## .####. ..##..
+W ##...## ##...## ##.#.## ##.#.## ####### ###.### ##...##
+X ##..## ##..## .####. ..##.. .####. ##..## ##..##
+0 .####. ##..## ##.### ###### ###.## ##..## .####.
+1 ..##.. .###.. ..##.. ..##.. ..##.. ..##.. .####.
+2 .####. ##..## ....## ...##. ..##.. .##... ######
+3 #####. ....## ....## ..###. ....## ....## #####.
+4 ...##. ..###. .####. ##.##. ###### ...##. ...##.
+5 ###### ##.... #####. ....## ....## ##..## .####.
+6 .####. ##.... ##.... #####. ##..## ##..## .####.
+7 ###### ....## ...##. ..##.. ..##.. ..##.. ..##..
+8 .####. ##..## ##..## .####. ##..## ##..## .####.
+9 .####. ##..## ##..## .##### ....## ....## .####.
+- ...... ...... ...... .####. ...... ...... ......
++ ...... ..##.. ..##.. ###### ..##.. ..##.. ......
+! ..##.. ..##.. ..##.. ..##.. ..##.. ...... ..##..
+/ ....## ...##. ...##. ..##.. .##... .##... ##....`;
+const GLYPHS = new Map(GLYPH_ART.trim().split('\n').map(line => {
+  const [ch, ...rows] = line.split(' ');
+  return [ch, rows];
+}));
+const advanceOf = ch => ch === ' ' ? 4 : GLYPHS.has(ch) ? GLYPHS.get(ch)[0].length + 1 : 7;
+
+// colour functions: (row inside the glyph, glyph height) → colour; `id` keys the bitmap cache
+function bands(id, cuts, cols) {
+  const f = (row, height) => { const u = row / height; let k = 0; while (k < cuts.length && u >= cuts[k]) k++; return cols[k]; };
+  f.id = id; return f;
+}
+const cWhite = bands('white', [], [P.white]);
+const cSilver = bands('silver', [], [P.silver]);
+const cGold = bands('gold', [0.35, 0.7], [P.gold, P.orange, P.red]);
+const cAqua = bands('aqua', [0.4, 0.75], [P.white, P.w0, P.w1]);
+const cPearl = bands('pearl', [0.4, 0.75], [P.white, P.pearl, P.lilac]);
+// colour cycling for the clear banner: 2-px stripes that scroll through a warm-to-sea loop
+const CYCLE_COLS = [P.gold, P.orange, P.pink, P.white, P.w0, P.sky2];
+const cCycle = CYCLE_COLS.map((_, shift) => {
+  const f = row => CYCLE_COLS[((row >> 1) + shift) % CYCLE_COLS.length];
+  f.id = 'cycle' + shift; return f;
+});
+
+// Builds a bitmap for a string: a 1-px ink ring on all eight sides, then the banded fill on top.
+// Glyph pixel (0,0) of the first letter sits at (PAD, PAD) inside the bitmap.
+const TEXT_CACHE = new Map(), PAD = 2;
+function textBitmap(str, size, colFn) {
+  const key = `${size}|${colFn.id}|${str}`;
+  if (TEXT_CACHE.has(key)) return TEXT_CACHE.get(key);
+  const sc = size >= 16 ? 2 : 1, chars = Array.from(str);
+  const width = (chars.reduce((sum, ch) => sum + advanceOf(ch), 0) - 1) * sc, height = 7 * sc;
+  const shape = mk(width + PAD * 2, height + PAD * 2), sg = shape.getContext('2d');
+  sg.fillStyle = '#fff';
+  let pen = 0;
+  for (const ch of chars) {
+    (GLYPHS.get(ch) || []).forEach((row, y) => {
+      for (let x = 0; x < row.length; x++) if (row[x] === '#') sg.fillRect(PAD + (pen + x) * sc, PAD + y * sc, sc, sc);
+    });
+    pen += advanceOf(ch);
   }
-  if (shadow) for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (on(i, j) && !on(i + 1, j + 1)) px(y, i + 2, j + 2, P.ink);
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (on(i, j)) px(y, i + 1, j + 1, colFn(j - top, 7 * s));
-  return (TXT[key] = { c: o, w: gw * s, top: top + 1, left: 4 });
+  const tinted = paint => {
+    const out = mk(shape.width, shape.height), og = out.getContext('2d');
+    if (typeof paint === 'string') { og.fillStyle = paint; og.fillRect(0, 0, out.width, out.height); }
+    else for (let y = 0; y < height; y++) { og.fillStyle = paint(y, height); og.fillRect(0, PAD + y, out.width, 1); }
+    og.globalCompositeOperation = 'destination-in';   // keep the paint only where the glyphs are
+    og.drawImage(shape, 0, 0);
+    return out;
+  };
+  const img = mk(shape.width, shape.height), ig = img.getContext('2d'), ring = tinted(P.ink);
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) ig.drawImage(ring, dx, dy);
+  ig.drawImage(tinted(colFn), 0, 0);
+  const entry = { img, width };
+  TEXT_CACHE.set(key, entry);
+  return entry;
 }
-function drawText(x, str, size, cx, top, colFn, align = 'center', outline = P.ink, shadow = true) {
-  const b = textBmp(str, size, colFn, outline, shadow);
-  const lx = align === 'center' ? R(cx - b.w / 2) : align === 'right' ? R(cx - b.w) : R(cx);
-  x.drawImage(b.c, lx - b.left, R(top) - b.top);
-  return b.w;
+// Draws `str` with its glyph tops on row `top`; x is the centre, left or right edge per `align`.
+function drawText(g, str, size, x, top, colFn, align = 'center') {
+  const bmp = textBitmap(str, size, colFn);
+  const left = { center: x - bmp.width / 2, right: x - bmp.width, left: x }[align];
+  g.drawImage(bmp.img, R(left) - PAD, R(top) - PAD);
+  return bmp.width;
 }
-const cWhite = function white() { return P.white; };
-const cGold = function gold(j, s) { const u = j / s; return u < 0.35 ? P.gold : u < 0.7 ? P.orange : P.red; };
-const cAqua = function aqua(j, s) { const u = j / s; return u < 0.4 ? P.white : u < 0.75 ? P.w0 : P.w1; };
-const cPearl = function pearlc(j, s) { const u = j / s; return u < 0.4 ? P.white : u < 0.75 ? P.pearl : P.lilac; };
-const cCycle = []; // palette cycle: 6-step sea-glass gradient
-for (let k = 0; k < 6; k++) { const pal = [P.gold, P.orange, P.pink, P.white, P.w0, P.sky2]; cCycle.push({ [`cyc${k}`]: function (j) { return pal[(Math.floor(j / 2) + k) % pal.length]; } }[`cyc${k}`]); }
+
 
 // ── pixel buffer helper: paint parts, then add a 1-px ink outline outside the silhouette ──
 function pixBuf(w, h) {
@@ -225,18 +287,21 @@ function genGrad(stops, w = LW, h = LH) {
   }
   return c;
 }
-function genRays() { // diagonal light shafts from the surface, stippled with a Bayer mask
-  const w = 640, c = mk(w, LH), x = c.getContext('2d');
-  [[40, 26], [150, 16], [230, 30], [380, 20], [470, 34], [590, 18]].forEach(([x0, bw]) => {
-    for (let j = 20; j < 150; j++) {
-      const d = clamp(1 - (j - 20) / 130) * 0.55, xs = x0 + (j - 20) * 0.45;
-      for (let i = 0; i < bw; i++) {
-        const e = Math.sin(i / bw * Math.PI), X = R(xs + i) % w;
-        if (d * e > (BAYER[j % 4][X % 4] + 0.5) / 16) px(x, X, j, P.w0);
-      }
+// Slanted light shafts hanging from the surface: a sine-shaped cross-section fading with depth,
+// dithered to single pixels through the Bayer matrix. `shift` nudges the set sideways (2-frame shimmer).
+const SHAFTS = [{ at: 40, span: 26 }, { at: 150, span: 16 }, { at: 230, span: 30 }, { at: 380, span: 20 }, { at: 470, span: 34 }, { at: 590, span: 18 }];
+function genRays(shift = 0) {
+  const tileW = 640, tile = mk(tileW, LH), g = tile.getContext('2d');
+  const top = 20, depth = 130;
+  for (const { at, span } of SHAFTS) for (let row = top; row < top + depth; row++) {
+    const fade = 0.55 * (1 - (row - top) / depth), lean = at + shift + 0.45 * (row - top);
+    for (let k = 0; k < span; k++) {
+      const col = ((R(lean + k) % tileW) + tileW) % tileW;
+      const strength = fade * Math.sin(Math.PI * k / span);
+      if (strength * 16 > BAYER[row & 3][col & 3] + 0.5) px(g, col, row, P.w0);
     }
-  });
-  return c;
+  }
+  return tile;
 }
 function genFar() { // distant rock spires + kelp in hazy blue
   const w = 640, c = mk(w, LH), x = c.getContext('2d'), r = rng(7), hts = new Array(w).fill(0);
@@ -322,14 +387,15 @@ function pathAt(t) {
 }
 const camX = t => { const d = pathAt(t)[0] - 110; return d < 150 ? Math.max(0, d) : 150 + 40 * Math.tanh((d - 150) / 40); };
 const HAND = [44 - DV.ax, 19 - DV.ay], HAND_UP = [36 - DV.ax, 3 - DV.ay];
+const EXHALES = [0.45, 1.55, 2.65, 3.75, 4.85, 5.95, 7.05]; // diver breath bursts
 const PEARL_T = [0.95, 1.12, 1.3, 1.48, 2.2, 2.4, 2.6, 4.55, 4.75, 4.95, 5.15];
 let PEARLS, PUFF = { x: 268, y: 80 }, CHEST = { x: 400 };
-function setupWorld() {
+function placeWorld() {
   PEARLS = PEARL_T.map(tc => { const [x, y] = pathAt(tc); return { t: tc, x: x + HAND[0], y: y + HAND[1] }; });
   CHEST.y = floorY(CHEST.x) + 2;
 }
 const pearlsGot = t => PEARLS.filter(p => t >= p.t).length + (t >= T_GRAB ? 1 : 0);
-function score(t) {
+function scoreAt(t) {
   let s = 8400 + 50 * PEARLS.filter(p => t >= p.t).length;
   if (t >= T_GRAB) s += 500;
   if (t >= T_CLEAR + 0.4) s += Math.min(1000, R((t - T_CLEAR - 0.4) * 2500 / 10) * 10);
@@ -354,7 +420,7 @@ function drawKelp(xs, h, seed, t, fore) {
     if (j % 9 === 4) { const s = (j / 9 | 0) % 2 ? 1 : -1; for (let q = 1; q <= 5; q++) px(L, X + s * (q + 1), Y - q + (q > 3 ? 1 : 0), q < 3 ? P.kelpL : P.kelp); }
   }
 }
-function drawLevel(t) {
+function paintLevel(t) {
   const cam = camX(t), f = Math.floor(t * 8);
   L.drawImage(SPR.water, 0, 0);
   const par = (img, fac, y = 0) => { const o = -((R(cam * fac) % 640) + 640) % 640; L.drawImage(img, o, y); L.drawImage(img, o + 640, y); };
@@ -399,7 +465,7 @@ function drawLevel(t) {
     const g = 7 + (Math.floor(t * 12) % 2) * 2; [[g, 0], [-g, 0], [0, g], [0, -g]].forEach(([ox, oy]) => { px(L, R(bx + ox), R(by + oy), P.white); px(L, R(bx + ox * 0.8), R(by + oy * 0.8), P.gold); });
   }
   // diver bubbles (exhale bursts)
-  [0.45, 1.55, 2.65, 3.75, 4.85, 5.95, 7.05].forEach((bt, n) => { if (t < bt) return; const [ox, oy] = pathAt(bt);
+  EXHALES.forEach((bt, n) => { if (t < bt) return; const [ox, oy] = pathAt(bt);
     for (let k = 0; k < 4; k++) { const age = t - bt - k * 0.07; if (age < 0) continue; const by = oy + 1 - age * (26 + k * 4);
       if (by < 22) continue; const bx = ox + 17 + age * 6 + Math.sin(age * 7 + k * 2) * 1.5;
       L.drawImage(SPR.bub[k === 1 ? 2 : k === 3 ? 0 : 1], R(bx - cam) - 2, R(by) - 2); } });
@@ -425,7 +491,7 @@ function drawLevel(t) {
     drawText(L, 'WORLD 3-2', 8, 236, yy, cAqua);
     drawText(L, 'CORAL DEEP', 16, 236, yy + 12, cGold);
   }
-  drawHUD(t);
+  paintHud(t);
   if (t > T_CLEAR) drawClear(t);
 }
 function drawBurst(t, cx, cy) { // rotating gold rays behind the opened chest (stepped)
@@ -435,7 +501,7 @@ function drawBurst(t, cx, cy) { // rotating gold rays behind the opened chest (s
       const col = s < len * 0.45 ? P.white : s < len * 0.75 ? P.gold : P.orange, X = cx + Math.cos(an) * s, Y = cy + Math.sin(an) * s * 0.8;
       px(L, R(X), R(Y), col); if (s < len * 0.6) px(L, R(X + nx), R(Y + ny), col); } }
 }
-function drawHUD(t) {
+function paintHud(t) {
   L.fillStyle = 'rgba(12,42,85,0.55)'; L.fillRect(0, 0, LW, 16);
   L.fillStyle = P.ink; L.fillRect(0, 16, LW, 1);
   const got = pearlsGot(t), last = [...PEARL_T, T_GRAB].filter(x => x <= t).pop() || -9, flash = t - last < 0.3 && Math.floor(t * 20) % 2;
@@ -443,31 +509,34 @@ function drawHUD(t) {
   drawText(L, 'PEARLS', 8, 17, 5, cPearl, 'left');
   drawText(L, String(got).padStart(2, '0') + '/12', 8, 63, 5, flash || got === 12 && Math.floor(t * 6) % 2 ? cGold : cWhite, 'left');
   drawText(L, 'SCORE', 8, 116, 5, cGold, 'left');
-  drawText(L, String(score(t)).padStart(6, '0'), 8, 154, 5, cWhite, 'left');
+  drawText(L, String(scoreAt(t)).padStart(6, '0'), 8, 154, 5, cWhite, 'left');
   drawText(L, 'AIR', 8, 226, 5, cAqua, 'left');
   const air = 8 - Math.floor(Math.min(t, T_CLEAR) / 2.2);
   for (let k = 0; k < 8; k++) { const x0 = 252 + k * 8; L.fillStyle = P.ink; L.fillRect(x0 - 1, 4, 8, 9); L.fillStyle = k < air ? (k === air - 1 && Math.floor(t * 4) % 2 ? P.w0 : P.w1) : P.w6; L.fillRect(x0, 5, 6, 7); if (k < air) px(L, x0 + 1, 6, P.white); }
 }
+// "LEVEL CLEAR!" — rising confetti, then a gold-rimmed box unfolds from the centre and the title colour-cycles
+const CONFETTI_COLS = [P.gold, P.pink, P.w0, P.white, P.orange];
 function drawClear(t) {
-  const u = seg(t, T_CLEAR, T_CLEAR + 0.3);
-  // confetti of bubbles + pearls glitter
-  const r = rng(5);
+  const since = t - T_CLEAR, open = seg(t, T_CLEAR, T_CLEAR + 0.3), rand = rng(12);
   for (let n = 0; n < 50; n++) {
-    const x0 = r() * LW, sp = 18 + r() * 30, ph = r() * 6, col = [P.gold, P.pink, P.w0, P.white, P.orange][n % 5];
-    const yy = 180 - (t - T_CLEAR) * sp * 2.2 - r() * 60; if (yy > 180 || yy < 18) continue;
-    L.fillStyle = col; L.fillRect(R(x0 + Math.sin(t * 4 + ph) * 3), R(yy), Math.floor(t * 8 + ph) % 2 ? 2 : 1, Math.floor(t * 8 + ph) % 2 ? 1 : 2);
+    const baseX = LW * rand(), rise = 40 + 66 * rand(), wob = 6 * rand(), lag = 60 * rand();
+    const y = LH - since * rise - lag;
+    if (y < 18 || y > LH) continue;
+    const flat = Math.floor(t * 8 + wob) & 1;
+    L.fillStyle = CONFETTI_COLS[n % CONFETTI_COLS.length];
+    L.fillRect(R(baseX + 3 * Math.sin(4 * t + wob)), R(y), flat ? 2 : 1, flat ? 1 : 2);
   }
-  const bw = R(228 * Math.min(1, u * 1.15 - (u > 0.87 ? (u - 0.87) * 1.15 : 0))), bh = R(48 * u);
-  if (bw < 4) return;
-  const bx = 160 - Math.floor(bw / 2), by = 56 - Math.floor(bh / 2);
-  L.fillStyle = P.ink; L.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
-  L.fillStyle = P.gold; L.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
-  L.fillStyle = P.w6; L.fillRect(bx, by, bw, bh);
-  if (u >= 1) {
-    drawText(L, 'LEVEL CLEAR!', 16, 160, 38, cCycle[Math.floor(t * 12) % 6]);
-    const v = seg(t, T_CLEAR + 0.3, T_CLEAR + 0.45);
-    if (v > 0) { const yy = R(64 + 6 * (1 - v)); L.drawImage(SPR.pearl[Math.floor(t * 8) % 4 === 0 ? 1 : 0], 110, yy - 1); drawText(L, 'PEARLS 12/12', 8, 166, yy, cPearl); }
-  }
+  const boxW = R(228 * Math.min(1, open / 0.87)), boxH = R(48 * open);
+  if (boxW < 4) return;
+  const left = 160 - (boxW >> 1), top = 56 - (boxH >> 1);
+  [[2, P.ink], [1, P.gold], [0, P.w6]].forEach(([grow, col]) => { L.fillStyle = col; L.fillRect(left - grow, top - grow, boxW + 2 * grow, boxH + 2 * grow); });
+  if (open < 1) return;
+  drawText(L, 'LEVEL CLEAR!', 16, 160, 38, cCycle[Math.floor(t * 12) % cCycle.length]);
+  const slide = seg(t, T_CLEAR + 0.3, T_CLEAR + 0.45);
+  if (slide <= 0) return;
+  const rowY = R(70 - 6 * slide);
+  L.drawImage(SPR.pearl[Math.floor(t * 8) % 4 ? 0 : 1], 110, rowY - 1);
+  drawText(L, 'PEARLS 12/12', 8, 166, rowY, cPearl);
 }
 
 // ── scene: world map ──
@@ -522,7 +591,7 @@ function drawMap(t) {
     let img = i === 0 ? SPR.nodeGold : i === 1 ? (flip ? SPR.nodeGold : SPR.nodeRed) : i === 2 ? (m > 0.95 && Math.floor(t * 6) % 2 ? SPR.nodeRedHi : SPR.nodeRed) : SPR.nodeGray;
     const dyp = i === 1 && pop > 0 && pop < 1 ? -R(Math.sin(pop * Math.PI) * 5) : 0;
     L.drawImage(img, x - 6, y - 6 + dyp);
-    drawText(L, '3-' + (i + 1), 8, x, y + 9, i === 3 ? function grayc() { return P.silver; } : cWhite);
+    drawText(L, '3-' + (i + 1), 8, x, y + 9, i === 3 ? cSilver : cWhite);
   });
   // star burst on the cleared node + pearl tally
   if (m > 0.3 && m < 0.65) { const d = m - 0.3, rr = 4 + R(d * 40);
@@ -541,68 +610,96 @@ function drawMap(t) {
     drawText(L, 'NEXT', 8, 84, yy, cGold, 'left'); drawText(L, '3-3 SUNKEN SHIP', 8, 124, yy, cWhite, 'left'); }
 }
 
-// SNES mosaic: block size grows, then shrinks
-function mosaic(b) {
-  if (b <= 1) return;
-  const w = Math.ceil(LW / b), h = Math.ceil(LH / b), m = MOS.getContext('2d');
-  m.imageSmoothingEnabled = false; m.clearRect(0, 0, LW, LH);
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) m.drawImage(LO, i * b, j * b, 1, 1, i * b, j * b, b, b);
-  L.drawImage(MOS, 0, 0);
+// Mosaic: every b×b block takes the colour of its top-left pixel (sampled from the back buffer).
+function pixelate(b) {
+  if (b < 2) return;
+  const g = BLOCKS.getContext('2d');
+  g.clearRect(0, 0, LW, LH);
+  for (let y = 0; y < LH; y += b) for (let x = 0; x < LW; x += b) g.drawImage(LO, x, y, 1, 1, x, y, b, b);
+  L.drawImage(BLOCKS, 0, 0);
 }
-function fadeSteps(v) { // 8-stage dimming (like hardware brightness registers)
-  const s = Math.floor(clamp(v) * 8) / 8; if (s <= 0) return;
-  L.fillStyle = `rgba(0,0,0,${s})`; L.fillRect(0, 0, LW, LH);
+// Brightness in eight hard steps, the way console fade registers work.
+function fadeSteps(amount) {
+  const level = Math.floor(8 * clamp(amount)) / 8;
+  if (level === 0) return;
+  L.globalAlpha = level; L.fillStyle = '#000'; L.fillRect(0, 0, LW, LH); L.globalAlpha = 1;
 }
-const MOS_STEPS = [1, 2, 4, 8, 12, 16];
-function render(t) {
-  L.imageSmoothingEnabled = false;
-  if (t < T_OUT + 0.3) {
-    drawLevel(t);
-    let m = 1 - seg(t, 0, 0.45);
-    if (t > T_OUT) m = seg(t, T_OUT, T_OUT + 0.3);
-    if (m > 0) { mosaic(MOS_STEPS[Math.floor(m * 5.99)]); fadeSteps(m); }
-  } else if (t < T_MAP) {
-    L.fillStyle = '#000'; L.fillRect(0, 0, LW, LH);
-  } else {
+const MOSAIC_SIZES = [1, 2, 4, 8, 12, 16];
+// amount 0 → clean picture, 1 → biggest blocks and nearly black
+function transition(amount) {
+  if (amount <= 0) return;
+  pixelate(MOSAIC_SIZES[Math.min(MOSAIC_SIZES.length - 1, Math.floor(amount * MOSAIC_SIZES.length))]);
+  fadeSteps(amount);
+}
+function composeFrame(t) {
+  const levelEnd = T_OUT + 0.3;
+  if (t >= T_MAP) {
     drawMap(t);
-    const m = 1 - seg(t, T_MAP, T_MAP + 0.28);
-    if (m > 0) { mosaic(MOS_STEPS[Math.floor(m * 5.99)]); fadeSteps(m); }
+    transition(1 - seg(t, T_MAP, T_MAP + 0.28));
+  } else if (t >= levelEnd) {
+    L.fillStyle = 'black'; L.fillRect(0, 0, LW, LH); // a beat of darkness between the scenes
+  } else {
+    paintLevel(t);
+    transition(t > T_OUT ? seg(t, T_OUT, levelEnd) : 1 - seg(t, 0, 0.45));
   }
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(LO, 0, 0, W, H);
+  ctx.drawImage(LO, 0, 0, LW, LH, 0, 0, W, H);
 }
 
-window.ready = (async () => {
+async function buildSprites() {
+  const range = n => Array.from({ length: n }, (_, k) => k);
   SPR.water = genGrad([[16, P.w1], [50, P.w2], [95, P.w3], [140, P.w4], [180, P.w5]]);
-  SPR.rays = [genRays(), (() => { const c = mk(640, LH); c.getContext('2d').drawImage(genRays(), 2, 0); return c; })()];
-  SPR.far = genFar(); SPR.reef = genReef(); SPR.sand = genSand(); SPR.caus = [0, 1, 2, 3, 4, 5, 6, 7].map(genCaustics);
-  SPR.star = genStar(); SPR.shell = genShell(); SPR.clumpA = genCoralClump(3, P.pink, P.lpink); SPR.clumpB = genCoralClump(9, P.orange, P.gold);
-  SPR.chest = [0, 1, 2].map(genChest);
-  SPR.diver = [0, 1, 2, 3, 4, 5].map(k => genDiver(k, 'reach')); SPR.diverUp = [0, 1, 2, 3, 4, 5].map(k => genDiver(k, 'up'));
-  SPR.pearl = [genPearl(5, false), genPearl(5, true)]; SPR.bigPearl = genPearl(9, true);
+  SPR.rays = [genRays(0), genRays(2)];
+  SPR.far = genFar();
+  SPR.reef = genReef();
+  SPR.sand = genSand();
+  SPR.caus = range(8).map(genCaustics);
+  SPR.star = genStar();
+  SPR.shell = genShell();
+  SPR.clumpA = genCoralClump(3, P.pink, P.lpink);
+  SPR.clumpB = genCoralClump(9, P.orange, P.gold);
+  SPR.chest = range(3).map(genChest);
+  SPR.diver = range(6).map(k => genDiver(k, 'reach'));
+  SPR.diverUp = range(6).map(k => genDiver(k, 'up'));
+  SPR.pearl = [genPearl(5, false), genPearl(5, true)];
+  SPR.bigPearl = genPearl(9, true);
   SPR.bub = [1, 2, 3].map(genBubble);
-  SPR.puff = []; for (let r = 5; r <= 15; r++) SPR.puff.push(genPuffer(r, false)); for (let r = 5; r <= 15; r++) SPR.puff.push(genPuffer(r, true));
+  // pufferfish radii 5..15, calm set first, then the angry set
+  SPR.puff = [false, true].flatMap(angry => range(11).map(k => genPuffer(5 + k, angry)));
   SPR.map = genMap();
-  const md = SPR.map.getContext('2d').getImageData(0, 0, LW, LH).data, sea = new Set([P.w2, P.w3, P.w4].map(h => parseInt(h.slice(1), 16)));
-  SPR.mapIsSea = (i, j) => { const k = (j * LW + i) * 4; return sea.has((md[k] << 16) | (md[k + 1] << 8) | md[k + 2]); };
-  SPR.nodeGold = genNode(P.gold, P.white); SPR.nodeRed = genNode(P.red, P.pink); SPR.nodeRedHi = genNode(P.pink, P.white); SPR.nodeGray = genNode(P.gray, P.silver);
+  // remember which map pixels are open sea so the glints never land on an island
+  const pix = SPR.map.getContext('2d').getImageData(0, 0, LW, LH).data;
+  const seaHex = new Set([P.w2, P.w3, P.w4]);
+  const hexAt = k => '#' + [pix[k], pix[k + 1], pix[k + 2]].map(v => v.toString(16).padStart(2, '0')).join('');
+  SPR.mapIsSea = (x, y) => seaHex.has(hexAt(4 * (y * LW + x)));
+  SPR.nodeGold = genNode(P.gold, P.white);
+  SPR.nodeRed = genNode(P.red, P.pink);
+  SPR.nodeRedHi = genNode(P.pink, P.white);
+  SPR.nodeGray = genNode(P.gray, P.silver);
   SPR.head = genHead();
-  setupWorld();
+  placeWorld();
   return true;
-})();
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
-window.events = () => {
-  const ev = [{ t: 0.05, k: 'swoosh_in' }, { t: T_CARD + 0.05, k: 'card' }];
-  PEARLS.forEach((p, i) => ev.push({ t: p.t, k: 'pearl', n: i }));
-  [0.45, 1.55, 2.65, 3.75, 4.85, 5.95, 7.05].forEach(bt => ev.push({ t: bt, k: 'bubble' }));
-  ev.push({ t: T_WARN, k: 'warn' }, { t: T_PUFF, k: 'puff' }, { t: T_DEFL, k: 'deflate' });
-  for (let k = 0; k < 3; k++) ev.push({ t: T_RATTLE + k * 0.11, k: 'rattle' });
-  ev.push({ t: T_OPEN, k: 'open' }, { t: T_GRAB, k: 'bigpearl' }, { t: T_CLEAR, k: 'fanfare' }, { t: T_CLEAR + 0.4, k: 'tally' });
-  ev.push({ t: T_OUT, k: 'swoosh_out' }, { t: T_MAP + 0.3, k: 'flag' });
-  for (let k = 1; k < 9; k++) ev.push({ t: T_MAP + 0.35 + k * 0.035, k: 'dot' });
-  for (let k = 0; k < 3; k++) ev.push({ t: T_MAP + 0.62 + k * 0.1, k: 'hop' });
-  ev.push({ t: T_MAP + 0.85, k: 'select' });
-  return ev;
+}
+window.ready = buildSprites();
+window.draw = function ({ t }) {
+  composeFrame(t);
+  return screenCanvas.toDataURL('image/jpeg', 0.92).replace(/^data:[^,]*,/, '');
+};
+// sound cues for audio.py: { t, k } in seconds
+window.events = function () {
+  const cues = [];
+  const cue = (t, k, extra) => cues.push(Object.assign({ t, k }, extra));
+  cue(0.05, 'swoosh_in');
+  cue(T_CARD + 0.05, 'card');
+  PEARLS.forEach((p, n) => cue(p.t, 'pearl', { n }));
+  EXHALES.forEach(t => cue(t, 'bubble'));
+  cue(T_WARN, 'warn'); cue(T_PUFF, 'puff'); cue(T_DEFL, 'deflate');
+  [0, 1, 2].forEach(k => cue(T_RATTLE + 0.11 * k, 'rattle'));
+  cue(T_OPEN, 'open'); cue(T_GRAB, 'bigpearl'); cue(T_CLEAR, 'fanfare'); cue(T_CLEAR + 0.4, 'tally');
+  cue(T_OUT, 'swoosh_out'); cue(T_MAP + 0.3, 'flag');
+  for (let k = 1; k <= 8; k++) cue(T_MAP + 0.35 + 0.035 * k, 'dot');
+  [0, 1, 2].forEach(k => cue(T_MAP + 0.62 + 0.1 * k, 'hop'));
+  cue(T_MAP + 0.85, 'select');
+  return cues;
 };
 </script>
 </body></html>
