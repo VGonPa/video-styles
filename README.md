@@ -2,7 +2,7 @@
 
 Short HTML canvas films demonstrate different animation styles. Each example is a self-contained clip of roughly 9–10 seconds. Choose a style before commissioning a new animation: “Explain this topic in the `blueprint` style.”
 
-Watch the [complete catalog reel](catalog/catalog.mp4) (116 styles in shuffled order, ~22 min), or browse by use case or visual family, or open a style below to see its video, animated preview, and HTML source.
+Watch the [complete catalog reel](catalog/catalog.mp4) (128 styles in shuffled order, ~24 min), or browse by use case or visual family, or open a style below to see its video, animated preview, and HTML source.
 
 The catalog began as an English adaptation of [Yasin Özmen’s Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu) (see [Acknowledgements](#acknowledgements)). Its first 20 styles were originally developed there and have since been re-made with new subjects; each style page credits its origin.
 
@@ -358,7 +358,6 @@ The code, videos, GIF previews, generated audio and documentation in this reposi
 
 Third-party components keep their own licenses: the fonts are under the SIL Open Font License 1.1, the Apache License 2.0 or the MIT License as listed in [FONTS.md](FONTS.md), and vendored or adapted code is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-**Rewrite in progress:** the `anim.html` of 14 styles still contains code derived from the [original catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which has no license. That code is being rewritten, and until then those derived portions are not offered under the MIT License: bauhaus, clay, data-visualization, documentary-16mm, isometric, kinetic-typography, kurzgesagt, linocut, memphis, paper-cutout, pencil-sketch, pixel-art, retro-1970s, sci-fi-interface.
 
 ## Disclaimer
 
