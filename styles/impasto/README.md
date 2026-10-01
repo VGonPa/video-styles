@@ -9,4 +9,6 @@
 **Visual family:** [Art Movements](../../categories/families/art-movements.md)  
 **Use cases:** [Storytelling & Brand](../../categories/use-cases/story.md), [Intros, Titles & Transitions](../../categories/use-cases/titles.md)
 
+**Credits:** Inspired by Vincent van Gogh
+
 ▶ [Watch the clip](impasto.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

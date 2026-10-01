@@ -22,7 +22,7 @@ Visual family · Type- and rhythm-driven pieces.
 <td width="25%" align="center"><a href="../../styles/split-flap/split-flap.mp4"><img src="../../styles/split-flap/preview.gif" alt="Split-Flap Board" width="100%"></a><br><b>Split-Flap Board</b><br><a href="../../styles/split-flap/split-flap.mp4">video</a> · <a href="../../styles/split-flap">source</a></td>
 </tr>
 <tr>
-<td width="25%" align="center"><a href="../../styles/stencil-street/stencil-street.mp4"><img src="../../styles/stencil-street/preview.gif" alt="Stencil Street Art" width="100%"></a><br><b>Stencil Street Art</b><br><a href="../../styles/stencil-street/stencil-street.mp4">video</a> · <a href="../../styles/stencil-street">source</a></td>
+<td width="25%" align="center"><a href="../../styles/stencil-street/stencil-street.mp4"><img src="../../styles/stencil-street/preview.gif" alt="Stencil Street Art" width="100%"></a><br><b>Stencil Street Art</b><br><sub>Inspired by Banksy's stencil street art</sub><br><a href="../../styles/stencil-street/stencil-street.mp4">video</a> · <a href="../../styles/stencil-street">source</a></td>
 <td width="25%" align="center"><a href="../../styles/surreal-loop/surreal-loop.mp4"><img src="../../styles/surreal-loop/preview.gif" alt="Surreal Replication" width="100%"></a><br><b>Surreal Replication</b><br><sub>Inspired by Cyriak</sub><br><a href="../../styles/surreal-loop/surreal-loop.mp4">video</a> · <a href="../../styles/surreal-loop">source</a></td>
 </tr>
 </table>

@@ -9,4 +9,6 @@
 **Visual family:** [Experimental](../../categories/families/experimental.md)  
 **Use cases:** [Social & Short-Form](../../categories/use-cases/social.md), [News & Current Affairs](../../categories/use-cases/news.md)
 
+**Credits:** Inspired by Banksy's stencil street art
+
 ▶ [Watch the clip](stencil-street.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

@@ -9,4 +9,6 @@
 **Visual family:** [Art Movements](../../categories/families/art-movements.md)  
 **Use cases:** [Storytelling & Brand](../../categories/use-cases/story.md), [Social & Short-Form](../../categories/use-cases/social.md)
 
+**Credits:** Inspired by Georges Seurat and Paul Signac
+
 ▶ [Watch the clip](pointillism.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
