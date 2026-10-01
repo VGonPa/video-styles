@@ -78,6 +78,21 @@ def check_shared_scripts(s, problems):
             problems.append(f"{name} differs from tools/{name}")
 
 
+ORIGINAL = "8228b1f"  # the unlicensed original catalog; our code must not carry it forward
+
+
+def derived_lines(slug):
+    """Lines (over 15 chars) of anim.html that also appear in the original catalog's version."""
+    try:
+        old = subprocess.run(["git", "show", f"{ORIGINAL}:styles/{slug}/anim.html"],
+                             capture_output=True, text=True, check=True, cwd=ROOT).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return 0  # style not in the original, or no git history available
+    orig = {l.strip() for l in old.splitlines() if len(l.strip()) > 15}
+    cur = (ROOT / "styles" / slug / "anim.html").read_text().splitlines()
+    return sum(1 for l in cur if l.strip() in orig)
+
+
 def main():
     failed = False
     for s in MANIFEST["styles"]:
@@ -94,6 +109,8 @@ def main():
         check_shared_scripts(s, problems)
         check_clip(s, problems)
         check_pages(s, problems)
+        if (n := derived_lines(s["slug"])) > 5:
+            problems.append(f"{n} lines shared with the original catalog")
         status = "ok" if not problems else "; ".join(problems)
         failed |= bool(problems)
         print(f"{s['number']:02d} {s['slug']:<20} {status}")
