@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── weather-tv · 1990s local TV weather report ───────────────────────────────────────────
+// Studio backdrop glint → the bevelled map of the (invented) Corrin Peninsula flies in like a DVE slab →
+// lower third "WEATHER CENTRE" + station bug → sun/cloud/rain icons pop onto six cities with temperature boxes →
+// a frontal system (cold front triangles, warm front half-circles, L and H) sweeps in from the west →
+// blocky radar loop steps across the region → the map tips back and the 5-day outlook strip slides up →
+// sign-off "GOOD NIGHT" holds, then fade to black.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eBack = (u, s = 1.6) => { u = clamp(u); const c3 = s + 1; return 1 + c3 * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2); };
+// damped spring pop: 0 → ~1.13 → settles at 1 (dt in seconds since start)
+const pop = dt => dt <= 0 ? 0 : 1 - Math.exp(-7.5 * dt) * Math.cos(11 * dt);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const deg = d => d * Math.PI / 180;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+const HEAD = '"Archivo Black"', COND = '"Barlow Condensed"';
+const OUT = '#14213d';
+
+// ── value noise ─────────────────────────────────────────────────────────────────
+function hash2(x, y, s) { let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(s, 1442695041); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0) / 4294967296; }
+function vnoise(x, y, s) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s), c = hash2(xi, yi + 1, s), d = hash2(xi + 1, yi + 1, s);
+  return lerp(lerp(a, b, u), lerp(c, d, u), v); }
+function fbm(x, y, s, o = 4) { let v = 0, a = .5, f = 1, n = 0; for (let i = 0; i < o; i++) { v += a * vnoise(x * f, y * f, s + i * 17); n += a; a *= .5; f *= 2.03; } return v / n; }
+
+// ── procedural coastline (radial function) ──────────────────────────────────────
+function radial(seed, K, amp, rough) {
+  const r = rng(seed), hs = [];
+  for (let k = 1; k <= K; k++) hs.push([k, Math.pow(k, -rough) * (0.35 + r()), r() * TAU]);
+  const raw = th => { let v = 0; for (const [k, a, p] of hs) v += a * Math.sin(k * th + p); return v; };
+  let m = 0; for (let i = 0; i < 720; i++) m = Math.max(m, Math.abs(raw(i / 720 * TAU)));
+  const sc = amp / m; return th => 1 + raw(th) * sc;
+}
+function landmass(cx, cy, rx, ry, seed, amp, lobes = []) {
+  const fb = radial(seed, 7, amp, 1.0), fd = radial(seed + 100, 60, .035, .8);
+  const lob = th => { let v = 0; for (const [a, d, w] of lobes) { const e = Math.abs(((th - deg(d)) % TAU + TAU + Math.PI) % TAU - Math.PI); v += a * Math.exp(-(e / w) * (e / w)); } return v; };
+  const f = th => fb(th) + lob(th) + fd(th) - 1;
+  const p = new Path2D(); const n = 900;
+  for (let i = 0; i <= n; i++) { const th = i / n * TAU, v = f(th); const x = cx + Math.cos(th) * rx * v, y = cy + Math.sin(th) * ry * v; i ? p.lineTo(x, y) : p.moveTo(x, y); }
+  p.closePath(); return p;
+}
+const LANDS = [
+  landmass(700, 520, 860, 430, 7, .12, [[.2, 18, .28], [-.2, -50, .16], [.12, 200, .5], [-.14, 128, .1], [.1, -100, .25]]),
+  landmass(1590, 180, 110, 60, 21, .2),
+  landmass(1840, 470, 52, 34, 33, .25),
+  landmass(1600, 860, 90, 50, 44, .22),
+];
+const LAND = new Path2D(); for (const p of LANDS) LAND.addPath(p);
+
+// ── story data ──────────────────────────────────────────────────────────────────
+const CITIES = [
+  { n: 'PORT ARDLEY', x: 400, y: 300, ic: 'sun', tp: 21, t0: 1.45 },
+  { n: 'VELMONT', x: 790, y: 250, ic: 'suncloud', tp: 19, t0: 1.62 },
+  { n: 'MOSSBURY', x: 1250, y: 300, ic: 'cloud', tp: 16, t0: 1.79 },
+  { n: 'ASHBY CROSS', x: 600, y: 620, ic: 'suncloud', tp: 18, t0: 1.96 },
+  { n: 'TARROW', x: 1040, y: 650, ic: 'rain', tp: 14, t0: 2.13 },
+  { n: 'LINDHAVEN', x: 1470, y: 560, ic: 'storm', tp: 13, t0: 2.30 },
+];
+const DAYS = [
+  { d: 'MON', ic: 'rain', hi: 14, lo: 9 }, { d: 'TUE', ic: 'storm', hi: 13, lo: 8 }, { d: 'WED', ic: 'cloud', hi: 15, lo: 9 },
+  { d: 'THU', ic: 'suncloud', hi: 18, lo: 10 }, { d: 'FRI', ic: 'sun', hi: 22, lo: 12 },
+];
+// timeline
+const T_FLY = [0.25, 1.35], T_LT = 0.75, T_FRONT = [2.75, 4.0], T_RADAR = [3.9, 6.0], T_TIP = [5.95, 6.75], T_STRIP = 6.3, T_SIGN = 8.25, T_FADE = [9.3, 10.0];
+
+// ── fronts (polylines through L) ────────────────────────────────────────────────
+function spline(pts, n = 24) { const out = [];
+  for (let i = 0; i < pts.length - 1; i++) { const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+    for (let k = 0; k < n; k++) { const u = k / n, u2 = u * u, u3 = u2 * u;
+      out.push([.5 * (2 * p1[0] + (-p0[0] + p2[0]) * u + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * u2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * u3),
+                .5 * (2 * p1[1] + (-p0[1] + p2[1]) * u + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * u2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * u3)]); } }
+  out.push(pts[pts.length - 1]); let L = 0; const cum = [0];
+  for (let i = 1; i < out.length; i++) { L += Math.hypot(out[i][0] - out[i - 1][0], out[i][1] - out[i - 1][1]); cum.push(L); }
+  return { p: out, cum, L };
+}
+const LOW = [1120, 150], HIGH = [250, 790];
+const COLD = spline([LOW, [1080, 300], [990, 470], [880, 640], [770, 830]]);
+const WARM = spline([LOW, [1290, 215], [1470, 290], [1680, 330], [1890, 345]]);
+function atLen(S, l) { let i = 1; while (i < S.cum.length - 1 && S.cum[i] < l) i++;
+  const u = (l - S.cum[i - 1]) / Math.max(1e-6, S.cum[i] - S.cum[i - 1]); const a = S.p[i - 1], b = S.p[i];
+  return [lerp(a[0], b[0], u), lerp(a[1], b[1], u), Math.atan2(b[1] - a[1], b[0] - a[0])]; }
+
+// ── offscreen layers ────────────────────────────────────────────────────────────
+const MAP = mk(W, H), BACK = mk(W, H), SCAN = mk(W, H), F = mk(W, H), SPR = mk(320, 320), RAD = mk(192, 108), BLUR = mk(W, H);
+function buildBack() {
+  const g = BACK.getContext('2d');
+  const gr = g.createRadialGradient(W * .5, H * .42, 50, W * .5, H * .5, 1250);
+  gr.addColorStop(0, '#2a5fc4'); gr.addColorStop(.45, '#123a8a'); gr.addColorStop(1, '#050f33');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  // diagonal studio light beams
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 7; i++) { g.save(); g.translate(W * .5, -200); g.rotate(deg(-38 + i * 13));
+    const lg = g.createLinearGradient(0, 0, 0, 1600); lg.addColorStop(0, 'rgba(120,170,255,.10)'); lg.addColorStop(1, 'rgba(120,170,255,0)');
+    g.fillStyle = lg; g.beginPath(); g.moveTo(-18, 0); g.lineTo(18, 0); g.lineTo(150, 1600); g.lineTo(-150, 1600); g.fill(); g.restore(); }
+  g.restore();
+  // perspective floor grid
+  g.strokeStyle = 'rgba(140,190,255,.16)'; g.lineWidth = 2;
+  for (let i = -14; i <= 14; i++) { g.beginPath(); g.moveTo(W / 2 + i * 40, 700); g.lineTo(W / 2 + i * 260, H); g.stroke(); }
+  for (let k = 0; k < 8; k++) { const y = 700 + Math.pow(k / 7, 1.8) * 380; g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+}
+function buildMap() {
+  const g = MAP.getContext('2d');
+  // sea
+  const sg = g.createLinearGradient(0, 0, W * .3, H); sg.addColorStop(0, '#0e46a8'); sg.addColorStop(.6, '#1a62cf'); sg.addColorStop(1, '#0c3c96');
+  g.fillStyle = sg; g.fillRect(0, 0, W, H);
+  // sea texture: soft swell noise
+  const id = g.getImageData(0, 0, W, H), d = id.data;
+  for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) { const v = (fbm(x / 160, y / 90, 3, 3) - .5) * 26;
+    for (let q = 0; q < 4; q++) { const k = ((y + (q >> 1)) * W + x + (q & 1)) * 4; d[k] += v * .5; d[k + 1] += v * .8; d[k + 2] += v; } }
+  g.putImageData(id, 0, 0);
+  // lat/long grid
+  g.strokeStyle = 'rgba(170,210,255,.16)'; g.lineWidth = 2;
+  for (let x = 120; x < W; x += 240) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  for (let y = 60; y < H; y += 240) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+  // coastal shallows glow
+  g.save(); g.filter = 'blur(18px)'; g.strokeStyle = 'rgba(90,200,255,.55)'; g.lineWidth = 46; g.stroke(LAND); g.restore();
+  // drop shadow of the slab on the sea
+  g.save(); g.filter = 'blur(14px)'; g.fillStyle = 'rgba(0,8,40,.62)'; g.translate(22, 30); g.fill(LAND); g.restore();
+  // extrusion (chunky side wall)
+  for (let k = 16; k >= 1; k--) { g.save(); g.translate(k * .55, k); g.fillStyle = k > 12 ? '#123d16' : `rgb(${26 + k},${78 - k * 1.5},${30})`; g.fill(LAND); g.restore(); }
+  // top face: relief colours from noise
+  const top = mk(W, H), tg = top.getContext('2d'), ti = tg.createImageData(W / 2, H / 2), td = ti.data;
+  const pal = [[0, [104, 196, 74]], [.45, [82, 176, 60]], [.6, [128, 170, 66]], [.72, [176, 160, 84]], [.84, [150, 118, 72]], [1, [236, 232, 220]]];
+  for (let y = 0; y < H / 2; y++) for (let x = 0; x < W / 2; x++) {
+    let h = fbm(x / 180, y / 180, 9, 4); h = clamp((h - .32) / .46); let j = 1; while (j < pal.length - 1 && pal[j][0] < h) j++;
+    const a = pal[j - 1], b = pal[j], u = clamp((h - a[0]) / (b[0] - a[0])), k = (y * W / 2 + x) * 4;
+    // hill-shade from the noise gradient (light from top-left)
+    const sh = (fbm((x - 1) / 110, (y - 1) / 110, 9, 5) - h * .5 - .3 * 0) ;
+    const lit = clamp(1 + (fbm((x - 2) / 180, (y - 2) / 180, 9, 4) - fbm((x + 2) / 180, (y + 2) / 180, 9, 4)) * 6, .82, 1.18);
+    for (let c = 0; c < 3; c++) td[k + c] = lerp(a[1][c], b[1][c], u) * lit;
+    td[k + 3] = 255; void sh; }
+  tg.putImageData(ti, 0, 0);
+  g.save(); g.clip(LAND); g.imageSmoothingEnabled = true; g.drawImage(top, 0, 0, W / 2, H / 2, 0, 0, W, H);
+  // lakes + rivers
+  const r = rng(5);
+  g.strokeStyle = '#2f86e0'; g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const [x0, y0, a0] of [[560, 420, .4], [930, 380, 1.2], [1200, 480, .9], [330, 560, -.2], [760, 760, 1.6]]) {
+    let x = x0, y = y0, a = a0; g.beginPath(); g.moveTo(x, y);
+    for (let i = 0; i < 26; i++) { a += (r() - .5) * .8; x += Math.cos(a) * 16; y += Math.sin(a) * 16; g.lineTo(x, y); }
+    g.lineWidth = 4; g.stroke(); }
+  g.fillStyle = '#2f86e0'; g.strokeStyle = '#1b4f99'; g.lineWidth = 3;
+  for (const [x, y, rx, ry] of [[700, 470, 34, 18], [1150, 420, 26, 14], [460, 700, 22, 12]]) { g.beginPath(); g.ellipse(x, y, rx, ry, .3, 0, TAU); g.fill(); g.stroke(); }
+  // county borders (dashed)
+  g.setLineDash([10, 9]); g.strokeStyle = 'rgba(255,255,230,.55)'; g.lineWidth = 3;
+  for (const pts of [[[860, 60], [880, 260], [960, 420], [940, 600], [1010, 980]], [[0, 470], [300, 450], [520, 520], [960, 420]], [[940, 600], [1300, 650], [1600, 640]], [[1240, 80], [1250, 330], [1300, 650]]]) {
+    const s = spline(pts, 12); g.beginPath(); s.p.forEach(([x, y], i) => { const jx = (vnoise(x / 40, y / 40, 4) - .5) * 18; i ? g.lineTo(x + jx, y) : g.moveTo(x + jx, y); }); g.stroke(); }
+  g.setLineDash([]);
+  // bevel: inner highlight (top-left edges) and inner shade (bottom-right edges)
+  const hole = new Path2D(); hole.rect(-50, -50, W + 100, H + 100); hole.addPath(LAND);
+  g.shadowBlur = 8; g.fillStyle = '#000';
+  g.shadowColor = 'rgba(255,255,220,.85)'; g.shadowOffsetX = 7; g.shadowOffsetY = 7; g.fill(hole, 'evenodd');
+  g.shadowColor = 'rgba(0,30,0,.7)'; g.shadowOffsetX = -7; g.shadowOffsetY = -7; g.fill(hole, 'evenodd');
+  g.restore();
+  g.lineWidth = 3; g.strokeStyle = '#0d3312'; g.stroke(LAND);
+  // sea labels
+  g.font = `italic 500 34px ${COND}`; g.fillStyle = 'rgba(200,230,255,.72)'; g.textAlign = 'center';
+  const lab = (s, x, y, a = 0) => { g.save(); g.translate(x, y); g.rotate(a); g.letterSpacing = '10px'; g.fillText(s, 0, 0); g.restore(); };
+  lab('NORTH SOUND', 1300, 64); lab('GREY CHANNEL', 1780, 640, deg(78)); lab('SKERRA', 1590, 192);
+  // slab frame
+  g.lineWidth = 8; g.strokeStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.moveTo(4, H); g.lineTo(4, 4); g.lineTo(W, 4); g.stroke();
+  g.strokeStyle = 'rgba(0,0,30,.55)'; g.beginPath(); g.moveTo(W - 4, 0); g.lineTo(W - 4, H - 4); g.lineTo(0, H - 4); g.stroke();
+}
+function buildScan() { const g = SCAN.getContext('2d'); g.fillStyle = 'rgba(0,0,0,.10)'; for (let y = 0; y < H; y += 3) g.fillRect(0, y, W, 1);
+  const vg = g.createRadialGradient(W / 2, H / 2, 600, W / 2, H / 2, 1200); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,20,.42)'); g.fillStyle = vg; g.fillRect(0, 0, W, H); }
+
+// ── icons (drawn at unit size ~150 around 0,0) ─────────────────────────────────
+function sun(g, t, r = 46) {
+  g.save(); g.rotate(t * .5);
+  for (let i = 0; i < 12; i++) { g.save(); g.rotate(i * TAU / 12); g.beginPath(); g.moveTo(-11, -r - 4); g.lineTo(0, -r - 30); g.lineTo(11, -r - 4); g.closePath();
+    g.fillStyle = '#ff9a10'; g.fill(); g.lineWidth = 4; g.strokeStyle = '#7a3600'; g.lineJoin = 'round'; g.stroke(); g.restore(); }
+  g.restore();
+  const gr = g.createRadialGradient(-r * .35, -r * .4, 4, 0, 0, r); gr.addColorStop(0, '#fffbd0'); gr.addColorStop(.4, '#ffe14a'); gr.addColorStop(1, '#ff9d00');
+  g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fillStyle = gr; g.fill(); g.lineWidth = 5; g.strokeStyle = '#7a3600'; g.stroke();
+  g.beginPath(); g.ellipse(-r * .38, -r * .42, r * .28, r * .16, -.6, 0, TAU); g.fillStyle = 'rgba(255,255,255,.75)'; g.fill();
+}
+function cloud(g, dark = 0, sc = 1) {
+  const C = [[-34, 8, 30], [0, -12, 38], [36, 4, 30], [16, 16, 26], [-14, 18, 24]].map(([x, y, r]) => [x * sc, y * sc, r * sc]);
+  g.lineWidth = 10; g.strokeStyle = OUT; for (const [x, y, r] of C) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.stroke(); }
+  const gr = g.createLinearGradient(0, -50 * sc, 0, 44 * sc);
+  if (dark) { gr.addColorStop(0, '#d7dde8'); gr.addColorStop(1, '#6f7c92'); } else { gr.addColorStop(0, '#ffffff'); gr.addColorStop(1, '#a9bad2'); }
+  g.fillStyle = gr; for (const [x, y, r] of C) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+  g.fillStyle = 'rgba(255,255,255,.8)'; g.beginPath(); g.ellipse(-6 * sc, -30 * sc, 16 * sc, 8 * sc, -.3, 0, TAU); g.fill();
+}
+function drops(g, t, n = 3) {
+  for (let i = 0; i < n; i++) { const ph = (t * 1.6 + i * .37) % 1, x = -30 + i * 30 - ph * 10, y = 42 + ph * 38, a = Math.sin(Math.PI * ph);
+    g.save(); g.globalAlpha *= a; g.translate(x, y); g.rotate(.35);
+    g.beginPath(); g.moveTo(0, -16); g.bezierCurveTo(9, -2, 10, 10, 0, 12); g.bezierCurveTo(-10, 10, -9, -2, 0, -16);
+    g.fillStyle = '#3db4ff'; g.fill(); g.lineWidth = 3.5; g.strokeStyle = '#0b2f73'; g.stroke(); g.restore(); }
+}
+function bolt(g, t) { const fl = (Math.floor(t * 8) % 5 === 0) ? 1.25 : 1;
+  g.save(); g.translate(8, 46); g.scale(fl, fl); g.beginPath(); g.moveTo(-6, -14); g.lineTo(14, -14); g.lineTo(4, 4); g.lineTo(16, 4); g.lineTo(-10, 40); g.lineTo(-2, 12); g.lineTo(-14, 12); g.closePath();
+  g.fillStyle = '#ffe23a'; g.fill(); g.lineWidth = 4; g.strokeStyle = '#6a3a00'; g.lineJoin = 'round'; g.stroke(); g.restore(); }
+function iconTo(g, kind, t) {
+  if (kind === 'sun') sun(g, t, 48);
+  else if (kind === 'suncloud') { g.save(); g.translate(-20, -24); sun(g, t, 38); g.restore(); g.save(); g.translate(14, 18); cloud(g, 0, .86); g.restore(); }
+  else if (kind === 'cloud') { g.save(); g.translate(-22, -16); g.globalAlpha = .9; cloud(g, 1, .7); g.restore(); g.save(); g.translate(10, 12); cloud(g, 0, 1); g.restore(); }
+  else if (kind === 'rain') { g.save(); g.translate(0, 8); drops(g, t, 3); g.restore(); g.save(); g.translate(0, -10); cloud(g, 1, 1); g.restore(); }
+  else if (kind === 'storm') { g.save(); g.translate(-4, 8); drops(g, t + .2, 2); bolt(g, t); g.restore(); g.save(); g.translate(0, -12); cloud(g, 1, 1.02); g.restore(); }
+}
+// icon with a single clean drop shadow, via sprite
+function drawIcon(g, kind, x, y, s, t, alpha = 1) {
+  if (s <= .01) return;
+  const sg = SPR.getContext('2d'); sg.setTransform(1, 0, 0, 1, 0, 0); sg.clearRect(0, 0, 320, 320); sg.setTransform(1.6, 0, 0, 1.6, 160, 150); iconTo(sg, kind, t);
+  g.save(); g.globalAlpha *= alpha; g.translate(x, y); g.scale(s / 1.6, s / 1.6);
+  g.shadowColor = 'rgba(0,0,25,.62)'; g.shadowOffsetX = 13 * s; g.shadowOffsetY = 16 * s; g.shadowBlur = 8;
+  g.drawImage(SPR, -160, -150); g.restore();
+}
+function rr(g, x, y, w, h, r) { g.beginPath(); g.roundRect(x, y, w, h, r); }
+function tempBox(g, x, y, s, v, w = 124, h = 80, fs = 48) {
+  if (s <= .01) return;
+  const warm = v >= 19, mild = v >= 16 && v < 19;
+  g.save(); g.translate(x, y); g.scale(s, s);
+  g.shadowColor = 'rgba(0,0,25,.5)'; g.shadowOffsetX = 9; g.shadowOffsetY = 11; g.shadowBlur = 8;
+  rr(g, -w / 2, -h / 2, w, h, 18); g.fillStyle = OUT; g.fill(); g.shadowColor = 'transparent';
+  const gr = g.createLinearGradient(0, -h / 2, 0, h / 2);
+  if (warm) { gr.addColorStop(0, '#ff8a4c'); gr.addColorStop(1, '#c4161c'); } else if (mild) { gr.addColorStop(0, '#ffc23d'); gr.addColorStop(1, '#e06a00'); } else { gr.addColorStop(0, '#62c3ff'); gr.addColorStop(1, '#1747b8'); }
+  rr(g, -w / 2 + 5, -h / 2 + 5, w - 10, h - 10, 14); g.fillStyle = gr; g.fill();
+  rr(g, -w / 2 + 10, -h / 2 + 8, w - 20, h * .36, 10); g.fillStyle = 'rgba(255,255,255,.3)'; g.fill();
+  g.font = `${fs}px ${HEAD}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = 'rgba(0,0,30,.6)'; g.fillText(v + '°', 4, 6); g.fillStyle = '#fff'; g.fillText(v + '°', 0, 3);
+  g.restore();
+}
+function outlined(g, s, x, y, lw = 7, fill = '#fff', stroke = OUT) { g.lineJoin = 'round'; g.lineWidth = lw; g.strokeStyle = stroke; g.strokeText(s, x, y); g.fillStyle = fill; g.fillText(s, x, y); }
+function pressureLetter(g, ch, x, y, s, col) {
+  if (s <= .01) return; g.save(); g.translate(x, y); g.scale(s, s);
+  g.font = `96px ${HEAD}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = 'rgba(0,0,25,.45)'; g.fillText(ch, 8, 12);
+  outlined(g, ch, 0, 0, 12, col, '#fff'); g.lineWidth = 3; g.strokeStyle = OUT; g.strokeText(ch, 0, 0);
+  g.restore();
+}
+
+// ── fronts ──────────────────────────────────────────────────────────────────────
+function drawFront(g, S, reveal, kind) {
+  const L = S.L * clamp(reveal); if (L < 2) return; const col = kind === 'cold' ? '#1f6bff' : '#ff2a2a';
+  const path = () => { g.beginPath(); g.moveTo(S.p[0][0], S.p[0][1]); for (let i = 1; i < S.p.length && S.cum[i] <= L; i++) g.lineTo(S.p[i][0], S.p[i][1]); const e = atLen(S, L); g.lineTo(e[0], e[1]); };
+  const sym = (fill) => { for (let l = 46; l < L - 20; l += 78) { const [x, y, a] = atLen(S, l); const gr = clamp((L - l) / 60);
+      g.save(); g.translate(x, y); g.rotate(a); g.scale(gr, gr); g.beginPath();
+      if (kind === 'cold') { g.moveTo(-17, 0); g.lineTo(0, 30); g.lineTo(17, 0); } else { g.arc(0, 0, 18, Math.PI, TAU); }
+      g.closePath(); fill(); g.restore(); } };
+  g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+  // shadow pass
+  g.translate(8, 10); g.fillStyle = 'rgba(0,0,25,.4)'; g.strokeStyle = 'rgba(0,0,25,.4)'; g.lineWidth = 12; path(); g.stroke(); sym(() => g.fill()); g.translate(-8, -10);
+  // outline + colour
+  g.strokeStyle = '#fff'; g.lineWidth = 17; path(); g.stroke(); sym(() => { g.lineWidth = 9; g.strokeStyle = '#fff'; g.stroke(); });
+  g.strokeStyle = col; g.lineWidth = 10; path(); g.stroke(); sym(() => { g.fillStyle = col; g.fill(); });
+  g.restore();
+}
+
+// ── radar (blocky 10 px cells, steps at 5 fps) ─────────────────────────────────
+const RADAR_STEP = 5;
+function distTo(S, x, y, dx) { let m = 1e9; for (let i = 0; i < S.p.length; i += 3) { const d = (S.p[i][0] + dx - x) ** 2 + (S.p[i][1] - y) ** 2; if (d < m) m = d; } return Math.sqrt(m); }
+function radarFrame(step) {
+  const g = RAD.getContext('2d'), id = g.createImageData(192, 108), d = id.data, drift = step * 9;
+  for (let j = 0; j < 108; j++) for (let i = 0; i < 192; i++) {
+    const x = i * 10 + 5, y = j * 10 + 5;
+    const dc = distTo(COLD, x, y, drift - 30), dw = distTo(WARM, x, y, drift - 30);
+    // rain band: just ahead (east) of the cold front, north of the warm front
+    const band = Math.max(Math.exp(-(((dc - 60) / 105) ** 2)), Math.exp(-(((dw - 50) / 90) ** 2)) * .8 * (.3 + .7 * clamp((560 - y) / 260)));
+    const n = fbm((x - drift * 1.4) / 150, (y + step * 4) / 150, 77, 4);
+    const v = band * (n * 1.75 - .3);
+    let c = null;
+    if (v > .78) c = [255, 40, 30, 235]; else if (v > .6) c = [255, 160, 0, 225]; else if (v > .44) c = [255, 236, 0, 215]; else if (v > .3) c = [40, 220, 60, 200]; else if (v > .22) c = [20, 150, 50, 150];
+    if (c) { const k = (j * 192 + i) * 4; d[k] = c[0]; d[k + 1] = c[1]; d[k + 2] = c[2]; d[k + 3] = c[3]; }
+  }
+  g.putImageData(id, 0, 0);
+}
+
+// ── lower third + bug ───────────────────────────────────────────────────────────
+function tabText(t) { return t < 3.85 ? 'CORRIN PENINSULA · TONIGHT' : t < 6.05 ? 'RADAR · LAST 2 HOURS' : t < T_SIGN ? '5-DAY OUTLOOK' : 'BACK AT TEN · GOOD NIGHT'; }
+const TAB_SW = [3.85, 6.05, T_SIGN];
+function lowerThird(g, t) {
+  const u = seg(t, T_LT, T_LT + .55); if (u <= 0) return;
+  const x0 = lerp(-1300, 0, eBack(u, 1.2)), y = 912, h = 96;
+  g.save(); g.translate(x0, 0);
+  // main bar
+  g.shadowColor = 'rgba(0,0,20,.6)'; g.shadowOffsetY = 10; g.shadowBlur = 16;
+  g.beginPath(); g.moveTo(0, y); g.lineTo(1170, y); g.lineTo(1220, y + h); g.lineTo(0, y + h); g.closePath(); g.fillStyle = OUT; g.fill(); g.shadowColor = 'transparent';
+  const bg = g.createLinearGradient(0, y, 0, y + h); bg.addColorStop(0, '#3a78e6'); bg.addColorStop(.5, '#1847b0'); bg.addColorStop(.52, '#0f3593'); bg.addColorStop(1, '#0a2a7a');
+  g.beginPath(); g.moveTo(0, y + 5); g.lineTo(1164, y + 5); g.lineTo(1208, y + h - 5); g.lineTo(0, y + h - 5); g.closePath(); g.fillStyle = bg; g.fill();
+  g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(0, y + 6, 1164, 3);
+  // red logo block
+  const rg = g.createLinearGradient(0, y, 0, y + h); rg.addColorStop(0, '#ff5a3c'); rg.addColorStop(.5, '#d81e1e'); rg.addColorStop(1, '#8e0f12');
+  g.fillStyle = rg; g.fillRect(90, y + 5, 120, h - 10); g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(90, y + 6, 120, 3);
+  g.font = `56px ${HEAD}`; g.textAlign = 'center'; g.textBaseline = 'middle'; outlined(g, 'K8', 150, y + h / 2 + 3, 6, '#fff', '#5a0508');
+  // title
+  g.textAlign = 'left'; g.font = `60px ${HEAD}`; g.fillStyle = 'rgba(0,0,30,.6)'; g.fillText('WEATHER CENTRE', 244, y + h / 2 + 8);
+  const tg = g.createLinearGradient(0, y + 20, 0, y + h - 20); tg.addColorStop(0, '#ffffff'); tg.addColorStop(.55, '#dfe8ff'); tg.addColorStop(.56, '#b5c6ec'); tg.addColorStop(1, '#ffffff');
+  g.fillStyle = tg; g.fillText('WEATHER CENTRE', 240, y + h / 2 + 4);
+  g.restore();
+  // yellow tab (slides in after the bar) with flipping text
+  const v = seg(t, T_LT + .35, T_LT + .8); if (v <= 0) return;
+  const ty = y - 50, tx = lerp(-800, 90, eBack(v, 1.3));
+  g.save(); g.translate(tx, ty);
+  g.shadowColor = 'rgba(0,0,20,.5)'; g.shadowOffsetY = 6; g.shadowBlur = 10;
+  g.beginPath(); g.moveTo(0, 0); g.lineTo(640, 0); g.lineTo(660, 50); g.lineTo(0, 50); g.closePath(); g.fillStyle = OUT; g.fill(); g.shadowColor = 'transparent';
+  const yg = g.createLinearGradient(0, 0, 0, 50); yg.addColorStop(0, '#fff27a'); yg.addColorStop(.5, '#ffd21a'); yg.addColorStop(1, '#e8a400');
+  g.beginPath(); g.moveTo(3, 4); g.lineTo(636, 4); g.lineTo(652, 47); g.lineTo(3, 47); g.closePath(); g.fillStyle = yg; g.fill();
+  let fl = 1, txt = tabText(t);
+  for (const s of TAB_SW) { const k = (t - s) / .14; if (k > -1 && k < 1) { fl = Math.abs(k); txt = tabText(k < 0 ? s - .01 : s + .01); } }
+  g.save(); g.translate(24, 27); g.scale(1, fl); g.font = `700 36px ${COND}`; g.textBaseline = 'middle'; g.letterSpacing = '3px'; g.fillStyle = OUT; g.fillText(txt, 0, 0); g.restore();
+  g.restore();
+}
+function clockText(t) { const m = 58 + Math.floor(t / 6); return `6:${String(m).padStart(2, '0')}`; }
+function bug(g, t) {
+  const u = seg(t, 1.0, 1.5); if (u <= 0) return; const s = pop(t - 1.0) * (t > T_FADE[0] ? 1 : 1);
+  g.save(); g.translate(1772, 118); g.scale(s, s); g.globalAlpha *= .92;
+  g.shadowColor = 'rgba(0,0,20,.55)'; g.shadowOffsetX = 6; g.shadowOffsetY = 8; g.shadowBlur = 10;
+  g.beginPath(); g.arc(0, 0, 66, 0, TAU); g.fillStyle = OUT; g.fill(); g.shadowColor = 'transparent';
+  const gr = g.createRadialGradient(-20, -26, 6, 0, 0, 64); gr.addColorStop(0, '#ffb15a'); gr.addColorStop(.6, '#ff6a00'); gr.addColorStop(1, '#b13a00');
+  g.beginPath(); g.arc(0, 0, 60, 0, TAU); g.fillStyle = gr; g.fill(); g.lineWidth = 4; g.strokeStyle = '#fff'; g.stroke();
+  g.font = `78px ${HEAD}`; g.textAlign = 'center'; g.textBaseline = 'middle'; outlined(g, '8', 0, 2, 8, '#fff', '#5a1a00');
+  // ribbon
+  rr(g, -84, 46, 168, 38, 8); g.fillStyle = '#0f3593'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#fff'; g.stroke();
+  g.font = `700 28px ${COND}`; g.letterSpacing = '4px'; g.fillStyle = '#fff'; g.fillText('KESTREL', 2, 66);
+  g.restore();
+  // clock under the bug
+  g.save(); g.globalAlpha *= clamp((t - 1.3) / .3) * .95; g.font = `700 34px ${COND}`; g.textAlign = 'center'; g.letterSpacing = '2px';
+  outlined(g, clockText(t) + ' PM', 1772, 232, 6); g.restore();
+}
+
+// ── scene (flat) ────────────────────────────────────────────────────────────────
+let radarCache = -1;
+function sceneFlat(g, t) {
+  g.drawImage(MAP, 0, 0);
+  // radar
+  const ru = seg(t, T_RADAR[0], T_RADAR[0] + .25) * (1 - seg(t, T_RADAR[1] - .3, T_RADAR[1]));
+  if (ru > 0) { const step = Math.floor((t - T_RADAR[0]) * RADAR_STEP); if (step !== radarCache) { radarFrame(step); radarCache = step; }
+    g.save(); g.globalAlpha = ru * .82; g.imageSmoothingEnabled = false; g.drawImage(RAD, 0, 0, W, H);
+    // cell grid
+    g.restore(); }
+  // fronts sweep in from the west
+  const fu = seg(t, T_FRONT[0], T_FRONT[1]);
+  if (fu > 0) { g.save(); g.translate(lerp(-520, 0, eOut(clamp(fu * 1.25))), 0);
+    drawFront(g, WARM, eInOut(seg(t, T_FRONT[0] + .35, T_FRONT[1] + .1)), 'warm'); drawFront(g, COLD, eInOut(seg(t, T_FRONT[0] + .15, T_FRONT[1])), 'cold'); g.restore();
+    pressureLetter(g, 'L', LOW[0], LOW[1], pop(t - T_FRONT[0] - .9), '#e8141c');
+    pressureLetter(g, 'H', HIGH[0], HIGH[1], pop(t - T_FRONT[0] - 1.1), '#1757e8'); }
+  // cities: dot + label, icon pop, temperature pop
+  for (const c of CITIES) {
+    const ps = pop(t - c.t0), lu = seg(t, c.t0 + .1, c.t0 + .35);
+    if (lu > 0) { g.save(); g.globalAlpha = lu; g.font = `700 36px ${COND}`; g.textAlign = 'center'; g.letterSpacing = '2px';
+      outlined(g, c.n, c.x + 50, c.y + 138 + (1 - eOut(lu)) * 14, 7); g.restore(); }
+    drawIcon(g, c.ic, c.x, c.y - (1 - Math.min(1, ps)) * 40, ps, t + c.x * .001);
+    tempBox(g, c.x + 165, c.y + 16, pop(t - c.t0 - .14), c.tp);
+  }
+}
+// project a flat frame as a tilted slab (rows → trapezoid)
+function project(src, g, th, s, cx, cy, roll) {
+  const f = 1700, step = 2;
+  g.save(); g.translate(cx, cy); g.rotate(roll);
+  const rowY = v => { const y = (v - H / 2) * s, Y = y * Math.cos(th), Z = -y * Math.sin(th), k = f / (f + Z); return [Y * k, k]; };
+  // slab shadow
+  const [yt, kt] = rowY(0), [yb, kb] = rowY(H);
+  g.fillStyle = 'rgba(0,0,20,.45)'; g.filter = 'blur(16px)'; g.beginPath(); g.moveTo(-W * s * kt / 2 + 30, yt + 40); g.lineTo(W * s * kt / 2 + 30, yt + 40); g.lineTo(W * s * kb / 2 + 30, yb + 40); g.lineTo(-W * s * kb / 2 + 30, yb + 40); g.fill(); g.filter = 'none';
+  // slab front edge (thickness)
+  g.fillStyle = '#0a2266'; g.fillRect(-W * s * kb / 2, yb - 2, W * s * kb, 18 * s * kb);
+  let [y0, k0] = rowY(0);
+  for (let v = 0; v < H; v += step) { const [y1, k1] = rowY(v + step); const w = W * s * k0;
+    g.drawImage(src, 0, v, W, step, -w / 2, y0, w, y1 - y0 + .8); y0 = y1; k0 = k1; }
+  g.restore();
+}
+
+// ── 5-day strip ─────────────────────────────────────────────────────────────────
+const PW = 292, PH = 360, GAP = 30, PX0 = (W - (5 * PW + 4 * GAP)) / 2, PY = 430;
+function strip(g, t) {
+  if (t < T_STRIP) return;
+  // header bar
+  const hu = seg(t, T_STRIP, T_STRIP + .45);
+  g.save(); g.globalAlpha = clamp(hu * 4); const hw = lerp(120, 5 * PW + 4 * GAP, eBack(hu, 1.1));
+  g.shadowColor = 'rgba(0,0,20,.5)'; g.shadowOffsetY = 8; g.shadowBlur = 12;
+  rr(g, W / 2 - hw / 2, PY - 112, hw, 82, 16); g.fillStyle = OUT; g.fill(); g.shadowColor = 'transparent';
+  const hg = g.createLinearGradient(0, PY - 112, 0, PY - 30); hg.addColorStop(0, '#ff6a3c'); hg.addColorStop(.5, '#d81e1e'); hg.addColorStop(.52, '#b81418'); hg.addColorStop(1, '#8e0f12');
+  rr(g, W / 2 - hw / 2 + 5, PY - 107, Math.max(0, hw - 10), 72, 12); g.fillStyle = hg; g.fill();
+  if (hu > .2) { g.globalAlpha = clamp((hu - .2) * 4); g.font = `50px ${HEAD}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.letterSpacing = '4px';
+    outlined(g, '5-DAY OUTLOOK', W / 2, PY - 68, 7, '#fff', '#4a0306'); }
+  g.restore();
+  DAYS.forEach((D, i) => {
+    const t0 = T_STRIP + .25 + i * .1, u = seg(t, t0, t0 + .55); if (u <= 0) return;
+    const x = PX0 + i * (PW + GAP), y = PY + (1 - eBack(u, .7)) * 640;
+    g.save(); g.translate(x, y);
+    g.shadowColor = 'rgba(0,0,20,.55)'; g.shadowOffsetX = 10; g.shadowOffsetY = 12; g.shadowBlur = 12;
+    rr(g, 0, 0, PW, PH, 20); g.fillStyle = OUT; g.fill(); g.shadowColor = 'transparent';
+    const pg = g.createLinearGradient(0, 0, 0, PH); pg.addColorStop(0, '#4f8ef0'); pg.addColorStop(.5, '#1d54c4'); pg.addColorStop(1, '#0d3290');
+    rr(g, 6, 6, PW - 12, PH - 12, 15); g.fillStyle = pg; g.fill();
+    rr(g, 12, 10, PW - 24, 60, 10); g.fillStyle = 'rgba(255,255,255,.22)'; g.fill();
+    g.font = `48px ${HEAD}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.letterSpacing = '3px';
+    outlined(g, D.d, PW / 2, 46, 8, '#ffe23a', OUT);
+    g.restore();
+    drawIcon(g, D.ic, x + PW / 2, y + 160, pop(t - t0 - .25) * .95, t + i * .3);
+    tempBox(g, x + 88, y + 292, pop(t - t0 - .4), D.hi, 132, 84, 50);
+    // low temp: small cool chip
+    const ls = pop(t - t0 - .5); if (ls > .01) { g.save(); g.translate(x + 228, y + 296); g.scale(ls, ls);
+      rr(g, -44, -30, 88, 60, 14); g.fillStyle = OUT; g.fill(); rr(g, -40, -26, 80, 52, 11); g.fillStyle = '#9fd6ff'; g.fill();
+      g.font = `34px ${HEAD}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = OUT; g.fillText(D.lo + '°', 0, 2); g.restore(); }
+  });
+  // FRI sticker
+  const ss = pop(t - 7.75); if (ss > .01) { const x = PX0 + 4 * (PW + GAP) + PW / 2, y = PY + 98;
+    g.save(); g.translate(x + 64, y + 110); g.rotate(deg(-10)); g.scale(ss, ss);
+    g.shadowColor = 'rgba(0,0,20,.5)'; g.shadowOffsetX = 5; g.shadowOffsetY = 7; g.shadowBlur = 6;
+    rr(g, -66, -24, 132, 48, 10); g.fillStyle = '#ff2f6d'; g.fill(); g.shadowColor = 'transparent'; g.lineWidth = 4; g.strokeStyle = '#fff'; g.stroke();
+    g.font = `700 32px ${COND}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.letterSpacing = '2px'; g.fillStyle = '#fff'; g.fillText('FINALLY.', 1, 2); g.restore(); }
+}
+
+// ── radar timestamp ─────────────────────────────────────────────────────────────
+function radarStamp(g, t) {
+  const u = seg(t, T_RADAR[0], T_RADAR[0] + .3) * (1 - seg(t, T_RADAR[1] - .3, T_RADAR[1])); if (u <= 0) return;
+  const step = clamp(Math.floor((t - T_RADAR[0]) / ((T_RADAR[1] - T_RADAR[0] - .3) / 8)), 0, 8), mins = 16 * 60 + 15 * step;
+  const txt = `${Math.floor(mins / 60) - 12}:${String(mins % 60).padStart(2, '0')} PM`;
+  g.save(); g.globalAlpha = u; g.translate(60, 70);
+  rr(g, 0, 0, 340, 74, 12); g.fillStyle = 'rgba(5,15,50,.85)'; g.fill(); g.lineWidth = 4; g.strokeStyle = '#7fd0ff'; g.stroke();
+  g.font = `700 40px ${COND}`; g.textBaseline = 'middle'; g.letterSpacing = '3px'; g.fillStyle = '#7fff7a'; g.fillText('RADAR', 22, 39);
+  g.fillStyle = '#fff'; g.textAlign = 'right'; g.fillText(txt, 318, 39);
+  // legend
+  [['#28dc3c', 'LIGHT'], ['#ffec00', 'MOD'], ['#ff2820', 'HEAVY']].forEach(([c, s], i) => { g.fillStyle = c; g.fillRect(4 + i * 112, 88, 26, 22); g.lineWidth = 2; g.strokeStyle = '#fff'; g.strokeRect(4 + i * 112, 88, 26, 22);
+    g.textAlign = 'left'; g.font = `700 24px ${COND}`; g.lineWidth = 5; g.strokeStyle = OUT; g.strokeText(s, 38 + i * 112, 100); g.fillStyle = '#fff'; g.fillText(s, 38 + i * 112, 100); });
+  g.restore();
+}
+
+// ── frame ───────────────────────────────────────────────────────────────────────
+function frame(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.filter = 'none';
+  ctx.drawImage(BACK, 0, 0);
+  // opening glint across the backdrop
+  if (t < 1.2) { const gx = lerp(-400, W + 400, eInOut(seg(t, 0, 1.0))); ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const lg = ctx.createLinearGradient(gx - 200, 0, gx + 200, 0); lg.addColorStop(0, 'rgba(255,255,255,0)'); lg.addColorStop(.5, 'rgba(180,220,255,.28)'); lg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = lg; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+  const fg = F.getContext('2d'); fg.setTransform(1, 0, 0, 1, 0, 0); fg.globalAlpha = 1;
+  if (t >= T_FLY[0]) {
+    sceneFlat(fg, t);
+    const tip = eInOut(seg(t, T_TIP[0], T_TIP[1]));
+    if (tip > 0) { fg.fillStyle = `rgba(4,12,48,${.62 * tip})`; fg.fillRect(0, 0, W, H);
+      const bg = BLUR.getContext('2d'); bg.filter = `blur(${(3.5 * tip).toFixed(2)}px)`; bg.clearRect(0, 0, W, H); bg.drawImage(F, 0, 0); bg.filter = 'none'; }
+    const fu = seg(t, T_FLY[0], T_FLY[1]);
+    if (fu < 1) { const e = eOut(fu), sc = lerp(.12, 1, e) + Math.sin(Math.PI * clamp(fu * 1.15)) * .03 * (fu > .6 ? 1 : 0);
+      project(F, ctx, deg(lerp(72, 0, eOut(clamp(fu * 1.1)))), sc, W / 2, lerp(700, H / 2, e), deg(lerp(-28, 0, e))); }
+    else if (tip > 0) project(BLUR, ctx, deg(lerp(0, 46, tip)), lerp(1, .9, tip), W / 2, lerp(H / 2, 300, tip), 0);
+    else ctx.drawImage(F, 0, 0);
+  }
+  strip(ctx, t);
+  if (t < T_TIP[0] + .3) radarStamp(ctx, t);
+  lowerThird(ctx, t); bug(ctx, t);
+  ctx.drawImage(SCAN, 0, 0);
+  const fo = seg(t, T_FADE[0], T_FADE[1]); if (fo > 0) { ctx.fillStyle = `rgba(0,0,0,${eInOut(fo)})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ── sound events ────────────────────────────────────────────────────────────────
+window.events = () => {
+  const ev = [{ k: 'glint', t: 0.05 }, { k: 'whoosh', t: T_FLY[0], d: 1.1 }, { k: 'thud', t: T_FLY[1] - .05 },
+    { k: 'swipe', t: T_LT }, { k: 'swipe', t: T_LT + .35 }, { k: 'pop', t: 1.05, v: .8, f: 1 }];
+  CITIES.forEach((c, i) => { ev.push({ k: 'pop', t: c.t0, f: 1 + i * .09 }); ev.push({ k: 'tick', t: c.t0 + .14 }); });
+  ev.push({ k: 'sweep', t: T_FRONT[0], d: 1.2 }, { k: 'pop', t: T_FRONT[0] + .9, f: .7 }, { k: 'pop', t: T_FRONT[0] + 1.1, f: .8 });
+  for (let i = 0; i < Math.floor((T_RADAR[1] - .3 - T_RADAR[0]) * RADAR_STEP); i++) ev.push({ k: 'blip', t: T_RADAR[0] + i / RADAR_STEP, v: i % 4 === 0 ? 1 : .55 });
+  for (const s of TAB_SW) ev.push({ k: 'flip', t: s - .14 });
+  ev.push({ k: 'whoosh', t: T_TIP[0], d: .8 }, { k: 'swipe', t: T_STRIP });
+  DAYS.forEach((D, i) => ev.push({ k: 'thump', t: T_STRIP + .25 + i * .1 + .3 }, { k: 'pop', t: T_STRIP + .5 + i * .1, f: 1.2 + i * .06, v: .7 }));
+  ev.push({ k: 'pop', t: 7.75, f: 1.5 }, { k: 'chord', t: T_SIGN });
+  return ev.sort((a, b) => a.t - b.t);
+};
+
+window.ready = (async () => {
+  await Promise.all([document.fonts.load(`48px ${HEAD}`), document.fonts.load(`700 48px ${COND}`), document.fonts.load(`500 48px ${COND}`), document.fonts.load(`italic 500 48px ${COND}`)]);
+  buildBack(); buildMap(); buildScan();
+})();
+window.draw = ({ t }) => { frame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+</script>
+</body></html>
