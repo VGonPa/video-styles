@@ -1,408 +1,753 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="fonts.css"></head>
-<body style="margin:0;background:#05090c"><canvas id="c" width="1920" height="1080"></canvas>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sci-fi-interface</title>
+<link rel="stylesheet" href="fonts.css">
+</head>
+<body style="margin:0; background:#05090c">
+<canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// ─────────────────────────────────────────────────────────────────────────────
-//  hud — a cold, neon-free sci-fi interface. window.draw({t}) → JPEG base64
-//  Story: the HUD boots → head-on docking reticle, the ARGO RING port drifts
-//  off-axis while three warnings flash → stepped RCS corrections pull it onto
-//  the crosshair, warnings resolve to green → the port turns edge-on and the
-//  view becomes a side schematic → contact, four clamps lock →
-//  DOCKING COMPLETE → the interface powers down to a dot.
-// ─────────────────────────────────────────────────────────────────────────────
-const W = 1920, H = 1080, CX = 960, CY = 540, DUR = 9.8;
-const cv = document.getElementById('c'); const mctx = cv.getContext('2d');
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
-const LAYER = mk(W, H); const ctx = LAYER.getContext('2d');
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const lerp = (a, b, p) => a + (b - a) * p;
-const eOut = x => 1 - Math.pow(1 - x, 3), eIn = x => x * x * x, eIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-const eBack = x => x <= 0 ? 0 : x >= 1 ? 1 : 1 + 2.4 * Math.pow(x - 1, 3) + 1.4 * Math.pow(x - 1, 2);
-const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
-const TAU = Math.PI * 2, D2R = Math.PI / 180;
-const ICE = [160, 208, 226], WH = '#eef6fa';
-const ice = a => `rgba(${ICE[0]},${ICE[1]},${ICE[2]},${a})`, wh = a => `rgba(238,246,250,${a})`;
-const amb = a => `rgba(232,172,96,${a})`, grn = a => `rgba(128,222,168,${a})`;
-const DISP = "'Chakra Petch', sans-serif", MONO = "'Martian Mono', monospace";
-function F(size, w, fam, ls = 0) { ctx.font = `${w} ${size}px ${fam}`; ctx.letterSpacing = ls + 'px'; }
+/*
+ * sci-fi-interface: a restrained docking HUD (ice blue on near-black, amber cautions, green
+ * confirmations). window.draw({t}) returns one JPEG frame as base64.
+ *
+ * Beat sheet: the HUD boots around a centre dot; a head-on docking reticle opens and the
+ * ARGO RING port appears off-axis and rolled while three cautions flash; five stepped RCS
+ * burns walk it onto the crosshair and the cautions turn green; the port swings edge-on and
+ * the screen becomes a side profile; contact, four clamps close, DOCKING COMPLETE; the whole
+ * interface collapses to a line and then a dot.
+ */
+const SW = 1920, SH = 1080, MX = SW / 2, MY = SH / 2, LENGTH = 9.8;
+const FULL = Math.PI * 2, DEG = Math.PI / 180, UP = -Math.PI / 2;
 
-// ── timeline ─────────────────────────────────────────────────────────────────
-const T = { ring0: 0.2, pan0: 0.9, app0: 0.9, app1: 4.9, ok: 4.55, fold0: 4.9, fold1: 5.5, side0: 5.3, fin0: 5.85, contact: 6.6,
-  clamp0: 6.75, done: 7.4, off0: 8.85, off1: 9.5, end: 9.8 };
-const RCS = [1.5, 2.2, 2.9, 3.5, 4.0];                    // thruster pulses: each starts one correction step
-const OFFK = [1, 0.74, 0.47, 0.22, -0.07, 0], ROLLK = [14, 10.5, 6.2, 2.8, 0.9, 0];
-const stepped = (t, K) => { let v = K[0]; for (let i = 0; i < RCS.length; i++) v = lerp(v, K[i + 1], eOut(seg(t, RCS[i], RCS[i] + 0.55))); return v; };
-const offF = t => stepped(t, OFFK), rollD = t => stepped(t, ROLLK);
-const WARN = [ // status rows: warnings that resolve to green
-  { lab: 'CLOSING RATE', on: 1.7, ok: 2.95 },
-  { lab: 'LATERAL OFFSET', on: 1.95, ok: 4.15 },
-  { lab: 'ROLL ALIGNMENT', on: 2.2, ok: 4.4 },
+const screen = document.getElementById('c');
+const out = screen.getContext('2d');
+function surface(w, h) {
+  const el = document.createElement('canvas');
+  el.width = w; el.height = h;
+  return el;
+}
+const hud = surface(SW, SH);          // everything but the backdrop is drawn here, then composited
+const g = hud.getContext('2d');
+
+// ── numbers ──────────────────────────────────────────────────────────────────
+const sat = (v, lo = 0, hi = 1) => (v < lo ? lo : v > hi ? hi : v);
+const span = (t, from, to) => sat((t - from) / (to - from));
+const mix = (a, b, k) => a * (1 - k) + b * k;
+const ease = {
+  out: k => { const u = 1 - k; return 1 - u * u * u; },
+  in: k => k * k * k,
+  both: k => (k < 0.5 ? 4 * k * k * k : 1 - ((2 - 2 * k) ** 3) / 2),
+  // settles past 1 and comes back (pop-in for brackets, icons and clamps)
+  pop: k => { if (k <= 0) return 0; if (k >= 1) return 1; const u = k - 1; return 1 + u * u * (2.4 * u + 1.4); },
+};
+function noise(n) {                    // integer hash → [0, 1)
+  let h = Math.imul(((n * 7919) | 0) ^ 0x2545f491, 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+// ── palette and type ─────────────────────────────────────────────────────────
+const RGB = { ice: '160,208,226', white: '238,246,250', amber: '232,172,96', green: '128,222,168' };
+const col = {};
+for (const name in RGB) col[name] = a => `rgba(${RGB[name]},${a})`;
+const SOLID = col.white(1), INK = 'rgb(5,9,12)';
+const HEAD = "'Chakra Petch', sans-serif", DATA = "'Martian Mono', monospace";
+
+function setType(px, weight, family, track = 0) {
+  g.font = `${weight} ${px}px ${family}`;
+  g.letterSpacing = `${track}px`;
+}
+function write(s, x, y, color, align = 'left', base = 'alphabetic') {
+  g.textAlign = align; g.textBaseline = base; g.fillStyle = color;
+  g.fillText(s, x, y);
+  return g.measureText(s).width;
+}
+
+// ── story timing ─────────────────────────────────────────────────────────────
+const CUE = {
+  rings: 0.2, portIn: 0.9, approachA: 0.9, approachB: 4.9, aligned: 4.55, swingA: 4.9, swingB: 5.5,
+  profile: 5.3, final: 5.85, contact: 6.6, latch: 6.75, docked: 7.4, shutA: 8.85, shutB: 9.5, end: 9.8,
+};
+const BURNS = [1.5, 2.2, 2.9, 3.5, 4.0];   // each RCS burn starts one correction step
+const OFFSET_STEPS = [1, 0.74, 0.47, 0.22, -0.07, 0];
+const ROLL_STEPS = [14, 10.5, 6.2, 2.8, 0.9, 0];
+const corrected = (t, steps) => BURNS.reduce((v, b, i) => mix(v, steps[i + 1], ease.out(span(t, b, b + 0.55))), steps[0]);
+const offsetAt = t => corrected(t, OFFSET_STEPS);
+const rollAt = t => corrected(t, ROLL_STEPS);
+
+const CAUTIONS = [
+  { name: 'CLOSING RATE', raise: 1.7, clear: 2.95 },
+  { name: 'LATERAL OFFSET', raise: 1.95, clear: 4.15 },
+  { name: 'ROLL ALIGNMENT', raise: 2.2, clear: 4.4 },
 ];
-const CLAMPS = ['A', 'B', 'C', 'D'].map((n, i) => ({ n, t: T.clamp0 + i * 0.15, deg: 45 + i * 90 }));
-function range(t) {
-  if (t < T.fin0) return lerp(240, 12, eIO(seg(t, T.app0, T.app1))) - 2.6 * seg(t, T.app1, T.fin0);
-  return lerp(9.4, 0, eOut(seg(t, T.fin0, T.contact)) * 0.35 + 0.65 * seg(t, T.fin0, T.contact) ** 1.6);
-}
-function rate(t) {
-  if (t < 1.5) return 1.92;
-  if (t < 2.95) return lerp(1.92, 0.38, eIO(seg(t, 1.5, 2.95)));
-  if (t < T.contact) return lerp(0.38, 0.06, seg(t, 2.95, T.contact));
-  return 0;
-}
-const blink = t => (Math.floor(t * 4) % 2 === 0) ? 1 : 0.35;
+const LATCHES = [0, 1, 2, 3].map(i => ({ id: 'ABCD'[i], at: CUE.latch + 0.15 * i, bearing: 45 + 90 * i }));
 
-// sound events for audio.py
+function distance(t) {                    // metres from nose to port
+  if (t >= CUE.final) {
+    const k = span(t, CUE.final, CUE.contact);
+    return 9.4 * (1 - (0.35 * ease.out(k) + 0.65 * k ** 1.6));
+  }
+  return mix(240, 12, ease.both(span(t, CUE.approachA, CUE.approachB))) - 2.6 * span(t, CUE.approachB, CUE.final);
+}
+function closing(t) {                     // m/s
+  if (t >= CUE.contact) return 0;
+  if (t >= 2.95) return mix(0.38, 0.06, span(t, 2.95, CUE.contact));
+  if (t >= 1.5) return mix(1.92, 0.38, ease.both(span(t, 1.5, 2.95)));
+  return 1.92;
+}
+const flash = t => ((Math.floor(t * 4) & 1) ? 0.35 : 1);
+const cautionTone = (c, t) => (t < c.raise ? SOLID : t < c.clear ? col.amber(0.6 + 0.4 * flash(t)) : col.green(0.95));
+
+// sound cues read by audio.py (through events.mjs)
 window.events = () => {
-  const E = [];
-  [0.2, 0.32, 0.44, 0.56, 0.68].forEach(t => E.push({ t, k: 'tick' }));
-  [1.0, 1.1, 1.2, 1.3].forEach(t => E.push({ t, k: 'blip' }));
-  WARN.forEach(w => { E.push({ t: w.on, k: 'warn' }); E.push({ t: w.ok, k: 'ok' }); });
-  for (let t = 2.45; t < 4.4; t += 0.5) E.push({ t, k: 'beep' });
-  RCS.forEach(t => E.push({ t, k: 'rcs' }));
-  E.push({ t: T.ok, k: 'ping' }, { t: T.fold0, k: 'sweep' }, { t: T.side0, k: 'scan' }, { t: T.contact, k: 'thud' });
-  CLAMPS.forEach(c => E.push({ t: c.t, k: 'clunk' }));
-  E.push({ t: T.done, k: 'chime' }, { t: T.off0, k: 'down' });
-  return E.sort((a, b) => a.t - b.t);
+  const cues = [];
+  const add = (t, k) => cues.push({ t, k });
+  for (const t of [0.2, 0.32, 0.44, 0.56, 0.68]) add(t, 'tick');
+  for (const t of [1.0, 1.1, 1.2, 1.3]) add(t, 'blip');
+  for (const c of CAUTIONS) { add(c.raise, 'warn'); add(c.clear, 'ok'); }
+  let beep = 2.45;
+  while (beep < 4.4) { add(beep, 'beep'); beep += 0.5; }
+  for (const b of BURNS) add(b, 'rcs');
+  add(CUE.aligned, 'ping'); add(CUE.swingA, 'sweep'); add(CUE.profile, 'scan'); add(CUE.contact, 'thud');
+  for (const l of LATCHES) add(l.at, 'clunk');
+  add(CUE.docked, 'chime'); add(CUE.shutA, 'down');
+  return cues.sort((p, q) => p.t - q.t);
 };
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-function arcAt(x, y, r, a0, a1, lw, col) { if (a1 <= a0) return; ctx.beginPath(); ctx.arc(x, y, r, a0, a1); ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.stroke(); }
-const arc = (r, a0, a1, lw, col) => arcAt(CX, CY, r, a0, a1, lw, col);
-function line(x0, y0, x1, y1, lw, col) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.stroke(); }
-function rect(x, y, w, h, lw, col) { ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.strokeRect(x, y, w, h); }
-const GLY = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-function decode(str, p, t, seed = 0) {
-  if (p >= 1) return str; if (p <= 0) return '';
-  const n = str.length, shown = Math.ceil(n * clamp(p * 1.4)); let out = '';
-  for (let i = 0; i < shown; i++) { const lock = p > 0.3 + 0.7 * i / n;
-    out += lock || str[i] === ' ' ? str[i] : GLY[Math.floor(hash(i * 13 + Math.floor(t * 24) * 7 + seed) * GLY.length)]; }
-  return out; }
-function ringVis(t, tin, tout) { return { a: eOut(seg(t, tin, tin + 0.55)), e: eIO(seg(t, tout, tout + 0.45)) }; }
-function warnTri(x, y, s, col) { if (s <= 0) return; ctx.beginPath(); ctx.moveTo(x, y - s); ctx.lineTo(x + s * 0.95, y + s * 0.7); ctx.lineTo(x - s * 0.95, y + s * 0.7); ctx.closePath();
-  ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke(); line(x, y - s * 0.4, x, y + s * 0.2, 1.5, col); ctx.fillStyle = col; ctx.fillRect(x - 1, y + s * 0.35, 2, 2); }
-function check(x, y, s, col, p = 1) { if (p <= 0) return; ctx.beginPath(); ctx.moveTo(x - s, y); const q = Math.min(1, p * 2);
-  ctx.lineTo(lerp(x - s, x - s * 0.35, q), y + s * 0.6 * q);
-  if (p > 0.5) ctx.lineTo(lerp(x - s * 0.35, x + s, (p - 0.5) * 2), lerp(y + s * 0.6, y - s * 0.7, (p - 0.5) * 2)); ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.stroke(); }
-
-// ── static layer: dot grid + vignette ───────────────────────────────────────
-let BG;
-function prep() {
-  BG = mk(W, H); const g = BG.getContext('2d');
-  g.fillStyle = '#05090c'; g.fillRect(0, 0, W, H);
-  const r = g.createRadialGradient(CX, CY, 50, CX, CY, 1100); r.addColorStop(0, 'rgba(40,70,85,0.28)'); r.addColorStop(1, 'rgba(0,0,0,0)');
-  g.fillStyle = r; g.fillRect(0, 0, W, H);
-  for (let y = 36; y < H; y += 48) for (let x = 24; x < W; x += 48) { g.fillStyle = 'rgba(160,208,226,0.07)'; g.fillRect(x - 1, y - 1, 2, 2); }
-  const v = g.createRadialGradient(CX, CY, 400, CX, CY, 1150); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.55)');
-  g.fillStyle = v; g.fillRect(0, 0, W, H);
+// ── drawing primitives ───────────────────────────────────────────────────────
+function pen(width, color, path) {
+  g.beginPath(); path(); g.lineWidth = width; g.strokeStyle = color; g.stroke();
 }
-
-// ── frame UI (corners, title, timecode, status line) ─────────────────────────
-function frameUI(t) {
-  const pin = eBack(seg(t, 0.45, 0.95)); const off = (1 - pin) * 60, a = clamp(pin * 1.2);
-  if (a <= 0) return;
-  const x0 = 150 - off, y0 = 110 - off, x1 = W - 150 + off, y1 = H - 110 + off, L = 46;
-  ctx.globalAlpha = a;
-  for (const [x, y, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
-    ctx.beginPath(); ctx.moveTo(x, y + sy * L); ctx.lineTo(x, y); ctx.lineTo(x + sx * L, y); ctx.lineWidth = 2; ctx.strokeStyle = ice(0.8); ctx.stroke(); }
-  const pt = seg(t, 0.7, 1.2);
-  F(20, 600, DISP, 5); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = wh(0.95);
-  ctx.fillText(decode('DOCKING APPROACH', pt, t, 1), 196, 158);
-  const w1 = ctx.measureText('DOCKING APPROACH').width;
-  F(14, 300, MONO, 2); ctx.fillStyle = ice(0.7); ctx.fillText(decode('KESTREL-7 TO ARGO RING', pt, t, 2), 196 + w1 + 22, 157);
-  ctx.textAlign = 'right'; F(15, 400, MONO, 2); ctx.fillStyle = ice(0.8);
-  const tc = Math.max(0, t - 0.7); const fr = Math.floor((tc % 1) * 30);
-  if (pt > 0) ctx.fillText(`MET 214:06:0${Math.floor(tc)}:${String(fr).padStart(2, '0')}`, W - 196, 157);
-  ctx.textAlign = 'left'; F(14, 300, MONO, 3);
-  const steps = [[0, 'SYSTEM INITIALIZING'], [T.app0 + 0.2, 'AUTO ALIGN · RCS ACTIVE'], [T.ok, 'ALIGNMENT NOMINAL'], [T.fin0, 'FINAL APPROACH'],
-    [T.contact, 'CLAMPS ENGAGING'], [T.done, 'HARD DOCK'], [T.off0, 'POWERING DOWN']];
-  const [stT, st] = steps.filter(s => s[0] <= t).pop();
-  ctx.fillStyle = (t >= T.ok && t < T.fin0) || (t >= T.done && t < T.off0) ? grn(0.85) : ice(0.6);
-  if (pt > 0) ctx.fillText(decode(st, seg(t, Math.max(stT, 0.8), Math.max(stT, 0.8) + 0.45), t, 3), 196, H - 146);
-  for (let k = 0; k < 16; k++) { const lv = 0.5 + 0.5 * Math.sin(t * 7 + k * 0.9) * hash(k + Math.floor(t * 12)); ctx.fillStyle = ice(0.25 + 0.55 * lv);
-    const h = 4 + 16 * lv; ctx.fillRect(W - 196 - (16 - k) * 7, H - 146 - h, 3, h); }
-  ctx.globalAlpha = 1;
+const seg = (x0, y0, x1, y1, width, color) => pen(width, color, () => { g.moveTo(x0, y0); g.lineTo(x1, y1); });
+function arcAround(x, y, r, from, to, width, color) {
+  if (to > from) pen(width, color, () => g.arc(x, y, r, from, to));
 }
+const boxLine = (x, y, w, h, width, color) => pen(width, color, () => g.rect(x, y, w, h));
 
-// ── left panel: range, rate, offset, roll, RCS ───────────────────────────────
-function leftPanel(t) {
-  const a = seg(t, 0.95, 1.35); if (a <= 0) return;
-  const x = 196; ctx.save(); ctx.globalAlpha = a; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  const colFor = (w, t) => t < w.on ? WH : t < w.ok ? amb(0.6 + 0.4 * blink(t)) : grn(0.95);
-  // range
-  { const p = seg(t, 1.0, 1.4), y = 290; F(14, 300, MONO, 3); ctx.fillStyle = ice(0.8); ctx.fillText(decode('RANGE TO PORT', p, t, 11), x, y);
-    F(72, 500, DISP, 0); ctx.fillStyle = WH; const txt = decode(range(t).toFixed(1), p, t, 12); ctx.fillText(txt, x - 4, y + 74);
-    const vw = ctx.measureText(txt).width; F(22, 500, DISP, 1); ctx.fillStyle = ice(0.8); ctx.fillText(' m', x + vw, y + 74);
-    const lw = 300, ly = y + 100, f = clamp(Math.log10(range(t) + 1) / Math.log10(251));   // log-scale range ladder
-    ctx.fillStyle = ice(0.18); ctx.fillRect(x, ly, lw, 3); ctx.fillStyle = WH; ctx.fillRect(x, ly, lw * f * eOut(p), 3);
-    for (let k = 0; k <= 10; k++) ctx.fillRect(x + lw * k / 10 - 0.5, ly - 6, 1, 4); }
-  // closing rate
-  { const w = WARN[0], y = 470, p = seg(t, 1.1, 1.5); F(14, 300, MONO, 3); ctx.fillStyle = ice(0.8); ctx.fillText(decode('CLOSING RATE', p, t, 13), x, y);
-    F(40, 500, DISP, 0); ctx.fillStyle = colFor(w, t); const v = decode((rate(t) > 0.004 ? '-' : '') + rate(t).toFixed(2), p, t, 14); ctx.fillText(v, x - 2, y + 46);
-    const vw = ctx.measureText(v).width; F(16, 500, DISP, 1); ctx.fillStyle = ice(0.8); ctx.fillText(' m/s', x + vw, y + 46); }
-  // lateral offset
-  { const w = WARN[1], y = 580, p = seg(t, 1.2, 1.6), f = offF(t); F(14, 300, MONO, 3); ctx.fillStyle = ice(0.8); ctx.fillText(decode('LATERAL OFFSET', p, t, 15), x, y);
-    const sg = v => (v >= -0.005 ? '+' : '-') + Math.abs(v).toFixed(2);
-    F(30, 500, DISP, 0); ctx.fillStyle = colFor(w, t); ctx.fillText(decode(`X ${sg(1.4 * f)}   Y ${sg(-0.9 * f)}`, p, t, 16), x - 1, y + 40); }
-  // roll
-  { const w = WARN[2], y = 680, p = seg(t, 1.3, 1.7); F(14, 300, MONO, 3); ctx.fillStyle = ice(0.8); ctx.fillText(decode('ROLL ERROR', p, t, 17), x, y);
-    const r = rollD(t); F(30, 500, DISP, 0); ctx.fillStyle = colFor(w, t); ctx.fillText(decode((r >= -0.05 ? '+' : '-') + Math.abs(r).toFixed(1) + '°', p, t, 18), x - 1, y + 40); }
-  // RCS thruster bars: flare at each pulse
-  { const y = 800, p = seg(t, 1.35, 1.75); F(12, 300, MONO, 3); ctx.fillStyle = ice(0.7); ctx.fillText(decode('RCS', p, t, 19), x, y);
-    for (let k = 0; k < 12; k++) { let lv = 0.08;
-      for (const r of RCS) { const d = t - r; if (d > 0 && d < 0.5) lv = Math.max(lv, (1 - d / 0.5) * (0.4 + 0.6 * hash(k * 7 + r * 10))); }
-      if (t > T.fin0 && t < T.contact) lv = Math.max(lv, 0.15 + 0.1 * hash(k + Math.floor(t * 15)));
-      const bx = x + 50 + k * 20, h = 26 * lv * p + 2; ctx.fillStyle = lv > 0.12 ? wh(0.9) : ice(0.3); ctx.fillRect(bx, y - h, 12, h); } }
-  ctx.restore();
+const GLYPHS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+// Readout "decode": characters type in from the left as cycling glyphs, then lock one by one.
+function scramble(text, k, t, salt = 0) {
+  if (k <= 0) return '';
+  if (k >= 1) return text;
+  const chars = [...text], n = chars.length, typed = Math.ceil(n * Math.min(1, k * 1.4)), tick = Math.floor(t * 24);
+  return chars.slice(0, typed).map((ch, i) => {
+    if (ch === ' ' || k > 0.3 + 0.7 * i / n) return ch;
+    return GLYPHS[Math.floor(noise(salt * 97 + i * 31 + tick * 5) * GLYPHS.length)];
+  }).join('');
 }
-
-// ── right panel: proximity radar → clamp diagram, status list ────────────────
-const RX = 1572, RY = 385, RR = 118;
-function rightPanel(t) {
-  const a = seg(t, 0.95, 1.35); if (a <= 0) return;
-  ctx.save(); ctx.globalAlpha = a; const x0 = 1420, x1 = W - 196;
-  // radar
-  const ra = 1 - eIO(seg(t, T.fold0, T.fold0 + 0.4));
-  if (ra > 0) {
-    ctx.globalAlpha = a * ra; const d = eOut(seg(t, 0.95, 1.5));
-    F(14, 300, MONO, 3); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.8); ctx.fillText(decode('PROXIMITY', seg(t, 1.0, 1.4), t, 31), x0, 244);
-    ctx.textAlign = 'right'; ctx.fillText(decode('CONTACTS 03', seg(t, 1.0, 1.4), t, 32), x1, 244);
-    for (const f of [1, 0.66, 0.33]) arcAt(RX, RY, RR * f, -Math.PI / 2, -Math.PI / 2 + TAU * d, 1, ice(f === 1 ? 0.6 : 0.25));
-    line(RX - RR * d, RY, RX + RR * d, RY, 1, ice(0.2)); line(RX, RY - RR * d, RX, RY + RR * d, 1, ice(0.2));
-    const sw = -Math.PI / 2 + (t - 1.0) * 2.6;
-    if (t > 1.0) { const g = ctx.createConicGradient(sw - 1.1, RX, RY); g.addColorStop(0, ice(0)); g.addColorStop(1.1 / TAU, ice(0.22)); g.addColorStop(1.1 / TAU + 0.001, ice(0)); g.addColorStop(1, ice(0));
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(RX, RY, RR, 0, TAU); ctx.fill(); line(RX, RY, RX + Math.cos(sw) * RR, RY + Math.sin(sw) * RR, 1.5, wh(0.85)); }
-    const rr = clamp(range(t) / 260); // the station blip closes in with range
-    const blips = [{ ang: -70, r: 0.12 + 0.8 * rr, lab: 'ARGO' }, { ang: 150, r: 0.72, lab: '' }, { ang: 35, r: 0.55, lab: '' }];
-    for (const b of blips) { const ang = b.ang * D2R, bx = RX + Math.cos(ang) * RR * b.r, by = RY + Math.sin(ang) * RR * b.r;
-      const since = (((sw - ang) % TAU) + TAU) % TAU, br = t > 1.0 ? 0.25 + 0.75 * Math.exp(-since * 1.3) : 0;
-      ctx.fillStyle = b.lab ? wh(br) : ice(br * 0.8); ctx.fillRect(bx - 3, by - 3, 6, 6);
-      if (b.lab) { F(11, 400, MONO, 1); ctx.textAlign = 'left'; ctx.fillStyle = ice(0.8 * clamp(br + 0.3)); ctx.fillText(b.lab, bx + 8, by + 4); } }
-    ctx.fillStyle = WH; ctx.beginPath(); ctx.moveTo(RX, RY - 6); ctx.lineTo(RX + 5, RY + 5); ctx.lineTo(RX - 5, RY + 5); ctx.closePath(); ctx.fill();
-  }
-  // clamp diagram (front view of the collar, four clamps)
-  const ca = eOut(seg(t, T.fold0 + 0.3, T.fold0 + 0.8));
-  if (ca > 0) {
-    ctx.globalAlpha = a * ca; F(14, 300, MONO, 3); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.8);
-    ctx.fillText(decode('CAPTURE CLAMPS', seg(t, T.fold0 + 0.3, T.fold0 + 0.7), t, 33), x0, 244);
-    const nL = CLAMPS.filter(c => t >= c.t + 0.1).length; ctx.textAlign = 'right'; ctx.fillStyle = nL === 4 ? grn(0.95) : ice(0.8); ctx.fillText(`${nL}/4`, x1, 244);
-    arcAt(RX, RY, 70, -Math.PI / 2, -Math.PI / 2 + TAU * ca, 1.5, ice(0.7)); arcAt(RX, RY, 52, 0, TAU * ca, 1, ice(0.3));
-    for (const c of CLAMPS) { const ang = (c.deg - 90) * D2R, lp = eBack(seg(t, c.t, c.t + 0.22)), locked = t >= c.t + 0.1;
-      const r0 = lerp(112, 78, lp); ctx.save(); ctx.translate(RX + Math.cos(ang) * r0, RY + Math.sin(ang) * r0); ctx.rotate(ang);
-      ctx.fillStyle = locked ? grn(0.9) : ice(0.15); ctx.fillRect(-4, -14, 22, 28); rect(-4, -14, 22, 28, 1.5, locked ? grn(1) : ice(0.8)); ctx.restore();
-      F(13, 400, MONO, 1); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = locked ? grn(1) : ice(0.7);
-      ctx.fillText(c.n, RX + Math.cos(ang) * 124, RY + Math.sin(ang) * 124);
-      if (t > c.t && t < c.t + 0.5) { const q = seg(t, c.t, c.t + 0.5); arcAt(RX + Math.cos(ang) * 80, RY + Math.sin(ang) * 80, 10 + 30 * eOut(q), 0, TAU, 1, grn(0.7 * (1 - q))); } }
-    ctx.textBaseline = 'alphabetic';
-  }
-  ctx.globalAlpha = a;
-  // status list
-  const rows = [...WARN, { lab: 'CAPTURE LATCH' }, { lab: 'HARD SEAL' }];
-  rows.forEach((r, k) => {
-    const y = 590 + k * 46, p = seg(t, 1.2 + k * 0.08, 1.6 + k * 0.08); if (p <= 0) return;
-    line(x0, y + 14, lerp(x0, x1, eOut(p)), y + 14, 1, ice(0.15));
-    F(13, 300, MONO, 2); ctx.textAlign = 'left'; ctx.fillStyle = ice(0.8); ctx.fillText(decode(r.lab, p, t, 40 + k), x0 + 30, y);
-    let s = 'NOMINAL', col = ice(0.55), mode = 'dot', t0 = 0;
-    if (r.on !== undefined) { if (t >= r.ok) { s = 'OK'; col = grn(1); mode = 'ok'; t0 = r.ok; } else if (t >= r.on) { s = 'CAUTION'; col = amb(0.55 + 0.45 * blink(t)); mode = 'warn'; t0 = r.on; } }
-    else if (k === 3) { if (t >= T.contact) { s = 'CAPTURED'; col = grn(1); mode = 'ok'; t0 = T.contact; } else if (t >= T.ok) { s = 'READY'; col = wh(0.9); t0 = T.ok; } else s = 'STANDBY'; }
-    else { if (t >= T.done - 0.05) { s = 'CONFIRMED'; col = grn(1); mode = 'ok'; t0 = T.done - 0.05; } else s = 'STANDBY'; }
-    const since = t0 ? t - t0 : 1;
-    ctx.textAlign = 'right'; F(14, 400, MONO, 2); ctx.fillStyle = col; ctx.fillText(decode(s, Math.min(p, seg(since, 0, 0.3)), t, 50 + k), x1, y);
-    if (mode === 'warn') warnTri(x0 + 10, y - 6, 9 * eBack(seg(since, 0, 0.25)), col);
-    else if (mode === 'ok') { check(x0 + 10, y - 5, 8, col, seg(since, 0, 0.25)); if (since < 0.4) { ctx.fillStyle = grn(0.14 * (1 - since / 0.4)); ctx.fillRect(x0, y - 22, x1 - x0, 34); } }
-    else { ctx.fillStyle = col; ctx.fillRect(x0 + 7, y - 9, 6, 6); }
+function cautionIcon(x, y, s, color) {
+  if (s <= 0) return;
+  pen(1.5, color, () => { g.moveTo(x, y - s); g.lineTo(x + 0.95 * s, y + 0.7 * s); g.lineTo(x - 0.95 * s, y + 0.7 * s); g.closePath(); });
+  seg(x, y - 0.4 * s, x, y + 0.2 * s, 1.5, color);
+  g.fillStyle = color; g.fillRect(x - 1, y + 0.35 * s, 2, 2);
+}
+function tick(x, y, s, color, k = 1) {   // check mark drawn in two strokes
+  if (k <= 0) return;
+  pen(2, color, () => {
+    const a = Math.min(1, 2 * k), b = (k - 0.5) * 2;
+    g.moveTo(x - s, y);
+    g.lineTo(mix(x - s, x - 0.35 * s, a), y + 0.6 * s * a);
+    if (k > 0.5) g.lineTo(mix(x - 0.35 * s, x + s, b), mix(y + 0.6 * s, y - 0.7 * s, b));
   });
-  ctx.restore();
 }
 
-// ── head-on view: reticle rings + ARGO RING docking port ─────────────────────
-const R1 = 118, R3 = 292, R4 = 332, R5 = 396;
-const portR = rg => 5200 / (rg + 20);
-function reticle(t) {
-  const tout = T.fold0 - 0.05, fade = 1 - eOut(seg(t, T.fold0 + 0.1, T.fold0 + 0.5));
-  if (fade <= 0) return;
-  ctx.save(); ctx.globalAlpha = fade; const rot = t * 0.1;
-  { const v = ringVis(t, T.ring0, tout); arc(R1, -Math.PI / 2 + TAU * v.e, -Math.PI / 2 + TAU * v.a, 1.5, ice(0.7)); }
-  { const v = ringVis(t, T.ring0 + 0.12, tout - 0.05); const n = 180;
-    for (let k = 0; k < n; k++) { const f = k / n; if (v.a <= 0 || f > v.a || f < v.e) continue; const ang = -Math.PI / 2 + TAU * f + rot * 0.6;
-      const L = k % 15 === 0 ? 16 : k % 5 === 0 ? 10 : 5; const c = Math.cos(ang), s = Math.sin(ang);
-      line(CX + c * R3, CY + s * R3, CX + c * (R3 + L), CY + s * (R3 + L), k % 15 === 0 ? 2 : 1, ice(k % 15 === 0 ? 0.9 : 0.45)); } }
-  { const v = ringVis(t, T.ring0 + 0.24, tout - 0.1); const n = 12;
-    for (let k = 0; k < n; k++) { const f0 = k / n, f1 = f0 + 0.058; const a0 = Math.max(f0, v.e), a1 = Math.min(f1, v.a); if (a1 <= a0) continue;
-      arc(R4, -Math.PI / 2 + TAU * a0 - rot, -Math.PI / 2 + TAU * a1 - rot, 1.5, ice(0.6)); } }
-  { const v = ringVis(t, T.ring0 + 0.36, tout - 0.15); arc(R5, -Math.PI / 2 + TAU * v.e, -Math.PI / 2 + TAU * v.a, 1, ice(0.3));
-    F(12, 300, MONO, 1); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (let d = 0; d < 360; d += 30) { const f = d / 360; if (v.a <= 0 || f > v.a || f < v.e) continue; const ang = -Math.PI / 2 + d * D2R;
-      ctx.fillStyle = ice(0.55); ctx.fillText(String(d).padStart(3, '0'), CX + Math.cos(ang) * (R5 + 20), CY + Math.sin(ang) * (R5 + 20)); } }
-  // roll scale (top): a caret follows the roll error
-  { const v = seg(t, 0.8, 1.2) * (1 - seg(t, tout - 0.3, tout)); if (v > 0) { ctx.globalAlpha = fade * v;
-      for (let d = -30; d <= 30; d += 5) { const ang = -Math.PI / 2 + d * D2R; const L = d % 15 === 0 ? 12 : 6;
-        line(CX + Math.cos(ang) * (R4 + 12), CY + Math.sin(ang) * (R4 + 12), CX + Math.cos(ang) * (R4 + 12 + L), CY + Math.sin(ang) * (R4 + 12 + L), 1, ice(0.6)); }
-      const ra = -Math.PI / 2 + rollD(t) * 2 * D2R, col = t < WARN[2].on ? WH : t >= WARN[2].ok ? grn(1) : amb(0.6 + 0.4 * blink(t));
-      const px = CX + Math.cos(ra) * (R4 + 8), py = CY + Math.sin(ra) * (R4 + 8);
-      ctx.save(); ctx.translate(px, py); ctx.rotate(ra + Math.PI / 2); ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-7, 12); ctx.lineTo(7, 12); ctx.closePath(); ctx.fill(); ctx.restore();
-      ctx.globalAlpha = fade; } }
-  // level arcs (left/right): RCS authority
-  { const v = seg(t, 0.7, 1.1); const vo = seg(t, tout - 0.35, tout);
-    for (const side of [0, 1]) { const base = side ? 0 : Math.PI; let lvl = 0.25; for (const r of RCS) { const d = t - r; if (d > 0 && d < 0.6) lvl = Math.max(lvl, 0.9 * (1 - d / 0.6)); }
-      for (let k = 0; k < 18; k++) { const f = k / 17; if (v <= 0 || f > v || f < vo) continue; const a0 = base - 22 * D2R + f * 44 * D2R;
-        arc(362, a0, a0 + 1.6 * D2R, 8, f < lvl ? ice(0.85) : ice(0.18)); } } }
-  // crosshair
-  { const p = eOut(seg(t, 0.3, 0.85)), q = eIO(seg(t, tout - 0.4, tout)); const r0 = 22, r1 = lerp(r0, R1 - 8, p * (1 - q));
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) line(CX + dx * r0, CY + dy * r0, CX + dx * r1, CY + dy * r1, 1.2, ice(0.55)); }
-  // aligned ping
-  if (t > T.ok && t < T.ok + 0.7) { const p = eOut(seg(t, T.ok, T.ok + 0.7)); arc(lerp(R1, R5 + 40, p), 0, TAU, 1.4, grn(0.7 * (1 - p))); }
-  // centre tag: ALIGNMENT ERROR → ALIGNED
-  { const on = WARN[1].on, ok = WARN[2].ok; const y = CY + 238;
-    if (t > on && t < T.fold0) { const p = seg(t, on, on + 0.3), okd = t >= ok; const col = okd ? grn(1) : amb(0.55 + 0.45 * blink(t));
-      const s = okd ? 'ALIGNED' : 'ALIGNMENT ERROR'; F(15, 400, MONO, 4); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const w = ctx.measureText(s).width + 56, bw = w * eBack(p); ctx.globalAlpha = fade * clamp(p * 2) * (1 - seg(t, T.fold0 - 0.25, T.fold0));
-      ctx.fillStyle = okd ? grn(0.12) : amb(0.08); ctx.fillRect(CX - bw / 2, y - 17, bw, 34); rect(CX - bw / 2, y - 17, bw, 34, 1.5, col);
-      ctx.fillStyle = col; ctx.fillText(decode(s, seg(t, okd ? ok : on, (okd ? ok : on) + 0.35), t, 60), CX + 10, y + 1);
-      if (!okd) warnTri(CX - w / 2 + 18, y, 8, col); else check(CX - w / 2 + 18, y - 1, 7, col, seg(t, ok, ok + 0.25));
-      ctx.globalAlpha = fade; } }
-  ctx.restore();
-}
-// the port: collar + petals + standoff cross; during the fold it turns edge-on and slides into the side view
-function port(t) {
-  if (t < T.pan0) return;
-  const a0 = eOut(seg(t, T.pan0, T.pan0 + 0.5)); const fp = eIO(seg(t, T.fold0, T.fold1));
-  if (fp >= 1) return;
-  const f = offF(t), r0 = portR(range(Math.min(t, T.app1)));
-  const px = lerp(CX + 150 * f, PORTX + 12, fp), py = lerp(CY - 95 * f, AXY, fp), r = lerp(r0, 80, fp), sx = Math.cos(fp * Math.PI / 2);
-  const roll = rollD(t) * D2R, pa = a0 * (1 - seg(fp, 0.75, 1));
-  ctx.save(); ctx.beginPath(); ctx.rect(560, 0, 800, H); ctx.clip();   // keep the station structure off the side panels
-  ctx.globalAlpha = pa; ctx.translate(px, py); ctx.rotate(roll);
-  // station structure behind the port (head-on only): truss arms, end modules, octagonal plate
-  const ta = 1 - seg(fp, 0, 0.4);
-  if (ta > 0) { ctx.globalAlpha = pa * ta; const L = r * 2.7, h = r * 0.38;
-    for (const s of [-1, 1]) { line(s * r * 1.05, -h, s * L, -h, 1, ice(0.28)); line(s * r * 1.05, h, s * L, h, 1, ice(0.28));
-      for (let k = 0; k < 5; k++) { const xa = s * (r * 1.05 + (L - r * 1.05) * k / 5), xb = s * (r * 1.05 + (L - r * 1.05) * (k + 1) / 5);
-        line(xa, -h, xb, h, 0.8, ice(0.16)); line(xa, h, xa, -h, 0.8, ice(0.2)); }
-      const mx = s > 0 ? L : -L - r * 0.5; rect(mx, -r * 1.3, r * 0.5, r * 2.6, 1, ice(0.3));
-      for (let k = 1; k < 6; k++) line(mx, -r * 1.3 + r * 2.6 * k / 6, mx + r * 0.5, -r * 1.3 + r * 2.6 * k / 6, 0.8, ice(0.16)); }
-    ctx.beginPath(); for (let k = 0; k < 8; k++) { const an = (k + 0.5) / 8 * TAU; ctx.lineTo(Math.cos(an) * r * 1.5, Math.sin(an) * r * 1.5); } ctx.closePath();
-    ctx.strokeStyle = ice(0.35); ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = pa; }
-  ctx.scale(Math.max(sx, 0.02), 1);
-  ctx.fillStyle = 'rgba(5,9,12,0.85)'; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
-  ctx.lineWidth = 2 / Math.max(sx, 0.3); ctx.strokeStyle = wh(0.9); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
-  ctx.lineWidth = 1; ctx.strokeStyle = ice(0.6); ctx.beginPath(); ctx.arc(0, 0, r * 0.72, 0, TAU); ctx.stroke();
-  for (let k = 0; k < 8; k++) { ctx.save(); ctx.rotate(k / 8 * TAU); ctx.fillStyle = ice(0.5); ctx.fillRect(r * 0.76, -r * 0.05, r * 0.18, r * 0.1); ctx.restore(); }
-  const cr = r * 0.34; ctx.lineWidth = 2; ctx.strokeStyle = WH; ctx.beginPath(); ctx.moveTo(-cr, 0); ctx.lineTo(cr, 0); ctx.moveTo(0, -cr); ctx.lineTo(0, cr * 0.6); ctx.stroke();
-  ctx.fillStyle = WH; ctx.fillRect(-3, -3, 6, 6);
-  ctx.restore();
-  // alignment brackets + offset vector + callout (head-on only)
-  const ba = a0 * (1 - seg(fp, 0, 0.3)); if (ba <= 0) return;
-  ctx.save(); ctx.globalAlpha = ba;
-  const al = t < WARN[1].on ? 0 : t < WARN[2].ok ? 1 : 2, col = al === 0 ? ice(0.8) : al === 1 ? amb(0.55 + 0.45 * blink(t)) : grn(1);
-  const b = r * 1.18 + 10, L = Math.min(34, b * 0.4);
-  for (const [sx2, sy2] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { ctx.beginPath(); ctx.moveTo(px + sx2 * b, py + sy2 * (b - L)); ctx.lineTo(px + sx2 * b, py + sy2 * b); ctx.lineTo(px + sx2 * (b - L), py + sy2 * b);
-    ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.stroke(); }
-  if (Math.hypot(px - CX, py - CY) > 12 && al) { ctx.setLineDash([4, 5]); line(CX, CY, px, py, 1, col); ctx.setLineDash([]); }
-  const cx0 = px + b * 0.72, cy0 = py - b * 0.72, cx1 = cx0 + 60, cy1 = cy0 - 60, lp = eOut(seg(t, T.pan0 + 0.3, T.pan0 + 0.8));
-  line(cx0, cy0, lerp(cx0, cx1, lp), lerp(cy0, cy1, lp), 1.2, ice(0.8)); line(cx1, cy1, lerp(cx1, cx1 + 180, seg(lp, 0.4, 1)), cy1, 1.2, ice(0.8));
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; const tp = seg(t, T.pan0 + 0.5, T.pan0 + 1.0);
-  F(20, 600, DISP, 3); ctx.fillStyle = WH; ctx.fillText(decode('ARGO RING', tp, t, 70), cx1 + 6, cy1 - 10);
-  F(12, 300, MONO, 2); ctx.fillStyle = ice(0.8); ctx.fillText(decode('BERTH 04', tp, t, 71), cx1 + 6, cy1 + 20);
-  ctx.restore();
+// ── backdrop (built once): cold glow, dot grid, vignette ─────────────────────
+let backdrop;
+function buildBackdrop() {
+  backdrop = surface(SW, SH);
+  const b = backdrop.getContext('2d');
+  const radial = (r0, r1, inner, outer) => {
+    const grad = b.createRadialGradient(MX, MY, r0, MX, MY, r1);
+    grad.addColorStop(0, inner); grad.addColorStop(1, outer);
+    b.fillStyle = grad; b.fillRect(0, 0, SW, SH);
+  };
+  b.fillStyle = INK; b.fillRect(0, 0, SW, SH);
+  radial(50, 1100, 'rgba(40,70,85,0.28)', 'rgba(40,70,85,0)');
+  b.fillStyle = col.ice(0.07);
+  for (let gy = 35; gy < SH; gy += 48) for (let gx = 23; gx < SW; gx += 48) b.fillRect(gx, gy, 2, 2);
+  radial(400, 1150, 'rgba(0,0,0,0)', 'rgba(0,0,0,0.55)');
 }
 
-// ── side schematic: ship nose + station collar, clamps ──────────────────────
-const PORTX = 1030, AXY = 600, PXM = 15;          // px per metre in the side view
-function scanClip(x0, x1, p, fn) { // reveal x0 → x1 behind a scan line
-  if (p <= 0) return; const xs = lerp(x0, x1, p); ctx.save(); ctx.beginPath(); ctx.rect(Math.min(x0, xs), 0, Math.abs(xs - x0), H); ctx.clip(); fn(); ctx.restore();
-  if (p < 1) { line(xs, AXY - 290, xs, AXY + 290, 1.5, wh(0.9)); ctx.fillStyle = ice(0.07); ctx.fillRect(x1 > x0 ? xs - 40 : xs, AXY - 290, 40, 580); } }
-function station() {
-  const x = PORTX, y = AXY;
-  ctx.fillStyle = 'rgba(160,208,226,0.05)'; ctx.fillRect(x, y - 80, 24, 160); rect(x, y - 80, 24, 160, 2, wh(0.9));
-  rect(x + 24, y - 96, 104, 192, 1.5, ice(0.75)); for (let k = 1; k < 4; k++) line(x + 24 + k * 26, y - 96, x + 24 + k * 26, y + 96, 1, ice(0.25));
-  const hx = x + 128, hw = 190, ht = 190;
-  ctx.save(); ctx.beginPath(); ctx.rect(hx, y - ht, hw, ht * 2); ctx.rect(hx, y - 96, 24, 192); ctx.clip('evenodd');
-  for (let k = -30; k < 12; k++) line(hx + k * 18, y - ht, hx + k * 18 + 480, y + ht, 0.8, ice(0.12)); ctx.restore();
-  ctx.strokeStyle = ice(0.8); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(hx, y - 96); ctx.lineTo(hx, y - ht); ctx.lineTo(hx + hw, y - ht);
-  ctx.moveTo(hx, y + 96); ctx.lineTo(hx, y + ht); ctx.lineTo(hx + hw, y + ht); ctx.stroke();
-  F(12, 300, MONO, 2); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.75); ctx.fillText('ARGO RING', hx + 40, y - ht + 28); ctx.fillText('BERTH 04', hx + 40, y - ht + 48);
-}
-function clampArm(t, c, sy) { // sy = -1 top, +1 bottom; pivot on the collar, hook closes over the ship flange
-  const px = PORTX + 12, py = AXY + sy * 92, lp = eBack(seg(t, c.t, c.t + 0.22)), locked = t >= c.t + 0.1;
-  const an = lerp(62, 0, lp) * D2R, dx = -Math.cos(an), dy = sy * Math.sin(an), L = 52;
-  const ex = px + dx * L, ey = py + dy * L, hx = -sy * dy * 16, hy = sy * dx * 16;
-  const col = locked ? grn(1) : ice(0.85);
-  ctx.fillStyle = 'rgba(5,9,12,1)'; ctx.fillRect(px - 10, py - 9, 26, 18); rect(px - 10, py - 9, 26, 18, 1.5, ice(0.8));   // actuator housing
-  ctx.lineCap = 'round'; line(px, py, ex, ey, 6, col); line(ex, ey, ex + hx, ey + hy, 6, col); ctx.lineCap = 'butt';
-  ctx.fillStyle = WH; ctx.beginPath(); ctx.arc(px, py, 5, 0, TAU); ctx.fill();
-}
-function ship(nx) {
-  const y = AXY, brk = 590;
-  ctx.save(); ctx.beginPath(); ctx.rect(brk, 0, W, H); ctx.clip();
-  ctx.fillStyle = 'rgba(160,208,226,0.05)';
-  ctx.beginPath(); ctx.moveTo(nx - 20, y - 64); ctx.lineTo(nx - 120, y - 118); ctx.lineTo(nx - 800, y - 118); ctx.lineTo(nx - 800, y + 118); ctx.lineTo(nx - 120, y + 118); ctx.lineTo(nx - 20, y + 64); ctx.closePath(); ctx.fill();
-  ctx.lineWidth = 1.5; ctx.strokeStyle = ice(0.85); ctx.stroke();
-  ctx.fillStyle = 'rgba(5,9,12,1)'; ctx.fillRect(nx - 20, y - 70, 20, 140); rect(nx - 20, y - 70, 20, 140, 2, wh(0.9));  // docking flange
-  for (let k = 1; k < 8; k++) line(nx - 120 - k * 70, y - 118, nx - 120 - k * 70, y + 118, 1, ice(0.22));
-  line(nx - 120, y - 118, nx - 120, y + 118, 1, ice(0.4));
-  for (let k = 0; k < 3; k++) rect(nx - 196 - k * 34, y - 92, 18, 12, 1, ice(0.6));
-  F(12, 300, MONO, 2); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.75); ctx.fillText('KESTREL-7', nx - 330, y + 96);
-  ctx.restore();
-  ctx.beginPath(); for (let k = 0; k <= 12; k++) ctx.lineTo(brk + (k % 2 ? 7 : -7), y - 130 + k * (260 / 12));   // break line
-  ctx.lineWidth = 1.2; ctx.strokeStyle = ice(0.6); ctx.stroke();
-}
-function sideView(t) {
-  if (t < T.fold0) return;
-  ctx.save(); const rg = range(t), nx = PORTX - rg * PXM;
-  const ap = eOut(seg(t, T.fold0 + 0.1, T.fold0 + 0.6)); ctx.setLineDash([14, 6, 3, 6]); line(lerp(CX, 560, ap), AXY, lerp(CX, 1400, ap), AXY, 1, ice(0.35)); ctx.setLineDash([]);
-  scanClip(PORTX, PORTX + 330, eIO(seg(t, T.side0, T.side0 + 0.5)), station);
-  scanClip(PORTX + 1, 580, eIO(seg(t, T.side0 + 0.15, T.side0 + 0.7)), () => ship(nx));
-  if (t > T.side0 + 0.3) { ctx.globalAlpha = seg(t, T.side0 + 0.3, T.side0 + 0.6); clampArm(t, CLAMPS[0], -1); clampArm(t, CLAMPS[2], 1); ctx.globalAlpha = 1; }
-  // view label + scale bar
-  { const la = seg(t, T.side0 + 0.2, T.side0 + 0.6); if (la > 0) { ctx.globalAlpha = la; const lx = 600, ly = AXY + 200;
-    F(12, 300, MONO, 3); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = ice(0.75); ctx.fillText(decode('SIDE PROFILE', la, t, 85), lx, ly);
-    const sw = 5 * PXM * eOut(la); line(lx, ly + 18, lx + sw, ly + 18, 1.5, ice(0.8)); line(lx, ly + 12, lx, ly + 24, 1, ice(0.8)); line(lx + sw, ly + 12, lx + sw, ly + 24, 1, ice(0.8));
-    ctx.fillText('5 m', lx + 5 * PXM + 12, ly + 23); ctx.globalAlpha = 1; } }
-  // dimension line nose ↔ port
-  const da = seg(t, T.side0 + 0.5, T.side0 + 0.8) * (1 - seg(t, T.contact - 0.1, T.contact + 0.1));
-  if (da > 0) { ctx.globalAlpha = da; const yd = AXY - 170; line(nx, yd - 12, nx, yd + 12, 1, ice(0.7)); line(PORTX, yd - 12, PORTX, yd + 12, 1, ice(0.7));
-    line(nx, yd, PORTX, yd, 1, ice(0.7)); for (const [xx, s] of [[nx, 1], [PORTX, -1]]) { ctx.fillStyle = ice(0.9); ctx.beginPath(); ctx.moveTo(xx, yd); ctx.lineTo(xx + s * 9, yd - 4); ctx.lineTo(xx + s * 9, yd + 4); ctx.closePath(); ctx.fill(); }
-    F(18, 500, DISP, 1); ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = WH; ctx.fillText(rg.toFixed(1) + ' m', nx - 14, yd + 6); ctx.globalAlpha = 1; }
-  // contact flash + label
-  if (t > T.contact) { const p = seg(t, T.contact, T.contact + 0.5); line(PORTX, AXY - 160 * eOut(p), PORTX, AXY + 160 * eOut(p), 2, wh(1 - p));
-    ctx.fillStyle = wh(0.25 * (1 - p)); ctx.fillRect(PORTX - 30, AXY - 90, 60, 180);
-    const ta = seg(t, T.contact, T.contact + 0.15) * (1 - seg(t, T.done - 0.3, T.done)); if (ta > 0) { ctx.globalAlpha = ta; F(14, 400, MONO, 4); ctx.textAlign = 'center'; ctx.fillStyle = WH;
-      ctx.fillText(decode('CONTACT', seg(t, T.contact, T.contact + 0.3), t, 80), PORTX, AXY - 160); ctx.globalAlpha = 1; } }
-  ctx.restore();
-}
-function title(t) {
-  if (t < T.done) return; const p = seg(t, T.done, T.done + 0.45), a = eOut(seg(t, T.done, T.done + 0.2));
-  ctx.save(); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  const y = 292; F(60, 600, DISP, 12); ctx.fillStyle = WH; ctx.fillText(decode('DOCKING COMPLETE', p, t, 90), CX + 6, y + (1 - eOut(p)) * 10);
-  const bw = 560 * eOut(seg(t, T.done + 0.1, T.done + 0.55)); ctx.fillStyle = grn(0.95); ctx.fillRect(CX - bw / 2, y + 22, bw, 3);
-  F(14, 300, MONO, 4); ctx.fillStyle = ice(0.85); ctx.fillText(decode('HARD SEAL CONFIRMED · 4/4 CLAMPS LOCKED', seg(t, T.done + 0.2, T.done + 0.6), t, 91), CX + 2, y + 58);
-  ctx.restore();
-}
-function dot(c, a) { if (a <= 0) return; c.globalAlpha = a; c.fillStyle = WH; c.beginPath(); c.arc(CX, CY, 3.5, 0, TAU); c.fill();
-  c.strokeStyle = 'rgba(160,208,226,0.8)'; c.lineWidth = 1; c.beginPath(); c.moveTo(CX - 14, CY); c.lineTo(CX - 6, CY); c.moveTo(CX + 6, CY); c.lineTo(CX + 14, CY); c.stroke(); c.globalAlpha = 1; }
-
-function render(t) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); ctx.globalAlpha = 1; ctx.lineCap = 'butt';
-  if (t < 0.7) dot(ctx, eOut(seg(t, 0.05, 0.3)) * (1 - seg(t, 0.5, 0.7)));
-  port(t); reticle(t); sideView(t); title(t); leftPanel(t); rightPanel(t); frameUI(t);
-  // composite; the power-down squeezes the whole UI into a line, then a dot
-  mctx.globalAlpha = 1; mctx.drawImage(BG, 0, 0);
-  const u = seg(t, T.off0, T.off1);
-  if (u <= 0) mctx.drawImage(LAYER, 0, 0);
-  else {
-    const sy = lerp(1, 0.004, eIn(seg(u, 0, 0.55))), sx = lerp(1, 0, eIn(seg(u, 0.5, 0.9)));
-    if (sx > 0.001) { mctx.save(); mctx.translate(CX, CY); mctx.scale(sx, sy); mctx.globalAlpha = 1 - seg(u, 0.5, 0.85) * 0.6; mctx.drawImage(LAYER, -CX, -CY); mctx.restore(); }
-    mctx.fillStyle = `rgba(3,6,8,${0.75 * eIn(seg(u, 0.3, 1))})`; mctx.fillRect(0, 0, W, H);
-    const la = seg(u, 0.4, 0.55) * (1 - seg(u, 0.85, 0.95)), lw = W * 0.72 * sx;
-    if (la > 0 && lw > 1) { mctx.fillStyle = `rgba(238,246,250,${0.85 * la})`; mctx.fillRect(CX - lw / 2, CY - 1, lw, 2); }
-    dot(mctx, seg(u, 0.82, 0.95) * (1 - seg(t, T.off1 + 0.02, T.end - 0.05)));
+// ── outer frame: corner marks, title, mission clock, status line, level meter ─
+const STATUS = [
+  [0, 'SYSTEM INITIALIZING'], [CUE.approachA + 0.2, 'AUTO ALIGN · RCS ACTIVE'], [CUE.aligned, 'ALIGNMENT NOMINAL'],
+  [CUE.final, 'FINAL APPROACH'], [CUE.contact, 'CLAMPS ENGAGING'], [CUE.docked, 'HARD DOCK'], [CUE.shutA, 'POWERING DOWN'],
+];
+function frameChrome(t) {
+  const settle = ease.pop(span(t, 0.45, 0.95)), alpha = sat(1.2 * settle);
+  if (alpha <= 0) return;
+  g.globalAlpha = alpha;
+  const push = 60 * (1 - settle), left = 150 - push, right = SW - 150 + push, top = 110 - push, bottom = SH - 110 + push;
+  for (const [x, y, dx, dy] of [[left, top, 1, 1], [right, top, -1, 1], [left, bottom, 1, -1], [right, bottom, -1, -1]]) {
+    pen(2, col.ice(0.8), () => { g.moveTo(x, y + 46 * dy); g.lineTo(x, y); g.lineTo(x + 46 * dx, y); });
   }
-  const fadeIn = 1 - seg(t, 0, 0.35), fadeOut = seg(t, T.end - 0.1, DUR - 0.02);
-  const k = Math.max(fadeIn * 0.85, fadeOut * 0.95); if (k > 0) { mctx.fillStyle = `rgba(3,6,8,${k})`; mctx.fillRect(0, 0, W, H); }
+  const typeIn = span(t, 0.7, 1.2);
+  setType(20, 600, HEAD, 5);
+  const titleW = g.measureText('DOCKING APPROACH').width;
+  write(scramble('DOCKING APPROACH', typeIn, t, 1), 196, 158, col.white(0.95));
+  setType(14, 300, DATA, 2);
+  write(scramble('KESTREL-7 TO ARGO RING', typeIn, t, 2), 218 + titleW, 157, col.ice(0.7));
+  if (typeIn > 0) {
+    const clock = Math.max(0, t - 0.7), sec = Math.floor(clock), fr = Math.floor((clock - sec) * 30);
+    setType(15, 400, DATA, 2);
+    write(`MET 214:06:0${sec}:${fr < 10 ? '0' + fr : fr}`, SW - 196, 157, col.ice(0.8), 'right');
+    let current = STATUS[0];
+    for (const s of STATUS) if (s[0] <= t) current = s;
+    const from = Math.max(current[0], 0.8);
+    const good = (t >= CUE.aligned && t < CUE.final) || (t >= CUE.docked && t < CUE.shutA);
+    setType(14, 300, DATA, 3);
+    write(scramble(current[1], span(t, from, from + 0.45), t, 3), 196, SH - 146, good ? col.green(0.85) : col.ice(0.6));
+  }
+  const step = Math.floor(t * 12);
+  for (let i = 0; i < 16; i++) {
+    const level = 0.5 + 0.5 * Math.sin(7 * t + 0.9 * i) * noise(i + 40 * step);
+    const bar = 4 + 16 * level;
+    g.fillStyle = col.ice(0.25 + 0.55 * level);
+    g.fillRect(SW - 308 + 7 * i, SH - 146 - bar, 3, bar);
+  }
+  g.globalAlpha = 1;
 }
-window.draw = function (job) { render(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
-window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`500 40px 'Chakra Petch'`, 'RANGE0123'), document.fonts.load(`600 40px 'Chakra Petch'`, 'DOCKING'),
-  document.fonts.load(`300 12px 'Martian Mono'`, 'RANGE0123'), document.fonts.load(`400 12px 'Martian Mono'`, 'RANGE0123')])).then(prep);
-</script></body></html>
+
+// ── left column: telemetry ───────────────────────────────────────────────────
+function caption(s, k, t, salt, x, y, px = 14, alpha = 0.8) {
+  setType(px, 300, DATA, 3);
+  write(scramble(s, k, t, salt), x, y, col.ice(alpha));
+}
+// big number followed by a small unit, both baseline-aligned
+function reading(value, unit, x, y, px, unitPx, color) {
+  setType(px, 500, HEAD, 0);
+  const w = write(value, x, y, color);
+  setType(unitPx, 500, HEAD, 1);
+  write(' ' + unit, x + w, y, col.ice(0.8));
+}
+const signed = (v, digits, dead) => (v >= -dead ? '+' : '-') + Math.abs(v).toFixed(digits);
+
+function telemetry(t) {
+  const alpha = span(t, 0.95, 1.35);
+  if (alpha <= 0) return;
+  g.save(); g.globalAlpha = alpha;
+  const x = 196;
+
+  let k = span(t, 1.0, 1.4);
+  const d = distance(t);
+  caption('RANGE TO PORT', k, t, 11, x, 290);
+  reading(scramble(d.toFixed(1), k, t, 12), 'm', x - 4, 364, 72, 22, SOLID);
+  const ladder = sat(Math.log10(d + 1) / Math.log10(251));   // log scale: 0 … 250 m
+  g.fillStyle = col.ice(0.18); g.fillRect(x, 390, 300, 3);
+  g.fillStyle = SOLID; g.fillRect(x, 390, 300 * ladder * ease.out(k), 3);
+  for (let i = 0; i <= 10; i++) g.fillRect(x - 0.5 + 30 * i, 384, 1, 4);
+
+  k = span(t, 1.1, 1.5);
+  const v = closing(t);
+  caption('CLOSING RATE', k, t, 13, x, 470);
+  reading(scramble((v > 0.004 ? '-' : '') + v.toFixed(2), k, t, 14), 'm/s', x - 2, 516, 40, 16, cautionTone(CAUTIONS[0], t));
+
+  k = span(t, 1.2, 1.6);
+  const off = offsetAt(t);
+  caption('LATERAL OFFSET', k, t, 15, x, 580);
+  setType(30, 500, HEAD, 0);
+  write(scramble(`X ${signed(1.4 * off, 2, 0.005)}   Y ${signed(-0.9 * off, 2, 0.005)}`, k, t, 16), x - 1, 620, cautionTone(CAUTIONS[1], t));
+
+  k = span(t, 1.3, 1.7);
+  caption('ROLL ERROR', k, t, 17, x, 680);
+  setType(30, 500, HEAD, 0);
+  write(scramble(signed(rollAt(t), 1, 0.05) + '°', k, t, 18), x - 1, 720, cautionTone(CAUTIONS[2], t));
+
+  // RCS activity: twelve bars that flare with each burn and simmer on final approach
+  k = span(t, 1.35, 1.75);
+  caption('RCS', k, t, 19, x, 800, 12, 0.7);
+  for (let i = 0; i < 12; i++) {
+    let level = 0.08;
+    for (const b of BURNS) {
+      const age = t - b;
+      if (age > 0 && age < 0.5) level = Math.max(level, (1 - age / 0.5) * (0.4 + 0.6 * noise(7 * i + 10 * b)));
+    }
+    if (t > CUE.final && t < CUE.contact) level = Math.max(level, 0.15 + 0.1 * noise(i + 50 * Math.floor(t * 15)));
+    const bar = 2 + 26 * level * k;
+    g.fillStyle = level > 0.12 ? col.white(0.9) : col.ice(0.3);
+    g.fillRect(x + 50 + 20 * i, 800 - bar, 12, bar);
+  }
+  g.restore();
+}
+
+// ── right column: proximity radar, then clamp diagram; status rows ──────────
+const RAD = { x: 1572, y: 385, r: 118 }, COL_L = 1420, COL_R = SW - 196;
+
+function radar(t, alpha) {
+  g.globalAlpha = alpha;
+  const grow = ease.out(span(t, 0.95, 1.5)), k = span(t, 1.0, 1.4);
+  caption('PROXIMITY', k, t, 31, COL_L, 244);
+  setType(14, 300, DATA, 3);
+  write(scramble('CONTACTS 03', k, t, 32), COL_R, 244, col.ice(0.8), 'right');
+  for (const f of [1, 0.66, 0.33]) arcAround(RAD.x, RAD.y, RAD.r * f, UP, UP + FULL * grow, 1, col.ice(f === 1 ? 0.6 : 0.25));
+  const arm = RAD.r * grow;
+  seg(RAD.x - arm, RAD.y, RAD.x + arm, RAD.y, 1, col.ice(0.2));
+  seg(RAD.x, RAD.y - arm, RAD.x, RAD.y + arm, 1, col.ice(0.2));
+  const beam = UP + 2.6 * (t - 1.0);
+  if (t > 1.0) {
+    const wedge = g.createConicGradient(beam - 1.1, RAD.x, RAD.y), edge = 1.1 / FULL;
+    wedge.addColorStop(0, col.ice(0)); wedge.addColorStop(edge, col.ice(0.22));
+    wedge.addColorStop(edge + 0.001, col.ice(0)); wedge.addColorStop(1, col.ice(0));
+    g.fillStyle = wedge; g.beginPath(); g.arc(RAD.x, RAD.y, RAD.r, 0, FULL); g.fill();
+    seg(RAD.x, RAD.y, RAD.x + RAD.r * Math.cos(beam), RAD.y + RAD.r * Math.sin(beam), 1.5, col.white(0.85));
+  }
+  // the station contact slides inward as range closes; two passive contacts stay put
+  const contacts = [[-70, 0.12 + 0.8 * sat(distance(t) / 260), 'ARGO'], [150, 0.72, ''], [35, 0.55, '']];
+  for (const [bearing, dist, name] of contacts) {
+    const a = bearing * DEG, bx = RAD.x + RAD.r * dist * Math.cos(a), by = RAD.y + RAD.r * dist * Math.sin(a);
+    const behind = (((beam - a) % FULL) + FULL) % FULL;     // how long ago the beam swept past
+    const glow = t > 1.0 ? 0.25 + 0.75 * Math.exp(-1.3 * behind) : 0;
+    g.fillStyle = name ? col.white(glow) : col.ice(0.8 * glow);
+    g.fillRect(bx - 3, by - 3, 6, 6);
+    if (name) { setType(11, 400, DATA, 1); write(name, bx + 8, by + 4, col.ice(0.8 * sat(glow + 0.3))); }
+  }
+  g.fillStyle = SOLID;
+  g.beginPath(); g.moveTo(RAD.x, RAD.y - 6); g.lineTo(RAD.x + 5, RAD.y + 5); g.lineTo(RAD.x - 5, RAD.y + 5); g.fill();
+}
+
+function clampDial(t, alpha, grow) {
+  g.globalAlpha = alpha;
+  caption('CAPTURE CLAMPS', span(t, CUE.swingA + 0.3, CUE.swingA + 0.7), t, 33, COL_L, 244);
+  const closed = LATCHES.filter(l => t >= l.at + 0.1).length;
+  setType(14, 300, DATA, 3);
+  write(`${closed}/4`, COL_R, 244, closed === 4 ? col.green(0.95) : col.ice(0.8), 'right');
+  arcAround(RAD.x, RAD.y, 70, UP, UP + FULL * grow, 1.5, col.ice(0.7));
+  arcAround(RAD.x, RAD.y, 52, 0, FULL * grow, 1, col.ice(0.3));
+  for (const l of LATCHES) {
+    const a = (l.bearing - 90) * DEG, ca = Math.cos(a), sa = Math.sin(a);
+    const shut = t >= l.at + 0.1, r = mix(112, 78, ease.pop(span(t, l.at, l.at + 0.22)));
+    g.save();
+    g.translate(RAD.x + r * ca, RAD.y + r * sa); g.rotate(a);
+    g.fillStyle = shut ? col.green(0.9) : col.ice(0.15); g.fillRect(-4, -14, 22, 28);
+    boxLine(-4, -14, 22, 28, 1.5, shut ? col.green(1) : col.ice(0.8));
+    g.restore();
+    setType(13, 400, DATA, 1);
+    write(l.id, RAD.x + 124 * ca, RAD.y + 124 * sa, shut ? col.green(1) : col.ice(0.7), 'center', 'middle');
+    const ripple = span(t, l.at, l.at + 0.5);
+    if (t > l.at && ripple < 1) arcAround(RAD.x + 80 * ca, RAD.y + 80 * sa, 10 + 30 * ease.out(ripple), 0, FULL, 1, col.green(0.7 * (1 - ripple)));
+  }
+}
+
+// status rows: [label, state, color, icon, since-state-change]
+function rowState(i, t) {
+  if (i < 3) {
+    const c = CAUTIONS[i];
+    if (t >= c.clear) return ['OK', col.green(1), 'ok', t - c.clear];
+    if (t >= c.raise) return ['CAUTION', col.amber(0.55 + 0.45 * flash(t)), 'warn', t - c.raise];
+    return ['NOMINAL', col.ice(0.55), 'dot', 1];
+  }
+  if (i === 3) {
+    if (t >= CUE.contact) return ['CAPTURED', col.green(1), 'ok', t - CUE.contact];
+    if (t >= CUE.aligned) return ['READY', col.white(0.9), 'dot', t - CUE.aligned];
+    return ['STANDBY', col.ice(0.55), 'dot', 1];
+  }
+  const sealed = CUE.docked - 0.05;
+  return t >= sealed ? ['CONFIRMED', col.green(1), 'ok', t - sealed] : ['STANDBY', col.ice(0.55), 'dot', 1];
+}
+const ROW_NAMES = [...CAUTIONS.map(c => c.name), 'CAPTURE LATCH', 'HARD SEAL'];
+
+function statusRows(t) {
+  ROW_NAMES.forEach((name, i) => {
+    const y = 590 + 46 * i, k = span(t, 1.2 + 0.08 * i, 1.6 + 0.08 * i);
+    if (k <= 0) return;
+    seg(COL_L, y + 14, mix(COL_L, COL_R, ease.out(k)), y + 14, 1, col.ice(0.15));
+    setType(13, 300, DATA, 2);
+    write(scramble(name, k, t, 40 + i), COL_L + 30, y, col.ice(0.8));
+    const [state, tone, icon, since] = rowState(i, t);
+    setType(14, 400, DATA, 2);
+    write(scramble(state, Math.min(k, span(since, 0, 0.3)), t, 50 + i), COL_R, y, tone, 'right');
+    if (icon === 'warn') cautionIcon(COL_L + 10, y - 6, 9 * ease.pop(span(since, 0, 0.25)), tone);
+    else if (icon === 'ok') {
+      tick(COL_L + 10, y - 5, 8, tone, span(since, 0, 0.25));
+      if (since < 0.4) { g.fillStyle = col.green(0.14 * (1 - since / 0.4)); g.fillRect(COL_L, y - 22, COL_R - COL_L, 34); }
+    } else { g.fillStyle = tone; g.fillRect(COL_L + 7, y - 9, 6, 6); }
+  });
+}
+
+function sidePanel(t) {
+  const alpha = span(t, 0.95, 1.35);
+  if (alpha <= 0) return;
+  g.save();
+  const radarLeft = 1 - ease.both(span(t, CUE.swingA, CUE.swingA + 0.4));
+  if (radarLeft > 0) radar(t, alpha * radarLeft);
+  const dial = ease.out(span(t, CUE.swingA + 0.3, CUE.swingA + 0.8));
+  if (dial > 0) clampDial(t, alpha * dial, dial);
+  g.globalAlpha = alpha;
+  statusRows(t);
+  g.restore();
+}
+
+// ── head-on reticle ──────────────────────────────────────────────────────────
+const RING_IN = 118, RING_TICKS = 292, RING_SEG = 332, RING_OUT = 396;
+// a ring draws on clockwise from 12 o'clock, then un-draws the same way
+function sweepWindow(t, start, stop) {
+  return [ease.both(span(t, stop, stop + 0.45)), ease.out(span(t, start, start + 0.55))];
+}
+const inWindow = (f, [lo, hi]) => hi > 0 && f >= lo && f <= hi;
+
+function reticle(t) {
+  const close = CUE.swingA - 0.05, fade = 1 - ease.out(span(t, CUE.swingA + 0.1, CUE.swingA + 0.5));
+  if (fade <= 0) return;   // fully swung away
+  g.save(); g.globalAlpha = fade;
+  const spin = 0.1 * t;
+
+  let w = sweepWindow(t, CUE.rings, close);
+  arcAround(MX, MY, RING_IN, UP + FULL * w[0], UP + FULL * w[1], 1.5, col.ice(0.7));
+
+  w = sweepWindow(t, CUE.rings + 0.12, close - 0.05);
+  for (let i = 0; i < 180; i++) {
+    if (!inWindow(i / 180, w)) continue;
+    const major = i % 15 === 0, len = major ? 16 : i % 5 === 0 ? 10 : 5;
+    const a = UP + FULL * i / 180 + 0.6 * spin, ca = Math.cos(a), sa = Math.sin(a);
+    seg(MX + RING_TICKS * ca, MY + RING_TICKS * sa, MX + (RING_TICKS + len) * ca, MY + (RING_TICKS + len) * sa, major ? 2 : 1, col.ice(major ? 0.9 : 0.45));
+  }
+
+  w = sweepWindow(t, CUE.rings + 0.24, close - 0.1);
+  for (let i = 0; i < 12; i++) {
+    const lo = Math.max(i / 12, w[0]), hi = Math.min(i / 12 + 0.058, w[1]);
+    if (hi > lo) arcAround(MX, MY, RING_SEG, UP + FULL * lo - spin, UP + FULL * hi - spin, 1.5, col.ice(0.6));
+  }
+
+  w = sweepWindow(t, CUE.rings + 0.36, close - 0.15);
+  arcAround(MX, MY, RING_OUT, UP + FULL * w[0], UP + FULL * w[1], 1, col.ice(0.3));
+  setType(12, 300, DATA, 1);
+  for (let b = 0; b < 360; b += 30) {
+    if (!inWindow(b / 360, w)) continue;
+    const a = UP + b * DEG;
+    write(('00' + b).slice(-3), MX + (RING_OUT + 20) * Math.cos(a), MY + (RING_OUT + 20) * Math.sin(a), col.ice(0.55), 'center', 'middle');
+  }
+
+  // roll scale across the top; the caret rides the roll error (2× exaggerated)
+  const rollVis = span(t, 0.8, 1.2) * (1 - span(t, close - 0.3, close));
+  if (rollVis > 0) {
+    g.globalAlpha = fade * rollVis;
+    const r0 = RING_SEG + 12;
+    for (let d = -30; d <= 30; d += 5) {
+      const a = UP + d * DEG, len = d % 15 === 0 ? 12 : 6;
+      seg(MX + r0 * Math.cos(a), MY + r0 * Math.sin(a), MX + (r0 + len) * Math.cos(a), MY + (r0 + len) * Math.sin(a), 1, col.ice(0.6));
+    }
+    const a = UP + 2 * rollAt(t) * DEG, rc = CAUTIONS[2];
+    g.save();
+    g.translate(MX + (RING_SEG + 8) * Math.cos(a), MY + (RING_SEG + 8) * Math.sin(a)); g.rotate(a + Math.PI / 2);
+    g.fillStyle = t < rc.raise ? SOLID : t >= rc.clear ? col.green(1) : col.amber(0.6 + 0.4 * flash(t));
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(-7, 12); g.lineTo(7, 12); g.fill();
+    g.restore();
+    g.globalAlpha = fade;
+  }
+
+  // RCS authority gauges, left and right of the rings
+  const gaugeOn = span(t, 0.7, 1.1), gaugeOff = span(t, close - 0.35, close);
+  let level = 0.25;
+  for (const b of BURNS) { const age = t - b; if (age > 0 && age < 0.6) level = Math.max(level, 0.9 * (1 - age / 0.6)); }
+  for (const base of [Math.PI, 0]) {
+    for (let i = 0; i < 18; i++) {
+      const f = i / 17;
+      if (gaugeOn <= 0 || f > gaugeOn || f < gaugeOff) continue;
+      const a = base + (44 * f - 22) * DEG;
+      arcAround(MX, MY, 362, a, a + 1.6 * DEG, 8, col.ice(f < level ? 0.85 : 0.18));
+    }
+  }
+
+  // crosshair arms grow out from a small gap and retract before the swing
+  const reach = mix(22, RING_IN - 8, ease.out(span(t, 0.3, 0.85)) * (1 - ease.both(span(t, close - 0.4, close))));
+  for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) seg(MX + 22 * dx, MY + 22 * dy, MX + reach * dx, MY + reach * dy, 1.2, col.ice(0.55));
+
+  if (t > CUE.aligned && t < CUE.aligned + 0.7) {
+    const k = ease.out(span(t, CUE.aligned, CUE.aligned + 0.7));
+    arcAround(MX, MY, mix(RING_IN, RING_OUT + 40, k), 0, FULL, 1.4, col.green(0.7 * (1 - k)));
+  }
+  alignTag(t, fade);
+  g.restore();
+}
+
+// centre badge under the rings: ALIGNMENT ERROR (amber) → ALIGNED (green)
+function alignTag(t, fade) {
+  const shown = CAUTIONS[1].raise, fixed = CAUTIONS[2].clear;
+  if (t <= shown || t >= CUE.swingA) return;
+  const y = MY + 238, good = t >= fixed, k = span(t, shown, shown + 0.3), since = good ? fixed : shown;
+  const tone = good ? col.green(1) : col.amber(0.55 + 0.45 * flash(t)), msg = good ? 'ALIGNED' : 'ALIGNMENT ERROR';
+  setType(15, 400, DATA, 4);
+  const full = g.measureText(msg).width + 56, wide = full * ease.pop(k);
+  g.globalAlpha = fade * sat(2 * k) * (1 - span(t, CUE.swingA - 0.25, CUE.swingA));
+  g.fillStyle = good ? col.green(0.12) : col.amber(0.08);
+  g.fillRect(MX - wide / 2, y - 17, wide, 34);
+  boxLine(MX - wide / 2, y - 17, wide, 34, 1.5, tone);
+  write(scramble(msg, span(t, since, since + 0.35), t, 60), MX + 10, y + 1, tone, 'center', 'middle');
+  if (good) tick(MX - full / 2 + 18, y - 1, 7, tone, span(t, fixed, fixed + 0.25));
+  else cautionIcon(MX - full / 2 + 18, y, 8, tone);
+  g.globalAlpha = fade;
+}
+
+// ── the ARGO RING port (head-on), which swings edge-on into the side profile ─
+const DOCK_X = 1030, AXIS_Y = 600, PX_PER_M = 15;
+const apparentRadius = metres => 5200 / (metres + 20);
+
+function truss(r) {                     // station structure behind the port, in port space
+  const reach = 2.7 * r, half = 0.38 * r, root = 1.05 * r;
+  for (const side of [-1, 1]) {
+    seg(side * root, -half, side * reach, -half, 1, col.ice(0.28));
+    seg(side * root, half, side * reach, half, 1, col.ice(0.28));
+    for (let i = 0; i < 5; i++) {
+      const xa = side * mix(root, reach, i / 5), xb = side * mix(root, reach, (i + 1) / 5);
+      seg(xa, -half, xb, half, 0.8, col.ice(0.16));
+      seg(xa, half, xa, -half, 0.8, col.ice(0.2));
+    }
+    const mx = side > 0 ? reach : -reach - 0.5 * r;
+    boxLine(mx, -1.3 * r, 0.5 * r, 2.6 * r, 1, col.ice(0.3));
+    for (let i = 1; i < 6; i++) { const yy = -1.3 * r + 2.6 * r * i / 6; seg(mx, yy, mx + 0.5 * r, yy, 0.8, col.ice(0.16)); }
+  }
+  pen(1, col.ice(0.35), () => {
+    for (let i = 0; i < 8; i++) { const a = FULL * (i + 0.5) / 8; g.lineTo(1.5 * r * Math.cos(a), 1.5 * r * Math.sin(a)); }
+    g.closePath();
+  });
+}
+
+function portFace(r, squash) {
+  g.scale(Math.max(squash, 0.02), 1);
+  g.fillStyle = 'rgba(5,9,12,0.85)';
+  g.beginPath(); g.arc(0, 0, r, 0, FULL); g.fill();
+  arcAround(0, 0, r, 0, FULL, 2 / Math.max(squash, 0.3), col.white(0.9));
+  arcAround(0, 0, 0.72 * r, 0, FULL, 1, col.ice(0.6));
+  g.fillStyle = col.ice(0.5);
+  for (let i = 0; i < 8; i++) {
+    g.save(); g.rotate(FULL * i / 8); g.fillRect(0.76 * r, -0.05 * r, 0.18 * r, 0.1 * r); g.restore();
+  }
+  const c = 0.34 * r;
+  pen(2, SOLID, () => { g.moveTo(-c, 0); g.lineTo(c, 0); g.moveTo(0, -c); g.lineTo(0, 0.6 * c); });
+  g.fillStyle = SOLID; g.fillRect(-3, -3, 6, 6);
+}
+
+function dockingPort(t) {
+  if (t < CUE.portIn) return;
+  const appear = ease.out(span(t, CUE.portIn, CUE.portIn + 0.5)), swing = ease.both(span(t, CUE.swingA, CUE.swingB));
+  if (swing >= 1) return;
+  const off = offsetAt(t);
+  const x = mix(MX + 150 * off, DOCK_X + 12, swing), y = mix(MY - 95 * off, AXIS_Y, swing);
+  const r = mix(apparentRadius(distance(Math.min(t, CUE.approachB))), 80, swing);
+  const alpha = appear * (1 - span(swing, 0.75, 1));
+
+  g.save();
+  g.beginPath(); g.rect(560, 0, 800, SH); g.clip();     // keep the structure out of the side columns
+  g.translate(x, y); g.rotate(rollAt(t) * DEG);
+  const trussAlpha = 1 - span(swing, 0, 0.4);
+  if (trussAlpha > 0) { g.globalAlpha = alpha * trussAlpha; truss(r); }
+  g.globalAlpha = alpha;
+  portFace(r, Math.cos(swing * Math.PI / 2));
+  g.restore();
+
+  const markAlpha = appear * (1 - span(swing, 0, 0.3));
+  if (markAlpha > 0) targetMarks(t, x, y, r, markAlpha);
+}
+
+// corner brackets, offset vector and name callout around the port (screen space)
+function targetMarks(t, x, y, r, alpha) {
+  g.save(); g.globalAlpha = alpha;
+  const stage = t < CAUTIONS[1].raise ? 0 : t < CAUTIONS[2].clear ? 1 : 2;
+  const tone = [col.ice(0.8), col.amber(0.55 + 0.45 * flash(t)), col.green(1)][stage];
+  const b = 1.18 * r + 10, len = Math.min(34, 0.4 * b);
+  for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+    pen(2, tone, () => { g.moveTo(x + sx * b, y + sy * (b - len)); g.lineTo(x + sx * b, y + sy * b); g.lineTo(x + sx * (b - len), y + sy * b); });
+  }
+  if (stage > 0 && Math.hypot(x - MX, y - MY) > 12) { g.setLineDash([4, 5]); seg(MX, MY, x, y, 1, tone); g.setLineDash([]); }
+  const ax = x + 0.72 * b, ay = y - 0.72 * b, kx = ax + 60, ky = ay - 60;
+  const draw = ease.out(span(t, CUE.portIn + 0.3, CUE.portIn + 0.8));
+  seg(ax, ay, mix(ax, kx, draw), mix(ay, ky, draw), 1.2, col.ice(0.8));
+  seg(kx, ky, kx + 180 * span(draw, 0.4, 1), ky, 1.2, col.ice(0.8));
+  const k = span(t, CUE.portIn + 0.5, CUE.portIn + 1.0);
+  setType(20, 600, HEAD, 3);
+  write(scramble('ARGO RING', k, t, 70), kx + 6, ky - 10, SOLID);
+  setType(12, 300, DATA, 2);
+  write(scramble('BERTH 04', k, t, 71), kx + 6, ky + 20, col.ice(0.8));
+  g.restore();
+}
+
+// ── side profile: station collar on the right, KESTREL-7 nose closing in ─────
+function revealBehindScan(from, to, k, drawFn) {
+  if (k <= 0) return;
+  const at = mix(from, to, k);
+  g.save(); g.beginPath(); g.rect(Math.min(from, at), 0, Math.abs(at - from), SH); g.clip(); drawFn(); g.restore();
+  if (k >= 1) return;
+  seg(at, AXIS_Y - 290, at, AXIS_Y + 290, 1.5, col.white(0.9));
+  g.fillStyle = col.ice(0.07); g.fillRect(to > from ? at - 40 : at, AXIS_Y - 290, 40, 580);
+}
+
+function stationProfile() {
+  const x = DOCK_X, y = AXIS_Y, hull = x + 128;
+  g.fillStyle = col.ice(0.05); g.fillRect(x, y - 80, 24, 160);
+  boxLine(x, y - 80, 24, 160, 2, col.white(0.9));
+  boxLine(x + 24, y - 96, 104, 192, 1.5, col.ice(0.75));
+  for (let i = 1; i <= 3; i++) seg(x + 24 + 26 * i, y - 96, x + 24 + 26 * i, y + 96, 1, col.ice(0.25));
+  // hatched hull section, with the tunnel mouth left open
+  g.save();
+  g.beginPath(); g.rect(hull, y - 190, 190, 380); g.rect(hull, y - 96, 24, 192); g.clip('evenodd');
+  for (let i = -30; i < 12; i++) seg(hull + 18 * i, y - 190, hull + 18 * i + 480, y + 190, 0.8, col.ice(0.12));
+  g.restore();
+  pen(1.5, col.ice(0.8), () => {
+    for (const s of [-1, 1]) { g.moveTo(hull, y + 96 * s); g.lineTo(hull, y + 190 * s); g.lineTo(hull + 190, y + 190 * s); }
+  });
+  setType(12, 300, DATA, 2);
+  write('ARGO RING', hull + 40, y - 162, col.ice(0.75));
+  write('BERTH 04', hull + 40, y - 142, col.ice(0.75));
+}
+
+function clampArm(t, latch, side) {     // side −1 = top, +1 = bottom; the hook swings shut over the flange
+  const px = DOCK_X + 12, py = AXIS_Y + 92 * side;
+  const a = mix(62, 0, ease.pop(span(t, latch.at, latch.at + 0.22))) * DEG;
+  const dx = -Math.cos(a), dy = side * Math.sin(a), ex = px + 52 * dx, ey = py + 52 * dy;
+  const tone = t >= latch.at + 0.1 ? col.green(1) : col.ice(0.85);
+  g.fillStyle = INK; g.fillRect(px - 10, py - 9, 26, 18);
+  boxLine(px - 10, py - 9, 26, 18, 1.5, col.ice(0.8));
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  pen(6, tone, () => { g.moveTo(px, py); g.lineTo(ex, ey); g.lineTo(ex - 16 * side * dy, ey + 16 * side * dx); });
+  g.lineCap = 'butt'; g.lineJoin = 'miter';
+  g.fillStyle = SOLID; g.beginPath(); g.arc(px, py, 5, 0, FULL); g.fill();
+}
+
+function shipProfile(nose) {
+  const y = AXIS_Y, cut = 590;
+  g.save();
+  g.beginPath(); g.rect(cut, 0, SW, SH); g.clip();
+  g.beginPath();
+  for (const [dx, dy] of [[-20, -64], [-120, -118], [-800, -118], [-800, 118], [-120, 118], [-20, 64]]) g.lineTo(nose + dx, y + dy);
+  g.closePath();
+  g.fillStyle = col.ice(0.05); g.fill();
+  g.lineWidth = 1.5; g.strokeStyle = col.ice(0.85); g.stroke();
+  g.fillStyle = INK; g.fillRect(nose - 20, y - 70, 20, 140);
+  boxLine(nose - 20, y - 70, 20, 140, 2, col.white(0.9));
+  seg(nose - 120, y - 118, nose - 120, y + 118, 1, col.ice(0.4));
+  for (let i = 1; i <= 7; i++) seg(nose - 120 - 70 * i, y - 118, nose - 120 - 70 * i, y + 118, 1, col.ice(0.22));
+  for (let i = 0; i < 3; i++) boxLine(nose - 196 - 34 * i, y - 92, 18, 12, 1, col.ice(0.6));
+  setType(12, 300, DATA, 2);
+  write('KESTREL-7', nose - 330, y + 96, col.ice(0.75));
+  g.restore();
+  // zig-zag break line where the hull is cut off
+  pen(1.2, col.ice(0.6), () => { for (let i = 0; i <= 12; i++) g.lineTo(cut + (i & 1 ? 7 : -7), y - 130 + 260 * i / 12); });
+}
+
+function sideProfile(t) {
+  if (t < CUE.swingA) return;
+  g.save();
+  const d = distance(t), nose = DOCK_X - PX_PER_M * d;
+  const axis = ease.out(span(t, CUE.swingA + 0.1, CUE.swingA + 0.6));
+  g.setLineDash([14, 6, 3, 6]); seg(mix(MX, 560, axis), AXIS_Y, mix(MX, 1400, axis), AXIS_Y, 1, col.ice(0.35)); g.setLineDash([]);
+  revealBehindScan(DOCK_X, DOCK_X + 330, ease.both(span(t, CUE.profile, CUE.profile + 0.5)), stationProfile);
+  revealBehindScan(DOCK_X + 1, 580, ease.both(span(t, CUE.profile + 0.15, CUE.profile + 0.7)), () => shipProfile(nose));
+  if (t > CUE.profile + 0.3) {
+    g.globalAlpha = span(t, CUE.profile + 0.3, CUE.profile + 0.6);
+    clampArm(t, LATCHES[0], -1); clampArm(t, LATCHES[2], 1);
+    g.globalAlpha = 1;
+  }
+
+  const legend = span(t, CUE.profile + 0.2, CUE.profile + 0.6);
+  if (legend > 0) {
+    g.globalAlpha = legend;
+    const lx = 600, ly = AXIS_Y + 200, bar = 5 * PX_PER_M * ease.out(legend);
+    caption('SIDE PROFILE', legend, t, 85, lx, ly, 12, 0.75);
+    seg(lx, ly + 18, lx + bar, ly + 18, 1.5, col.ice(0.8));
+    for (const bx of [lx, lx + bar]) seg(bx, ly + 12, bx, ly + 24, 1, col.ice(0.8));
+    setType(12, 300, DATA, 3);
+    write('5 m', lx + 5 * PX_PER_M + 12, ly + 23, col.ice(0.75));
+    g.globalAlpha = 1;
+  }
+
+  // dimension line between nose and port, gone at contact
+  const dim = span(t, CUE.profile + 0.5, CUE.profile + 0.8) * (1 - span(t, CUE.contact - 0.1, CUE.contact + 0.1));
+  if (dim > 0) {
+    g.globalAlpha = dim;
+    const yd = AXIS_Y - 170;
+    for (const xx of [nose, DOCK_X]) seg(xx, yd - 12, xx, yd + 12, 1, col.ice(0.7));
+    seg(nose, yd, DOCK_X, yd, 1, col.ice(0.7));
+    g.fillStyle = col.ice(0.9);
+    for (const [xx, dir] of [[nose, 1], [DOCK_X, -1]]) {
+      g.beginPath(); g.moveTo(xx, yd); g.lineTo(xx + 9 * dir, yd - 4); g.lineTo(xx + 9 * dir, yd + 4); g.fill();
+    }
+    setType(18, 500, HEAD, 1);
+    write(d.toFixed(1) + ' m', nose - 14, yd + 6, SOLID, 'right');
+    g.globalAlpha = 1;
+  }
+
+  if (t > CUE.contact) {
+    const k = span(t, CUE.contact, CUE.contact + 0.5), half = 160 * ease.out(k);
+    seg(DOCK_X, AXIS_Y - half, DOCK_X, AXIS_Y + half, 2, col.white(1 - k));
+    g.fillStyle = col.white(0.25 * (1 - k)); g.fillRect(DOCK_X - 30, AXIS_Y - 90, 60, 180);
+    const tag = span(t, CUE.contact, CUE.contact + 0.15) * (1 - span(t, CUE.docked - 0.3, CUE.docked));
+    if (tag > 0) {
+      g.globalAlpha = tag;
+      setType(14, 400, DATA, 4);
+      write(scramble('CONTACT', span(t, CUE.contact, CUE.contact + 0.3), t, 80), DOCK_X, AXIS_Y - 160, SOLID, 'center');
+      g.globalAlpha = 1;
+    }
+  }
+  g.restore();
+}
+
+function completeBanner(t) {
+  if (t < CUE.docked) return;
+  const k = span(t, CUE.docked, CUE.docked + 0.45), y = 292;
+  g.save(); g.globalAlpha = ease.out(span(t, CUE.docked, CUE.docked + 0.2));
+  setType(60, 600, HEAD, 12);
+  write(scramble('DOCKING COMPLETE', k, t, 90), MX + 6, y + 10 * (1 - ease.out(k)), SOLID, 'center');
+  const rule = 560 * ease.out(span(t, CUE.docked + 0.1, CUE.docked + 0.55));
+  g.fillStyle = col.green(0.95); g.fillRect(MX - rule / 2, y + 22, rule, 3);
+  setType(14, 300, DATA, 4);
+  write(scramble('HARD SEAL CONFIRMED · 4/4 CLAMPS LOCKED', span(t, CUE.docked + 0.2, CUE.docked + 0.6), t, 91), MX + 2, y + 58, col.ice(0.85), 'center');
+  g.restore();
+}
+
+function centreDot(c, alpha) {           // idle pip shown before boot and after shutdown
+  if (alpha <= 0) return;
+  c.globalAlpha = alpha;
+  c.fillStyle = SOLID; c.beginPath(); c.arc(MX, MY, 3.5, 0, FULL); c.fill();
+  c.lineWidth = 1; c.strokeStyle = col.ice(0.8);
+  c.beginPath(); c.moveTo(MX - 14, MY); c.lineTo(MX - 6, MY); c.moveTo(MX + 6, MY); c.lineTo(MX + 14, MY); c.stroke();
+  c.globalAlpha = 1;
+}
+
+// ── frame ────────────────────────────────────────────────────────────────────
+function compose(t) {
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalAlpha = 1; g.lineCap = 'butt';
+  g.clearRect(0, 0, SW, SH);
+  if (t < 0.7) centreDot(g, ease.out(span(t, 0.05, 0.3)) * (1 - span(t, 0.5, 0.7)));
+  for (const layer of [dockingPort, reticle, sideProfile, completeBanner, telemetry, sidePanel, frameChrome]) layer(t);
+
+  out.globalAlpha = 1;
+  out.drawImage(backdrop, 0, 0);
+  const shut = span(t, CUE.shutA, CUE.shutB);
+  if (shut > 0) {
+    // power-down: squash to a horizontal line, then pinch the line to a dot
+    const vy = mix(1, 0.004, ease.in(span(shut, 0, 0.55))), vx = mix(1, 0, ease.in(span(shut, 0.5, 0.9)));
+    if (vx > 0.001) {
+      out.save();
+      out.translate(MX, MY); out.scale(vx, vy);
+      out.globalAlpha = 1 - 0.6 * span(shut, 0.5, 0.85);
+      out.drawImage(hud, -MX, -MY);
+      out.restore();
+    }
+    out.fillStyle = `rgba(3,6,8,${0.75 * ease.in(span(shut, 0.3, 1))})`; out.fillRect(0, 0, SW, SH);
+    const glint = span(shut, 0.4, 0.55) * (1 - span(shut, 0.85, 0.95)), width = 0.72 * SW * vx;
+    if (glint > 0 && width > 1) { out.fillStyle = col.white(0.85 * glint); out.fillRect(MX - width / 2, MY - 1, width, 2); }
+    centreDot(out, span(shut, 0.82, 0.95) * (1 - span(t, CUE.shutB + 0.02, CUE.end - 0.05)));
+  } else {
+    out.drawImage(hud, 0, 0);
+  }
+  const black = Math.max(0.85 * (1 - span(t, 0, 0.35)), 0.95 * span(t, CUE.end - 0.1, LENGTH - 0.02));
+  if (black > 0) { out.fillStyle = `rgba(3,6,8,${black})`; out.fillRect(0, 0, SW, SH); }
+}
+
+window.draw = ({ t, q }) => {
+  compose(t);
+  return screen.toDataURL('image/jpeg', q || 0.92).split(',')[1];
+};
+const FACES = [
+  ['500 40px', HEAD, 'RANGE0123'], ['600 40px', HEAD, 'DOCKING'],
+  ['300 12px', DATA, 'RANGE0123'], ['400 12px', DATA, 'RANGE0123'],
+];
+window.ready = document.fonts.ready
+  .then(() => Promise.all(FACES.map(([spec, fam, sample]) => document.fonts.load(`${spec} ${fam}`, sample))))
+  .then(buildBackdrop);
+</script>
+</body>
+</html>
