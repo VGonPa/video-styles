@@ -121,9 +121,9 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 
 As recorded in each family's `METADATA.pb` in the google/fonts repository.
 
-- **Abril Fatface**: Copyright (c) 2011, Copyright (c) 2011, TypeTogether (www.type-together.com info@type-together.com), with Reserved Font Names \"Abril\" and \"Abril Fatface\"
+- **Abril Fatface**: Copyright (c) 2011, Copyright (c) 2011, TypeTogether (www.type-together.com info@type-together.com), with Reserved Font Names "Abril" and "Abril Fatface"
 - **Alegreya**: Copyright 2011 The Alegreya Project Authors (https://github.com/huertatipografica/Alegreya)
-- **Alfa Slab One**: Copyright 2016 The Alfa Slab One Project Authors (http://www.jmsole.cl | info@jmsole.cl), with Reserved Font Name \"Alfa Slab\".
+- **Alfa Slab One**: Copyright 2016 The Alfa Slab One Project Authors (http://www.jmsole.cl | info@jmsole.cl), with Reserved Font Name "Alfa Slab".
 - **Amatic SC**: Copyright 2015 The Amatic SC Project Authors (https://github.com/googlefonts/AmaticSC)
 - **Amiri**: Copyright 2010-2022 The Amiri Project Authors (https://github.com/aliftype/amiri).
 - **Anton**: Copyright 2020 The Anton Project Authors (https://github.com/googlefonts/AntonFont.git)
@@ -132,7 +132,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Bangers**: Copyright 2010 The Bangers Project Authors (https://github.com/googlefonts/bangers)
 - **Barlow**: Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
 - **Barlow Condensed**: Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
-- **Bowlby One SC**: Copyright (c) 2011, vernon adams (vern@newtypography.co.uk), with Reserved Font Names \"Bowlby\"
+- **Bowlby One SC**: Copyright (c) 2011, vernon adams (vern@newtypography.co.uk), with Reserved Font Names "Bowlby"
 - **Bricolage Grotesque**: Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage)
 - **Bungee**: Copyright 2023 The Bungee Project Authors (https://github.com/djrrb/Bungee)
 - **Caveat**: Copyright 2014 The Caveat Project Authors (https://github.com/googlefonts/caveat)
@@ -140,20 +140,20 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Chakra Petch**: Copyright 2018 The Chakra Petch Project Authors (https://github.com/m4rc1e/Chakra-Petch.git)
 - **Chewy**: Copyright (c) 2010 by Font Diner, Inc DBA Sideshow. All rights reserved.
 - **Cinzel**: Copyright 2020 The Cinzel Project Authors (https://github.com/NDISCOVER/Cinzel)
-- **Cinzel Decorative**: Copyright  2012 Natanael Gama (info@ndiscovered.com), with Reserved Font Name \'Cinzel\'
+- **Cinzel Decorative**: Copyright  2012 Natanael Gama (info@ndiscovered.com), with Reserved Font Name 'Cinzel'
 - **Comic Neue**: Copyright 2014 The Comic Neue Project Authors (https://github.com/crozynski/comicneue)
 - **Cormorant Garamond**: Copyright 2015 The Cormorant Project Authors (github.com/CatharsisFonts/Cormorant)
 - **Cormorant SC**: Copyright 2015 The Cormorant Project Authors (github.com/CatharsisFonts/Cormorant)
 - **Courier Prime**: Copyright 2015 The Courier Prime Project Authors (https://github.com/quoteunquoteapps/CourierPrime).
 - **Dela Gothic One**: Copyright 2020 The Dela Gothic Project Authors (https://github.com/syakuzen/DelaGothic)
-- **DM Serif Display**: Copyright 2014 - 2017 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name \'Source\'. Copyright 2019 Google LLC.
+- **DM Serif Display**: Copyright 2014 - 2017 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name 'Source'. Copyright 2019 Google LLC.
 - **EB Garamond**: Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/EBGaramond12)
 - **Exo 2**: Copyright 2013 The Exo 2 Project Authors (https://github.com/googlefonts/Exo-2.0)
 - **Federo**: Copyright (c) 2011 by Olexa M. Volochay | Cyreal.org (a@cyreal.org). All rights reserved.
 - **Fraunces**: Copyright 2020 The Fraunces Project Authors (github.com/undercasetype/Fraunces)
 - **Fredoka**: Copyright 2016 The Fredoka Project Authors (https://github.com/hafontia/Fredoka-One)
 - **Gaegu**: Copyright 2018 The Gaegu Project Authors
-- **Gochi Hand**: Copyright (c) 2011, HT Fonts (www.htfonts.com info@htfonts.com), with Reserved Font Names \"Gochi\" and \"Gochi Hand\"
+- **Gochi Hand**: Copyright (c) 2011, HT Fonts (www.htfonts.com info@htfonts.com), with Reserved Font Names "Gochi" and "Gochi Hand"
 - **Grenze Gotisch**: Copyright 2020 The Grenze Gotisch Project Authors (https://github.com/Omnibus-Type/Grenze-Gotisch)
 - **Homemade Apple**: Copyright (c) 2010 by Font Diner, Inc. All rights reserved.
 - **IBM Plex Mono**: Copyright 2017 IBM Corp. All rights reserved.
@@ -164,25 +164,25 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Inter Tight**: Copyright 2022 The Inter Project Authors (https://github.com/rsms/inter-tight)
 - **Italiana**: Copyright (c) 2011 by Santiago Orozco (hi@typemade.mx) with reserved name Italiana
 - **JetBrains Mono**: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
-- **Josefin Sans**: Copyright 2010 The Josefin Sans Project Authors (https://github.com/ThomasJockin/JosefinSansFont-master), with Reserved Font Name \"Josefin Sans\".
+- **Josefin Sans**: Copyright 2010 The Josefin Sans Project Authors (https://github.com/ThomasJockin/JosefinSansFont-master), with Reserved Font Name "Josefin Sans".
 - **Jost**: Copyright 2020 The Jost Project Authors (https://github.com/indestructible-type/Jost)
 - **Kalam**: Copyright (c) 2014 Indian Type Foundry (info@indiantypefoundry.com)
 - **Libre Baskerville**: Copyright 2012 The Libre Baskerville Project Authors (https://github.com/impallari/Libre-Baskerville)
 - **Libre Franklin**: Copyright 2020 The Libre Franklin Project Authors (https://github.com/googlefonts/Libre-Franklin)
-- **Lilita One**: Copyright (c) 2011 Juan Montoreano (juan@remolacha.biz), with Reserved Font Names \"Lilita One\"
+- **Lilita One**: Copyright (c) 2011 Juan Montoreano (juan@remolacha.biz), with Reserved Font Names "Lilita One"
 - **Limelight**: Copyright (c) 2010 by Sorkin Type Co (eben@eyebytes.com) with Reserved Font Name Limelight. This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
 - **Manrope**: Copyright 2019 The Manrope Project Authors (https://github.com/googlefonts/manrope)
-- **Marcellus**: Copyright (c) 2012 by Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Name \"Marcellus\"
-- **Marcellus SC**: Copyright (c) 2012 by Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Name \"Marcellus\"
+- **Marcellus**: Copyright (c) 2012 by Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Name "Marcellus"
+- **Marcellus SC**: Copyright (c) 2012 by Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Name "Marcellus"
 - **Martian Mono**: Copyright 2020 The Martian Mono Project Authors (https://github.com/evilmartians/mono)
 - **Mochiy Pop One**: Copyright 2020 The MochiyPop Project Authors (https://github.com/fontdasu/Mochiypop)
-- **Monoton**: Copyright (c) 2011, Vernon Adams (vern@newtypography.co.uk) with Reserved Font Name \'Monoton\'. All rights reserved.
+- **Monoton**: Copyright (c) 2011, Vernon Adams (vern@newtypography.co.uk) with Reserved Font Name 'Monoton'. All rights reserved.
 - **Montserrat**: Copyright 2011 The Montserrat Project Authors (https://github.com/JulietaUla/Montserrat)
-- **Mr Dafoe**: Copyright (c) 2004 Alejandro Paul (sudtipos@sudtipos.com), with Reserved Font Name \"Mr Dafoe\"
+- **Mr Dafoe**: Copyright (c) 2004 Alejandro Paul (sudtipos@sudtipos.com), with Reserved Font Name "Mr Dafoe"
 - **Newsreader**: Copyright 2020 The Newsreader Project Authors (http://github.com/productiontype/Newsreader)
 - **Nunito**: Copyright 2014 The Nunito Project Authors (https://github.com/googlefonts/nunito)
 - **Old Standard TT**: Copyright 2011 The Old Standard Project Authors (amkryukov@gmail.com)
-- **Oleo Script**: Copyright (c) 2012, Soytutype (contact@soytutype.com.ar|soytutype@gmail.com), with reserved fontname \'Oleo\'
+- **Oleo Script**: Copyright (c) 2012, Soytutype (contact@soytutype.com.ar|soytutype@gmail.com), with reserved fontname 'Oleo'
 - **Open Sans**: Copyright 2020 The Open Sans Project Authors (https://github.com/googlefonts/opensans)
 - **Orbitron**: Copyright 2018 The Orbitron Project Authors (https://github.com/theleagueof/orbitron)
 - **Oswald**: Copyright 2016 The Oswald Project Authors (https://github.com/googlefonts/OswaldFont)
@@ -190,17 +190,17 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Patrick Hand**: Copyright (c) 2010-2012 Patrick Wagesreiter (mail@patrickwagesreiter.at)
 - **Patrick Hand SC**: Copyright 2012 The Patrick Hand Authors (mail@patrickwagesreiter.at)
 - **Pixelify Sans**: Copyright 2021 The Pixelify Sans Project Authors (https://github.com/eifetx/Pixelify-Sans)
-- **Playfair Display**: Copyright 2017 The Playfair Display Project Authors (https://github.com/clauseggers/Playfair-Display), with Reserved Font Name \"Playfair Display\".
+- **Playfair Display**: Copyright 2017 The Playfair Display Project Authors (https://github.com/clauseggers/Playfair-Display), with Reserved Font Name "Playfair Display".
 - **Plus Jakarta Sans**: Copyright 2020 The Plus Jakarta Sans Project Authors (https://github.com/tokotype/PlusJakartaSans)
 - **Poiret One**: Copyright 2011 The Poiret One Project Authors (https://github.com/alexeiva/poiretone)
 - **Potta One**: Copyright 2020 The Potta Project Authors (https://github.com/go108go/Potta), all rights reserved.
-- **Press Start 2P**: Copyright 2012 The Press Start 2P Project Authors (cody@zone38.net), with Reserved Font Name \"Press Start 2P\"
+- **Press Start 2P**: Copyright 2012 The Press Start 2P Project Authors (cody@zone38.net), with Reserved Font Name "Press Start 2P"
 - **Rammetto One**: Copyright 2011 The Rammetto Project Authors (https://github.com/googlefonts/RammettoFont), with Reserved Font Name Rammetto.
 - **Reenie Beanie**: Copyright (c) 2010 Typeco (james@typeco.com). All rights reserved.
 - **Rubik**: Copyright 2015 The Rubik Project Authors (https://github.com/googlefonts/rubik)
-- **Russo One**: Copyright (c) 2011-2012, Jovanny Lemonad (lemonad@jovanny.ru), with Reserved Font Name \"Russo\"
-- **Rye**: Copyright (c) 2012, Sorkin Type Co (eben@eyebytes.com) with Reserved Font Name \'Rye\'
-- **Short Stack**: Copyright (c) 2011, Sorkin Type Co (www.sorkintype.com eben@eyebytes.com) with Reserved Font Names \"Short Stack\" and \"Short Stack One\".
+- **Russo One**: Copyright (c) 2011-2012, Jovanny Lemonad (lemonad@jovanny.ru), with Reserved Font Name "Russo"
+- **Rye**: Copyright (c) 2012, Sorkin Type Co (eben@eyebytes.com) with Reserved Font Name 'Rye'
+- **Short Stack**: Copyright (c) 2011, Sorkin Type Co (www.sorkintype.com eben@eyebytes.com) with Reserved Font Names "Short Stack" and "Short Stack One".
 - **Shrikhand**: Copyright (c) 2015 Jonny Pinhorn (jonpinhorn.typedesign@gmail.com)
 - **Silkscreen**: Copyright 2001 The Silkscreen Project Authors (https://github.com/googlefonts/silkscreen)
 - **Sniglet**: Copyright (c) 2008, Haley Fiege (haley@kingdomofawesome.com), Copyright (c) 2012, Brenda Gallo (gbrenda1987@gmail.com) Copyright (c) 2013, Pablo Impallari (www.impallari.com|impallari@gmail.com), with no Reserved Font Name.
@@ -208,12 +208,12 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Space Grotesk**: Copyright 2020 The Space Grotesk Project Authors (https://github.com/floriankarsten/space-grotesk)
 - **Space Mono**: Copyright 2016 The Space Mono Project Authors (https://github.com/googlefonts/spacemono)
 - **Special Elite**: Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI). All rights reserved. Available under the Apache 2.0 licence. http://www.apache.org/licenses/LICENSE-2.0.html
-- **Stardos Stencil**: Copyright (c) 2011, Vernon Adams (vern@newtypography.co.uk) with Reserved Font Names \'Stardos\'. All rights reserved.
+- **Stardos Stencil**: Copyright (c) 2011, Vernon Adams (vern@newtypography.co.uk) with Reserved Font Names 'Stardos'. All rights reserved.
 - **Tiny5**: Copyright 2022-2024 The Tiny5 Project Authors (https://github.com/Gissio/font_tiny5)
-- **Titan One**: Copyright (c) 2011 Rodrigo Fuenzalida (hello@rfuenzalida.com), with Reserved Font Name \"Titan One\"
+- **Titan One**: Copyright (c) 2011 Rodrigo Fuenzalida (hello@rfuenzalida.com), with Reserved Font Name "Titan One"
 - **Unbounded**: Copyright 2022 The Unbounded Project Authors (https://github.com/googlefonts/unbounded)
-- **UnifrakturCook**: Copyright (c) 2010 j. \'mach\' wust (j.mach.wust@gmail.com) with Reserved Font Name UnifrakturCook. Copyright (c) 2009 Peter Wiegel (wiegel@peter-wiegel.de). This Font Software is licensed under the SIL Open Font License, Version 1.1.
-- **UnifrakturMaguntia**: Copyright (c) 2010 j. \'mach\' wust (j.mach.wust@gmail.com) with Reserved Font Name UnifrakturMaguntia. Copyright (c) 2009 Peter Wiegel (wiegel@peter-wiegel.de). This Font Software is licensed under the SIL Open Font License, Version 1.1.
+- **UnifrakturCook**: Copyright (c) 2010 j. 'mach' wust (j.mach.wust@gmail.com) with Reserved Font Name UnifrakturCook. Copyright (c) 2009 Peter Wiegel (wiegel@peter-wiegel.de). This Font Software is licensed under the SIL Open Font License, Version 1.1.
+- **UnifrakturMaguntia**: Copyright (c) 2010 j. 'mach' wust (j.mach.wust@gmail.com) with Reserved Font Name UnifrakturMaguntia. Copyright (c) 2009 Peter Wiegel (wiegel@peter-wiegel.de). This Font Software is licensed under the SIL Open Font License, Version 1.1.
 - **VT323**: Copyright 2011, The VT323 Project Authors (peter.hull@oikoi.com)
 - **Yatra One**: Copyright 2014 The Yatra Project Authors.
 - **Yellowtail**: Copyright (c) 2011 by Brian J. Bonislawsky DBA Astigmatic (AOETI). All rights reserved. Available under the Apache 2.0 licence. http://www.apache.org/licenses/LICENSE-2.0.html
