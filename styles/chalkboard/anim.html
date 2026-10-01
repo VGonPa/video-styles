@@ -1,69 +1,128 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><style>html,body{margin:0;background:#1f2b26}canvas{display:block}</style></head>
-<body><canvas id="c" width="1920" height="1080"></canvas>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>html, body { margin: 0; background: #1f2b26; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
 <script src="common.js"></script>
 <script>
 // CHALKBOARD — Lesson 3 · Pythagoras: chalk texture, counted squares, eraser wipe, ladder word problem
 const WHITE = '#f3f0e6', YEL = '#f1d35f', FONT = "'Caveat'";
-const TRAY = 1004;
+const TRAY = 1004;                                // top edge of the wooden chalk tray
 
-// ---------- Board + wood tray (once) ----------
+// ---------- static layers, all painted once ----------
+// The slate: green-black gradient, mottling, ghosts of old erasing, grain, vignette, then the tray with chalk.
 const board = mk(W, H);
-{ const c = board.getContext('2d'), r = rng(11);
-  const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#26352e'); g.addColorStop(1, '#1b2621'); c.fillStyle = g; c.fillRect(0, 0, W, H);
-  // large scale spots
-  for (let i = 0; i < 140; i++) { const x = r() * W, y = r() * H, rr = 80 + r() * 260, lt = r() < .5;
-    const gg = c.createRadialGradient(x, y, 0, x, y, rr); gg.addColorStop(0, lt ? 'rgba(120,150,130,0.05)' : 'rgba(0,0,0,0.07)'); gg.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gg; c.fillRect(x - rr, y - rr, rr * 2, rr * 2); }
-  // old eraser marks: arc-shaped striped spots
-  c.lineCap = 'round';
-  for (let i = 0; i < 16; i++) { const cx = r() * W, cy = r() * (TRAY - 100), R = 160 + r() * 380, a0 = r() * 6, span = .6 + r() * 1.1, al = 0.018 + r() * 0.03;
-    for (let k = 0; k < 26; k++) { const rr = R + (k - 13) * 3.4; c.strokeStyle = `rgba(225,235,225,${al * (0.4 + r() * 0.9)})`; c.lineWidth = 1 + r() * 2.4;
-      c.beginPath(); c.arc(cx, cy, rr, a0 + r() * .08, a0 + span - r() * .1); c.stroke(); } }
-  // horizontal wipe strokes
-  for (let i = 0; i < 10; i++) { const x = r() * W, y = r() * (TRAY - 60), w = 300 + r() * 500, al = 0.015 + r() * 0.022;
-    for (let k = 0; k < 20; k++) { c.strokeStyle = `rgba(225,235,225,${al * r()})`; c.lineWidth = 1 + r() * 2; const yy = y + k * 4 + r() * 2; c.beginPath(); c.moveTo(x, yy); c.bezierCurveTo(x + w * .3, yy - 8, x + w * .7, yy + 8, x + w, yy + (r() - .5) * 6); c.stroke(); } }
-  // fine grain
-  const id = c.getImageData(0, 0, W, H), d = id.data;
-  for (let q = 0; q < d.length; q += 4) { const n = (r() - .5) * 9; d[q] += n; d[q + 1] += n; d[q + 2] += n; } c.putImageData(id, 0, 0);
-  // vignetting
-  const v = c.createRadialGradient(960, 480, 520, 960, 540, 1250); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.42)'); c.fillStyle = v; c.fillRect(0, 0, W, H);
-  // wooden chalk holder
-  const wg = c.createLinearGradient(0, TRAY, 0, H); wg.addColorStop(0, '#8a5a34'); wg.addColorStop(.12, '#6d4424'); wg.addColorStop(.55, '#58361c'); wg.addColorStop(1, '#3a2312'); c.fillStyle = wg; c.fillRect(0, TRAY, W, H - TRAY);
-  for (let k = 0; k < 90; k++) { c.strokeStyle = `rgba(${r() < .5 ? '30,15,5' : '160,110,70'},${0.08 + r() * 0.12})`; c.lineWidth = .6 + r() * 1.4; const y = TRAY + 8 + r() * (H - TRAY - 10); c.beginPath(); c.moveTo(0, y); for (let x = 0; x <= W; x += 120) c.lineTo(x, y + Math.sin(x * .004 + k) * 2.5); c.stroke(); }
-  c.fillStyle = 'rgba(0,0,0,0.45)'; c.fillRect(0, TRAY - 3, W, 5);
-  c.fillStyle = 'rgba(255,220,180,0.18)'; c.fillRect(0, TRAY + 2, W, 2);
-  // powder in the tray + two chalks
-  for (let i = 0; i < 1400; i++) { c.fillStyle = `rgba(235,235,225,${r() * 0.25})`; c.fillRect(r() * W, TRAY + 6 + r() * 18, 1 + r() * 2, 1 + r() * 1.5); }
-  const chalk = (x, y, l, rot, col) => { c.save(); c.translate(x, y); c.rotate(rot); c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.roundRect(-l / 2 + 4, -6, l, 20, 9); c.fill();
-    const cg = c.createLinearGradient(0, -10, 0, 10); cg.addColorStop(0, col); cg.addColorStop(.6, col); cg.addColorStop(1, 'rgba(120,110,90,1)'); c.fillStyle = cg; c.beginPath(); c.roundRect(-l / 2, -10, l, 20, 9); c.fill(); c.restore(); };
-  chalk(1480, TRAY + 22, 120, -0.04, '#efece2'); chalk(1622, TRAY + 24, 64, 0.08, '#efd66a');
+paintSlate(board.getContext('2d'), rng(11));
+function paintSlate(g, rand) {
+  const slate = g.createLinearGradient(0, 0, 0, H);
+  slate.addColorStop(0, '#26352e'); slate.addColorStop(1, '#1b2621');
+  g.fillStyle = slate; g.fillRect(0, 0, W, H);
+  for (let n = 0; n < 140; n++) {                 // light and dark mottling
+    const x = rand() * W, y = rand() * H, rad = 80 + rand() * 260, light = rand() < .5;
+    const spot = g.createRadialGradient(x, y, 0, x, y, rad);
+    spot.addColorStop(0, light ? 'rgba(120,150,130,0.05)' : 'rgba(0,0,0,0.07)'); spot.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = spot; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  g.lineCap = 'round';
+  for (let n = 0; n < 16; n++) {                  // curved eraser swipes: bundles of concentric arcs
+    const cx = rand() * W, cy = rand() * (TRAY - 100), R = 160 + rand() * 380, from = rand() * 6, span = .6 + rand() * 1.1, alpha = 0.018 + rand() * 0.03;
+    for (let ring = 0; ring < 26; ring++) {
+      const rad = R + (ring - 13) * 3.4;
+      g.strokeStyle = `rgba(225,235,225,${alpha * (0.4 + rand() * 0.9)})`; g.lineWidth = 1 + rand() * 2.4;
+      g.beginPath(); g.arc(cx, cy, rad, from + rand() * .08, from + span - rand() * .1); g.stroke();
+    }
+  }
+  for (let n = 0; n < 10; n++) {                  // straight eraser swipes: bundles of wavy lines
+    const x = rand() * W, y = rand() * (TRAY - 60), len = 300 + rand() * 500, alpha = 0.015 + rand() * 0.022;
+    for (let line = 0; line < 20; line++) {
+      g.strokeStyle = `rgba(225,235,225,${alpha * rand()})`; g.lineWidth = 1 + rand() * 2;
+      const ly = y + line * 4 + rand() * 2;
+      g.beginPath(); g.moveTo(x, ly); g.bezierCurveTo(x + len * .3, ly - 8, x + len * .7, ly + 8, x + len, ly + (rand() - .5) * 6); g.stroke();
+    }
+  }
+  const img = g.getImageData(0, 0, W, H), px = img.data;   // grain
+  for (let i = 0; i < px.length; i += 4) { const n = (rand() - .5) * 9; for (let ch = 0; ch < 3; ch++) px[i + ch] += n; }
+  g.putImageData(img, 0, 0);
+  const vig = g.createRadialGradient(960, 480, 520, 960, 540, 1250);
+  vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,0.42)');
+  g.fillStyle = vig; g.fillRect(0, 0, W, H);
+  paintTray(g, rand);
 }
-// ---------- Chalk grain (alpha mask, once) ----------
+function paintTray(g, rand) {
+  const wood = g.createLinearGradient(0, TRAY, 0, H);
+  [[0, '#8a5a34'], [.12, '#6d4424'], [.55, '#58361c'], [1, '#3a2312']].forEach(([at, col]) => wood.addColorStop(at, col));
+  g.fillStyle = wood; g.fillRect(0, TRAY, W, H - TRAY);
+  for (let n = 0; n < 90; n++) {                  // wood grain
+    g.strokeStyle = `rgba(${rand() < .5 ? '30,15,5' : '160,110,70'},${0.08 + rand() * 0.12})`; g.lineWidth = .6 + rand() * 1.4;
+    const y = TRAY + 8 + rand() * (H - TRAY - 10);
+    g.beginPath(); g.moveTo(0, y);
+    for (let x = 0; x <= W; x += 120) g.lineTo(x, y + Math.sin(x * .004 + n) * 2.5);
+    g.stroke();
+  }
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(0, TRAY - 3, W, 5);          // lip shadow
+  g.fillStyle = 'rgba(255,220,180,0.18)'; g.fillRect(0, TRAY + 2, W, 2);    // lip highlight
+  for (let n = 0; n < 1400; n++) {                // chalk powder
+    g.fillStyle = `rgba(235,235,225,${rand() * 0.25})`;
+    g.fillRect(rand() * W, TRAY + 6 + rand() * 18, 1 + rand() * 2, 1 + rand() * 1.5);
+  }
+  const stick = (x, y, len, rot, col) => {
+    g.save(); g.translate(x, y); g.rotate(rot);
+    g.fillStyle = 'rgba(0,0,0,0.35)'; g.beginPath(); g.roundRect(-len / 2 + 4, -6, len, 20, 9); g.fill();
+    const body = g.createLinearGradient(0, -10, 0, 10);
+    body.addColorStop(0, col); body.addColorStop(.6, col); body.addColorStop(1, 'rgba(120,110,90,1)');
+    g.fillStyle = body; g.beginPath(); g.roundRect(-len / 2, -10, len, 20, 9); g.fill();
+    g.restore();
+  };
+  stick(1480, TRAY + 22, 120, -0.04, '#efece2');
+  stick(1622, TRAY + 24, 64, 0.08, '#efd66a');
+}
+
+// Chalk texture as an alpha mask over the chalk layer: rows vary slowly (stroke direction), random pits drop out.
 const grain = mk(W, H);
-{ const c = grain.getContext('2d'), id = c.createImageData(W, H), d = id.data, r = rng(5);
-  // horizontal directional roughness: slow row change + dot gaps
-  const row = new Float32Array(H); for (let y = 0; y < H; y++) row[y] = 0.82 + 0.18 * Math.sin(y * 0.9) * Math.sin(y * 0.13 + 2);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const q = (y * W + x) * 4, n = r();
-    let a = row[y] * (0.72 + 0.28 * r()); if (n < 0.16) a *= 0.15 + r() * 0.3; d[q] = d[q + 1] = d[q + 2] = 255; d[q + 3] = Math.min(255, a * 255); }
-  c.putImageData(id, 0, 0);
-}
+{ const g = grain.getContext('2d'), img = g.createImageData(W, H), px = img.data, rand = rng(5);
+  const rowLevel = new Float32Array(H);
+  for (let y = 0; y < H; y++) rowLevel[y] = 0.82 + 0.18 * Math.sin(y * 0.9) * Math.sin(y * 0.13 + 2);
+  for (let y = 0, i = 0; y < H; y++) {
+    for (let x = 0; x < W; x++, i += 4) {
+      const pit = rand();
+      let alpha = rowLevel[y] * (0.72 + 0.28 * rand());
+      if (pit < 0.16) alpha *= 0.15 + rand() * 0.3;
+      px[i] = px[i + 1] = px[i + 2] = 255;
+      px[i + 3] = Math.min(255, alpha * 255);
+    }
+  }
+  g.putImageData(img, 0, 0); }
+
+// Working layers: L holds the chalk, M the area wiped so far, SM the smudge left inside the wipe.
 const L = mk(W, H), lc = L.getContext('2d');
-// eraser stamp (soft edge)
-const ER = { w: 250, h: 92 };
-const eStamp = mk(ER.w + 40, ER.h + 40);
-{ const c = eStamp.getContext('2d'); c.filter = 'blur(9px)'; c.fillStyle = '#000'; c.beginPath(); c.roundRect(24, 24, ER.w - 8, ER.h - 8, 20); c.fill(); }
-// wipe mask + vertical smudge streaks (the eraser moves up and down)
 const M = mk(W, H), mc = M.getContext('2d'), SM = mk(W, H), smc = SM.getContext('2d');
-const streak = mk(W, H);
-{ const c = streak.getContext('2d'), r = rng(9); for (let k = 0; k < 2600; k++) { const y = r() * H, x = r() * W, l = 60 + r() * 420; c.strokeStyle = `rgba(235,240,232,${0.15 + r() * 0.85})`; c.lineWidth = .6 + r() * 2.2; c.beginPath(); c.moveTo(x, y); c.lineTo(x + (r() - .5) * 5, y + l); c.stroke(); } }
+const ER = { w: 250, h: 92 };                     // eraser footprint
+const eStamp = mk(ER.w + 40, ER.h + 40);          // its soft-edged print, stamped along the wipe path
+{ const g = eStamp.getContext('2d'); g.filter = 'blur(9px)'; g.fillStyle = '#000'; g.beginPath(); g.roundRect(24, 24, ER.w - 8, ER.h - 8, 20); g.fill(); }
+const streak = mk(W, H);                          // vertical drag marks the eraser leaves behind
+{ const g = streak.getContext('2d'), rand = rng(9);
+  for (let n = 0; n < 2600; n++) {
+    const y = rand() * H, x = rand() * W, len = 60 + rand() * 420;
+    g.strokeStyle = `rgba(235,240,232,${0.15 + rand() * 0.85})`; g.lineWidth = .6 + rand() * 2.2;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rand() - .5) * 5, y + len); g.stroke();
+  } }
 // soft dust blob for the final puff
 const blob = mk(96, 96);
 { const c = blob.getContext('2d'), g = c.createRadialGradient(48, 48, 0, 48, 48, 48); g.addColorStop(0, 'rgba(240,240,232,0.26)'); g.addColorStop(.45, 'rgba(240,240,232,0.1)'); g.addColorStop(1, 'rgba(240,240,232,0)'); c.fillStyle = g; c.fillRect(0, 0, 96, 96); }
 
-// ---------- Actions ----------
+// ---------- timeline of chalk marks ----------
 const acts = [];
-function stroke(path, t0, t1, o = {}) { path.jitter(o.jit ?? 1.8, acts.length * 31 + 7); acts.push({ kind: 'path', path, t0, t1, color: o.color || WHITE, width: o.width || 8, ease: o.ease || (u => u) }); }
-function text(str, x, y, size, t0, t1, o = {}) { acts.push({ kind: 'text', str, x, y, size, t0, t1, color: o.color || WHITE, align: o.align || 'left', rot: o.rot || 0, w8: o.w8 || 700, hide: o.hide ?? 1e9 }); }
+function stroke(path, t0, t1, o = {}) {
+  path.jitter(o.jit ?? 1.8, acts.length * 31 + 7);
+  acts.push({ kind: 'path', path, t0, t1, color: o.color || WHITE, width: o.width || 8, ease: o.ease || (u => u) });
+}
+function text(str, x, y, size, t0, t1, o = {}) {
+  acts.push({ kind: 'text', str, x, y, size, t0, t1, color: o.color || WHITE, align: o.align || 'left', rot: o.rot || 0,
+              w8: o.w8 || 700, hide: o.hide ?? 1e9 });
+}
 function poly(pts, t0, t1, o = {}) { const p = P().M(...pts[0]); for (const q of pts.slice(1)) p.L(...q); stroke(p, t0, t1, o); }
 const add2 = (p, v, k = 1) => [p[0] + v[0] * k, p[1] + v[1] * k];
 // title
@@ -135,115 +194,188 @@ text('h² = 25 − 9', RX, 750, 116, 8.05, 8.45, { align: 'center' });
 text('h = 4 m', RX, 900, 140, 8.5, 8.8, { align: 'center', color: YEL });
 stroke(P().M(1215, 928).S([[1400, 922], [1560, 920], [1660, 924]], 20), 8.82, 8.98, { color: YEL, width: 8, ease: eout });
 const PUFF = { t: 8.98, x: 1672, y: 922 };
-acts.forEach(a => { if (a.kind === 'path') a.path.done(); });
+for (const a of acts) if (a.kind === 'path') a.path.done();
 
-// ---------- Drawing ----------
-function prepText() { for (const a of acts) if (a.kind === 'text') { ctx.font = `${a.w8} ${a.size}px ${FONT}`; a.w = ctx.measureText(a.str).width; a.xs = [0]; for (let i = 1; i <= a.str.length; i++) a.xs.push(ctx.measureText(a.str.slice(0, i)).width); a.left = a.align === 'center' ? a.x - a.w / 2 : a.x; } }
-function revealX(a, t) { const u = seg(t, a.t0, a.t1), n = a.str.length, f = u * n, i = Math.min(n - 1, Math.floor(f)); return lerp(a.xs[i], a.xs[i + 1], f - i); }
-function headOf(a, t) {
-  if (a.kind === 'text') { const u = seg(t, a.t0, a.t1), f = u * a.str.length, hx = a.left + revealX(a, t) - a.x, hy = -a.size * (0.25 + 0.18 * Math.sin(f * 3.1)), c = Math.cos(a.rot), s = Math.sin(a.rot);
-    return [a.x + hx * c - hy * s, a.y + hx * s + hy * c]; }
-  const q = a.path.at(a.ease(seg(t, a.t0, a.t1)) * a.path.len); return [q.x, q.y]; }
+// ---------- drawing ----------
+// Label widths, needed for the write-on (call once the font is loaded).
+function measureLabels() {
+  for (const a of acts) {
+    if (a.kind !== 'text') continue;
+    ctx.font = `${a.w8} ${a.size}px ${FONT}`;
+    a.w = ctx.measureText(a.str).width;
+    a.xs = [0];
+    for (let n = 1; n <= a.str.length; n++) a.xs.push(ctx.measureText(a.str.slice(0, n)).width);
+    a.left = a.align === 'center' ? a.x - a.w / 2 : a.x;
+  }
+}
+// Pixels of a label written by time t.
+function writtenWidth(a, t) {
+  const pos = seg(t, a.t0, a.t1) * a.str.length, letter = Math.min(a.str.length - 1, Math.floor(pos));
+  return lerp(a.xs[letter], a.xs[letter + 1], pos - letter);
+}
+// Where the chalk tip is at time t (used to seed dust); label tips bob and follow the label's rotation.
+function chalkTip(a, t) {
+  if (a.kind !== 'text') { const q = a.path.at(a.ease(seg(t, a.t0, a.t1)) * a.path.len); return [q.x, q.y]; }
+  const pos = seg(t, a.t0, a.t1) * a.str.length;
+  const dx = a.left + writtenWidth(a, t) - a.x, dy = -a.size * (0.25 + 0.18 * Math.sin(pos * 3.1));
+  const cos = Math.cos(a.rot), sin = Math.sin(a.rot);
+  return [a.x + dx * cos - dy * sin, a.y + dx * sin + dy * cos];
+}
 const quadC = q => [(q[0][0] + q[2][0]) / 2, (q[0][1] + q[2][1]) / 2];
 
+function drawLabel(c, a, t) {
+  if (t >= a.hide + 0.15) return;               // labels can be wiped away again
+  const shown = t >= a.t1 ? a.w + 30 : writtenWidth(a, t);
+  c.globalAlpha = 1 - seg(t, a.hide, a.hide + 0.15);
+  c.translate(a.x, a.y); c.rotate(a.rot); c.translate(-a.x, -a.y);
+  c.beginPath(); c.rect(a.left - 30, a.y - a.size * 1.2, shown + 30, a.size * 1.7); c.clip();
+  c.font = `${a.w8} ${a.size}px ${FONT}`; c.textAlign = 'left'; c.fillStyle = a.color;
+  const fade = c.globalAlpha;
+  c.globalAlpha = 0.07 * fade; c.lineWidth = 10; c.strokeStyle = a.color; c.lineJoin = 'round';
+  c.strokeText(a.str, a.left, a.y);              // faint dust halo
+  c.globalAlpha = fade;
+  c.fillText(a.str, a.left, a.y); c.fillText(a.str, a.left + 0.8, a.y - 0.6);   // doubled for a chalky, uneven edge
+}
+function drawLine(c, a, t) {
+  const drawn = a.ease(seg(t, a.t0, a.t1)) * a.path.len;
+  c.strokeStyle = a.color; c.lineCap = 'round'; c.lineJoin = 'round';
+  for (const [alpha, width] of [[0.07, a.width + 12], [1, a.width]]) {   // dust halo, then the line itself
+    c.globalAlpha = alpha; c.lineWidth = width;
+    c.beginPath(); a.path.trace(c, 0, drawn); c.stroke();
+  }
+}
+// quick chalk fill, inset from the grid lines, with a small pop
+function drawCell(c, a, t) {
+  const u = seg(t, a.t0, a.t1), [cx, cy] = quadC(a.q), k = 0.8 * (0.85 + 0.15 * eback(u));
+  c.globalAlpha = 0.2 + 0.25 * (1 - u); c.fillStyle = WHITE; c.beginPath();
+  a.q.forEach(([x, y], i) => { const px = cx + (x - cx) * k, py = cy + (y - cy) * k; i ? c.lineTo(px, py) : c.moveTo(px, py); }); c.closePath(); c.fill();
+}
+// running count while cells are ticked, then the total pops in yellow (scaled around its own centre)
+function drawCount(c, a, t) {
+  const done = t >= a.t1, n = done ? a.n : Math.min(a.n, Math.floor((t - a.t0) / a.dt) + 1);
+  const pop = done ? eback(seg(t, a.t1, a.t1 + 0.28), 2.4) : 1, size = done ? lerp(64, 112, pop) : 64;
+  c.font = `700 ${size}px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.lineJoin = 'round'; c.lineWidth = 16; c.strokeStyle = '#22302a'; c.globalAlpha = 0.85; c.strokeText(String(n), a.cx, a.cy + 4);
+  c.globalAlpha = 1; c.fillStyle = done ? YEL : WHITE; c.fillText(String(n), a.cx, a.cy + 4);
+}
+const PAINTERS = { text: drawLabel, path: drawLine, cell: drawCell, count: drawCount };
 function drawAct(c, a, t) {
   if (t < a.t0) return;
-  c.save();
-  if (a.kind === 'text') {
-    if (t >= a.hide + 0.15) { c.restore(); return; }
-    const rx = t >= a.t1 ? a.w + 30 : revealX(a, t);
-    c.globalAlpha = 1 - seg(t, a.hide, a.hide + 0.15);
-    c.translate(a.x, a.y); c.rotate(a.rot); c.translate(-a.x, -a.y);
-    c.beginPath(); c.rect(a.left - 30, a.y - a.size * 1.2, rx + 30, a.size * 1.7); c.clip();
-    c.font = `${a.w8} ${a.size}px ${FONT}`; c.textAlign = 'left'; c.fillStyle = a.color;
-    const ga = c.globalAlpha; c.globalAlpha = 0.07 * ga; c.lineWidth = 10; c.strokeStyle = a.color; c.lineJoin = 'round'; c.strokeText(a.str, a.left, a.y);   // dust halo
-    c.globalAlpha = ga; c.fillText(a.str, a.left, a.y); c.fillText(a.str, a.left + 0.8, a.y - 0.6);
-  } else if (a.kind === 'path') {
-    const u = a.ease(seg(t, a.t0, a.t1)); c.strokeStyle = a.color; c.lineCap = 'round'; c.lineJoin = 'round';
-    c.globalAlpha = 0.07; c.lineWidth = a.width + 12; c.beginPath(); a.path.trace(c, 0, u * a.path.len); c.stroke();
-    c.globalAlpha = 1; c.lineWidth = a.width; c.beginPath(); a.path.trace(c, 0, u * a.path.len); c.stroke();
-  } else if (a.kind === 'cell') {
-    // quick chalk fill, inset from the grid lines, with a small pop
-    const u = seg(t, a.t0, a.t1), [cx, cy] = quadC(a.q), k = 0.8 * (0.85 + 0.15 * eback(u));
-    c.globalAlpha = 0.2 + 0.25 * (1 - u); c.fillStyle = WHITE; c.beginPath();
-    a.q.forEach(([x, y], i) => { const px = cx + (x - cx) * k, py = cy + (y - cy) * k; i ? c.lineTo(px, py) : c.moveTo(px, py); }); c.closePath(); c.fill();
-  } else if (a.kind === 'count') {
-    // running count while cells are ticked, then the total pops in yellow (scaled around its own centre)
-    const done = t >= a.t1, n = done ? a.n : Math.min(a.n, Math.floor((t - a.t0) / a.dt) + 1);
-    const pop = done ? eback(seg(t, a.t1, a.t1 + 0.28), 2.4) : 1, size = done ? lerp(64, 112, pop) : 64;
-    c.font = `700 ${size}px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.lineJoin = 'round'; c.lineWidth = 16; c.strokeStyle = '#22302a'; c.globalAlpha = 0.85; c.strokeText(String(n), a.cx, a.cy + 4);
-    c.globalAlpha = 1; c.fillStyle = done ? YEL : WHITE; c.fillText(String(n), a.cx, a.cy + 4);
-  }
-  c.restore();
+  c.save(); PAINTERS[a.kind](c, a, t); c.restore();
 }
-// chalk dust particles (pre-generated)
+
+// ---------- chalk dust, generated once ----------
+// `parts` are specks that fall under gravity; `puffs` are soft clouds for the final flourish.
 const parts = [], puffs = [];
+const speck = (t0, x, y, vx, vy, life, s, a) => ({ t0, x, y, vx, vy, life, s, a });
 function buildParticles() {
-  const r = rng(21);
-  for (const a of acts) { if (a.kind !== 'path' && a.kind !== 'text') continue;
-    for (let tt = a.t0; tt < a.t1; tt += 1 / 90) { if (r() < 0.55) { const [x, y] = headOf(a, tt); parts.push({ t0: tt, x, y, vx: (r() - .5) * 40, vy: 10 + r() * 50, life: .6 + r() * 1.1, s: .8 + r() * 1.8, a: .35 + r() * .45 }); } } }
-  for (const a of acts) if (a.kind === 'cell') { const [x, y] = quadC(a.q); for (let k = 0; k < 4; k++) parts.push({ t0: a.t0, x: x + (r() - .5) * 30, y: y + (r() - .5) * 30, vx: (r() - .5) * 60, vy: r() * 40, life: .5 + r() * .6, s: 1 + r() * 1.5, a: .3 + r() * .3 }); }
-  for (let tt = ERASE.t0; tt < ERASE.t1; tt += 1 / 120) { const q = ePath.at(eio2(seg(tt, ERASE.t0, ERASE.t1)) * ePath.len);
-    for (let k = 0; k < 3; k++) parts.push({ t0: tt, x: q.x + (r() - .5) * ER.w, y: q.y + ER.h * (r() - .5) * .8, vx: (r() - .5) * 70, vy: 20 + r() * 60, life: .8 + r() * 1.6, s: 1 + r() * 2.2, a: .18 + r() * .3 }); }
+  const rand = rng(21);
+  for (const a of acts) {                         // shed by the chalk tip while drawing and writing
+    if (a.kind !== 'path' && a.kind !== 'text') continue;
+    for (let tt = a.t0; tt < a.t1; tt += 1 / 90) {
+      if (rand() >= 0.55) continue;
+      const [x, y] = chalkTip(a, tt);
+      parts.push(speck(tt, x, y, (rand() - .5) * 40, 10 + rand() * 50, .6 + rand() * 1.1, .8 + rand() * 1.8, .35 + rand() * .45));
+    }
+  }
+  for (const a of acts) {                         // a few from each ticked cell
+    if (a.kind !== 'cell') continue;
+    const [x, y] = quadC(a.q);
+    for (let n = 0; n < 4; n++) parts.push(speck(a.t0, x + (rand() - .5) * 30, y + (rand() - .5) * 30, (rand() - .5) * 60, rand() * 40, .5 + rand() * .6, 1 + rand() * 1.5, .3 + rand() * .3));
+  }
+  for (let tt = ERASE.t0; tt < ERASE.t1; tt += 1 / 120) {   // kicked up along the eraser's path
+    const q = ePath.at(eio2(seg(tt, ERASE.t0, ERASE.t1)) * ePath.len);
+    for (let n = 0; n < 3; n++) parts.push(speck(tt, q.x + (rand() - .5) * ER.w, q.y + ER.h * (rand() - .5) * .8, (rand() - .5) * 70, 20 + rand() * 60, .8 + rand() * 1.6, 1 + rand() * 2.2, .18 + rand() * .3));
+  }
   // final puff: soft clouds that billow and slow down, plus specks that fall
-  for (let k = 0; k < 26; k++) { const an = -Math.PI * (0.02 + r() * 0.7), sp = 120 + r() * 300;
-    puffs.push({ t0: PUFF.t + r() * 0.08, x: PUFF.x + (r() - .5) * 20, y: PUFF.y + (r() - .5) * 12, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, life: 1.0 + r() * 0.7, s: 0.7 + r() * 1.0, a: 0.3 + r() * 0.35 }); }
-  for (let k = 0; k < 160; k++) { const an = -Math.PI * r(), sp = 60 + r() * 320;
-    parts.push({ t0: PUFF.t + r() * 0.05, x: PUFF.x, y: PUFF.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp * 0.8, life: .6 + r() * .9, s: 1 + r() * 2.2, a: .4 + r() * .5 }); }
+  for (let n = 0; n < 26; n++) {
+    const an = -Math.PI * (0.02 + rand() * 0.7), sp = 120 + rand() * 300;
+    puffs.push(speck(PUFF.t + rand() * 0.08, PUFF.x + (rand() - .5) * 20, PUFF.y + (rand() - .5) * 12, Math.cos(an) * sp, Math.sin(an) * sp, 1.0 + rand() * 0.7, 0.7 + rand() * 1.0, 0.3 + rand() * 0.35));
+  }
+  for (let n = 0; n < 160; n++) {
+    const an = -Math.PI * rand(), sp = 60 + rand() * 320;
+    parts.push(speck(PUFF.t + rand() * 0.05, PUFF.x, PUFF.y, Math.cos(an) * sp, Math.sin(an) * sp * 0.8, .6 + rand() * .9, 1 + rand() * 2.2, .4 + rand() * .5));
+  }
 }
+
+// ---------- the eraser ----------
+// [x, y, lift]: slides in from the left, follows ePath during the wipe, then leaves up and to the left.
 function eraserPos(t) {
-  if (t < ERASE.t0) { const u = eio2(seg(t, ERASE.in0, ERASE.t0)); const s = ePath.p[0]; return [lerp(-320, s[0], u), lerp(560, s[1], u), 1 - u]; }
-  if (t <= ERASE.t1) { const q = ePath.at(eio2(seg(t, ERASE.t0, ERASE.t1)) * ePath.len); return [q.x, q.y, 0]; }
-  const u = eio2(seg(t, ERASE.t1, ERASE.out1)), e = ePath.p[ePath.p.length - 1]; return [lerp(e[0], -300, u), lerp(e[1], 300, u), u];
+  if (t < ERASE.t0) {
+    const u = eio2(seg(t, ERASE.in0, ERASE.t0)), start = ePath.p[0];
+    return [lerp(-320, start[0], u), lerp(560, start[1], u), 1 - u];
+  }
+  if (t <= ERASE.t1) {
+    const q = ePath.at(eio2(seg(t, ERASE.t0, ERASE.t1)) * ePath.len);
+    return [q.x, q.y, 0];
+  }
+  const u = eio2(seg(t, ERASE.t1, ERASE.out1)), end = ePath.p[ePath.p.length - 1];
+  return [lerp(end[0], -300, u), lerp(end[1], 300, u), u];
 }
 function drawEraser(x, y, lift) {
-  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.05 + Math.sin(y * 0.01) * 0.03);
-  const w = ER.w + 10, h = ER.h + 10;
-  ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.filter = 'blur(12px)'; ctx.beginPath(); ctx.roundRect(-w / 2 + 16 + lift * 26, -h / 2 + 22 + lift * 30, w, h, 16); ctx.fill(); ctx.filter = 'none';
-  // felt base
-  ctx.fillStyle = '#5d605c'; ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2 + 14, w, h - 2, 14); ctx.fill();
-  ctx.fillStyle = 'rgba(235,235,226,0.5)'; ctx.fillRect(-w / 2 + 8, h / 2 - 5, w - 16, 4); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(-w / 2 + 4, h / 2 - 16, w - 8, 3);
-  // wooden top
-  const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2 - 8); g.addColorStop(0, '#b99670'); g.addColorStop(.45, '#9a774f'); g.addColorStop(1, '#6c5033');
-  ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h - 18, 14); ctx.fill();
+  const w = ER.w + 10, h = ER.h + 10, left = -w / 2, top = -h / 2;
+  const block = (fill, x0, y0, bw, bh, r) => { ctx.fillStyle = fill; ctx.beginPath(); ctx.roundRect(x0, y0, bw, bh, r); ctx.fill(); };
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(-0.05 + Math.sin(y * 0.01) * 0.03);
+  ctx.filter = 'blur(12px)';                      // drop shadow, offset more when lifted
+  block('rgba(0,0,0,0.38)', left + 16 + lift * 26, top + 22 + lift * 30, w, h, 16);
+  ctx.filter = 'none';
+  block('#5d605c', left, top + 14, w, h - 2, 14);  // grey felt
+  ctx.fillStyle = 'rgba(235,235,226,0.5)'; ctx.fillRect(left + 8, h / 2 - 5, w - 16, 4);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(left + 4, h / 2 - 16, w - 8, 3);
+  const wood = ctx.createLinearGradient(0, top, 0, h / 2 - 8);
+  wood.addColorStop(0, '#b99670'); wood.addColorStop(.45, '#9a774f'); wood.addColorStop(1, '#6c5033');
+  block(wood, left, top, w, h - 18, 14);           // wooden back
   ctx.strokeStyle = 'rgba(70,40,15,0.35)'; ctx.lineWidth = 1.4;
-  for (let k = 0; k < 5; k++) { const yy = -h / 2 + 14 + k * 13 + (k % 2) * 3; ctx.globalAlpha = 0.5 + (k % 3) * 0.2; ctx.beginPath(); ctx.moveTo(-w / 2 + 14, yy); ctx.bezierCurveTo(-60, yy + 6 - k, 30, yy - 5 + k, w / 2 - 14, yy + 1); ctx.stroke(); } ctx.globalAlpha = 1;
-  ctx.fillStyle = 'rgba(255,240,210,0.22)'; ctx.beginPath(); ctx.roundRect(-w / 2 + 6, -h / 2 + 4, w - 12, 8, 4); ctx.fill();
+  for (let n = 0; n < 5; n++) {                   // its grain
+    const gy = top + 14 + n * 13 + (n % 2) * 3;
+    ctx.globalAlpha = 0.5 + (n % 3) * 0.2;
+    ctx.beginPath(); ctx.moveTo(left + 14, gy); ctx.bezierCurveTo(-60, gy + 6 - n, 30, gy - 5 + n, w / 2 - 14, gy + 1); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  block('rgba(255,240,210,0.22)', left + 6, top + 4, w - 12, 8, 4);   // bevel highlight
   ctx.restore();
 }
 
-function render(t) {
-  // 1) chalk layer
+// ---------- frame ----------
+// Chalk goes to its own layer so the eraser can cut it and the grain mask can texture it.
+function paintChalk(t) {
   lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalCompositeOperation = 'source-over'; lc.clearRect(0, 0, W, H);
   for (const a of acts) if (a.t0 < ERASE.t0) drawAct(lc, a, t);
   if (t > ERASE.t0) {
-    const u = eio2(seg(t, ERASE.t0, ERASE.t1)), s1 = u * ePath.len;
+    const reach = eio2(seg(t, ERASE.t0, ERASE.t1)) * ePath.len;
     mc.clearRect(0, 0, W, H);
-    for (let s = 0; s <= s1; s += 7) { const q = ePath.at(s); mc.drawImage(eStamp, q.x - ER.w / 2 - 20, q.y - ER.h / 2 - 20); }
-    lc.globalCompositeOperation = 'destination-out'; lc.globalAlpha = 0.92; lc.drawImage(M, 0, 0);
-    smc.globalCompositeOperation = 'source-over'; smc.clearRect(0, 0, W, H); smc.drawImage(M, 0, 0); smc.globalCompositeOperation = 'source-in'; smc.drawImage(streak, 0, 0);
+    for (let s = 0; s <= reach; s += 7) { const q = ePath.at(s); mc.drawImage(eStamp, q.x - ER.w / 2 - 20, q.y - ER.h / 2 - 20); }
+    lc.globalCompositeOperation = 'destination-out'; lc.globalAlpha = 0.92; lc.drawImage(M, 0, 0);      // wipe
+    smc.globalCompositeOperation = 'source-over'; smc.clearRect(0, 0, W, H); smc.drawImage(M, 0, 0);
+    smc.globalCompositeOperation = 'source-in'; smc.drawImage(streak, 0, 0);                            // streaks, only where wiped
     lc.globalCompositeOperation = 'source-over'; lc.globalAlpha = 0.14; lc.drawImage(SM, 0, 0);
     lc.globalAlpha = 1;
   }
   for (const a of acts) if (a.t0 >= ERASE.t0) drawAct(lc, a, t);
   lc.globalCompositeOperation = 'destination-in'; lc.drawImage(grain, 0, 0); lc.globalCompositeOperation = 'source-over';
-  // 2) scene (slow camera push)
-  const s = 1 + 0.04 * eio2(seg(t, 0, 10)), cx = 960, cy = 540;
-  ctx.setTransform(s, 0, 0, s, 960 - cx * s, 540 - cy * s);
-  ctx.drawImage(board, 0, 0); ctx.drawImage(L, 0, 0);
-  // dust
-  for (const p of parts) { const age = t - p.t0; if (age < 0 || age > p.life) continue; const k = age / p.life;
-    ctx.fillStyle = `rgba(240,240,230,${p.a * (1 - k)})`; ctx.fillRect(p.x + p.vx * age, p.y + p.vy * age + 90 * age * age, p.s, p.s); }
+}
+function paintDust(t) {
+  for (const p of parts) {
+    const age = t - p.t0;
+    if (age < 0 || age > p.life) continue;
+    ctx.fillStyle = `rgba(240,240,230,${p.a * (1 - age / p.life)})`;
+    ctx.fillRect(p.x + p.vx * age, p.y + p.vy * age + 90 * age * age, p.s, p.s);
+  }
   for (const p of puffs) { const age = t - p.t0; if (age < 0 || age > p.life) continue; const k = age / p.life, dr = (1 - Math.exp(-4 * age)) / 4, sc = p.s * (0.6 + 2.2 * eout(k)) * 96;
     ctx.globalAlpha = p.a * Math.pow(1 - k, 1.4) * seg(age, 0, 0.12); ctx.drawImage(blob, p.x + p.vx * dr - sc / 2, p.y + p.vy * dr - 18 * age - sc / 2, sc, sc); }
   ctx.globalAlpha = 1;
-  // eraser
-  if (t > ERASE.in0 && t < ERASE.out1) { const [x, y, lift] = eraserPos(t); drawEraser(x, y, lift); }
+}
+function render(t) {
+  paintChalk(t);
+  const zoom = 1 + 0.04 * eio2(seg(t, 0, 10));    // slow push in on the centre
+  ctx.setTransform(zoom, 0, 0, zoom, 960 - 960 * zoom, 540 - 540 * zoom);
+  ctx.drawImage(board, 0, 0); ctx.drawImage(L, 0, 0);
+  paintDust(t);
+  if (t > ERASE.in0 && t < ERASE.out1) drawEraser(...eraserPos(t));
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // fade in / out
-  const fi = 1 - seg(t, 0, 0.3), fo = seg(t, 9.45, 10);
-  const a = Math.max(fi, eio2(fo)); if (a > 0) { ctx.fillStyle = `rgba(12,17,15,${a})`; ctx.fillRect(0, 0, W, H); }
+  const dark = Math.max(1 - seg(t, 0, 0.3), eio2(seg(t, 9.45, 10)));   // fade in and out
+  if (dark > 0) { ctx.fillStyle = `rgba(12,17,15,${dark})`; ctx.fillRect(0, 0, W, H); }
 }
 // sound events for audio.py (k = kind, t = seconds, d = duration)
 window.events = () => {
@@ -257,6 +389,14 @@ window.events = () => {
   ev.push({ k: 'thud', t: ERASE.t0 - 0.02 }, { k: 'erase', t: ERASE.t0, d: ERASE.t1 - ERASE.t0 }, { k: 'puff', t: PUFF.t });
   return ev.sort((x, y) => x.t - y.t);
 };
-window.ready = loadFont('Caveat', 'Caveat-700', 700).then(() => document.fonts.load(`700 80px ${FONT}`, 'Lesson Pythagoras a² + b² = c² − h ?')).then(() => { prepText(); buildParticles(); });
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
-</script></body></html>
+window.ready = loadFont('Caveat', 'Caveat-700', 700)
+  .then(() => document.fonts.load(`700 80px ${FONT}`, 'Lesson Pythagoras a² + b² = c² − h ?'))
+  .then(() => { measureLabels(); buildParticles(); });
+window.draw = ({ t }) => {
+  render(t);
+  const url = cv.toDataURL('image/jpeg', 0.92);
+  return url.slice(url.indexOf(',') + 1);
+};
+</script>
+</body>
+</html>
