@@ -14,6 +14,7 @@
 //                path-dependent simulations); absent: pages take frames round-robin
 //   eventsGpu    GPU mode for events.mjs (same values as gpu). Kept separate because some styles derive
 //                cue timings from what they draw, and their events.json was produced without GPU flags.
+//   signal       file name for events.mjs to write window.signal()'s base64 sample stream to, instead of events.json
 //
 // Playwright is looked up in $PLAYWRIGHT_DIR, then the global @playwright/test, then local packages.
 // events.mjs imports this module to share the browser setup.

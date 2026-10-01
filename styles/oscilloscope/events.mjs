@@ -1,16 +1,24 @@
-// node events.mjs → writes the beam's X/Y deflection signal from anim.html (48 kHz, interleaved float32) to xy.f32.
-// audio.py turns it into the soundtrack: left channel = X, right channel = Y, exactly what the beam draws.
-import { createRequire } from 'module'; import { execSync } from 'child_process'; import path from 'path'; import fs from 'fs';
-const require = createRequire(import.meta.url);
-// Playwright: global @playwright/test (as in the other styles), else $PLAYWRIGHT_DIR (a playwright or playwright-core package dir)
-const loadPW = () => { const cands = [process.env.PLAYWRIGHT_DIR, path.join(execSync('npm root -g').toString().trim(), '@playwright/test'), 'playwright', 'playwright-core'].filter(Boolean);
-  for (const c of cands) { try { return require(c); } catch {} } throw new Error('Playwright not found: npm i -g @playwright/test or set PLAYWRIGHT_DIR'); };
-const { chromium } = loadPW();
-const dir = path.dirname(new URL(import.meta.url).pathname);
-const base = path.join(process.env.HOME, 'Library/Caches/ms-playwright');
-const d = fs.readdirSync(base).filter(d => d.startsWith('chromium_headless_shell-')).sort().reverse()[0];
-const b = await chromium.launch({ executablePath: path.join(base, d, 'chrome-headless-shell-mac-arm64/chrome-headless-shell') });
-const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });
-await p.goto('file://' + path.join(dir, 'anim.html')); await p.evaluate(() => window.ready);
-fs.writeFileSync(path.join(dir, 'xy.f32'), Buffer.from(await p.evaluate(() => window.signal()), 'base64'));
-await b.close();
+// Writes the style's sound cue list to events.json for audio.py. The canonical copy lives in
+// tools/events.mjs and is copied unchanged into each styles/<slug>/ folder next to render.mjs.
+//
+//   node events.mjs
+//
+// Opens anim.html like render.mjs does (GPU mode from render.json `eventsGpu`) and saves what
+// `window.events()` returns. A style that drives its audio from a raw sample stream instead sets
+// render.json `signal` to a file name: `window.signal()` must then return base64 bytes, which are
+// written to that file and no events.json is produced.
+import fs from 'fs';
+import path from 'path';
+import { here, launch, openPage, settings } from './render.mjs';
+
+const cfg = settings();
+const browser = await launch(cfg.eventsGpu);
+const page = await openPage(browser);
+if (cfg.signal) {
+  const bytes = await page.evaluate(() => window.signal());
+  fs.writeFileSync(path.join(here, cfg.signal), Buffer.from(bytes, 'base64'));
+} else {
+  const cues = await page.evaluate(() => window.events());
+  fs.writeFileSync(path.join(here, 'events.json'), JSON.stringify(cues));
+}
+await browser.close();
