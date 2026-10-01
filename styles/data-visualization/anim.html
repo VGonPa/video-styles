@@ -1,34 +1,71 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="fonts.css"></head>
-<body style="margin:0;background:#f6f4ef"><canvas id="c" width="1920" height="1080"></canvas>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html, body { margin: 0; background: #f6f4ef; }</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// ─────────────────────────────────────────────────────────────────────────────
-//  data-visualization — editorial data journalism: protected bike lanes. window.draw({t}) → JPEG base64
-//  Scene 1: line chart of daily cyclists draws itself, lane-opening marker, bracket + "×3" counter.
-//  Scroll (scrollytelling) → Scene 2: street-by-street bars, with vs without lanes.
-//  Scroll → Scene 3: small multiples by season. Closing: content lifts away, key takeaway holds.
-// ─────────────────────────────────────────────────────────────────────────────
-const W = 1920, H = 1080, DUR = 10.0;
-const cv = document.getElementById('c'); const ctx = cv.getContext('2d');
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const lerp = (a, b, p) => a + (b - a) * p;
-const eOut = x => 1 - Math.pow(1 - x, 3), eOut4 = x => 1 - Math.pow(1 - x, 4), eIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-const eBack = x => { const c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
-const PAPER = '#f6f4ef', INK = '#15130f', MUTED = '#6d685e', GRID = '#dcd7cc', ACC = '#d8402f', GREY = '#a19b8f', DARK = '#45413a';
-const SERIF = "'Source Serif 4', Georgia, serif", SANS = "'Libre Franklin', sans-serif";
-function F(size, w, fam, ls = 0) { ctx.font = `${w} ${size}px ${fam}`; ctx.letterSpacing = ls + 'px'; }
-const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
-const fmt = v => Math.round(v).toLocaleString('en-US');
-function rng(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+/* data-visualization: an editorial data story about protected bike lanes.
+   Act 1  a monthly line chart traces itself, the lane opening is marked, a bracket counts up to "x3".
+   Act 2  the page scrolls to a street-by-street bar chart, lane streets vs the rest.
+   Act 3  another scroll to four seasonal small multiples, before vs after.
+   Close  the stack lifts away and one takeaway line holds, with the act 1 chart echoed as a sparkline.
+   Contract: window.ready resolves when fonts and paper are prepared; window.draw({t}) returns JPEG base64. */
 
-// ── data (illustrative) ─────────────────────────────────────────────────────
-// average daily cyclists on one avenue, 24 months; the protected lane opens after month 8
+const canvas = document.getElementById('c');
+const g = canvas.getContext('2d');
+const VW = canvas.width, VH = canvas.height, LENGTH = 10;
+
+// palette and type
+const C = {
+  paper: '#f6f4ef', ink: '#15130f', muted: '#6d685e', rule: '#dcd7cc',
+  red: '#d8402f', grey: '#a19b8f', dark: '#45413a',
+};
+const SERIF_FACE = "'Source Serif 4', Georgia, serif";
+const SANS_FACE = "'Libre Franklin', sans-serif";
+
+// ── small maths ────────────────────────────────────────────────────────────
+const unit = v => (v < 0 ? 0 : v > 1 ? 1 : v);
+const span = (t, t0, t1) => unit((t - t0) / (t1 - t0));
+const mix = (a, b, k) => a * (1 - k) + b * k;
+const ease = {
+  out3: k => 1 - (1 - k) ** 3,
+  out4: k => 1 - (1 - k) ** 4,
+  inOut3: k => (k < 0.5 ? 4 * k ** 3 : 1 - (2 - 2 * k) ** 3 / 2),
+  // overshoots a little past 1 before settling
+  back: k => { const m = k - 1, s = 1.9; return 1 + m * m * ((s + 1) * m + s); },
+};
+// closed-form inverse of ease.inOut3
+const unInOut3 = f => (f < 0.5 ? Math.cbrt(f / 4) : 1 - Math.cbrt(2 * (1 - f)) / 2);
+
+function alphaOf(hex, a) {
+  const [r, gr, b] = [1, 3, 5].map(i => parseInt(hex.substr(i, 2), 16));
+  return `rgba(${r},${gr},${b},${a})`;
+}
+const commas = n => Math.round(n).toLocaleString('en-US');
+
+// seeded generator (xorshift32 with a scrambled seed), values in [0, 1)
+function seeded(seed) {
+  let x = Math.imul(seed, 2654435761) >>> 0 || 1;
+  return () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+}
+
+function type(size, weight, face, track = 0) {
+  g.font = `${weight} ${size}px ${face}`;
+  g.letterSpacing = `${track}px`;
+}
+
+// ── data (illustrative) ────────────────────────────────────────────────────
+// average daily cyclists on one avenue over 24 months; the protected lane opens after month 8
 const LINE = [760, 790, 840, 870, 900, 880, 910, 860, 830, 1050, 1280, 1420, 1500, 1690, 1840, 1980, 2120, 2210, 2290, 2380, 2330, 2440, 2520, 2560];
-const OPEN = 8, BEFORE = 850, NL = LINE.length - 1;
-const PX0 = 200, PX1 = 1330, PY0 = 890, PY1 = 400, YMAX = 3000;
-const X = i => lerp(PX0, PX1, i / NL), Y = v => lerp(PY0, PY1, v / YMAX);
+const OPEN = 8, BEFORE = 850, LAST = LINE.length - 1;
+const plot = { left: 200, right: 1330, base: 890, top: 400, max: 3000 };
+const px = i => mix(plot.left, plot.right, i / LAST);
+const py = v => mix(plot.base, plot.top, v / plot.max);
+
 const STREETS = [
   { lab: 'Harbor Avenue', v: 2560, lane: true }, { lab: 'Mill Road', v: 2140, lane: true }, { lab: 'Linden Street', v: 1790, lane: true },
   { lab: 'Quarry Lane', v: 830, lane: false }, { lab: 'Fenwick Street', v: 690, lane: false }, { lab: 'Elm Parade', v: 540, lane: false }];
@@ -37,246 +74,460 @@ const SEASONS = [
   { lab: 'Spring', b: [600, 640, 690, 720, 760, 800, 830, 860, 880, 900, 930, 950, 970], k: 3.0 },
   { lab: 'Summer', b: [990, 1030, 1060, 1100, 1120, 1150, 1170, 1160, 1180, 1150, 1130, 1110, 1090], k: 3.2 },
   { lab: 'Autumn', b: [1000, 960, 930, 890, 860, 820, 790, 760, 720, 690, 660, 620, 590], k: 2.9 }];
-// "after" series: same seasonal shape, lifted by the season's factor, with a little seeded wobble
-SEASONS.forEach((s, i) => { const r = rng(40 + i); s.a = s.b.map(v => v * s.k * (0.96 + 0.08 * r())); s.pct = Math.round((s.k - 1) * 100); });
-const SMAX = 4000;
+// "after" series: the same seasonal curve scaled by the season's factor, with a small seeded wobble
+for (const [n, s] of SEASONS.entries()) {
+  const wobble = seeded(71 + n);
+  s.a = s.b.map(v => v * s.k * (0.96 + 0.08 * wobble()));
+  s.pct = Math.round(100 * s.k - 100);
+}
+const SEASON_MAX = 4000;
 
-const T = { head: 0.1, grid: 0.55, line0: 0.95, line1: 2.6, note: 2.7, sc1a: 3.55, sc1b: 4.2, bars: 4.0,
-  sc2a: 5.9, sc2b: 6.5, pan: 6.3, fade: 7.85, end: 8.05 };
+// ── timeline (seconds) ─────────────────────────────────────────────────────
+const CUE = {
+  title: 0.1, axes: 0.55, traceIn: 0.95, traceOut: 2.6, note: 2.7,
+  scroll1: [3.55, 4.2], bars: 4.0, scroll2: [5.9, 6.5], panels: 6.3,
+  lift: 7.85, close: 8.05,
+};
+// moment the act 1 trace passes data point i
+const reach = i => CUE.traceIn + (CUE.traceOut - CUE.traceIn) * unInOut3(i / LAST);
 
-function invIO(f) { let lo = 0, hi = 1; for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; eIO(m) < f ? lo = m : hi = m; } return lo; }
-const tLine = i => T.line0 + (T.line1 - T.line0) * invIO(i / NL);   // time the drawn line reaches point i
 window.events = () => {
-  const E = [];
-  for (let i = 0; i <= NL; i++) E.push({ t: tLine(i), k: 'dot', v: LINE[i] / YMAX });
-  E.push({ t: tLine(OPEN) + 0.05, k: 'tock' });
-  for (let j = 0; j < 8; j++) E.push({ t: T.note + 0.12 + 0.62 * (1 - Math.cbrt(1 - j / 7)), k: 'count', v: j / 7 });
-  E.push({ t: T.note + 0.8, k: 'tock' });
-  E.push({ t: T.sc1a, k: 'slide', d: T.sc1b - T.sc1a });
-  STREETS.forEach((s, i) => E.push({ t: T.bars + 0.25 + i * 0.12 + 0.55, k: s.lane ? 'tick' : 'tickLo' }));
-  E.push({ t: T.bars + 1.3, k: 'tock' });
-  E.push({ t: T.sc2a, k: 'slide', d: T.sc2b - T.sc2a });
-  SEASONS.forEach((s, i) => E.push({ t: T.pan + i * 0.12 + 0.62, k: 'dot', v: 0.45 + i * 0.08 }));
-  E.push({ t: T.end + 0.1, k: 'soft' });
-  E.push({ t: T.end + 0.74, k: 'tock' });
-  return E;
+  const cues = LINE.map((v, i) => ({ t: reach(i), k: 'dot', v: v / plot.max }));
+  cues.push({ t: reach(OPEN) + 0.05, k: 'tock' });
+  for (let n = 0; n < 8; n++) cues.push({ t: CUE.note + 0.12 + 0.62 * (1 - Math.cbrt(1 - n / 7)), k: 'count', v: n / 7 });
+  cues.push({ t: CUE.note + 0.8, k: 'tock' });
+  cues.push({ t: CUE.scroll1[0], k: 'slide', d: CUE.scroll1[1] - CUE.scroll1[0] });
+  STREETS.forEach((s, n) => cues.push({ t: CUE.bars + 0.8 + 0.12 * n, k: s.lane ? 'tick' : 'tickLo' }));
+  cues.push({ t: CUE.bars + 1.3, k: 'tock' });
+  cues.push({ t: CUE.scroll2[0], k: 'slide', d: CUE.scroll2[1] - CUE.scroll2[0] });
+  SEASONS.forEach((s, n) => cues.push({ t: CUE.panels + 0.62 + 0.12 * n, k: 'dot', v: 0.45 + 0.08 * n }));
+  cues.push({ t: CUE.close + 0.1, k: 'soft' }, { t: CUE.close + 0.74, k: 'tock' });
+  return cues;
 };
 
-// ── text helpers ────────────────────────────────────────────────────────────
-// line rising out of a mask (editorial title entry)
-function riseText(str, x, y, p, lineH, halo = 0) {
-  if (p <= 0) return; const e = eOut4(p), yy = y + (1 - e) * lineH * 0.9;
-  ctx.save(); ctx.beginPath(); ctx.rect(x - 10, y - lineH * 0.95, 1700, lineH * 1.25); ctx.clip();
-  ctx.globalAlpha *= clamp(p * 2);
-  if (halo) { const fs = ctx.fillStyle; ctx.strokeStyle = PAPER; ctx.lineWidth = halo; ctx.lineJoin = 'round'; ctx.strokeText(str, x, yy); ctx.fillStyle = fs; }
-  ctx.fillText(str, x, yy); ctx.restore();
-}
-// headline with one accent phrase in red and an underline wipe under it
-function headline(pre, key, post, x, y, p, up) {
-  F(66, 600, SERIF, -0.8); ctx.textAlign = 'left';
-  const w1 = ctx.measureText(pre).width, w2 = ctx.measureText(key).width;
-  const u = eOut(up); if (u > 0) { ctx.fillStyle = ACC; ctx.fillRect(x + w1 + 2, y + 14, (w2 - 4) * u, 4); }
-  ctx.fillStyle = INK; riseText(pre, x, y, p, 76);
-  ctx.fillStyle = ACC; riseText(key, x + w1, y, p, 76, 7);
-  ctx.fillStyle = INK; riseText(post, x + w1 + w2, y, p, 76);
-}
-// number with equal-width digits (does not jitter while counting)
-function numText(str, x, y, align = 'left') {
-  const dw = ctx.measureText('0').width; let w = 0; const parts = [...str].map(ch => { const cw = /[0-9]/.test(ch) ? dw : ctx.measureText(ch).width; w += cw; return [ch, cw]; });
-  let cx = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x; const al = ctx.textAlign; ctx.textAlign = 'center';
-  for (const [ch, cw] of parts) { ctx.fillText(ch, cx + cw / 2, y); cx += cw; } ctx.textAlign = al; return w;
-}
-function source(x, y, a, str = 'Illustrative data.') { if (a <= 0) return; F(16, 400, SANS, 0.3); ctx.fillStyle = rgba(MUTED, a * 0.9); ctx.textAlign = 'left'; ctx.fillText(str, x, y); }
-function kicker(str, x, y, p) { F(17, 700, SANS, 2.5); ctx.fillStyle = ACC; ctx.textAlign = 'left'; riseText(str, x, y, p, 24); }
-function sub(str, x, y, p) { F(25, 400, SANS, 0); ctx.fillStyle = MUTED; ctx.textAlign = 'left'; riseText(str, x, y, p, 34); }
-
-// ── scene 1: line chart ─────────────────────────────────────────────────────
-function scene1(t) {
-  ctx.textBaseline = 'alphabetic';
-  kicker('CITY CYCLING', PX0, 150, seg(t, T.head, T.head + 0.55));
-  headline('Build the lane and ', 'the riders come', '', PX0, 232, seg(t, T.head + 0.12, T.head + 0.8), seg(t, 0.85, 1.3));
-  sub('Average cyclists per day on Harbor Avenue, by month', PX0, 292, seg(t, T.head + 0.35, T.head + 0.95));
-
-  // grid grows bottom to top, left to right
-  for (let k = 0; k <= 3; k++) { const v = k * 1000, y = Y(v), p = eOut(seg(t, T.grid + k * 0.08, T.grid + 0.55 + k * 0.08)); if (p <= 0) continue;
-    ctx.fillStyle = k === 0 ? INK : GRID; ctx.fillRect(PX0, y - (k === 0 ? 1 : 0.5), (PX1 - PX0 + 40) * p, k === 0 ? 2 : 1);
-    F(19, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, clamp(p * 1.5)); ctx.textAlign = 'left';
-    if (k > 0) ctx.fillText(k === 3 ? '3,000 riders' : fmt(v), PX0, y - 10); }
-  F(19, 400, SANS, 0); ctx.textAlign = 'center';
-  [[0, 'Jan'], [6, 'Jul'], [12, 'Jan'], [18, 'Jul'], [23, 'Dec']].forEach(([i, s], k) => { const p = seg(t, T.grid + 0.3 + k * 0.06, T.grid + 0.7 + k * 0.06); if (p <= 0) return;
-    ctx.fillStyle = rgba(MUTED, p); ctx.fillRect(X(i) - 0.5, PY0, 1, 8 * p); ctx.fillText(s, X(i), PY0 + 36); });
-  const yp = seg(t, T.grid + 0.5, T.grid + 0.9);
-  if (yp > 0) { F(16, 700, SANS, 1.5); ctx.fillStyle = rgba(DARK, yp); ctx.textAlign = 'center'; ctx.fillText('YEAR 1', X(0), PY0 + 64); ctx.fillText('YEAR 2', X(12), PY0 + 64); }
-
-  // lane-opening marker: dashed rule drops from the top when the line reaches it
-  const mp = seg(t, tLine(OPEN) - 0.05, tLine(OPEN) + 0.4);
-  if (mp > 0) { const x = (X(OPEN) + X(OPEN + 1)) / 2, e = eOut(mp), top = PY1 - 30;
-    ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.setLineDash([5, 6]); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + (PY0 - top) * e); ctx.stroke(); ctx.setLineDash([]);
-    F(20, 700, SANS, 0); ctx.textAlign = 'left'; ctx.fillStyle = rgba(INK, clamp(mp * 2)); ctx.fillText('Protected lane opens', x + 12 + (1 - e) * 10, top + 16);
-    F(19, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, clamp(mp * 2 - 0.4)); ctx.fillText('Curb-separated, both directions', x + 12 + (1 - e) * 10, top + 42); }
-
-  // "before" reference level
-  const bp = seg(t, T.note - 0.1, T.note + 0.45);
-  if (bp > 0) { const y = Y(BEFORE); ctx.strokeStyle = rgba(DARK, 0.8); ctx.lineWidth = 1.5; ctx.setLineDash([2, 5]);
-    ctx.beginPath(); ctx.moveTo(X(0), y); ctx.lineTo(lerp(X(0), X(NL), eOut(bp)), y); ctx.stroke(); ctx.setLineDash([]);
-    F(19, 500, SANS, 0); ctx.fillStyle = rgba(DARK, clamp(bp * 2 - 0.8)); ctx.textAlign = 'right'; ctx.fillText('Before the lane: 850 a day', X(NL), y + 30); }
-
-  drawLine(LINE, ACC, 5, eIO(seg(t, T.line0, T.line1)));
-
-  // note: bracket + big "×3" counter
-  const np = seg(t, T.note, T.note + 0.5);
-  if (np > 0) { const x = X(NL) + 70, y0 = Y(BEFORE), y1 = Y(LINE[NL]), e = eOut(np);
-    ctx.fillStyle = INK; const ym = (y0 + y1) / 2; const hh = (y0 - y1) / 2 * e;
-    ctx.fillRect(x, ym - hh, 2, hh * 2); ctx.fillRect(x - 8, ym - hh, 10, 2); ctx.fillRect(x - 8, ym + hh - 2, 10, 2);
-    const cp = seg(t, T.note + 0.12, T.note + 0.74), v = lerp(1, 3, eOut(cp));
-    const pop = cp >= 1 ? 1 + 0.06 * Math.sin(Math.PI * seg(t, T.note + 0.74, T.note + 0.98)) : 1;
-    ctx.save(); ctx.globalAlpha *= clamp(cp * 3); const tx = x + 30;
-    ctx.translate(tx, ym + 22); ctx.scale(pop, pop); F(104, 800, SANS, -2); ctx.fillStyle = ACC; ctx.textAlign = 'left';
-    const mw = ctx.measureText('×').width; ctx.fillText('×', 0, 0); numText(cp >= 1 ? '3' : v.toFixed(1), mw + 2, 0); ctx.restore();
-    ctx.save(); ctx.globalAlpha *= clamp(cp * 2 - 0.5); F(21, 400, SANS, 0); ctx.fillStyle = MUTED; ctx.textAlign = 'left';
-    ctx.fillText('riders a day, two years', tx + 4, ym + 64); ctx.fillText('after the lane opened', tx + 4, ym + 92); ctx.restore(); }
-  source(PX0, 985, seg(t, 1.2, 1.7), 'Illustrative data. Monthly average of automatic counter readings.');
-}
-function drawLine(D, col, lw, p) {
-  if (p <= 0) return;
-  const pts = D.map((v, i) => [X(i), Y(v)]);
-  // parametrise by x so the head moves at a steady pace across months
-  const px = lerp(pts[0][0], pts[NL][0], p); let hx = pts[0][0], hy = pts[0][1], hv = D[0];
-  const trace = () => { ctx.moveTo(...pts[0]);
-    for (let i = 1; i < pts.length; i++) {
-      if (pts[i][0] <= px + 1e-6) { ctx.lineTo(...pts[i]); hx = pts[i][0]; hy = pts[i][1]; hv = D[i]; }
-      else { const f = (px - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]); hx = px; hy = lerp(pts[i - 1][1], pts[i][1], f); hv = lerp(D[i - 1], D[i], f); ctx.lineTo(hx, hy); break; } } };
-  // soft area under the drawn line
-  ctx.beginPath(); trace(); ctx.lineTo(hx, PY0); ctx.lineTo(pts[0][0], PY0); ctx.closePath(); ctx.fillStyle = rgba(ACC, 0.07); ctx.fill();
-  ctx.beginPath(); trace(); ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
-  const passed = Math.floor(p * NL + 1e-6);
-  for (let i = 0; i <= passed && i <= NL; i++) { const sz = i === NL || i === 0 ? 7 : 4.5;
-    ctx.fillStyle = PAPER; ctx.beginPath(); ctx.arc(X(i), Y(D[i]), sz + 2, 0, 7); ctx.fill(); ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(i), Y(D[i]), sz, 0, 7); ctx.fill(); }
-  if (p < 1) {   // running value at the head
-    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(hx, hy, 9, 0, 7); ctx.fill();
-    F(30, 700, SANS, 0); ctx.fillStyle = INK; ctx.textAlign = 'left'; numText(fmt(hv), hx + 14, hy - 20, 'left'); }
-  else { F(24, 700, SANS, 0); ctx.fillStyle = INK; ctx.textAlign = 'right'; ctx.fillText('2,560', X(NL) - 14, Y(D[NL]) - 18);
-    ctx.fillStyle = MUTED; ctx.textAlign = 'left'; F(22, 700, SANS, 0); ctx.fillText('760', X(0) + 12, Y(D[0]) + 34); }
+// ── typography helpers ─────────────────────────────────────────────────────
+// a line of text that slides up into view from behind a mask; `halo` strokes paper around it
+function revealLine(text, x, y, k, lead, halo = 0) {
+  if (k <= 0) return;
+  const lift = (1 - ease.out4(k)) * lead * 0.9;
+  g.save();
+  g.beginPath(); g.rect(x - 10, y - 0.95 * lead, 1700, 1.25 * lead); g.clip();
+  g.globalAlpha *= unit(2 * k);
+  if (halo) {
+    g.save(); g.lineJoin = 'round'; g.lineWidth = halo; g.strokeStyle = C.paper;
+    g.strokeText(text, x, y + lift); g.restore();
+  }
+  g.fillText(text, x, y + lift);
+  g.restore();
 }
 
-// ── scene 2: street-by-street bars ─────────────────────────────────────────
-function scene2(t, oy) {
-  ctx.textBaseline = 'alphabetic';
-  const b = T.sc1b - 0.45;
-  kicker('STREET BY STREET', PX0, oy + 150, seg(t, b, b + 0.55));
-  headline('Streets ', 'with protected lanes', ' carry more', PX0, oy + 232, seg(t, b + 0.1, b + 0.75), seg(t, b + 0.7, b + 1.1));
-  sub('Average cyclists per day, six comparable streets', PX0, oy + 292, seg(t, b + 0.25, b + 0.85));
-  const BX0 = 620, BX1 = 1560, unit = (BX1 - BX0) / 3000, top = oy + 410, gap = 80, bh = 52, split = 40;
-  const rowY = i => top + i * gap + (i >= 3 ? split : 0);
-  // scale
-  for (let k = 0; k <= 3000; k += 1000) { const x = BX0 + k * unit, d = k / 1000 * 0.03, p = seg(t, T.bars + d, T.bars + 0.4 + d); if (p <= 0) continue;
-    ctx.fillStyle = k === 0 ? INK : GRID; ctx.fillRect(x - (k === 0 ? 1 : 0.5), top - 36, k === 0 ? 2 : 1, (rowY(5) + bh + 28 - top) * eOut(p));
-    F(19, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, p); ctx.textAlign = 'center'; ctx.fillText(k === 3000 ? '3,000 riders' : fmt(k), x, top - 50); }
-  // group labels
-  [[0, 'WITH PROTECTED LANES', ACC], [3, 'PAINT ONLY OR NO LANE', DARK]].forEach(([i, s, c], k) => { const p = seg(t, T.bars + 0.1 + k * 0.36, T.bars + 0.5 + k * 0.36); if (p <= 0) return;
-    F(15, 700, SANS, 2); ctx.fillStyle = rgba(c, p); ctx.textAlign = 'right'; ctx.fillText(s, BX0 - 28, rowY(i) - 12); });
-  STREETS.forEach((d, i) => { const y = rowY(i); const p = seg(t, T.bars + 0.25 + i * 0.12, T.bars + 1.05 + i * 0.12); if (p <= 0) return;
-    const e = eOut4(p), col = d.lane ? ACC : GREY, len = d.v * unit * e;
-    ctx.textAlign = 'right'; F(27, d.lane ? 700 : 500, SANS, 0); ctx.fillStyle = rgba(d.lane ? INK : DARK, clamp(p * 2.5));
-    ctx.fillText(d.lab, BX0 - 28, y + bh / 2 + 10);
-    ctx.fillStyle = col; ctx.fillRect(BX0, y, len, bh);
-    F(30, 800, SANS, -0.5); ctx.fillStyle = d.lane ? ACC : DARK; ctx.textAlign = 'left';
-    numText(fmt(Math.round(d.v * e / 10) * 10), BX0 + len + 16, y + bh / 2 + 11); });
-  // note beside the "without" group
-  const np = seg(t, T.bars + 1.25, T.bars + 1.65);
-  if (np > 0) { const x = BX0 + 1150 * unit + 40 + (1 - eOut(np)) * 12, y = rowY(3) + 24;
-    ctx.save(); ctx.globalAlpha *= np; ctx.fillStyle = INK; ctx.fillRect(x - 20, rowY(3), 2, rowY(5) + bh - rowY(3));
-    F(22, 400, SANS, 0); ctx.textAlign = 'left'; ctx.fillStyle = ACC; ctx.fillText('On average, lane streets', x, y);
-    F(22, 700, SANS, 0); ctx.fillText('carry 3.1 times the riders', x, y + 30); ctx.restore(); }
-  source(PX0, oy + 985, seg(t, b + 0.4, b + 0.9), 'Illustrative data. Streets matched for length and traffic volume.');
-}
-
-// ── scene 3: small multiples by season ─────────────────────────────────────
-function scene3(t, oy) {
-  ctx.textBaseline = 'alphabetic';
-  const b = T.sc2b - 0.45;
-  kicker('BY SEASON', PX0, oy + 150, seg(t, b, b + 0.55));
-  headline('The gain holds ', 'in every season', '', PX0, oy + 232, seg(t, b + 0.1, b + 0.75), seg(t, b + 0.7, b + 1.1));
-  sub('Cyclists per day, year before vs. year after the lane opened', PX0, oy + 292, seg(t, b + 0.25, b + 0.85));
-  const pw = 350, gp = 60, ph = 300, y0 = oy + 520, base = y0 + ph;
-  SEASONS.forEach((s, i) => { const x0 = PX0 + i * (pw + gp), st = T.pan + i * 0.12, p = seg(t, st, st + 0.35); if (p <= 0) return;
-    const e = eOut(p), SX = j => x0 + j / 12 * pw, SY = v => base - v / SMAX * ph;
-    // panel frame: baseline + faint gridlines (shared scale across panels)
-    ctx.fillStyle = rgba(GRID, e); for (let g = 1; g <= 4; g++) ctx.fillRect(x0, SY(g * 1000) - 0.5, pw * e, 1);
-    ctx.fillStyle = INK; ctx.fillRect(x0, base - 1, pw * e, 2);
-    if (i === 0) { F(16, 400, SANS, 0); ctx.fillStyle = rgba(MUTED, e); ctx.textAlign = 'left'; ctx.fillText('4,000', x0, SY(4000) - 10); ctx.fillText('2,000', x0, SY(2000) - 8); }
-    F(26, 700, SANS, 0); ctx.fillStyle = rgba(INK, e); ctx.textAlign = 'left'; ctx.fillText(s.lab, x0, y0 - 128 + (1 - e) * 10);
-    // lines draw left to right, "before" slightly ahead of "after"
-    const lp = eIO(seg(t, st + 0.12, st + 0.62)), la = eIO(seg(t, st + 0.2, st + 0.7));
-    const path = (D, q, col, lw) => { if (q <= 0) return; const n = q * 12; ctx.beginPath(); ctx.moveTo(SX(0), SY(D[0]));
-      for (let j = 1; j <= Math.floor(n); j++) ctx.lineTo(SX(j), SY(D[j]));
-      const f = n - Math.floor(n); if (f > 0 && n < 12) { const j = Math.floor(n); ctx.lineTo(SX(j + f), SY(lerp(D[j], D[j + 1], f))); }
-      ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke(); };
-    path(s.b, lp, GREY, 3); path(s.a, la, ACC, 4.5);
-    if (i === 0) { const lb = seg(t, st + 0.6, st + 0.9); F(18, 700, SANS, 0); ctx.textAlign = 'right';
-      ctx.fillStyle = rgba(DARK, lb); ctx.fillText('Before', SX(12), SY(s.b[12]) + 28);
-      ctx.fillStyle = rgba(ACC, lb); ctx.fillText('After', SX(12), SY(s.a[12]) - 16); }
-    // counting percentage with a small overshoot pop
-    const cp = seg(t, st + 0.3, st + 0.8);
-    if (cp > 0) { const sc = 0.6 + 0.4 * eBack(cp); ctx.save(); ctx.translate(x0, y0 - 50); ctx.scale(sc, sc); ctx.globalAlpha *= clamp(cp * 3);
-      F(52, 800, SANS, -1.5); ctx.fillStyle = ACC; ctx.textAlign = 'left'; const n = Math.round(s.pct * eOut(cp)); const w = numText('+' + n, 0, 0); ctx.fillText('%', w + 2, 0); ctx.restore(); }
+// digits share one cell width so a counting number does not jitter; returns the total width
+function tabular(text, x, y, align = 'left') {
+  const cell = g.measureText('8').width;
+  const glyphs = Array.from(text, ch => {
+    const w = g.measureText(ch).width;
+    return { ch, w, box: /\d/.test(ch) ? cell : w };
   });
-  source(PX0, oy + 985, seg(t, b + 0.4, b + 0.9), 'Illustrative data. Daily averages by week within each season.');
+  const total = glyphs.reduce((s, gl) => s + gl.box, 0);
+  let cursor = align === 'right' ? x - total : align === 'center' ? x - total / 2 : x;
+  const keep = g.textAlign; g.textAlign = 'left';
+  for (const gl of glyphs) { g.fillText(gl.ch, cursor + (gl.box - gl.w) / 2, y); cursor += gl.box; }
+  g.textAlign = keep;
+  return total;
 }
 
-// ── closing: key takeaway, with the opening line chart echoed as a sparkline ─────
-function takeaway(t) {
-  const p = seg(t, T.end, T.end + 0.5); if (p <= 0) return;
-  ctx.textBaseline = 'alphabetic'; const x = PX0;
-  kicker('THE TAKEAWAY', x, 400, p);
-  F(92, 600, SERIF, -1.2); ctx.fillStyle = INK; ctx.textAlign = 'left';
-  riseText('Protect the lane,', x, 512, seg(t, T.end + 0.05, T.end + 0.6), 104);
-  const p2 = seg(t, T.end + 0.15, T.end + 0.7); const pre = 'and cycling ', w1 = ctx.measureText(pre).width, w2 = ctx.measureText('triples').width;
-  const u = eOut(seg(t, T.end + 0.6, T.end + 0.9)); if (u > 0) { ctx.fillStyle = ACC; ctx.fillRect(x + w1 + 2, 640, (w2 - 2) * u, 5); }
-  ctx.fillStyle = INK; riseText(pre, x, 620, p2, 104); ctx.fillStyle = ACC; riseText('triples.', x + w1, 620, p2, 104, 9);
-  F(25, 400, SANS, 0); ctx.fillStyle = MUTED; riseText('Daily cyclists on Harbor Avenue: 850 before, 2,560 two years after.', x, 712, seg(t, T.end + 0.3, T.end + 0.8), 34);
-  // sparkline
-  const sx0 = 1200, sx1 = 1700, sy0 = 640, sy1 = 420, SX = i => lerp(sx0, sx1, i / NL), SY = v => lerp(sy0, sy1, v / 2600);
-  const fp = seg(t, T.end + 0.1, T.end + 0.45);
-  if (fp > 0) { ctx.fillStyle = rgba(INK, fp); ctx.fillRect(sx0, sy0 + 20, (sx1 - sx0) * eOut(fp), 2);
-    const mx = (SX(OPEN) + SX(OPEN + 1)) / 2; ctx.strokeStyle = rgba(INK, fp); ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
-    ctx.beginPath(); ctx.moveTo(mx, sy1 - 10); ctx.lineTo(mx, sy1 - 10 + (sy0 - sy1 + 30) * eOut(fp)); ctx.stroke(); ctx.setLineDash([]);
-    F(17, 700, SANS, 0); ctx.fillStyle = rgba(DARK, fp); ctx.textAlign = 'left'; ctx.fillText('Lane opens', mx + 10, sy1 + 4); }
-  const lp = eIO(seg(t, T.end + 0.2, T.end + 0.8));
-  if (lp > 0) { const n = lp * NL; ctx.beginPath(); ctx.moveTo(SX(0), SY(LINE[0]));
-    for (let i = 1; i <= Math.floor(n); i++) ctx.lineTo(SX(i), SY(LINE[i]));
-    const f = n - Math.floor(n); if (f > 0 && n < NL) { const i = Math.floor(n); ctx.lineTo(SX(i + f), SY(lerp(LINE[i], LINE[i + 1], f))); }
-    ctx.lineWidth = 4.5; ctx.strokeStyle = ACC; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
-    const by = SY(BEFORE); ctx.strokeStyle = rgba(DARK, 0.8); ctx.lineWidth = 1.5; ctx.setLineDash([2, 5]);
-    ctx.beginPath(); ctx.moveTo(SX(0), by); ctx.lineTo(SX(Math.min(n, OPEN + 0.5)), by); ctx.stroke(); ctx.setLineDash([]);
-    F(22, 700, SANS, 0); ctx.fillStyle = DARK; ctx.textAlign = 'right'; ctx.fillText('850', SX(0) - 14, by + 8); }
-  const ep = seg(t, T.end + 0.72, T.end + 0.92);
-  if (ep > 0) { const s = 0.6 + 0.4 * eBack(ep); ctx.fillStyle = ACC; ctx.beginPath(); ctx.arc(SX(NL), SY(LINE[NL]), 8 * s, 0, 7); ctx.fill();
-    F(22, 700, SANS, 0); ctx.fillStyle = rgba(INK, ep); ctx.textAlign = 'right'; ctx.fillText('2,560', SX(NL), SY(LINE[NL]) - 22); }
-  source(x, 985, seg(t, T.end + 0.4, T.end + 0.8));
+// kicker, serif headline with a red key phrase (underline wipe) and a grey standfirst
+// h = { label, lead, key, tail, start, rise: [from, to], wipe: [from, to], sub } (rise and sub relative to start)
+function sectionHeader(t, h, standfirst) {
+  const x = plot.left, s = h.start;
+  type(17, 700, SANS_FACE, 2.5); g.fillStyle = C.red; g.textAlign = 'left';
+  revealLine(h.label, x, 150, span(t, s, s + 0.55), 24);
+
+  type(66, 600, SERIF_FACE, -0.8);
+  const aw = g.measureText(h.lead).width, kw = g.measureText(h.key).width;
+  const k = span(t, s + h.rise[0], s + h.rise[1]), u = ease.out3(span(t, ...h.wipe));
+  if (u > 0) { g.fillStyle = C.red; g.fillRect(x + aw + 2, 246, u * (kw - 4), 4); }
+  g.fillStyle = C.ink; revealLine(h.lead, x, 232, k, 76);
+  g.fillStyle = C.red; revealLine(h.key, x + aw, 232, k, 76, 7);
+  g.fillStyle = C.ink; revealLine(h.tail, x + aw + kw, 232, k, 76);
+
+  const subAt = s + h.sub;
+  type(25, 400, SANS_FACE); g.fillStyle = C.muted;
+  revealLine(standfirst, x, 292, span(t, subAt, subAt + 0.6), 34);
 }
 
-function render(t) {
-  ctx.globalAlpha = 1; ctx.drawImage(PAPER_CV, 0, 0);
-  const s1 = eIO(seg(t, T.sc1a, T.sc1b)), s2 = eIO(seg(t, T.sc2a, T.sc2b)); const oy = -H * (s1 + s2);
-  const fp = seg(t, T.fade, T.fade + 0.45), fo = 1 - eIO(fp);
-  if (fo > 0) { ctx.save(); ctx.globalAlpha = fo; ctx.translate(0, -24 * eIO(fp));
-    if (oy > -H) { ctx.save(); ctx.translate(0, oy); scene1(t); ctx.restore(); }
-    if (oy > -2 * H && oy < 0) scene2(t, oy + H);
-    if (oy < -H) scene3(t, oy + 2 * H);
-    ctx.restore(); }
-  takeaway(t);
-  // last 0.2 s: settle toward paper for a soft ending
-  const ep = seg(t, DUR - 0.2, DUR); if (ep > 0) { ctx.globalAlpha = eIO(ep) * 0.85; ctx.drawImage(PAPER_CV, 0, 0); ctx.globalAlpha = 1; }
+function footnote(text, k) {
+  if (k <= 0) return;
+  type(16, 400, SANS_FACE, 0.3); g.textAlign = 'left'; g.fillStyle = alphaOf(C.muted, 0.9 * k);
+  g.fillText(text, plot.left, 985);
 }
-let PAPER_CV;
-function prep() {
-  PAPER_CV = mk(W, H); const g = PAPER_CV.getContext('2d'); g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
-  const r = rng(19); const im = g.getImageData(0, 0, W, H); for (let i = 0; i < im.data.length; i += 4) { const n = (r() - 0.5) * 7; im.data[i] += n; im.data[i + 1] += n; im.data[i + 2] += n; }
-  g.putImageData(im, 0, 0);
+
+// trace a polyline through (xs(i), ys(i)) up to the fractional index n; returns the head position
+function tracePolyline(count, n, xs, ys, vals) {
+  const whole = Math.min(Math.floor(n), count - 1), frac = n - whole;
+  g.moveTo(xs(0), ys(0));
+  for (let i = 1; i <= whole; i++) g.lineTo(xs(i), ys(i));
+  let head = { x: xs(whole), y: ys(whole), v: vals ? vals[whole] : 0 };
+  if (frac > 0 && whole < count - 1) {
+    head = {
+      x: mix(xs(whole), xs(whole + 1), frac), y: mix(ys(whole), ys(whole + 1), frac),
+      v: vals ? mix(vals[whole], vals[whole + 1], frac) : 0,
+    };
+    g.lineTo(head.x, head.y);
+  }
+  return head;
 }
-window.draw = function (job) { render(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
-window.ready = document.fonts.ready.then(() => Promise.all([
-  document.fonts.load(`600 60px 'Source Serif 4'`, 'Build the lane and riders come'),
-  ...[400, 500, 700, 800].map(w => document.fonts.load(`${w} 20px 'Libre Franklin'`, 'Cycling 0123456789,.×+%'))])).then(prep);
-</script></body></html>
+
+function dashed(pattern, x0, y0, x1, y1) {
+  g.setLineDash(pattern); g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); g.setLineDash([]);
+}
+
+function roundStroke(col, w) {
+  g.strokeStyle = col; g.lineWidth = w; g.lineCap = 'round'; g.lineJoin = 'round'; g.stroke();
+}
+
+// ── act 1: the line chart ──────────────────────────────────────────────────
+function actOne(t) {
+  sectionHeader(t, {
+    label: 'CITY CYCLING', lead: 'Build the lane and ', key: 'the riders come', tail: '',
+    start: CUE.title, rise: [0.12, 0.8], wipe: [0.85, 1.3], sub: 0.35,
+  }, 'Average cyclists per day on Harbor Avenue, by month');
+
+  // horizontal gridlines, bottom first, growing from the left
+  for (let row = 0; row < 4; row++) {
+    const k = ease.out3(span(t, CUE.axes + 0.08 * row, CUE.axes + 0.55 + 0.08 * row));
+    if (k <= 0) continue;
+    const y = py(1000 * row), axis = row === 0;
+    g.fillStyle = axis ? C.ink : C.rule;
+    g.fillRect(plot.left, axis ? y - 1 : y - 0.5, k * (plot.right - plot.left + 40), axis ? 2 : 1);
+    if (!axis) {
+      type(19, 400, SANS_FACE); g.textAlign = 'left'; g.fillStyle = alphaOf(C.muted, unit(1.5 * k));
+      g.fillText(row === 3 ? '3,000 riders' : commas(1000 * row), plot.left, y - 10);
+    }
+  }
+  // month ticks
+  const months = [[0, 'Jan'], [6, 'Jul'], [12, 'Jan'], [18, 'Jul'], [23, 'Dec']];
+  type(19, 400, SANS_FACE); g.textAlign = 'center';
+  months.forEach(([i, name], n) => {
+    const k = span(t, CUE.axes + 0.3 + 0.06 * n, CUE.axes + 0.7 + 0.06 * n);
+    if (k <= 0) return;
+    g.fillStyle = alphaOf(C.muted, k);
+    g.fillRect(px(i) - 0.5, plot.base, 1, 8 * k);
+    g.fillText(name, px(i), plot.base + 36);
+  });
+  const yk = span(t, CUE.axes + 0.5, CUE.axes + 0.9);
+  if (yk > 0) {
+    type(16, 700, SANS_FACE, 1.5); g.textAlign = 'center'; g.fillStyle = alphaOf(C.dark, yk);
+    g.fillText('YEAR 1', px(0), plot.base + 64);
+    g.fillText('YEAR 2', px(12), plot.base + 64);
+  }
+
+  // lane-opening marker drops in as the trace arrives
+  const mk = span(t, reach(OPEN) - 0.05, reach(OPEN) + 0.4);
+  if (mk > 0) {
+    const e = ease.out3(mk), mx = px(OPEN + 0.5), top = plot.top - 30, tx = mx + 12 + 10 * (1 - e);
+    g.strokeStyle = C.ink; g.lineWidth = 1.5;
+    dashed([5, 6], mx, top, mx, mix(top, plot.base, e));
+    g.textAlign = 'left';
+    type(20, 700, SANS_FACE); g.fillStyle = alphaOf(C.ink, unit(2 * mk));
+    g.fillText('Protected lane opens', tx, top + 16);
+    type(19, 400, SANS_FACE); g.fillStyle = alphaOf(C.muted, unit(2 * mk - 0.4));
+    g.fillText('Curb-separated, both directions', tx, top + 42);
+  }
+
+  // dotted "before" level
+  const bk = span(t, CUE.note - 0.1, CUE.note + 0.45);
+  if (bk > 0) {
+    const y = py(BEFORE);
+    g.strokeStyle = alphaOf(C.dark, 0.8); g.lineWidth = 1.5;
+    dashed([2, 5], px(0), y, mix(px(0), px(LAST), ease.out3(bk)), y);
+    type(19, 500, SANS_FACE); g.textAlign = 'right'; g.fillStyle = alphaOf(C.dark, unit(2 * bk - 0.8));
+    g.fillText('Before the lane: 850 a day', px(LAST), y + 30);
+  }
+
+  mainTrace(ease.inOut3(span(t, CUE.traceIn, CUE.traceOut)));
+  growthNote(t);
+  footnote('Illustrative data. Monthly average of automatic counter readings.', span(t, 1.2, 1.7));
+}
+
+function mainTrace(k) {
+  if (k <= 0) return;
+  const n = k * LAST, ys = i => py(LINE[i]);
+  // pale area under the drawn part
+  g.beginPath();
+  const head = tracePolyline(LINE.length, n, px, ys, LINE);
+  g.lineTo(head.x, plot.base); g.lineTo(px(0), plot.base); g.closePath();
+  g.fillStyle = alphaOf(C.red, 0.07); g.fill();
+  g.beginPath(); tracePolyline(LINE.length, n, px, ys);
+  roundStroke(C.red, 5);
+  // a dot on every month already passed, larger at both ends
+  const passed = Math.min(LAST, Math.floor(n + 1e-6));
+  for (let i = 0; i <= passed; i++) {
+    const r = i === 0 || i === LAST ? 7 : 4.5;
+    g.fillStyle = C.paper; g.beginPath(); g.arc(px(i), ys(i), r + 2, 0, 2 * Math.PI); g.fill();
+    g.fillStyle = C.red; g.beginPath(); g.arc(px(i), ys(i), r, 0, 2 * Math.PI); g.fill();
+  }
+  if (k < 1) {
+    g.fillStyle = C.red; g.beginPath(); g.arc(head.x, head.y, 9, 0, 2 * Math.PI); g.fill();
+    type(30, 700, SANS_FACE); g.fillStyle = C.ink;
+    tabular(commas(head.v), head.x + 14, head.y - 20);
+  } else {
+    type(24, 700, SANS_FACE); g.fillStyle = C.ink; g.textAlign = 'right';
+    g.fillText('2,560', px(LAST) - 14, ys(LAST) - 18);
+    type(22, 700, SANS_FACE); g.fillStyle = C.muted; g.textAlign = 'left';
+    g.fillText('760', px(0) + 12, ys(0) + 34);
+  }
+}
+
+// bracket from the "before" level to the last value, with a big counting "x3"
+function growthNote(t) {
+  const k = span(t, CUE.note, CUE.note + 0.5);
+  if (k <= 0) return;
+  const bx = px(LAST) + 70, lo = py(BEFORE), hi = py(LINE[LAST]), mid = (lo + hi) / 2;
+  const half = ease.out3(k) * (lo - hi) / 2;
+  g.fillStyle = C.ink;
+  g.fillRect(bx, mid - half, 2, 2 * half);
+  g.fillRect(bx - 8, mid - half, 10, 2);
+  g.fillRect(bx - 8, mid + half - 2, 10, 2);
+
+  const ck = span(t, CUE.note + 0.12, CUE.note + 0.74), done = ck >= 1;
+  const bump = done ? 1 + 0.06 * Math.sin(Math.PI * span(t, CUE.note + 0.74, CUE.note + 0.98)) : 1;
+  const nx = bx + 30;
+  g.save();
+  g.globalAlpha *= unit(3 * ck);
+  g.translate(nx, mid + 22); g.scale(bump, bump);
+  type(104, 800, SANS_FACE, -2); g.fillStyle = C.red; g.textAlign = 'left';
+  g.fillText('×', 0, 0);
+  tabular(done ? '3' : mix(1, 3, ease.out3(ck)).toFixed(1), g.measureText('×').width + 2, 0);
+  g.restore();
+
+  g.save();
+  g.globalAlpha *= unit(2 * ck - 0.5);
+  type(21, 400, SANS_FACE); g.fillStyle = C.muted; g.textAlign = 'left';
+  g.fillText('riders a day, two years', nx + 4, mid + 64);
+  g.fillText('after the lane opened', nx + 4, mid + 92);
+  g.restore();
+}
+
+// ── act 2: street-by-street bars ───────────────────────────────────────────
+function actTwo(t) {
+  const t0 = CUE.scroll1[1] - 0.45;
+  sectionHeader(t, {
+    label: 'STREET BY STREET', lead: 'Streets ', key: 'with protected lanes', tail: ' carry more',
+    start: t0, rise: [0.1, 0.75], wipe: [t0 + 0.7, t0 + 1.1], sub: 0.25,
+  }, 'Average cyclists per day, six comparable streets');
+
+  const x0 = 620, scale = (1560 - x0) / 3000, top = 410, barH = 52;
+  const rowTop = i => top + 80 * i + (i < 3 ? 0 : 40);
+  const columnH = rowTop(5) + barH + 28 - top;
+
+  for (let v = 0; v <= 3000; v += 1000) {
+    const delay = 0.03 * v / 1000, k = span(t, CUE.bars + delay, CUE.bars + 0.4 + delay);
+    if (k <= 0) continue;
+    const x = x0 + v * scale, axis = v === 0;
+    g.fillStyle = axis ? C.ink : C.rule;
+    g.fillRect(axis ? x - 1 : x - 0.5, top - 36, axis ? 2 : 1, columnH * ease.out3(k));
+    type(19, 400, SANS_FACE); g.textAlign = 'center'; g.fillStyle = alphaOf(C.muted, k);
+    g.fillText(v === 3000 ? '3,000 riders' : commas(v), x, top - 50);
+  }
+
+  const groups = [{ row: 0, text: 'WITH PROTECTED LANES', col: C.red }, { row: 3, text: 'PAINT ONLY OR NO LANE', col: C.dark }];
+  groups.forEach((gr, n) => {
+    const k = span(t, CUE.bars + 0.1 + 0.36 * n, CUE.bars + 0.5 + 0.36 * n);
+    if (k <= 0) return;
+    type(15, 700, SANS_FACE, 2); g.textAlign = 'right'; g.fillStyle = alphaOf(gr.col, k);
+    g.fillText(gr.text, x0 - 28, rowTop(gr.row) - 12);
+  });
+
+  STREETS.forEach((s, i) => {
+    const k = span(t, CUE.bars + 0.25 + 0.12 * i, CUE.bars + 1.05 + 0.12 * i);
+    if (k <= 0) return;
+    const y = rowTop(i), grow = ease.out4(k), len = s.v * scale * grow;
+    type(27, s.lane ? 700 : 500, SANS_FACE); g.textAlign = 'right';
+    g.fillStyle = alphaOf(s.lane ? C.ink : C.dark, unit(2.5 * k));
+    g.fillText(s.lab, x0 - 28, y + barH / 2 + 10);
+    g.fillStyle = s.lane ? C.red : C.grey;
+    g.fillRect(x0, y, len, barH);
+    type(30, 800, SANS_FACE, -0.5); g.fillStyle = s.lane ? C.red : C.dark;
+    tabular(commas(10 * Math.round(s.v * grow / 10)), x0 + len + 16, y + barH / 2 + 11);
+  });
+
+  // aside next to the shorter group
+  const nk = span(t, CUE.bars + 1.25, CUE.bars + 1.65);
+  if (nk > 0) {
+    const ax = x0 + 1150 * scale + 40 + 12 * (1 - ease.out3(nk)), ay = rowTop(3) + 24;
+    g.save(); g.globalAlpha *= nk;
+    g.fillStyle = C.ink; g.fillRect(ax - 20, rowTop(3), 2, rowTop(5) + barH - rowTop(3));
+    g.textAlign = 'left'; g.fillStyle = C.red;
+    type(22, 400, SANS_FACE); g.fillText('On average, lane streets', ax, ay);
+    type(22, 700, SANS_FACE); g.fillText('carry 3.1 times the riders', ax, ay + 30);
+    g.restore();
+  }
+  footnote('Illustrative data. Streets matched for length and traffic volume.', span(t, t0 + 0.4, t0 + 0.9));
+}
+
+// ── act 3: seasonal small multiples ────────────────────────────────────────
+function actThree(t) {
+  const t0 = CUE.scroll2[1] - 0.45;
+  sectionHeader(t, {
+    label: 'BY SEASON', lead: 'The gain holds ', key: 'in every season', tail: '',
+    start: t0, rise: [0.1, 0.75], wipe: [t0 + 0.7, t0 + 1.1], sub: 0.25,
+  }, 'Cyclists per day, year before vs. year after the lane opened');
+
+  const panelW = 350, panelH = 300, top = 520, floor = top + panelH;
+  SEASONS.forEach((s, i) => {
+    const left = plot.left + 410 * i, start = CUE.panels + 0.12 * i;
+    const k = span(t, start, start + 0.35);
+    if (k <= 0) return;
+    const e = ease.out3(k);
+    const sx = j => left + panelW * j / 12, sy = v => floor - panelH * v / SEASON_MAX;
+
+    // shared scale: faint gridlines every 1,000 and an ink baseline
+    g.fillStyle = alphaOf(C.rule, e);
+    for (let v = 1000; v <= SEASON_MAX; v += 1000) g.fillRect(left, sy(v) - 0.5, e * panelW, 1);
+    g.fillStyle = C.ink; g.fillRect(left, floor - 1, e * panelW, 2);
+    type(16, 400, SANS_FACE); g.textAlign = 'left'; g.fillStyle = alphaOf(C.muted, e);
+    if (i === 0) { g.fillText('4,000', left, sy(4000) - 10); g.fillText('2,000', left, sy(2000) - 8); }
+    type(26, 700, SANS_FACE); g.fillStyle = alphaOf(C.ink, e);
+    g.fillText(s.lab, left, top - 128 + 10 * (1 - e));
+
+    // "before" leads, "after" follows a beat later
+    const series = [[s.b, 0.12, C.grey, 3], [s.a, 0.2, C.red, 4.5]];
+    for (const [vals, lag, col, w] of series) {
+      const q = ease.inOut3(span(t, start + lag, start + lag + 0.5));
+      if (q <= 0) continue;
+      g.beginPath(); tracePolyline(13, 12 * q, sx, j => sy(vals[j]));
+      roundStroke(col, w);
+    }
+    if (i === 0) {
+      const lk = span(t, start + 0.6, start + 0.9);
+      type(18, 700, SANS_FACE); g.textAlign = 'right';
+      g.fillStyle = alphaOf(C.dark, lk); g.fillText('Before', sx(12), sy(s.b[12]) + 28);
+      g.fillStyle = alphaOf(C.red, lk); g.fillText('After', sx(12), sy(s.a[12]) - 16);
+    }
+
+    // percentage counts up with a small overshoot
+    const ck = span(t, start + 0.3, start + 0.8);
+    if (ck > 0) {
+      const z = 0.6 + 0.4 * ease.back(ck);
+      g.save(); g.translate(left, top - 50); g.scale(z, z); g.globalAlpha *= unit(3 * ck);
+      type(52, 800, SANS_FACE, -1.5); g.fillStyle = C.red; g.textAlign = 'left';
+      const w = tabular(`+${Math.round(s.pct * ease.out3(ck))}`, 0, 0);
+      g.fillText('%', w + 2, 0);
+      g.restore();
+    }
+  });
+  footnote('Illustrative data. Daily averages by week within each season.', span(t, t0 + 0.4, t0 + 0.9));
+}
+
+// ── close: takeaway with the act 1 chart echoed as a sparkline ──────────────
+function closing(t) {
+  const c0 = CUE.close;
+  const k = span(t, c0, c0 + 0.5);
+  if (k <= 0) return;
+  const x = plot.left;
+  type(17, 700, SANS_FACE, 2.5); g.fillStyle = C.red; g.textAlign = 'left';
+  revealLine('THE TAKEAWAY', x, 400, k, 24);
+
+  type(92, 600, SERIF_FACE, -1.2); g.fillStyle = C.ink;
+  revealLine('Protect the lane,', x, 512, span(t, c0 + 0.05, c0 + 0.6), 104);
+  const lead = 'and cycling ', lw = g.measureText(lead).width, kw = g.measureText('triples').width;
+  const u = ease.out3(span(t, c0 + 0.6, c0 + 0.9));
+  if (u > 0) { g.fillStyle = C.red; g.fillRect(x + lw + 2, 640, u * (kw - 2), 5); }
+  const k2 = span(t, c0 + 0.15, c0 + 0.7);
+  g.fillStyle = C.ink; revealLine(lead, x, 620, k2, 104);
+  g.fillStyle = C.red; revealLine('triples.', x + lw, 620, k2, 104, 9);
+  type(25, 400, SANS_FACE); g.fillStyle = C.muted;
+  revealLine('Daily cyclists on Harbor Avenue: 850 before, 2,560 two years after.', x, 712, span(t, c0 + 0.3, c0 + 0.8), 34);
+
+  const box = { l: 1200, r: 1700, b: 640, t: 420 };
+  const sx = i => mix(box.l, box.r, i / LAST), sy = v => mix(box.b, box.t, v / 2600);
+  const fk = span(t, c0 + 0.1, c0 + 0.45);
+  if (fk > 0) {
+    const e = ease.out3(fk), mx = sx(OPEN + 0.5);
+    g.fillStyle = alphaOf(C.ink, fk); g.fillRect(box.l, box.b + 20, e * (box.r - box.l), 2);
+    g.strokeStyle = alphaOf(C.ink, fk); g.lineWidth = 1.5;
+    dashed([4, 5], mx, box.t - 10, mx, box.t - 10 + e * (box.b - box.t + 30));
+    type(17, 700, SANS_FACE); g.fillStyle = alphaOf(C.dark, fk); g.textAlign = 'left';
+    g.fillText('Lane opens', mx + 10, box.t + 4);
+  }
+  const lk = ease.inOut3(span(t, c0 + 0.2, c0 + 0.8));
+  if (lk > 0) {
+    const n = lk * LAST;
+    g.beginPath(); tracePolyline(LINE.length, n, sx, i => sy(LINE[i]));
+    roundStroke(C.red, 4.5);
+    const by = sy(BEFORE);
+    g.strokeStyle = alphaOf(C.dark, 0.8); g.lineWidth = 1.5;
+    dashed([2, 5], sx(0), by, sx(Math.min(n, OPEN + 0.5)), by);
+    type(22, 700, SANS_FACE); g.fillStyle = C.dark; g.textAlign = 'right';
+    g.fillText('850', sx(0) - 14, by + 8);
+  }
+  const ek = span(t, c0 + 0.72, c0 + 0.92);
+  if (ek > 0) {
+    const ex = sx(LAST), ey = sy(LINE[LAST]);
+    g.fillStyle = C.red; g.beginPath(); g.arc(ex, ey, 8 * (0.6 + 0.4 * ease.back(ek)), 0, 2 * Math.PI); g.fill();
+    type(22, 700, SANS_FACE); g.fillStyle = alphaOf(C.ink, ek); g.textAlign = 'right';
+    g.fillText('2,560', ex, ey - 22);
+  }
+  footnote('Illustrative data.', span(t, c0 + 0.4, c0 + 0.8));
+}
+
+// ── frame composition ──────────────────────────────────────────────────────
+let paperSheet = null;
+const ACTS = [actOne, actTwo, actThree];
+
+function frame(t) {
+  g.globalAlpha = 1;
+  g.drawImage(paperSheet, 0, 0);
+  g.textBaseline = 'alphabetic';
+
+  // page scroll: each act sits one screen below the previous one
+  const scrolled = ease.inOut3(span(t, ...CUE.scroll1)) + ease.inOut3(span(t, ...CUE.scroll2));
+  const liftK = ease.inOut3(span(t, CUE.lift, CUE.lift + 0.45));
+  if (liftK < 1) {
+    g.save();
+    g.globalAlpha = 1 - liftK;
+    g.translate(0, -24 * liftK);
+    ACTS.forEach((act, n) => {
+      const offset = (n - scrolled) * VH;
+      if (offset <= -VH || offset >= VH) return;
+      g.save(); g.translate(0, offset); act(t); g.restore();
+    });
+    g.restore();
+  }
+  closing(t);
+
+  // the final 0.2 s eases back toward bare paper
+  const settle = span(t, LENGTH - 0.2, LENGTH);
+  if (settle > 0) { g.globalAlpha = 0.85 * ease.inOut3(settle); g.drawImage(paperSheet, 0, 0); g.globalAlpha = 1; }
+}
+
+// paper colour with a faint static grain, built once
+function makePaper() {
+  paperSheet = document.createElement('canvas');
+  paperSheet.width = VW; paperSheet.height = VH;
+  const pc = paperSheet.getContext('2d');
+  pc.fillStyle = C.paper; pc.fillRect(0, 0, VW, VH);
+  const img = pc.getImageData(0, 0, VW, VH), rgbaBytes = img.data, noise = seeded(23);
+  for (let p = 0; p < rgbaBytes.length; p += 4) {
+    const d = 7 * noise() - 3.5;
+    rgbaBytes[p] += d; rgbaBytes[p + 1] += d; rgbaBytes[p + 2] += d;
+  }
+  pc.putImageData(img, 0, 0);
+}
+
+const fontsNeeded = [
+  [`600 66px 'Source Serif 4'`, 'Build the lane and riders come'],
+  ...[400, 500, 700, 800].map(w => [`${w} 24px 'Libre Franklin'`, 'Cycling 0123456789,.×+%']),
+];
+window.ready = document.fonts.ready
+  .then(() => Promise.all(fontsNeeded.map(([spec, sample]) => document.fonts.load(spec, sample))))
+  .then(makePaper);
+
+window.draw = ({ t, q }) => {
+  frame(t);
+  return canvas.toDataURL('image/jpeg', q || 0.92).split(',')[1];
+};
+</script>
+</body>
+</html>
