@@ -358,6 +358,8 @@ The code, videos, GIF previews, generated audio and documentation in this reposi
 
 Third-party components keep their own licenses: the fonts are under the SIL Open Font License 1.1, the Apache License 2.0 or the MIT License as listed in [FONTS.md](FONTS.md), and vendored or adapted code is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+**Rewrite in progress:** the `anim.html` of 14 styles still contains code derived from the [original catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu), which has no license. That code is being rewritten, and until then those derived portions are not offered under the MIT License: bauhaus, clay, data-visualization, documentary-16mm, isometric, kinetic-typography, kurzgesagt, linocut, memphis, paper-cutout, pencil-sketch, pixel-art, retro-1970s, sci-fi-interface.
+
 ## Disclaimer
 
 This project is not affiliated with, sponsored by or endorsed by any of the creators, studios, publications, games or brands named in the style credits. Those names only describe the visual tradition a style draws on. All characters, products, brands and places shown in the clips are invented.
