@@ -6,19 +6,18 @@
 </head>
 <body>
 <canvas id="c" width="1920" height="1080"></canvas>
-<script src="common.js"></script>
+<script src="./common.js"></script>
 <script>
 // SINGLE LINE — "Good morning.": one unbroken line of ink draws a coffee cup, its steam becomes a bird,
 // the bird flies into a window, the window becomes a sunrise over the city, and the line writes "good morning."
-const PAPER = '#f3eee4', INK = '#1e1c19', ACC = '#c4502f';
-const HY = 742;                // horizon
-const X0 = -80, X1 = 2000;
+const [PAPER, INK, ACC] = ['#f3eee4', '#1e1c19', '#c4502f'];   // paper, ink, nib accent
+const HY = 742, X0 = -80, X1 = 2000;   // ground line; the line enters and leaves off-canvas
 // every scene is five segments with fixed point counts, so each part morphs into its counterpart
 const CNT = [360, 760, 560, 620, 300];
 const N = CNT.reduce((a, b) => a + b, 0);
 // --- warm drawing paper, painted once: centre lift, grain, curled fibres ---
-const paper = mk(W, H);
-{ const g = paper.getContext('2d'), rand = rng(7);
+const sheet = mk(W, H);
+{ const g = sheet.getContext('2d'), rand = rng(7);
   g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
   const lift = g.createRadialGradient(960, 520, 500, 960, 540, 1300);
   lift.addColorStop(0, 'rgba(255,252,245,0.22)'); lift.addColorStop(1, 'rgba(120,100,70,0.13)');
@@ -141,24 +140,27 @@ for (let i = 0; i < N; i++) {
   WID[i] = 5.6 + 1.2 * Math.sin(u * 37.0) * Math.sin(u * 11.3 + 1) + 0.6 * Math.sin(u * 91);
 }
 
-// Ink points i0..i1 of the line in short runs, each run with the pressure width at its start.
-function strokePts(pts, i0, i1) {
-  const RUN = 6, first = Math.max(0, Math.floor(i0)), last = Math.ceil(i1) - 1;
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = INK;
-  for (let a = first; a < i1 - 1; a += RUN) {
-    const b = Math.min(last, a + RUN);
-    ctx.lineWidth = WID[a];
-    ctx.beginPath(); ctx.moveTo(pts[a][0], pts[a][1]);
-    for (let k = a + 1; k <= b; k++) ctx.lineTo(pts[k][0], pts[k][1]);
-    ctx.stroke();
+// Ink the line between fractional indices `from` and `to` as short Path2D runs of 6 points,
+// each run stroked at the pressure width found at its first point.
+function inkRange(pts, from, to) {
+  const lo = Math.max(0, Math.floor(from)), hi = Math.ceil(to) - 1;
+  Object.assign(ctx, { lineCap: 'round', lineJoin: 'round', strokeStyle: INK });
+  for (let s = lo; s < to - 1; s += 6) {
+    const run = new Path2D();
+    run.moveTo(pts[s][0], pts[s][1]);
+    for (let j = s + 1, e = Math.min(hi, s + 6); j <= e; j++) run.lineTo(pts[j][0], pts[j][1]);
+    ctx.lineWidth = WID[s];
+    ctx.stroke(run);
   }
 }
-// Blend scene A into scene B point by point; `stag` makes the start of the line change before its end.
-function morph(A, B, tau, stag = 0.55) {
-  return Array.from({ length: N }, (_, i) => {
-    const u = eio(clamp(tau * (1 + stag) - stag * (i / N)));
-    return [lerp(A.p[i][0], B.p[i][0], u), lerp(A.p[i][1], B.p[i][1], u)];
-  });
+// Point-wise blend from scene A to scene B at progress tau; with lag > 0 the head of the line leads the tail.
+function morph(A, B, tau, lag = 0.55) {
+  const mixed = new Array(N);
+  for (let i = 0; i < N; i++) {
+    const k = eio(clamp(tau * (1 + lag) - lag * (i / N))), a = A.p[i], b = B.p[i];
+    mixed[i] = [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+  }
+  return mixed;
 }
 // index at a fraction of the total arc length (so the pen moves at a steady speed)
 function idxAt(path, u) { const s = u * path.len; let lo = 0, hi = N - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (path.cum[m] < s) lo = m; else hi = m; } return lo + (s - path.cum[lo]) / ((path.cum[hi] - path.cum[lo]) || 1); }
@@ -195,25 +197,37 @@ function lineAt(t) {
   }
   return view;
 }
-function render(t) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(paper, 0, 0);
+const CAPTION = 'one line, a new day.', CAPTION_FONT = "italic 500 40px 'Cormorant Garamond'";
+// the closing caption fades in under the words and settles upward by 10 px
+function caption(t) {
+  const alpha = seg(t, 8.9, 9.4);
+  if (alpha <= 0) return;
+  const rise = 10 * (1 - eout(seg(t, 8.9, 9.5)));
+  ctx.save();
+  Object.assign(ctx, { globalAlpha: alpha, fillStyle: INK, font: CAPTION_FONT, textAlign: 'center', letterSpacing: '2px' });
+  ctx.fillText(CAPTION, 960, 860 + rise);
+  ctx.restore();
+}
+function paint(t) {
+  ctx.resetTransform();
+  ctx.drawImage(sheet, 0, 0);
   // soft sunrise warmth behind the sun loop
   const glow = seg(t, 5.9, 7.2) * (1 - seg(t, 7.5, 8.4));
   if (glow > 0) { const sy = sunY(t);
     const g = ctx.createRadialGradient(960, sy, 40, 960, sy, 420); g.addColorStop(0, `rgba(232,150,90,${0.2 * glow})`); g.addColorStop(1, 'rgba(232,150,90,0)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
-  const sc = 1 + 0.025 * eio(seg(t, 0, 10));
-  ctx.setTransform(sc, 0, 0, sc, 960 - 960 * sc, 540 - 540 * sc);
-  const { pts, i0, i1, head, tail } = lineAt(t);
-  if (i1 - i0 > 1) strokePts(pts, i0, i1);
-  if (head) dot(head[0], head[1], 7.5);
-  if (tail && i0 > 1) dot(tail[0], tail[1], 7.5);
-  // subtitle
-  const ca = seg(t, 8.9, 9.4);
-  if (ca > 0) { ctx.save(); ctx.globalAlpha = ca; ctx.fillStyle = INK; ctx.font = "italic 500 40px 'Cormorant Garamond'"; ctx.textAlign = 'center'; ctx.letterSpacing = '2px';
-    ctx.fillText('one line, a new day.', 960, 860 + 10 * (1 - eout(seg(t, 8.9, 9.5)))); ctx.restore(); }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const fo = seg(t, 9.6, 10); if (fo > 0) { ctx.globalAlpha = fo * 0.35; ctx.drawImage(paper, 0, 0); ctx.globalAlpha = 1; }
+  // slow push-in about the frame centre across the whole clip
+  const zoom = 1 + 0.025 * eio(clamp(t / TL.end));
+  ctx.translate(W / 2, H / 2); ctx.scale(zoom, zoom); ctx.translate(-W / 2, -H / 2);
+  const view = lineAt(t), nib = q => dot(q[0], q[1], 7.5);
+  if (view.i1 - view.i0 > 1) inkRange(view.pts, view.i0, view.i1);
+  if (view.head) nib(view.head);
+  if (view.tail && view.i0 > 1) nib(view.tail);
+  caption(t);
+  // the last 0.4 s wash back toward blank paper
+  ctx.resetTransform();
+  const wash = seg(t, 9.6, TL.end);
+  if (wash > 0) { ctx.save(); ctx.globalAlpha = 0.35 * wash; ctx.drawImage(sheet, 0, 0); ctx.restore(); }
 }
 // sound cues for audio.py
 window.events = () => [
@@ -225,11 +239,10 @@ window.events = () => [
   { t: 8.35, k: 'chord' },
   { t: TL.out0, k: 'retract', d: TL.out1 - TL.out0 },
 ];
-window.ready = loadFont('Cormorant Garamond', 'CormorantGaramond-500', 500, 'italic').then(() => document.fonts.load("italic 500 40px 'Cormorant Garamond'", 'one line, a new day.'));
+window.ready = loadFont('Cormorant Garamond', 'CormorantGaramond-500', 500, 'italic').then(() => document.fonts.load(CAPTION_FONT, CAPTION));
 window.draw = ({ t }) => {
-  render(t);
-  const url = cv.toDataURL('image/jpeg', 0.92);
-  return url.slice(url.indexOf(',') + 1);
+  paint(t);
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
 };
 </script>
 </body>
