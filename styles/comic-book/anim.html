@@ -1,8 +1,11 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="en">
+<head>
+<meta charset="utf-8">
 <link rel="stylesheet" href="fonts.css">
-<style>html,body{margin:0;background:#000}canvas{display:block}</style>
-</head><body>
+<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+</head>
+<body>
 <canvas id="c" width="1920" height="1080"></canvas>
 <script>
 // ── comic book · "CAPTAIN CLARITY vs. THE RUNAWAY ROBOT" ────────────────────
@@ -11,49 +14,93 @@
 // its eyes turn happy and it sweeps the dust away → pull back to the whole page, "THE END?" + a second robot peeks → fade.
 // Colors are printed with Ben-Day dots (CMY + ink), the color pattern is slightly offset from the line (print shift).
 const W = 1920, H = 1080, DUR = 10.0;
-const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const lerp = (a, b, u) => a + (b - a) * u;
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
-const eOut = u => 1 - Math.pow(1 - u, 3);
-const eBack = (u, s = 2.2) => u <= 0 ? 0 : 1 + (s + 1) * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2);
-function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+// ── math ──
+const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
+const lerp = (from, to, k) => from + (to - from) * k;
+const seg = (t, start, end) => clamp((t - start) / (end - start));
+const eInOut = k => (k < .5 ? 4 * k * k * k : 1 - Math.pow(2 - 2 * k, 3) / 2);
+const eOut = k => 1 - Math.pow(1 - k, 3);
+// overshooting ease; 0 until the animation starts so callers can skip drawing
+const eBack = (k, over = 2.2) => {
+  if (k <= 0) return 0;
+  const d = k - 1;
+  return 1 + (over + 1) * Math.pow(d, 3) + over * Math.pow(d, 2);
+};
+// seeded generator in [0, 1): the public-domain mulberry32 algorithm
+function rng(seed) {
+  let state = seed;
+  return () => {
+    state = (state | 0) + 0x6D2B79F5 | 0;
+    let z = Math.imul(state ^ state >>> 15, 1 | state);
+    z = z + Math.imul(z ^ z >>> 7, 61 | z) ^ z;
+    return ((z ^ z >>> 14) >>> 0) / 4294967296;
+  };
+}
+function mk(w, h) { const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; return canvas; }
+
+// ── the printed page ──
 const INK = '#1b1716', PAPER = '#efe2c0', CY = '#2f9fd8', MG = '#e0393e', YE = '#f5c928', CR = '#fbf6e6';
-const MIS = [5, -4]; // color pattern shift (page unit)
-const PW = 3050, PH = 2130;
-const PAN = { P1: [100, 340, 1350, 740], P2: [1500, 340, 1350, 740], P3: [100, 1130, 1900, 800], P4: [2050, 1130, 800, 800] };
-let PAPERC, PATS = {};
+const MIS = [5, -4];                              // colour plate offset from the ink plate (page units)
+const PW = 3050, PH = 2130;                       // page size
+const PAN = {                                     // panel boxes [x, y, w, h]
+  P1: [100, 340, 1350, 740],
+  P2: [1500, 340, 1350, 740],
+  P3: [100, 1130, 1900, 800],
+  P4: [2050, 1130, 800, 800],
+};
+let PAPERC;                                       // newsprint texture, built in window.ready
 const HAND = '"Patrick Hand"', BANG = 'Bangers';
 
-// ── Ben-Day dot patterns ──
+// ── Ben-Day printing ──
+// A screen tile is one dot in the middle plus quarter dots in the corners, so the repeat forms a diagonal grid;
+// the pattern is rotated to its screen angle. Tiles are cached per colour/size/angle.
+const SCREENS = {};
 function pat(x, col, r, cell = 18, ang = 15) {
-  const key = col + r + cell + ang;
-  if (!PATS[key]) {
-    const c = mk(cell, cell), y = c.getContext('2d');
-    y.fillStyle = col; y.beginPath(); y.arc(cell / 2, cell / 2, r, 0, Math.PI * 2); y.fill();
-    [[0, 0], [cell, 0], [0, cell], [cell, cell]].forEach(([a, b]) => { y.beginPath(); y.arc(a, b, r * 0.55, 0, Math.PI * 2); y.fill(); });
-    const p = x.createPattern(c, 'repeat'); p.setTransform(new DOMMatrix().rotateSelf(ang)); PATS[key] = p;
+  const id = [col, r, cell, ang].join('|');
+  if (!(id in SCREENS)) {
+    const tile = mk(cell, cell), g = tile.getContext('2d');
+    const disc = (cx, cy, rad) => { g.beginPath(); g.arc(cx, cy, rad, 0, Math.PI * 2); g.fill(); };
+    g.fillStyle = col;
+    disc(cell / 2, cell / 2, r);
+    for (const [cx, cy] of [[0, 0], [cell, 0], [0, cell], [cell, cell]]) disc(cx, cy, r * 0.55);
+    const screen = x.createPattern(tile, 'repeat');
+    screen.setTransform(new DOMMatrix().rotateSelf(ang));
+    SCREENS[id] = screen;
   }
-  return PATS[key];
+  return SCREENS[id];
 }
-function dots(x, pathFn, col, r, cell, ang) { // fill colored area with dots, offset pattern
+// Overprint on the shifted colour plate: everything multiplies onto what is already there.
+function onColourPlate(x, paint) {
   x.save(); x.translate(MIS[0], MIS[1]); x.globalCompositeOperation = 'multiply';
-  x.fillStyle = pat(x, col, r, cell, ang); pathFn(x); x.fill(); x.restore();
+  paint();
+  x.restore();
 }
-function flat(x, pathFn, col) { x.save(); x.translate(MIS[0], MIS[1]); x.globalCompositeOperation = 'multiply'; x.fillStyle = col; pathFn(x); x.fill(); x.restore(); }
+function dots(x, pathFn, col, r, cell, ang) {      // dot screen inside a shape
+  onColourPlate(x, () => { x.fillStyle = pat(x, col, r, cell, ang); pathFn(x); x.fill(); });
+}
+function flat(x, pathFn, col) {                    // solid tint inside a shape
+  onColourPlate(x, () => { x.fillStyle = col; pathFn(x); x.fill(); });
+}
+// Dot screen whose dot radius varies across the box (rFn(px, py) gives it), on a grid rotated by `ang`.
 function halftoneGrad(x, bx, by, bw, bh, col, rFn, cell = 20, ang = 0.26) {
-  // dot gradient changing size (light, explosion)
-  x.save(); x.translate(MIS[0], MIS[1]); x.globalCompositeOperation = 'multiply'; x.fillStyle = col; x.beginPath();
-  const ca = Math.cos(ang), sa = Math.sin(ang), cxp = bx + bw / 2, cyp = by + bh / 2, R = Math.hypot(bw, bh) / 2 + cell;
-  for (let v = -R; v < R; v += cell) for (let u = -R; u < R; u += cell) {
-    const px = cxp + u * ca - v * sa, py = cyp + u * sa + v * ca;
-    if (px < bx - cell || px > bx + bw + cell || py < by - cell || py > by + bh + cell) continue;
-    const r = rFn(px, py); if (r < 0.6) continue;
-    x.moveTo(px + r, py); x.arc(px, py, r, 0, Math.PI * 2);
-  }
-  x.fill(); x.restore();
+  onColourPlate(x, () => {
+    x.fillStyle = col; x.beginPath();
+    const cos = Math.cos(ang), sin = Math.sin(ang), mx = bx + bw / 2, my = by + bh / 2, reach = Math.hypot(bw, bh) / 2 + cell;
+    for (let v = -reach; v < reach; v += cell) {
+      for (let u = -reach; u < reach; u += cell) {
+        const px = mx + u * cos - v * sin, py = my + u * sin + v * cos;
+        const outside = px < bx - cell || px > bx + bw + cell || py < by - cell || py > by + bh + cell;
+        if (outside) continue;
+        const r = rFn(px, py);
+        if (r < 0.6) continue;
+        x.moveTo(px + r, py); x.arc(px, py, r, 0, Math.PI * 2);
+      }
+    }
+    x.fill();
+  });
 }
 const rectP = (bx, by, bw, bh) => x => { x.beginPath(); x.rect(bx, by, bw, bh); };
 // print colors: [dot color, dot radius, cell, screen angle, flat tint or null]
@@ -100,18 +147,33 @@ function tube(P, R) { // smooth tube with varying radius and round caps
 const mix = (a, b, u) => [lerp(a[0], b[0], u), lerp(a[1], b[1], u)];
 
 // ── drawing elements ──
-function inkStroke(x, w = 9) { x.strokeStyle = INK; x.lineWidth = w; x.lineJoin = 'round'; x.lineCap = 'round'; x.stroke(); }
+// ── lettering and page furniture ──
+function inkStroke(x, w = 9) {
+  x.strokeStyle = INK; x.lineWidth = w; x.lineJoin = 'round'; x.lineCap = 'round';
+  x.stroke();
+}
+// Centred lines of hand lettering around the origin (balloon interiors).
+function letterLines(x, lines, size, weight = 400) {
+  x.fillStyle = INK; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = `${weight} ${size}px ${HAND}`;
+  const mid = (lines.length - 1) / 2;
+  lines.forEach((line, i) => x.fillText(line, 0, (i - mid) * size * 1.02 + 4));
+}
+// Speech balloon that pops in (prog 0..1). tail = [tipX, tipY, startAngle, endAngle] relative to the centre.
 function balloon(x, cx, cy, rw, rh, tail, lines, size, prog, opt = {}) {
-  const s = eBack(prog, 2.4); if (s <= 0) return;
-  x.save(); x.translate(cx, cy); x.scale(s, s);
-  const path = () => {
+  const pop = eBack(prog, 2.4);
+  if (pop <= 0) return;
+  x.save(); x.translate(cx, cy); x.scale(pop, pop);
+  const rim = (ang, k) => [Math.cos(ang) * rw * k, Math.sin(ang) * rh * k];
+  const outline = () => {
     x.beginPath(); x.ellipse(0, 0, rw, rh, 0, 0, Math.PI * 2);
-    if (tail) { const [tx, ty, a0, a1] = tail; x.moveTo(Math.cos(a0) * rw * 0.98, Math.sin(a0) * rh * 0.98); x.quadraticCurveTo(tx * 0.45, ty * 0.6, tx, ty); x.lineTo(Math.cos(a1) * rw * 0.98, Math.sin(a1) * rh * 0.98); }
+    if (!tail) return;
+    const [tx, ty, from, to] = tail;
+    x.moveTo(...rim(from, 0.98)); x.quadraticCurveTo(tx * 0.45, ty * 0.6, tx, ty); x.lineTo(...rim(to, 0.98));
   };
-  x.fillStyle = CR; path(); x.fill(); path(); inkStroke(x, 8);
-  x.fillStyle = CR; x.beginPath(); x.ellipse(0, 0, rw - 5, rh - 5, 0, 0, Math.PI * 2); x.fill(); // hide tail seam
-  x.fillStyle = INK; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = `${opt.w ?? 400} ${size}px ${HAND}`;
-  lines.forEach((ln, i) => x.fillText(ln, 0, (i - (lines.length - 1) / 2) * size * 1.02 + 4));
+  x.fillStyle = CR; outline(); x.fill();
+  outline(); inkStroke(x, 8);
+  x.fillStyle = CR; x.beginPath(); x.ellipse(0, 0, rw - 5, rh - 5, 0, 0, Math.PI * 2); x.fill();   // cover the line where the tail joins
+  letterLines(x, lines, size, opt.w ?? 400);
   x.restore();
 }
 function zapBalloon(x, cx, cy, rw, rh, tail, lines, size, prog) { // electric (robot) balloon: zigzag edge + lightning tail
@@ -128,64 +190,88 @@ function zapBalloon(x, cx, cy, rw, rh, tail, lines, size, prog) { // electric (r
   };
   x.fillStyle = CR; path(); x.fill(); path(); inkStroke(x, 7);
   x.fillStyle = CR; x.beginPath(); edge(0.93).forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath(); x.fill();
-  x.fillStyle = INK; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = `400 ${size}px ${HAND}`;
-  lines.forEach((ln, i) => x.fillText(ln, 0, (i - (lines.length - 1) / 2) * size * 1.02 + 4));
+  letterLines(x, lines, size);
   x.restore();
 }
+// Yellow caption box that unrolls downward; width fits the text unless `w` is given.
 function caption(x, bx, by, text, size, prog, w) {
   if (prog <= 0) return;
-  x.save(); x.font = `400 ${size}px ${HAND}`; const tw = w ?? x.measureText(text).width + 60, th = size + 36;
-  const u = eOut(prog); x.translate(bx, by); x.scale(1, u);
-  x.fillStyle = CR; x.fillRect(0, 0, tw, th);
-  dots(x, rectP(0, 0, tw, th), YE, 8.5, 16, 45); flat(x, rectP(0, 0, tw, th), 'rgba(245,201,40,0.35)');
-  x.beginPath(); x.rect(0, 0, tw, th); inkStroke(x, 7);
-  x.fillStyle = INK; x.textBaseline = 'middle'; x.fillText(text, 30, th / 2 + 3);
+  x.save();
+  x.font = `400 ${size}px ${HAND}`;
+  const boxW = w ?? x.measureText(text).width + 60, boxH = size + 36, box = rectP(0, 0, boxW, boxH);
+  x.translate(bx, by); x.scale(1, eOut(prog));
+  x.fillStyle = CR; x.fillRect(0, 0, boxW, boxH);
+  dots(x, box, YE, 8.5, 16, 45);
+  flat(x, box, 'rgba(245,201,40,0.35)');
+  box(x); inkStroke(x, 7);
+  x.fillStyle = INK; x.textBaseline = 'middle'; x.fillText(text, 30, boxH / 2 + 3);
   x.restore();
 }
+// Speed lines: n thin ink wedges radiating from (cx, cy), starting r0..r0+90 out, clipped to the panel.
 function actionLines(x, cx, cy, r0, n, seed, bx, by, bw, bh) {
-  const r = rng(seed); x.save(); x.beginPath(); x.rect(bx, by, bw, bh); x.clip(); x.fillStyle = INK;
+  const rand = rng(seed);
+  const at = (ang, dist) => [cx + Math.cos(ang) * dist, cy + Math.sin(ang) * dist];
+  x.save();
+  x.beginPath(); x.rect(bx, by, bw, bh); x.clip();
+  x.fillStyle = INK;
   for (let i = 0; i < n; i++) {
-    const a = i / n * Math.PI * 2 + r() * 0.05, w = 0.008 + r() * 0.012, rr = r0 + r() * 90;
-    x.beginPath(); x.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
-    x.lineTo(cx + Math.cos(a - w) * 2600, cy + Math.sin(a - w) * 2600); x.lineTo(cx + Math.cos(a + w) * 2600, cy + Math.sin(a + w) * 2600); x.closePath(); x.fill();
+    const ang = i / n * Math.PI * 2 + rand() * 0.05, half = 0.008 + rand() * 0.012, start = r0 + rand() * 90;
+    x.beginPath(); x.moveTo(...at(ang, start)); x.lineTo(...at(ang - half, 2600)); x.lineTo(...at(ang + half, 2600));
+    x.closePath(); x.fill();
   }
   x.restore();
 }
+// Jagged explosion outline with n spikes (wider than tall), as a path ready to fill or stroke.
 function burstPath(x, cx, cy, R, n, seed, jit = 0) {
-  const r = rng(seed); x.beginPath();
-  for (let i = 0; i < n * 2; i++) {
-    const a = i / (n * 2) * Math.PI * 2 + (r() - 0.5) * 0.12, rr = (i % 2 ? R * (0.62 + r() * 0.08) : R * (0.95 + r() * 0.2)) + jit * (r() - 0.5);
-    i ? x.lineTo(cx + Math.cos(a) * rr * 1.25, cy + Math.sin(a) * rr) : x.moveTo(cx + Math.cos(a) * rr * 1.25, cy + Math.sin(a) * rr);
+  const rand = rng(seed), corners = n * 2;
+  x.beginPath();
+  for (let i = 0; i < corners; i++) {
+    const ang = i / corners * Math.PI * 2 + (rand() - 0.5) * 0.12;
+    const radius = (i % 2 ? R * (0.62 + rand() * 0.08) : R * (0.95 + rand() * 0.2)) + jit * (rand() - 0.5);
+    const px = cx + Math.cos(ang) * radius * 1.25, py = cy + Math.sin(ang) * radius;
+    if (i) x.lineTo(px, py); else x.moveTo(px, py);
   }
   x.closePath();
 }
+// Sound-effect lettering: letters pop in one after another, each tilted, outlined and with a stacked block shadow.
 function sfx(x, text, cx, cy, size, rot, prog, fill, shadow = INK) {
-  // sound effect: thick outline + protruding shadow, letter by letter grows larger
   if (prog <= 0) return;
-  x.save(); x.translate(cx, cy); x.rotate(rot); x.font = `400 ${size}px ${BANG}`; x.textBaseline = 'middle'; x.letterSpacing = `${size * 0.04}px`;
-  const chars = [...text], tw = x.measureText(text).width; let pre = '';
-  chars.forEach((ch, i) => {
-    const px = x.measureText(pre).width; pre += ch; const u = clamp(prog * (1 + (chars.length - 1) * 0.18) - i * 0.18); if (u <= 0) return;
-    const s = eBack(u, 2.6), cw = x.measureText(ch).width;
-    x.save(); x.translate(-tw / 2 + px + cw / 2, (i % 2 ? -1 : 1) * size * 0.04); x.scale(s, s); x.rotate((i % 2 ? 0.06 : -0.05));
+  x.save();
+  x.translate(cx, cy); x.rotate(rot);
+  x.font = `400 ${size}px ${BANG}`; x.textBaseline = 'middle'; x.letterSpacing = `${size * 0.04}px`;
+  const letters = [...text], total = x.measureText(text).width, stagger = 0.18;
+  let before = '';
+  letters.forEach((ch, i) => {
+    const offset = x.measureText(before).width;
+    before += ch;
+    const u = clamp(prog * (1 + (letters.length - 1) * stagger) - i * stagger);
+    if (u <= 0) return;
+    const pop = eBack(u, 2.6), cw = x.measureText(ch).width, odd = i % 2 === 1;
+    x.save();
+    x.translate(-total / 2 + offset + cw / 2, (odd ? -1 : 1) * size * 0.04);
+    x.scale(pop, pop); x.rotate(odd ? 0.06 : -0.05);
     x.lineJoin = 'round';
-    for (let k = 10; k >= 1; k -= 1.5) { x.fillStyle = shadow; x.fillText(ch, -cw / 2 + k, k); }
+    for (let depth = 10; depth >= 1; depth -= 1.5) { x.fillStyle = shadow; x.fillText(ch, -cw / 2 + depth, depth); }
     x.strokeStyle = INK; x.lineWidth = size * 0.1; x.strokeText(ch, -cw / 2, 0);
     x.fillStyle = fill; x.fillText(ch, -cw / 2, 0);
     x.restore();
   });
   x.restore();
 }
+// Panel border inked clockwise from the top-left corner; prog 0..1 is how much of the perimeter is done.
 function panelFrame(x, [bx, by, bw, bh], prog) {
   if (prog <= 0) return false;
-  const u = eOut(prog);
-  x.save(); x.beginPath();
-  // border line is drawn clockwise
-  const L = 2 * (bw + bh), d = L * u;
-  x.moveTo(bx, by);
-  const pts = [[bx + bw, by], [bx + bw, by + bh], [bx, by + bh], [bx, by]]; let acc = 0, px = bx, py = by;
-  for (const [qx, qy] of pts) { const l = Math.hypot(qx - px, qy - py); if (acc + l <= d) { x.lineTo(qx, qy); acc += l; px = qx; py = qy; } else { const f = (d - acc) / l; x.lineTo(px + (qx - px) * f, py + (qy - py) * f); break; } }
-  inkStroke(x, 10); x.restore();
+  const target = 2 * (bw + bh) * eOut(prog);
+  let done = 0, [px, py] = [bx, by];
+  x.save();
+  x.beginPath(); x.moveTo(px, py);
+  for (const [qx, qy] of [[bx + bw, by], [bx + bw, by + bh], [bx, by + bh], [bx, by]]) {
+    const side = Math.hypot(qx - px, qy - py);
+    if (done + side > target) { const f = (target - done) / side; x.lineTo(px + (qx - px) * f, py + (qy - py) * f); break; }
+    x.lineTo(qx, qy); done += side; px = qx; py = qy;
+  }
+  inkStroke(x, 10);
+  x.restore();
   return true;
 }
 function star(x, cx, cy, s, rot, col = YE) {
@@ -514,31 +600,40 @@ function panel4(x, t) {
   if (u > 0) robot(x, bx + 600, by + bh + 150 - 200 * eBack(u, 1.8), 0.95, { mood: blink ? 0.5 : 0, tilt: -0.12, ant: Math.sin(t * 8) * 0.4, noShadow: true });
   x.restore();
 }
+// Title strip across the top of the page.
 function masthead(x, t) {
-  const u = seg(t, 0.15, 0.6);
-  sfx(x, 'CAPTAIN CLARITY', 800, 180, 180, -0.02, u, MG);
-  x.save(); x.globalAlpha = seg(t, 0.4, 0.7);
+  sfx(x, 'CAPTAIN CLARITY', 800, 180, 180, -0.02, seg(t, 0.15, 0.6), MG);
+  x.save();
+  x.globalAlpha = seg(t, 0.4, 0.7);
   sfx(x, 'VS. THE RUNAWAY ROBOT!', 1860, 196, 84, -0.02, 1, CY);
-  x.fillStyle = INK; x.font = `400 44px ${HAND}`; x.textBaseline = 'middle'; x.textAlign = 'right'; x.fillText('ISSUE No. 16 · 10¢', 2850, 205);
-  x.beginPath(); x.moveTo(100, 290); x.lineTo(2850, 290); inkStroke(x, 5); x.beginPath(); x.moveTo(100, 302); x.lineTo(2850, 302); inkStroke(x, 2);
+  x.fillStyle = INK; x.font = `400 44px ${HAND}`; x.textBaseline = 'middle'; x.textAlign = 'right';
+  x.fillText('ISSUE No. 16 · 10¢', 2850, 205);
+  for (const [y, w] of [[290, 5], [302, 2]]) { x.beginPath(); x.moveTo(100, y); x.lineTo(2850, y); inkStroke(x, w); }   // double rule
   x.restore();
 }
+// Panels fade in one after another, each followed by its border being inked: [box, painter, start time].
+const PANEL_ORDER = [['P1', panel1, 0.3], ['P2', panel2, 0.4], ['P3', panel3, 0.5], ['P4', panel4, 0.6]];
 function drawPage(x, t) {
-  x.save(); x.shadowColor = 'rgba(0,0,0,0.55)'; x.shadowBlur = 60; x.shadowOffsetY = 20; x.fillStyle = PAPER; x.fillRect(0, 0, PW, PH); x.restore();
+  x.save();
+  x.shadowColor = 'rgba(0,0,0,0.55)'; x.shadowBlur = 60; x.shadowOffsetY = 20;   // page lifted off the desk
+  x.fillStyle = PAPER; x.fillRect(0, 0, PW, PH);
+  x.restore();
   x.drawImage(PAPERC, 0, 0, PW, PH);
   masthead(x, t);
-  const order = [['P1', panel1, 0.3], ['P2', panel2, 0.4], ['P3', panel3, 0.5], ['P4', panel4, 0.6]];
-  order.forEach(([k, fn, t0]) => {
-    const u = seg(t, t0, t0 + 0.45);
-    if (u <= 0) return;
-    x.save(); x.globalAlpha = clamp(u * 2.5); fn(x, t); x.restore();
-    panelFrame(x, PAN[k], u);
-  });
-  // newsprint texture on top (also fades the ink slightly)
-  x.save(); x.globalCompositeOperation = 'multiply'; x.globalAlpha = 0.55; x.drawImage(PAPERC, 0, 0, PW, PH); x.restore();
+  for (const [box, paint, start] of PANEL_ORDER) {
+    const u = seg(t, start, start + 0.45);
+    if (u <= 0) continue;
+    x.save(); x.globalAlpha = clamp(u * 2.5); paint(x, t); x.restore();
+    panelFrame(x, PAN[box], u);
+  }
+  x.save();                                       // newsprint texture over the ink, which also knocks it back a little
+  x.globalCompositeOperation = 'multiply'; x.globalAlpha = 0.55; x.drawImage(PAPERC, 0, 0, PW, PH);
+  x.restore();
 }
 
 // ── camera ──
+// Keyframes [time, [page x, page y, zoom]]. Even-numbered intervals are holds (linear drift),
+// odd ones are moves (eased); zoom is interpolated in log space so it feels even.
 const FULL = [1475, 1030, 0.52];
 const KEYS = [
   // holds stay still (static newsprint dots compress far better); only the closing hold drifts
@@ -546,54 +641,65 @@ const KEYS = [
   [5.45, [1050, 1530, 0.99]], [7.65, [1050, 1530, 0.99]], [8.2, [1475, 1030, 0.53]], [10, [1475, 1030, 0.545]]
 ];
 function cam(t) {
-  for (let i = 0; i < KEYS.length - 1; i++) {
-    const [a, A] = KEYS[i], [b, B] = KEYS[i + 1];
-    if (t >= a && t <= b) {
-      const hold = i % 2 === 0; // hold intervals drift slowly
-      const u = hold ? (t - a) / (b - a) : eInOut((t - a) / (b - a));
-      return [lerp(A[0], B[0], u), lerp(A[1], B[1], u), Math.exp(lerp(Math.log(A[2]), Math.log(B[2]), u))];
-    }
-  }
-  return KEYS[KEYS.length - 1][1];
+  const i = KEYS.findIndex(([start], k) => k < KEYS.length - 1 && t >= start && t <= KEYS[k + 1][0]);
+  if (i < 0) return KEYS[KEYS.length - 1][1];
+  const [start, from] = KEYS[i], [end, to] = KEYS[i + 1];
+  const k = (t - start) / (end - start), u = i % 2 === 0 ? k : eInOut(k);
+  return [lerp(from[0], to[0], u), lerp(from[1], to[1], u), Math.exp(lerp(Math.log(from[2]), Math.log(to[2]), u))];
 }
 function renderAt(t, alpha) {
   const [cx, cy, z] = cam(t);
-  ctx.save(); ctx.globalAlpha = alpha; ctx.setTransform(z, 0, 0, z, W / 2 - cx * z, H / 2 - cy * z);
-  drawPage(ctx, t); ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.setTransform(z, 0, 0, z, W / 2 - cx * z, H / 2 - cy * z);
+  drawPage(ctx, t);
+  ctx.restore();
+}
+// Screen-space speed of the camera over the last 1/60 s (pan in pixels plus a zoom term).
+function camSpeed(t) {
+  const now = cam(t), prev = cam(t - 1 / 60);
+  return Math.hypot((now[0] - prev[0]) * now[2], (now[1] - prev[1]) * now[2]) + Math.abs(Math.log(now[2] / prev[2])) * 2000;
 }
 function render(t) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#2e2622'; ctx.fillRect(0, 0, W, H);
-  // motion blur with 3 subsamples if camera is fast
-  const a = cam(t), b = cam(t - 1 / 60), v = Math.hypot((a[0] - b[0]) * a[2], (a[1] - b[1]) * a[2]) + Math.abs(Math.log(a[2] / b[2])) * 2000;
-  if (v > 8) { for (let j = 0; j < 3; j++) renderAt(t - j / 90, 1 / (j + 1)); }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#2e2622'; ctx.fillRect(0, 0, W, H);   // desk
+  if (camSpeed(t) > 8) for (let j = 0; j < 3; j++) renderAt(t - j / 90, 1 / (j + 1));   // fast moves: three blended sub-frames
   else renderAt(t, 1);
-  // closing: inky black
-  const f = seg(t, 9.5, 9.97);
-  if (f > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(20,16,14,${eInOut(f)})`; ctx.fillRect(0, 0, W, H); }
+  const out = seg(t, 9.5, 9.97);                  // ends on black ink
+  if (out > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(20,16,14,${eInOut(out)})`; ctx.fillRect(0, 0, W, H); }
 }
 
+// Newsprint at half resolution: warm noise with faint banding, scattered fibres, darker towards the edges.
 function buildPaper() {
-  const w = PW / 2 | 0, h = PH / 2 | 0, c = mk(w, h), x = c.getContext('2d'), d = x.createImageData(w, h), r = rng(9);
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-    const n = (r() - 0.5) * 16 + Math.sin(i * 0.05 + j * 0.002) * 2, k = (j * w + i) * 4;
-    d.data[k] = 239 + n; d.data[k + 1] = 226 + n; d.data[k + 2] = 192 + n * 1.2; d.data[k + 3] = 255;
+  const w = PW / 2 | 0, h = PH / 2 | 0, sheet = mk(w, h), g = sheet.getContext('2d'), rand = rng(9);
+  const img = g.createImageData(w, h), px = img.data;
+  for (let row = 0, i = 0; row < h; row++) {
+    for (let col = 0; col < w; col++, i += 4) {
+      const n = (rand() - 0.5) * 16 + Math.sin(col * 0.05 + row * 0.002) * 2;
+      px[i] = 239 + n; px[i + 1] = 226 + n; px[i + 2] = 192 + n * 1.2; px[i + 3] = 255;
+    }
   }
-  x.putImageData(d, 0, 0);
-  x.strokeStyle = 'rgba(150,120,70,0.10)'; x.lineWidth = 1;
-  for (let i = 0; i < 900; i++) { const px = r() * w, py = r() * h, l = 6 + r() * 20, a = r() * 6.28; x.beginPath(); x.moveTo(px, py); x.lineTo(px + Math.cos(a) * l, py + Math.sin(a) * l); x.stroke(); }
-  const g = x.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, w * 0.75);
-  g.addColorStop(0, 'rgba(255,250,235,0)'); g.addColorStop(1, 'rgba(170,130,70,0.28)'); x.fillStyle = g; x.fillRect(0, 0, w, h);
-  return c;
+  g.putImageData(img, 0, 0);
+  g.strokeStyle = 'rgba(150,120,70,0.10)'; g.lineWidth = 1;
+  for (let n = 0; n < 900; n++) {
+    const fx = rand() * w, fy = rand() * h, len = 6 + rand() * 20, ang = rand() * 6.28;
+    g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx + Math.cos(ang) * len, fy + Math.sin(ang) * len); g.stroke();
+  }
+  const edge = g.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, w * 0.75);
+  edge.addColorStop(0, 'rgba(255,250,235,0)'); edge.addColorStop(1, 'rgba(170,130,70,0.28)');
+  g.fillStyle = edge; g.fillRect(0, 0, w, h);
+  return sheet;
 }
 
-window.ready = (async () => {
-  const txt = 'CAPTAIN CLARITY VS. THE RUNAWAY ROBOT! ISSUE No. 16 · 10¢ MEANWHILE, AT CITY MUSEUM... BZZT! BEEP! DUST DETECTED! VROOOM! BONK! WHOOSH! POW! "';
-  await Promise.all([`400 100px ${BANG}`, `400 100px ${HAND}`].map(f => document.fonts.load(f, txt)));
-  await document.fonts.ready;
-  PAPERC = buildPaper();
-  return true;
-})();
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+const GLYPHS = 'CAPTAIN CLARITY VS. THE RUNAWAY ROBOT! ISSUE No. 16 · 10¢ MEANWHILE, AT CITY MUSEUM... BZZT! BEEP! DUST DETECTED! VROOOM! BONK! WHOOSH! POW! "';
+window.ready = Promise.all([BANG, HAND].map(fam => document.fonts.load(`400 100px ${fam}`, GLYPHS)))
+  .then(() => document.fonts.ready)
+  .then(() => { PAPERC = buildPaper(); return true; });
+window.draw = ({ t }) => {
+  render(t);
+  const url = cv.toDataURL('image/jpeg', 0.92);
+  return url.slice(url.indexOf(',') + 1);
+};
 window.events = () => [
   ...[0.3, 0.4, 0.5, 0.6].map(t => ({ t, k: 'paper' })),
   { t: 1.35, k: 'vroom' }, { t: 1.95, k: 'bonk' }, { t: 2.25, k: 'beep' },
