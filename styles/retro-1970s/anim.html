@@ -1,8 +1,14 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<link rel="stylesheet" href="fonts.css">
-<style>html,body{margin:0;background:#000}canvas{display:block}</style>
-</head><body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="fonts.css" rel="stylesheet">
+<style>
+  html, body { margin: 0; background: #000; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
 <canvas id="c" width="1920" height="1080"></canvas>
 <script>
 // ── retro-70s · "SUNDAY KITCHEN" TV cooking show titles ─────────
@@ -12,118 +18,182 @@
 // Transition: crash zoom into the soup, then four-colour stripe rings iris open onto scene 2
 // Scene 2: a lemon cake drops onto its stand, lemon slices land on the beat, "Tonight: Lemon Cake" zooms in with echo trails
 // Out : hold, then a soft fade to dark. Channel ident in the top-right corner throughout.
-const W = 1920, H = 1080, DUR = 10.0, BEAT = 0.5;
-const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const C = { cream: '#F3E3C3', cream2: '#E9D2A8', brown: '#3A2216', brown2: '#6E3B1F', rust: '#C2501F', orange: '#E8862B', mustard: '#EDB53A',
-  olive: '#7D7B2E', tomato: '#D4452A', lemon: '#F7D55C' };
-const STRIPES = [C.mustard, C.orange, C.rust, C.brown2];
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const lerp = (a, b, u) => a + (b - a) * u;
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eOut3 = u => 1 - Math.pow(1 - u, 3);
-const eIn3 = u => u * u * u;
-const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
-const eBack = (u, s = 1.9) => 1 + (s + 1) * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2);
-function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const [W, H] = [1920, 1080];
+const DUR = 10, BEAT = 0.5;
+const out = document.getElementById('c');
+const ctx = out.getContext('2d');
 
-const S = mk(W, H), sx = S.getContext('2d');              // scene
-const CH = [mk(W, H), mk(W, H), mk(W, H)];                // RGB channel separation
-let SUNBURST, GRAIN = [], SCAN, VIG;
+// warm 70s palette
+const C = {
+  cream: '#F3E3C3', cream2: '#E9D2A8',
+  brown: '#3A2216', brown2: '#6E3B1F',
+  rust: '#C2501F', orange: '#E8862B', mustard: '#EDB53A',
+  olive: '#7D7B2E', tomato: '#D4452A', lemon: '#F7D55C',
+};
+// the four-colour stripe motif, light to dark
+const STRIPES = ['mustard', 'orange', 'rust', 'brown2'].map(k => C[k]);
 
-function buildSunburst() {
-  const R = 1500, c = mk(R * 2, R * 2), x = c.getContext('2d');
-  x.translate(R, R);
-  const n = 28;
-  for (let i = 0; i < n; i += 2) {
-    x.fillStyle = C.cream2;
-    x.beginPath(); x.moveTo(0, 0);
-    x.arc(0, 0, R, i * Math.PI * 2 / n, (i + 1) * Math.PI * 2 / n); x.closePath(); x.fill();
+// ── maths ──
+const clamp = (v, lo = 0, hi = 1) => v < lo ? lo : v > hi ? hi : v;
+const lerp = (p, q, k) => p * (1 - k) + q * k;
+const seg = (t, t0, t1) => clamp((t - t0) / (t1 - t0));
+const eOut3 = k => { const m = 1 - k; return 1 - m * m * m; };
+const eIn3 = k => k ** 3;
+const eInOut = k => k < 0.5 ? 4 * k ** 3 : 1 - 4 * (1 - k) ** 3;
+const eBack = (k, s = 1.9) => { const m = k - 1; return 1 + m * m * (m * (s + 1) + s); };
+// seeded xorshift32; returns floats in [0, 1)
+function rng(seed) {
+  let s = (Math.imul(seed + 1, 2654435761) ^ 0x5bd1e995) >>> 0 || 1;
+  const next = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  for (let n = 0; n < 4; n++) next();
+  return next;
+}
+function surface(w, h) {
+  const el = document.createElement('canvas');
+  Object.assign(el, { width: w, height: h });
+  return el;
+}
+
+// ── precomputed layers ──
+const scene = surface(W, H), sx = scene.getContext('2d');
+let GRAIN = [], SCAN, TUBE;
+
+function noiseTile(seed) {
+  const w = 960, h = 540, el = surface(w, h), g = el.getContext('2d');
+  const img = g.createImageData(w, h), px = new Uint32Array(img.data.buffer), rand = rng(seed);
+  for (let n = 0; n < px.length; n++) {
+    const v = Math.round(clamp(128 + 184 * (rand() - rand()), 0, 255));
+    px[n] = 0xff000000 | v << 16 | v << 8 | v;
   }
-  return c;
+  g.putImageData(img, 0, 0);
+  return el;
 }
-function buildGrain(seed) {
-  const w = 960, h = 540, c = mk(w, h), x = c.getContext('2d'), d = x.createImageData(w, h), r = rng(seed);
-  for (let i = 0; i < w * h; i++) { const v = 128 + (r() + r() + r() - 1.5) * 150; d.data[i * 4] = d.data[i * 4 + 1] = d.data[i * 4 + 2] = v; d.data[i * 4 + 3] = 255; }
-  x.putImageData(d, 0, 0); return c;
+function scanlines() {
+  const cell = surface(1, 4), cg = cell.getContext('2d');
+  cg.fillStyle = '#fff'; cg.fillRect(0, 0, 1, 4);
+  cg.fillStyle = 'rgba(40,20,10,0.16)'; cg.fillRect(0, 2, 1, 2);
+  const el = surface(W, H), g = el.getContext('2d');
+  g.fillStyle = g.createPattern(cell, 'repeat');
+  g.fillRect(0, 0, W, H);
+  return el;
 }
-function buildScan() {
-  const c = mk(W, H), x = c.getContext('2d');
-  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
-  x.fillStyle = 'rgba(40,20,10,0.16)';
-  for (let y = 0; y < H; y += 4) x.fillRect(0, y + 2, W, 2);
-  return c;
+function roundedRect(g, x0, y0, w, h, r) {
+  const x1 = x0 + w, y1 = y0 + h;
+  g.moveTo(x0 + r, y0);
+  g.arcTo(x1, y0, x1, y1, r); g.arcTo(x1, y1, x0, y1, r);
+  g.arcTo(x0, y1, x0, y0, r); g.arcTo(x0, y0, x1, y0, r);
+  g.closePath();
 }
-function buildVig() {
-  const c = mk(W, H), x = c.getContext('2d');
-  const g = x.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.05);
-  g.addColorStop(0, 'rgba(20,8,0,0)'); g.addColorStop(1, 'rgba(20,8,0,0.62)');
-  x.fillStyle = g; x.fillRect(0, 0, W, H);
-  // rounded corners of the tube screen
-  x.fillStyle = '#0b0604'; x.beginPath(); x.rect(0, 0, W, H); x.roundRect(18, 14, W - 36, H - 28, 70); x.fill('evenodd');
-  const e = x.createLinearGradient(0, 0, 0, H); // light glare on the glass
-  e.addColorStop(0, 'rgba(255,240,210,0.06)'); e.addColorStop(0.5, 'rgba(255,240,210,0)');
-  x.fillStyle = e; x.fillRect(0, 0, W, H);
-  return c;
+// vignette, the dark bezel round the curved tube face, and a faint glare on the glass
+function tubeMask() {
+  const el = surface(W, H), g = el.getContext('2d');
+  const shade = g.createRadialGradient(W / 2, H / 2, 0.35 * H, W / 2, H / 2, 1.05 * H);
+  shade.addColorStop(0, 'rgba(20,8,0,0)');
+  shade.addColorStop(1, 'rgba(20,8,0,0.62)');
+  g.fillStyle = shade; g.fillRect(0, 0, W, H);
+  g.beginPath(); g.rect(0, 0, W, H); roundedRect(g, 18, 14, W - 36, H - 28, 70);
+  g.fillStyle = '#0b0604'; g.fill('evenodd');
+  const glare = g.createLinearGradient(0, 0, 0, H / 2);
+  glare.addColorStop(0, 'rgba(255,240,210,0.06)');
+  glare.addColorStop(1, 'rgba(255,240,210,0)');
+  g.fillStyle = glare; g.fillRect(0, 0, W, H / 2);
+  return el;
 }
 
-// ── type helpers ──
-function stacked(x, text, cx, cy, size, font, prog, opts = {}) {
-  // 70s "stacked shadow" title, jumping letter by letter (each letter scales around its own centre)
-  x.save(); x.font = `${font.w} ${size}px ${font.f}`; x.textBaseline = 'alphabetic'; x.textAlign = 'left';
-  const track = opts.track ?? 0;
-  const chars = [...text];
-  const adv = chars.map(ch => x.measureText(ch).width);
-  const total = adv.reduce((a, b) => a + b, 0) + track * (chars.length - 1);
-  const depth = opts.depth ?? size * 0.035, stroke = opts.stroke ?? size * 0.055;
-  const layers = opts.layers ?? [C.brown2, C.rust, C.orange];
-  let px = cx - total / 2;
-  chars.forEach((ch, i) => {
-    const cw = adv[i], u = prog(i), lx = px; px += cw + track;
-    if (u <= 0 || ch === ' ') return;
-    const s = eBack(clamp(u), 2.0), yo = (1 - eOut3(clamp(u))) * size * 0.45;
+// sunburst: 14 cream wedges, each 1/28 of a turn wide
+function rays(x, cx, cy, spin, alpha) {
+  const wedge = Math.PI / 14, reach = 2400;
+  x.save(); x.globalAlpha = alpha; x.fillStyle = C.cream2; x.beginPath();
+  for (let n = 0; n < 14; n++) {
+    const a = spin + 2 * n * wedge;
+    x.moveTo(cx, cy);
+    x.lineTo(cx + reach * Math.cos(a), cy + reach * Math.sin(a));
+    x.lineTo(cx + reach * Math.cos(a + wedge), cy + reach * Math.sin(a + wedge));
+    x.closePath();
+  }
+  x.fill(); x.restore();
+}
+
+// ── type ──
+// Chunky serif title with a three-step offset shadow. spec.at(i) gives letter i its entrance
+// progress 0..1: each letter rises, rocks upright and overshoots its size around its own centre.
+function poppedTitle(x, text, cx, baseY, size, spec) {
+  const track = spec.track || 0, depth = spec.depth ?? size * 0.035, edge = size * 0.055;
+  const shadows = [C.brown2, C.rust, C.orange];   // nearest first
+  x.save();
+  x.font = `900 ${size}px Fraunces`;
+  x.textAlign = 'left'; x.textBaseline = 'alphabetic'; x.lineJoin = 'round'; x.lineWidth = 2 * edge;
+  const glyphs = Array.from(text, ch => ({ ch, w: x.measureText(ch).width }));
+  const span = glyphs.reduce((sum, g) => sum + g.w, 0) + track * (glyphs.length - 1);
+  let pen = cx - span / 2;
+  glyphs.forEach((g, i) => {
+    const left = pen;
+    pen += g.w + track;
+    const k = clamp(spec.at(i));
+    if (k <= 0 || g.ch === ' ') return;
+    const grow = eBack(k, 2.0), rise = 0.45 * size * (1 - eOut3(k));
+    const ox = -g.w / 2, oy = 0.35 * size;
     x.save();
-    x.translate(lx + cw / 2, cy + yo - size * 0.35);
-    x.rotate((1 - clamp(u)) * (i % 2 ? 0.25 : -0.25));
-    x.scale(s, s);
-    x.translate(0, size * 0.35);
-    x.globalAlpha *= clamp(u * 3);
-    x.lineJoin = 'round';
-    for (let L = layers.length; L >= 1; L--) {
-      x.fillStyle = layers[L - 1]; x.strokeStyle = layers[L - 1]; x.lineWidth = stroke * 2;
-      x.strokeText(ch, -cw / 2 + depth * L, depth * L); x.fillText(ch, -cw / 2 + depth * L, depth * L);
+    x.globalAlpha *= Math.min(1, 3 * k);
+    x.translate(left + g.w / 2, baseY - oy + rise);
+    x.rotate((i % 2 ? 0.25 : -0.25) * (1 - k));
+    x.scale(grow, grow);
+    for (let d = shadows.length; d > 0; d--) {
+      x.fillStyle = x.strokeStyle = shadows[d - 1];
+      x.strokeText(g.ch, ox + d * depth, oy + d * depth);
+      x.fillText(g.ch, ox + d * depth, oy + d * depth);
     }
-    x.strokeStyle = C.brown; x.lineWidth = stroke * 2; x.strokeText(ch, -cw / 2, 0);
-    x.fillStyle = opts.fill ?? C.cream; x.fillText(ch, -cw / 2, 0);
+    x.strokeStyle = C.brown; x.strokeText(g.ch, ox, oy);
+    x.fillStyle = C.cream; x.fillText(g.ch, ox, oy);
     x.restore();
   });
   x.restore();
 }
-function sparkle(x, px, py, r, a) {
-  if (a <= 0) return;
-  x.save(); x.translate(px, py); x.globalAlpha = a; x.fillStyle = C.cream; x.strokeStyle = C.brown; x.lineWidth = 5;
+// per-letter progress: letter i starts `step` seconds after letter i-1 and takes `dur`
+const stagger = (t, t0, step, dur) => i => seg(t, t0 + step * i, t0 + step * i + dur);
+
+// four-point twinkle with small diagonal points
+function twinkle(x, px, py, r, alpha) {
+  if (alpha <= 0) return;
+  x.save(); x.globalAlpha = alpha; x.translate(px, py);
   x.beginPath();
-  for (let i = 0; i < 8; i++) { const ang = i * Math.PI / 4, rr = i % 2 ? r * 0.28 : r; x.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr); }
-  x.closePath(); x.stroke(); x.fill(); x.restore();
+  for (let n = 0; n < 8; n++) {
+    const len = n & 1 ? 0.28 * r : r, ang = n * Math.PI / 4;
+    x.lineTo(len * Math.cos(ang), len * Math.sin(ang));
+  }
+  x.closePath();
+  x.lineWidth = 5; x.strokeStyle = C.brown; x.stroke();
+  x.fillStyle = C.cream; x.fill();
+  x.restore();
+}
+// each entry [x, y, radius, start]: pops in with overshoot, then pulses gently
+function twinkles(x, t, list, wobble, rate) {
+  for (const [px, py, r, t0] of list) {
+    const k = seg(t, t0, t0 + 0.35);
+    twinkle(x, px, py, r * eBack(k) * (1 + wobble * Math.sin(rate * (t - t0))), Math.min(1, 2 * k));
+  }
 }
 
-// ── rainbow ribbon: enters from the right along the counter, curves up the left side ──
-const RX = 470, RY = 735, RB = 250;
-function ribbonPath(x, o) {
-  const R = RB + o;
-  x.beginPath(); x.moveTo(2060, RY + R); x.lineTo(RX, RY + R);
-  x.arc(RX, RY, R, Math.PI / 2, Math.PI, false); x.lineTo(RX - R, -160);
+// ── rainbow ribbon: four stripes run in along the counter from the right and turn up the left side ──
+const BEND = { x: 470, y: 735, r: 250 };
+const LANES = [-69, -23, 23, 69];
+function lanePath(x, r) {
+  x.beginPath();
+  x.moveTo(2060, BEND.y + r);
+  x.arc(BEND.x, BEND.y, r, Math.PI / 2, Math.PI);
+  x.lineTo(BEND.x - r, -160);
 }
-const ribbonLen = o => (2060 - RX) + (RB + o) * Math.PI / 2 + (RY + 160);
-const O4 = [-69, -23, 23, 69];
-function ribbon(x, t, t0) {
-  x.lineCap = 'butt'; x.lineJoin = 'round';
-  O4.forEach((o, i) => {
-    const u = eInOut(seg(t, t0 + i * 0.09, t0 + 1.1 + i * 0.09));
-    if (u <= 0) return;
-    const L = ribbonLen(o);
-    x.save(); x.setLineDash([L * u, L * 2]);
-    x.strokeStyle = STRIPES[i]; x.lineWidth = 47; ribbonPath(x, o); x.stroke(); x.restore();
+const laneLength = r => (2060 - BEND.x) + r * Math.PI / 2 + (BEND.y + 160);
+function rainbow(x, t, start) {
+  LANES.forEach((off, i) => {
+    const t0 = start + 0.09 * i, grow = eInOut(seg(t, t0, t0 + 1.1));
+    if (grow <= 0) return;
+    const r = BEND.r + off, len = laneLength(r);
+    x.save();
+    x.lineWidth = 47; x.lineCap = 'butt'; x.lineJoin = 'round'; x.strokeStyle = STRIPES[i];
+    x.setLineDash([grow * len, 2 * len]);
+    lanePath(x, r); x.stroke();
+    x.restore();
   });
 }
 
@@ -271,46 +341,52 @@ function splash(x, t) {
 
 // ── scene 1: the kitchen ──
 const ZOOM_IN = 4.3, S2 = 4.62;
-function scene1(x, t) {
-  x.setTransform(1, 0, 0, 1, 0, 0);
-  x.fillStyle = C.cream; x.fillRect(0, 0, W, H);
-  // zoom-lens: pull back from the pot at the start, crash zoom into the soup at the end
-  const pull = seg(t, 0.25, 1.5);
-  let z = 1 + 0.75 * (1 - eOut3(pull)) + 0.025 * Math.sin(pull * Math.PI) * (1 - pull);
-  const cu = seg(t, ZOOM_IN, S2 + 0.2);
-  z *= Math.exp(3.75 * eIn3(cu));
-  const ax = POT.x, ay = lerp(800, POT.rim + 10, clamp(cu * 3));
-  const m = eInOut(clamp(cu * 1.6)), px = lerp(ax, W / 2, m), py = lerp(ay, H * 0.55, m);
-  x.setTransform(z, 0, 0, z, px - ax * z, py - ay * z);
-  // sunburst
-  x.save(); x.translate(POT.x, 760); x.rotate(t * 0.06); x.globalAlpha = 0.9;
-  x.drawImage(SUNBURST, -SUNBURST.width / 2, -SUNBURST.height / 2); x.restore();
-  ribbon(x, t, 0.55);
-  // pot, vegetables, steam
+function flood(x, colour) {
+  x.resetTransform();
+  x.fillStyle = colour;
+  x.fillRect(0, 0, W, H);
+}
+// zoom lens: pulls back from the pot at the start, crash-zooms into the soup at the end
+function kitchenCamera(t) {
+  const pull = seg(t, 0.25, 1.5), crash = seg(t, ZOOM_IN, S2 + 0.2);
+  const settle = 1 + 0.75 * (1 - eOut3(pull)) + 0.025 * Math.sin(Math.PI * pull) * (1 - pull);
+  const zoom = settle * Math.exp(3.75 * eIn3(crash));
+  const fx = POT.x, fy = lerp(800, POT.rim + 10, clamp(3 * crash));
+  const centre = eInOut(clamp(1.6 * crash));
+  return [zoom, lerp(fx, W / 2, centre) - fx * zoom, lerp(fy, 0.55 * H, centre) - fy * zoom];
+}
+function kitchenScene(x, t) {
+  flood(x, C.cream);
+  const [zoom, dx, dy] = kitchenCamera(t);
+  x.setTransform(zoom, 0, 0, zoom, dx, dy);
+  rays(x, POT.x, 760, 0.06 * t, 0.9);
+  rainbow(x, t, 0.55);
+
   const poses = VEG.map(v => vegPose(v, t));
   VEG.forEach((v, i) => vegShadow(x, v, poses[i]));
-  const lastPlop = VEG[3].jump + JUMP_D * 0.55, puff = Math.exp(-Math.pow((t - lastPlop - 0.25) / 0.25, 2));
-  const calm = 1 - seg(t, ZOOM_IN - 0.05, ZOOM_IN + 0.12);
+  const plopAt = VEG[VEG.length - 1].jump + 0.55 * JUMP_D;
+  const puff = Math.exp(-(((t - plopAt - 0.25) / 0.25) ** 2));   // steam burst after the last plop
+  const calm = 1 - seg(t, ZOOM_IN - 0.05, ZOOM_IN + 0.12);       // steam and splashes clear for the zoom
   steam(x, t, 0.8 * calm, puff);
   potBack(x, t);
-  VEG.forEach((v, i) => { if (poses[i] && poses[i].inPot) drawVeg(x, v, poses[i]); });
+  poses.forEach((p, i) => p && p.inPot && drawVeg(x, VEG[i], p));
   potFront(x);
-  VEG.forEach((v, i) => { if (poses[i] && !poses[i].inPot) drawVeg(x, v, poses[i]); });
+  poses.forEach((p, i) => p && !p.inPot && drawVeg(x, VEG[i], p));
   x.save(); x.globalAlpha = calm; splash(x, t); x.restore();
-  // title
-  stacked(x, 'SUNDAY', 1040, 200, 135, { w: 900, f: 'Fraunces' }, i => seg(t, 1.45 + i * 0.07, 1.95 + i * 0.07), { depth: 7, track: 8 });
-  stacked(x, 'KITCHEN', 1040, 378, 185, { w: 900, f: 'Fraunces' }, i => seg(t, 1.85 + i * 0.07, 2.35 + i * 0.07), { depth: 9, track: 10 });
-  const su = eOut3(seg(t, 2.75, 3.35));
-  if (su > 0) {
-    x.save(); x.globalAlpha = su; x.font = '400 46px Monoton'; x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.letterSpacing = `${lerp(34, 12, su)}px`; x.fillStyle = C.rust;
-    x.fillText('EVERY SUNDAY AT SIX', 1040, 446); x.restore();
+
+  poppedTitle(x, 'SUNDAY', 1040, 200, 135, { at: stagger(t, 1.45, 0.07, 0.5), depth: 7, track: 8 });
+  poppedTitle(x, 'KITCHEN', 1040, 378, 185, { at: stagger(t, 1.85, 0.07, 0.5), depth: 9, track: 10 });
+  const sub = eOut3(seg(t, 2.75, 3.35));
+  if (sub > 0) {
+    x.save();
+    x.globalAlpha = sub;
+    x.font = '400 46px Monoton'; x.letterSpacing = `${lerp(34, 12, sub)}px`;
+    x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = C.rust;
+    x.fillText('EVERY SUNDAY AT SIX', 1040, 446);
+    x.restore();
   }
-  [[380, 170, 34, 2.55], [1560, 330, 28, 2.8], [700, 110, 22, 3.05]].forEach(([qx, qy, r, t0]) => {
-    const u = seg(t, t0, t0 + 0.35);
-    sparkle(x, qx, qy, r * eBack(u) * (1 + 0.12 * Math.sin((t - t0) * 7)), clamp(u * 2));
-  });
-  x.setTransform(1, 0, 0, 1, 0, 0);
+  twinkles(x, t, [[380, 170, 34, 2.55], [1560, 330, 28, 2.8], [700, 110, 22, 3.05]], 0.12, 7);
+  x.resetTransform();
 }
 
 // ── scene 2: tonight's recipe ──
@@ -322,10 +398,13 @@ function lemonSlice(x, r) {
   for (let i = 0; i < 8; i++) { const a0 = i * Math.PI / 4 + 0.07, a1 = a0 + Math.PI / 4 - 0.14; x.beginPath(); x.moveTo(0, 0); x.arc(0, 0, r * 0.72, a0, a1); x.closePath(); x.fill(); }
   x.beginPath(); x.arc(0, 0, r * 0.1, 0, Math.PI * 2); x.fillStyle = C.cream; x.fill();
 }
-function leafSprig(x, px, py, u) {
-  if (u <= 0) return;
-  x.save(); x.translate(px, py); x.scale(eBack(u), eBack(u));
-  leaf(x, 0, 0, -0.5, 58, 16); leaf(x, 0, 0, 0.35, 48, 14); x.restore();
+function leafSprig(x, px, py, k) {
+  if (k <= 0) return;
+  const s = eBack(k);
+  x.save(); x.translate(px, py); x.scale(s, s);
+  leaf(x, 0, 0, -0.5, 58, 16);
+  leaf(x, 0, 0, 0.35, 48, 14);
+  x.restore();
 }
 function cake(x, t) {
   const { x: cx, top, bot, rx } = CAKE, ry = 46;
@@ -366,51 +445,64 @@ function cake(x, t) {
   leafSprig(x, cx + 170, top - 26, seg(t, 6.2, 6.5));
   x.restore();
 }
-function echoTitle(x, text, cx, cy, size, u) {
-  // zoom-lens echo: stripe-coloured ghosts contract into the title
-  if (u <= 0) return;
-  const oy = cy - size * 0.35, cols = [C.brown2, C.rust, C.orange];
-  x.save(); x.font = `900 ${size}px Fraunces`; x.textAlign = 'center'; x.textBaseline = 'alphabetic'; x.lineJoin = 'round';
-  x.letterSpacing = '4px';
-  for (let k = 3; k >= 1; k--) {
-    const uk = clamp(u * 1.3 - k * 0.1); if (uk <= 0 || uk >= 1) continue;
-    const s = lerp(3.0 - k * 0.35, 1, eOut3(uk));
-    x.save(); x.translate(cx, oy); x.scale(s, s); x.translate(-cx, -oy);
-    x.globalAlpha = 0.85 * (1 - uk);
-    x.strokeStyle = cols[k - 1]; x.lineWidth = size * 0.1; x.strokeText(text, cx, cy);
+// The title arrives through the zoom lens: three stripe-coloured outline ghosts shrink onto it
+// from about three times its size, then the solid title lands with a small overshoot.
+function lensTitle(x, text, cx, baseY, size, k) {
+  if (k <= 0) return;
+  const pivotY = baseY - 0.35 * size;
+  const aroundPivot = s => { x.translate(cx, pivotY); x.scale(s, s); x.translate(-cx, -pivotY); };
+  const ghosts = [C.brown2, C.rust, C.orange];
+  x.save();
+  x.font = `900 ${size}px Fraunces`; x.letterSpacing = '4px';
+  x.textAlign = 'center'; x.textBaseline = 'alphabetic'; x.lineJoin = 'round'; x.lineWidth = 0.1 * size;
+  for (let g = ghosts.length; g >= 1; g--) {
+    const kg = clamp(1.3 * k - 0.1 * g);
+    if (kg <= 0 || kg >= 1) continue;
+    x.save();
+    aroundPivot(lerp(3 - 0.35 * g, 1, eOut3(kg)));
+    x.globalAlpha = 0.85 * (1 - kg);
+    x.strokeStyle = ghosts[g - 1];
+    x.strokeText(text, cx, baseY);
     x.restore();
   }
   x.restore();
-  const v = clamp(u * 1.3), s = 1 + (1 - eBack(v, 1.5)) * 1.2;
-  x.save(); x.globalAlpha = clamp(v * 3); x.translate(cx, oy); x.scale(s, s); x.translate(-cx, -oy);
-  stacked(x, text, cx, cy, size, { w: 900, f: 'Fraunces' }, () => 1, { depth: 9, track: 4 });
+  const main = clamp(1.3 * k);
+  x.save();
+  x.globalAlpha = Math.min(1, 3 * main);
+  aroundPivot(1 + 1.2 * (1 - eBack(main, 1.5)));
+  poppedTitle(x, text, cx, baseY, size, { at: () => 1, depth: 9, track: 4 });
   x.restore();
 }
-function scene2(x, t) {
-  x.setTransform(1, 0, 0, 1, 0, 0);
-  x.fillStyle = C.mustard; x.fillRect(0, 0, W, H);
-  const z = 1 + 0.05 * eInOut(seg(t, S2, DUR));
-  x.setTransform(z, 0, 0, z, 960 - 960 * z, 600 - 600 * z);
-  x.save(); x.translate(960, 640); x.rotate(-t * 0.08); x.globalAlpha = 0.4;
-  x.drawImage(SUNBURST, -SUNBURST.width / 2, -SUNBURST.height / 2); x.restore();
-  // striped table band
-  [C.cream, C.orange, C.rust, C.brown2].forEach((c, i) => { x.fillStyle = c; x.fillRect(-100, 948 + i * 36, W + 200, 37); });
-  x.fillStyle = 'rgba(58,34,22,0.3)'; x.beginPath(); x.ellipse(CAKE.x + 12, CAKE.bot + 106, 150, 14, 0, 0, Math.PI * 2); x.fill();
-  cake(x, t);
-  const hu = eBack(seg(t, 5.55, 6.0), 1.6);
-  if (seg(t, 5.55, 6.0) > 0) {
-    x.save(); x.translate(960, lerp(-100, 150, hu));
-    x.font = '400 96px Shrikhand'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineJoin = 'round';
-    x.fillStyle = C.rust; x.strokeStyle = C.rust; x.lineWidth = 12; x.strokeText('Tonight:', 7, 7); x.fillText('Tonight:', 7, 7);
-    x.strokeStyle = C.brown; x.lineWidth = 12; x.strokeText('Tonight:', 0, 0);
-    x.fillStyle = C.cream; x.fillText('Tonight:', 0, 0); x.restore();
-  }
-  echoTitle(x, 'Lemon Cake', 960, 420, 190, seg(t, 6.0, 6.75));
-  [[300, 300, 36, 6.7], [1620, 420, 30, 6.85], [1450, 150, 22, 7.0], [470, 610, 24, 7.1]].forEach(([qx, qy, r, t0]) => {
-    const u = seg(t, t0, t0 + 0.35);
-    sparkle(x, qx, qy, r * eBack(u) * (1 + 0.14 * Math.sin((t - t0) * 6)), clamp(u * 2));
+function cakeScene(x, t) {
+  flood(x, C.mustard);
+  const z = 1 + 0.05 * eInOut(seg(t, S2, DUR));   // slow push-in, centred a little below the middle
+  x.setTransform(z, 0, 0, z, 960 * (1 - z), 600 * (1 - z));
+  rays(x, 960, 640, -0.08 * t, 0.4);
+  // striped tablecloth along the bottom
+  [C.cream, C.orange, C.rust, C.brown2].forEach((col, i) => {
+    x.fillStyle = col;
+    x.fillRect(-100, 948 + 36 * i, W + 200, 37);
   });
-  x.setTransform(1, 0, 0, 1, 0, 0);
+  x.fillStyle = 'rgba(58,34,22,0.3)';
+  x.beginPath(); x.ellipse(CAKE.x + 12, CAKE.bot + 106, 150, 14, 0, 0, 2 * Math.PI); x.fill();
+  cake(x, t);
+
+  const drop = seg(t, 5.55, 6.0);
+  if (drop > 0) {
+    const label = 'Tonight:';
+    x.save();
+    x.translate(960, lerp(-100, 150, eBack(drop, 1.6)));
+    x.font = '400 96px Shrikhand'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.lineJoin = 'round'; x.lineWidth = 12;
+    x.fillStyle = x.strokeStyle = C.rust;
+    x.strokeText(label, 7, 7); x.fillText(label, 7, 7);
+    x.strokeStyle = C.brown; x.strokeText(label, 0, 0);
+    x.fillStyle = C.cream; x.fillText(label, 0, 0);
+    x.restore();
+  }
+  lensTitle(x, 'Lemon Cake', 960, 420, 190, seg(t, 6.0, 6.75));
+  twinkles(x, t, [[300, 300, 36, 6.7], [1620, 420, 30, 6.85], [1450, 150, 22, 7.0], [470, 610, 24, 7.1]], 0.14, 6);
+  x.resetTransform();
 }
 
 // ── transition: four-colour stripe rings iris open from the soup ──
@@ -422,7 +514,7 @@ function iris(x, t) {
     x.fillStyle = c; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
   });
   const r = R0 - 4 * 85;
-  if (r > 0) { x.save(); x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.clip(); scene2(x, t); x.restore(); }
+  if (r > 0) { x.save(); x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.clip(); cakeScene(x, t); x.restore(); }
 }
 
 // ── channel ident (corner bug) ──
@@ -443,79 +535,110 @@ function ident(x, t) {
   x.restore();
 }
 
-function render(t) {
-  sx.setTransform(1, 0, 0, 1, 0, 0);
-  if (t < S2 + 0.6) scene1(sx, t);
-  if (t >= S2 - 0.05 && t < S2 + 0.6) iris(sx, t);
-  else if (t >= S2 + 0.6) scene2(sx, t);
-  sx.setTransform(1, 0, 0, 1, 0, 0);
-  ident(sx, t);
-  // tracking distortion: brief horizontal band slips
-  const glitch = [[0.62, 0.1], [S2 + 0.02, 0.12], [7.9, 0.08]].find(([g0, gd]) => t >= g0 && t < g0 + gd);
-  if (glitch) {
-    const r = rng(Math.floor(t * 30) * 7 + 3);
-    for (let k = 0; k < 3; k++) {
-      const y = r() * H, h = 20 + r() * 90, dx = (r() - 0.5) * 70;
-      sx.drawImage(S, 0, y, W, h, dx, y, W, h);
-    }
-  }
-  // RGB channel shift (old TV)
-  const shift = 3 + (glitch ? 6 : 0);
-  ['#f00', '#0f0', '#00f'].forEach((col, i) => {
-    const c = CH[i].getContext('2d'); c.globalCompositeOperation = 'source-over';
-    c.fillStyle = col; c.fillRect(0, 0, W, H); c.globalCompositeOperation = 'multiply'; c.drawImage(S, 0, 0);
-  });
-  ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.drawImage(CH[0], -shift, 0); ctx.drawImage(CH[1], 0, 0); ctx.drawImage(CH[2], shift, 1);
-  // scan lines + grain (refreshed at 15 fps) + warm tone
-  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(SCAN, 0, 0);
-  const f = Math.floor(t * 15), r = rng(f * 13 + 1);
-  ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.2;
-  ctx.drawImage(GRAIN[f % GRAIN.length], -r() * 60, -r() * 60, W * 2 + 120, H * 2 + 120);
-  ctx.globalAlpha = 1;
-  ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = 'rgba(200,120,50,0.25)'; ctx.fillRect(0, 0, W, H);
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.fillStyle = `rgba(255,235,200,${0.025 + 0.02 * r()})`; ctx.fillRect(0, 0, W, H);
+// ── final picture: old-TV treatment over the scene ──
+const SPLIT = [['#f00', -1, 0], ['#0f0', 0, 0], ['#00f', 1, 1]];   // channel mask, x shift sign, y shift
+const planes = SPLIT.map(() => surface(W, H));
+// run paint() on the output with a blend mode and opacity, then restore normal drawing
+function blend(mode, alpha, paint) {
+  Object.assign(ctx, { globalCompositeOperation: mode, globalAlpha: alpha });
+  paint();
+  Object.assign(ctx, { globalCompositeOperation: 'source-over', globalAlpha: 1 });
+}
+function wash(colour) {
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, W, H);
+}
+const SLIPS = [[0.62, 0.1], [S2 + 0.02, 0.12], [7.9, 0.08]];       // tracking glitches [start, length]
 
-  // TV switching on
-  if (t < 0.6) {
-    const openX = eOut3(seg(t, 0.0, 0.2)), openY = eOut3(seg(t, 0.18, 0.55)), flash = 1 - seg(t, 0.2, 0.6);
-    const hh = Math.max(3, H * openY), ww = Math.max(6, W * openX);
-    const tmp = CH[0].getContext('2d'); tmp.globalCompositeOperation = 'source-over'; tmp.drawImage(cv, 0, 0);
-    ctx.fillStyle = '#060302'; ctx.fillRect(0, 0, W, H);
-    ctx.drawImage(CH[0], (W - ww) / 2, (H - hh) / 2, ww, hh);
-    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = flash * 0.7; ctx.fillStyle = '#fff4e0';
-    ctx.fillRect((W - ww) / 2, (H - hh) / 2, ww, hh); ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
+function paintScene(t) {
+  const phase = t < S2 - 0.05 ? 'kitchen' : t < S2 + 0.6 ? 'iris' : 'cake';
+  if (phase !== 'cake') kitchenScene(sx, t);
+  if (phase === 'iris') iris(sx, t);
+  if (phase === 'cake') cakeScene(sx, t);
+  sx.resetTransform();
+  ident(sx, t);
+}
+// a few horizontal bands slip sideways for a few frames
+function trackingSlip(t) {
+  if (!SLIPS.some(([a, len]) => t >= a && t < a + len)) return false;
+  const rand = rng(7 * Math.floor(30 * t) + 3);
+  for (let n = 0; n < 3; n++) {
+    const top = H * rand(), tall = 20 + 90 * rand(), slide = 70 * (rand() - 0.5);
+    sx.drawImage(scene, 0, top, W, tall, slide, top, W, tall);
   }
-  ctx.drawImage(VIG, 0, 0);
-  // soft fade to dark
-  const fo = eInOut(seg(t, 9.12, 9.96));
-  if (fo > 0) { ctx.fillStyle = `rgba(11,6,4,${fo})`; ctx.fillRect(0, 0, W, H); }
+  return true;
+}
+// split the scene into R, G and B and add them back slightly misregistered
+function misregister(px) {
+  planes.forEach((plane, i) => {
+    const g = plane.getContext('2d');
+    g.globalCompositeOperation = 'copy'; g.fillStyle = SPLIT[i][0]; g.fillRect(0, 0, W, H);
+    g.globalCompositeOperation = 'multiply'; g.drawImage(scene, 0, 0);
+  });
+  blend('copy', 1, () => wash('#000'));
+  blend('lighter', 1, () => planes.forEach((plane, i) => ctx.drawImage(plane, SPLIT[i][1] * px, SPLIT[i][2])));
+}
+// the picture opens from a thin bright line as the set warms up
+function switchOn(t) {
+  const wide = eOut3(seg(t, 0, 0.2)), tall = eOut3(seg(t, 0.18, 0.55)), glow = 1 - seg(t, 0.2, 0.6);
+  const w = Math.max(6, W * wide), h = Math.max(3, H * tall), x0 = (W - w) / 2, y0 = (H - h) / 2;
+  const hold = planes[0].getContext('2d');
+  hold.globalCompositeOperation = 'copy'; hold.drawImage(out, 0, 0);
+  wash('#060302');
+  ctx.drawImage(planes[0], x0, y0, w, h);
+  blend('lighter', 0.7 * glow, () => { ctx.fillStyle = '#fff4e0'; ctx.fillRect(x0, y0, w, h); });
+}
+function compose(t) {
+  paintScene(t);
+  const glitching = trackingSlip(t);
+  misregister(glitching ? 9 : 3);
+  blend('multiply', 1, () => ctx.drawImage(SCAN, 0, 0));
+  // grain refreshes at 15 fps; the same random stream also drives a faint flicker
+  const tick = Math.floor(15 * t), rand = rng(13 * tick + 1);
+  const tile = GRAIN[tick % GRAIN.length], gx = -60 * rand(), gy = -60 * rand();
+  blend('overlay', 0.2, () => ctx.drawImage(tile, gx, gy, 2 * W + 120, 2 * H + 120));
+  blend('soft-light', 1, () => wash('rgba(200,120,50,0.25)'));   // warm cast
+  wash(`rgba(255,235,200,${0.025 + 0.02 * rand()})`);
+  if (t < 0.6) switchOn(t);
+  ctx.drawImage(TUBE, 0, 0);
+  const dark = eInOut(seg(t, 9.12, 9.96));   // soft fade to black at the end
+  if (dark > 0) wash(`rgba(11,6,4,${dark})`);
 }
 
-window.ready = (async () => {
-  await Promise.all(['900 100px Fraunces', '400 100px Shrikhand', '400 100px Monoton', '700 30px Fredoka'].map(f => document.fonts.load(f, 'SUNDAY KITCHEN Tonight: Lemon Cake 7')));
-  await document.fonts.ready;
-  SUNBURST = buildSunburst(); SCAN = buildScan(); VIG = buildVig();
-  for (let i = 0; i < 6; i++) GRAIN.push(buildGrain(i * 101 + 7));
-  return true;
-})();
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
-window.events = () => {
-  // for sound: TV on, ident, vegetable landings/bounces, letter pops, plops, zoom whoosh, iris, cake thump, lemon dings, title chime, fade
-  const ev = [{ t: 0.02, k: 'on' }, { t: 0.8, k: 'ident' }, { t: ZOOM_IN, k: 'whoosh' }, { t: S2 - 0.05, k: 'iris' },
-    { t: 5.3, k: 'thump' }, { t: 6.0, k: 'chime' }, { t: 9.12, k: 'fade' }];
-  VEG.forEach((v, i) => {
-    ev.push({ t: v.land, k: 'land', v: i });
-    for (let b = v.land + BEAT; b < v.jump - 0.01; b += BEAT) ev.push({ t: b, k: 'bounce', v: i });
-    ev.push({ t: v.jump, k: 'hop', v: i }); ev.push({ t: v.jump + JUMP_D * 0.55, k: 'plop', v: i });
+const FACES = ['900 100px Fraunces', '400 100px Shrikhand', '400 100px Monoton', '700 30px Fredoka'];
+async function prepare() {
+  const sample = 'SUNDAY KITCHEN EVERY AT SIX Tonight: Lemon Cake CHANNEL 7';
+  for (const face of FACES) await document.fonts.load(face, sample);
+  return document.fonts.ready.then(() => {
+    SCAN = scanlines();
+    TUBE = tubeMask();
+    GRAIN = [0, 1, 2, 3, 4, 5].map(n => noiseTile(101 * n + 7));
+    return true;
   });
-  [...'SUNDAY'].forEach((_, i) => ev.push({ t: 1.5 + i * 0.07, k: 'pop', v: i }));
-  [...'KITCHEN'].forEach((_, i) => ev.push({ t: 1.9 + i * 0.07, k: 'pop', v: i + 3 }));
-  [5.5, 5.75, 6.0].forEach((t, i) => ev.push({ t, k: 'ding', v: i }));
-  return ev;
+}
+window.ready = prepare();
+window.draw = ({ t }) => {
+  compose(t);
+  const url = out.toDataURL('image/jpeg', 0.92);
+  return url.slice(url.indexOf(',') + 1);
 };
+// sound cues: TV on, ident, vegetable landings and bounces, hops and plops, letter pops,
+// zoom whoosh, iris, cake thump, lemon dings, title chime, fade
+function soundCues() {
+  const cue = (t, k, v) => v === undefined ? { t, k } : { t, k, v };
+  const list = [cue(0.02, 'on'), cue(0.8, 'ident'), cue(ZOOM_IN, 'whoosh'), cue(S2 - 0.05, 'iris'),
+    cue(5.3, 'thump'), cue(6.0, 'chime'), cue(9.12, 'fade')];
+  VEG.forEach((veg, n) => {
+    list.push(cue(veg.land, 'land', n));
+    for (let b = veg.land + BEAT; b < veg.jump - 0.01; b += BEAT) list.push(cue(b, 'bounce', n));
+    list.push(cue(veg.jump, 'hop', n), cue(veg.jump + JUMP_D * 0.55, 'plop', n));
+  });
+  for (let n = 0; n < 6; n++) list.push(cue(1.5 + n * 0.07, 'pop', n));
+  for (let n = 0; n < 7; n++) list.push(cue(1.9 + n * 0.07, 'pop', n + 3));
+  [5.5, 5.75, 6.0].forEach((when, n) => list.push(cue(when, 'ding', n)));
+  return list;
+}
+window.events = soundCues;
 </script>
-</body></html>
+</body>
+</html>
