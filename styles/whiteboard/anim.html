@@ -6,11 +6,11 @@
 </head>
 <body>
 <canvas id="c" width="1920" height="1080"></canvas>
-<script src="common.js"></script>
+<script src="./common.js"></script>
 <script>
 // WHITEBOARD — "How do bees make honey?": marker draws each step, camera trails the long arrow, zoom out to the summary board
 const INK = '#18181b', RED = '#d4352a', AMBER = '#e9a21f', BOARD = '#f6f6f3';
-const FONT = "'Kalam'";
+const HAND = '"Kalam"';
 const BX = 1760, BY = 420;                        // world offset of second panel
 const A_C = [960, 540], B_C = [BX + 860, BY + 600];
 const SUM = { c: [0, 0], s: 1 };                  // summary framing, fitted to the drawings in measureLabels
@@ -87,16 +87,16 @@ paintMarker(mSprite.getContext('2d'));
   g.globalCompositeOperation = 'source-in'; g.fillStyle = '#2b3036'; g.fillRect(0, 0, 700, 700); }
 
 // ---------- timeline: every stroke and label the marker draws, with its time window ----------
-const acts = [];
+const moves = [];
 function stroke(path, t0, t1, o = {}) {
-  path.jitter(o.jit ?? 1.6, acts.length * 17 + 5);
+  path.jitter(o.jit ?? 1.6, moves.length * 17 + 5);
   const act = { kind: 'path', path, t0, t1, color: o.color || INK, width: o.width || 7, clip: o.clip, dash: o.dash,
                 ease: o.ease || (u => u), flap: o.flap, drift: o.drift };
-  acts.push(act);
+  moves.push(act);
   return act;
 }
 function text(str, x, y, size, t0, t1, o = {}) {
-  acts.push({ kind: 'text', str, x, y, size, t0, t1, color: o.color || INK, align: o.align || 'center', rot: o.rot || 0 });
+  moves.push({ kind: 'text', str, x, y, size, t0, t1, color: o.color || INK, align: o.align || 'center', rot: o.rot || 0 });
 }
 const ell = (cx, cy, rx, ry, a0, a1, rot = 0, n = 48) => Array.from({ length: n + 1 }, (_, i) => { const a = lerp(a0, a1, i / n), x = Math.cos(a) * rx, y = Math.sin(a) * ry; return [cx + x * Math.cos(rot) - y * Math.sin(rot), cy + x * Math.sin(rot) + y * Math.cos(rot)]; });
 const poly = pts => { const p = P().M(...pts[0]); for (let i = 1; i < pts.length; i++) p.L(...pts[i]); return p; };
@@ -108,12 +108,12 @@ const hexPts = (cx, cy, r, a0 = 0) => Array.from({ length: 7 }, (_, i) => { cons
 // point `len` away from (x, y) in direction `ang`
 const toward = (x, y, ang, len) => [x + Math.cos(ang) * len, y + Math.sin(ang) * len];
 // gently bowed arrow: the shaft first, then a two-barb head in the last 0.06 s
-function arrow(x0, y0, x1, y1, t0, t1, bend = -24, o = {}) {
-  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2 + bend, barb = o.head || 30;
-  stroke(P().M(x0, y0).Q(cx, cy, x1, y1, 30), t0, t1 - 0.06, o);
-  const ang = Math.atan2(y1 - (cy + y1) / 2, x1 - (cx + x1) / 2);
-  stroke(P().M(...toward(x1, y1, ang + 2.55, barb)).L(x1, y1).L(...toward(x1, y1, ang - 2.55, barb)), t1 - 0.06, t1, o);
-}
+const arrow = (from, to, t0, t1, bow = -24, o = {}) => {
+  const [ax, ay] = from, [bx, by] = to, ctl = [(ax + bx) / 2, (ay + by) / 2 + bow], len = o.head || 30;
+  stroke(P().M(ax, ay).Q(...ctl, bx, by, 30), t0, t1 - 0.06, o);
+  const dir = Math.atan2((by - ctl[1]) / 2, (bx - ctl[0]) / 2);   // tangent at the tip
+  stroke(P().M(...toward(bx, by, dir + 2.55, len)).L(bx, by).L(...toward(bx, by, dir - 2.55, len)), t1 - 0.06, t1, o);
+};
 // A bee: body with stripes, head, antennae, stinger, legs, two flapping wings. flip=-1 faces left.
 const BEES = [];
 function bee(cx, cy, s, flip, t0, dur, o = {}) {
@@ -156,7 +156,7 @@ stroke(P().M(470, 420).S([[540, 350], [620, 380], [612, 452], [556, 446], [566, 
 // 2 bee sipping nectar
 bee(900, 470, 0.95, 1, 2.4, 0.62, { drop: true });
 text('sips nectar', 920, 850, 70, 3.2, 3.44);
-arrow(1150, 480, 1300, 480, 3.48, 3.64);
+arrow([1150, 480], [1300, 480], 3.48, 3.64);
 // 3 the hive: honeycomb of 7 cells
 const HIVE = { cx: 1570, cy: 470, r: 60 };
 { const { cx, cy, r } = HIVE, d = Math.sqrt(3) * r;
@@ -168,9 +168,10 @@ const HIVE = { cx: 1570, cy: 470, r: 60 };
 // long arrow connecting panels (camera follows tip)
 const CONN = { t0: 4.5, t1: 5.4 };
 { const p = P().M(1790, 610).S([[1832, 712], [1888, 818], [BX + 186, BY + 508], [BX + 250, BY + 580]], 24);
-  stroke(p, CONN.t0, CONN.t1 - 0.08, { ease: eio2, jit: 2 });
+  const headAt = CONN.t1 - 0.08;
+  stroke(p, CONN.t0, headAt, { jit: 2, ease: eio2 });
   const e = p.p[p.p.length - 1], q = p.p[p.p.length - 8], a = Math.atan2(e[1] - q[1], e[0] - q[0]);
-  stroke(P().M(e[0] + Math.cos(a + 2.55) * 34, e[1] + Math.sin(a + 2.55) * 34).L(...e).L(e[0] + Math.cos(a - 2.55) * 34, e[1] + Math.sin(a - 2.55) * 34), CONN.t1 - 0.08, CONN.t1); }
+  stroke(P().M(e[0] + Math.cos(a + 2.55) * 34, e[1] + Math.sin(a + 2.55) * 34).L(...e).L(e[0] + Math.cos(a - 2.55) * 34, e[1] + Math.sin(a - 2.55) * 34), headAt, CONN.t1); }
 // Panel B — 4 bees fan the water out of the nectar
 { const r = 90, C = [[380, 700], [515, 622], [650, 700]].map(([x, y]) => [BX + x, BY + y]);
   C.forEach(([x, y], i) => stroke(poly(hexPts(x, y, r)), 5.46 + i * 0.1, 5.55 + i * 0.1, { width: 7, jit: 1 }));
@@ -184,7 +185,7 @@ const CONN = { t0: 4.5, t1: 5.4 };
     p.S(Array.from({ length: 5 }, (_, k) => [BX + x + (k % 2 ? 14 : -14) - k * 4, BY + 520 - (k + 1) * 30]), 12);
     stroke(p, 6.76 + i * 0.06, 6.82 + i * 0.06, { width: 5, jit: 0.4, drift: ph }); });
   text('fan off water', BX + 515, BY + 900, 66, 6.96, 7.22); }
-arrow(BX + 820, BY + 700, BX + 1000, BY + 700, 7.26, 7.42);
+arrow([BX + 820, BY + 700], [BX + 1000, BY + 700], 7.26, 7.42);
 // 5 a jar of honey
 { const J = BX + 1300, Y = BY;
   stroke(poly([[J - 104, Y + 392], [J + 100, Y + 388], [J + 104, Y + 444], [J - 102, Y + 446], [J - 104, Y + 392]]), 7.46, 7.56, { width: 7 });
@@ -200,22 +201,22 @@ arrow(BX + 820, BY + 700, BX + 1000, BY + 700, 7.26, 7.42);
   stroke(P().M(J - 110, Y + 994).S([[J - 20, Y + 988], [J + 70, Y + 986], [J + 126, Y + 990]], 20), 8.48, 8.56, { color: RED, width: 8, ease: eout }); }
 
 
-for (const a of acts) if (a.kind === 'path') a.path.done();
-acts.sort((a, b) => a.t0 - b.t0);
+moves.forEach(mv => mv.kind === 'path' && mv.path.done());
+moves.sort((p, q) => p.t0 - q.t0);   // chronological, so the pen visits them in order
 
 // Label widths (needs the font): full width, width of every prefix for the write-on, left edge.
+const labels = () => moves.filter(mv => mv.kind === 'text');
 function measureLabels() {
-  for (const a of acts) {
-    if (a.kind !== 'text') continue;
-    ctx.font = `700 ${a.size}px ${FONT}`;
-    a.w = ctx.measureText(a.str).width;
-    a.xs = [0];
-    for (let n = 1; n <= a.str.length; n++) a.xs.push(ctx.measureText(a.str.slice(0, n)).width);
-    a.left = a.align === 'center' ? a.x - a.w / 2 : a.x;
-  }
+  labels().forEach(lb => {
+    ctx.font = `700 ${lb.size}px ${HAND}`;
+    lb.xs = [...lb.str].map((_, i) => ctx.measureText(lb.str.slice(0, i)).width);
+    lb.w = ctx.measureText(lb.str).width;
+    lb.xs.push(lb.w);
+    lb.left = lb.x - (lb.align === 'center' ? lb.w / 2 : 0);
+  });
   // summary framing: fit every drawing and label with a margin
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; const add = (x, y) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
-  for (const a of acts) if (a.kind === 'text') { add(a.left, a.y - a.size * 0.8); add(a.left + a.w, a.y + a.size * 0.25); } else a.path.p.forEach(q => add(...q));
+  for (const a of moves) if (a.kind === 'text') { add(a.left, a.y - a.size * 0.8); add(a.left + a.w, a.y + a.size * 0.25); } else a.path.p.forEach(q => add(...q));
   SUM.c = [(x0 + x1) / 2, (y0 + y1) / 2]; SUM.s = Math.min(1720 / (x1 - x0), 940 / (y1 - y0));
 }
 
@@ -238,26 +239,24 @@ function nibOn(a, t) {
 const mix2 = (p, q, u) => [lerp(p[0], q[0], u), lerp(p[1], q[1], u)];
 
 // Where the marker is and how far it is lifted off the board: on an act while it draws,
-// gliding (and hopping, for longer gaps) between acts, then leaving the frame after the last one.
+// gliding (and hopping, for longer gaps) between moves, then leaving the frame after the last one.
 const ENTER = [1500, 1300], EXIT = [BX + 1900, BY + 1500], PEN_OUT = 0.4;
-function markerAt(t) {
-  let before = null;
-  for (const a of acts) {
-    if (t >= a.t0 && t <= a.t1) return { p: nibOn(a, t), lift: 0 };
-    if (t < a.t0) {
-      const from = before ? lastPoint(before) : ENTER, leave = before ? before.t1 : 0;
-      const u = eio2(seg(t, leave, a.t0));
-      return { p: mix2(from, firstPoint(a), u), lift: Math.sin(u * Math.PI) * Math.min(1, (a.t0 - leave) * 6) };
-    }
-    before = a;
+function penAt(t) {
+  const next = moves.findIndex(mv => t <= mv.t1);
+  if (next < 0) {                                  // all done: carry the pen off screen
+    const tail = moves[moves.length - 1], u = eio2(seg(t, tail.t1, tail.t1 + PEN_OUT));
+    return { p: mix2(lastPoint(tail), EXIT, u), lift: u, gone: u >= 1 };
   }
-  const u = eio2(seg(t, before.t1, before.t1 + PEN_OUT));
-  return { p: mix2(lastPoint(before), EXIT, u), lift: u, gone: u >= 1 };
+  const mv = moves[next];
+  if (t >= mv.t0) return { p: nibOn(mv, t), lift: 0 };
+  const prev = moves[next - 1], start = prev ? prev.t1 : 0, u = eio2(seg(t, start, mv.t0));
+  const hop = Math.min(1, 6 * (mv.t0 - start));    // short gaps barely lift the nib
+  return { p: mix2(prev ? lastPoint(prev) : ENTER, firstPoint(mv), u), lift: hop * Math.sin(Math.PI * u) };
 }
 
 // Camera centre and zoom: slow push on panel A, glide along the long arrow to panel B, then pull back to the summary.
 const Z0 = 8.6, Z1 = 9.3;
-function camAt(t) {
+function cameraFor(t) {
   if (t < CONN.t0) return { c: A_C, s: 1 + 0.02 * seg(t, 0, CONN.t0) };
   const glide = eio(seg(t, CONN.t0 - 0.05, CONN.t1 + 0.05));
   if (t < CONN.t1) return { c: mix2(A_C, B_C, glide), s: lerp(1.02, 1, glide) };
@@ -266,15 +265,15 @@ function camAt(t) {
   return { c: mix2(B_C, SUM.c, out), s: lerp(1.02, SUM.s, out) * (1 - 0.012 * seg(t, Z1, 10)) };
 }
 
-function drawLabel(a, t) {
-  const shown = t >= a.t1 ? a.w + 20 : writing(a, t).shown;
-  ctx.translate(a.x, a.y); ctx.rotate(a.rot); ctx.translate(-a.x, -a.y);
-  ctx.beginPath(); ctx.rect(a.left - 20, a.y - a.size * 1.3, shown + 20, a.size * 1.8); ctx.clip();
-  ctx.font = `700 ${a.size}px ${FONT}`; ctx.fillStyle = a.color; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  ctx.fillText(a.str, a.left, a.y);
+function drawLabel(lb, t) {
+  const { x, y, size } = lb, reveal = t < lb.t1 ? writing(lb, t).shown : lb.w + 20;
+  ctx.translate(x, y); ctx.rotate(lb.rot); ctx.translate(-x, -y);   // slight hand-written tilt
+  ctx.beginPath(); ctx.rect(lb.left - 20, y - 1.3 * size, reveal + 20, 1.8 * size); ctx.clip();
+  Object.assign(ctx, { font: `700 ${size}px ${HAND}`, fillStyle: lb.color, textAlign: 'left', textBaseline: 'alphabetic' });
+  ctx.fillText(lb.str, lb.left, y);
 }
 function drawStroke(a, t) {
-  if (a.clip) ctx.clip(a.clip);
+  a.clip && ctx.clip(a.clip);
   if (a.flap && t > a.t1) {        // wings beat once drawn
     const k = seg(t, a.t1, a.t1 + 0.25), ang = a.flap.sgn * 0.2 * k * Math.sin((t - a.t1) * 2 * Math.PI * 7 + a.flap.ph);
     ctx.translate(...a.flap.p); ctx.rotate(ang); ctx.translate(-a.flap.p[0], -a.flap.p[1]);
@@ -283,7 +282,7 @@ function drawStroke(a, t) {
     const k = t - a.t1; ctx.translate(Math.sin(k * 3 + a.drift) * 5, -Math.min(20, k * 14));
   }
   const drawn = a.ease(seg(t, a.t0, a.t1)) * a.path.len;
-  ctx.strokeStyle = a.color; ctx.lineWidth = a.width; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  Object.assign(ctx, { strokeStyle: a.color, lineWidth: a.width, lineCap: 'round', lineJoin: 'round' });
   if (a.dash) ctx.setLineDash(a.dash);
   ctx.beginPath(); a.path.trace(ctx, 0, drawn); ctx.stroke();
 }
@@ -294,20 +293,19 @@ function drawMarker(m) {
   stamp(mSprite, m.p[0], m.p[1]);
 }
 
-function render(t) {
-  const cam = camAt(t);
-  ctx.setTransform(cam.s, 0, 0, cam.s, 960 - cam.c[0] * cam.s, 540 - cam.c[1] * cam.s);
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(board, WB.x0, WB.y0, WB.w, WB.h);
-  for (const a of acts) {
-    if (t < a.t0) continue;
+function frame(t) {
+  const { c: [cx, cy], s: z } = cameraFor(t);
+  ctx.setTransform(z, 0, 0, z, W / 2 - cx * z, H / 2 - cy * z);   // world → screen
+  ctx.imageSmoothingQuality = 'high'; // the board texture is half-res, upscale it smoothly
+  ctx.drawImage(board, WB.x0, WB.y0, board.width / WB.k, board.height / WB.k);
+  moves.filter(mv => mv.t0 <= t).forEach(mv => {
     ctx.save();
-    if (a.kind === 'text') drawLabel(a, t); else drawStroke(a, t);
+    (mv.kind === 'text' ? drawLabel : drawStroke)(mv, t);
     ctx.restore();
-  }
-  const m = markerAt(t);
-  if (!m.gone) drawMarker(m);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  });
+  const pen = penAt(t);
+  pen.gone || drawMarker(pen);
+  ctx.resetTransform();
   const falloff = ctx.createRadialGradient(960, 420, 400, 960, 540, 1250);   // light falls off toward the corners
   falloff.addColorStop(0, 'rgba(255,255,255,0)'); falloff.addColorStop(1, 'rgba(70,80,90,0.10)');
   ctx.fillStyle = falloff; ctx.fillRect(0, 0, W, H);
@@ -316,14 +314,14 @@ function render(t) {
 // sound cues for audio.py
 window.events = () => {
   const ev = [];
-  for (const a of acts) ev.push({ t: a.t0, k: a.kind === 'text' ? 'write' : 'marker', d: +(a.t1 - a.t0).toFixed(3), n: a.kind === 'text' ? a.str.replace(/ /g, '').length : 0 });
+  for (const a of moves) ev.push({ t: a.t0, k: a.kind === 'text' ? 'write' : 'marker', d: +(a.t1 - a.t0).toFixed(3), n: a.kind === 'text' ? a.str.replace(/ /g, '').length : 0 });
   BEES.forEach(b => ev.push({ t: b.t0, k: 'buzz', pan: b.cx < BX ? -0.3 : 0.3 }));
   ev.push({ t: CONN.t0, k: 'whoosh', d: CONN.t1 - CONN.t0 + 0.2 }, { t: Z0, k: 'whoosh', d: Z1 - Z0 + 0.2 }, { t: Z1 - 0.1, k: 'chord' });
   return ev.sort((a, b) => a.t - b.t);
 };
-window.ready = loadFont('Kalam', 'Kalam-700', 700).then(() => document.fonts.load(`700 80px ${FONT}`, 'How do bees make honey?')).then(measureLabels);
+window.ready = loadFont('Kalam', 'Kalam-700', 700).then(() => document.fonts.load(`700 80px ${HAND}`, 'How do bees make honey?')).then(measureLabels);
 window.draw = ({ t }) => {
-  render(t);
+  frame(t);
   const url = cv.toDataURL('image/jpeg', 0.92);
   return url.slice(url.indexOf(',') + 1);
 };
