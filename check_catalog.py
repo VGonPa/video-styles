@@ -13,6 +13,10 @@ import manifest
 ROOT = manifest.ROOT
 MANIFEST = manifest.load()
 REQUIRED = {"number", "name", "feel", "best_for", "family", "use_cases"}
+# Every style folder carries an unmodified copy of these shared scripts from tools/.
+SHARED_SCRIPTS = ["render.mjs", "events.mjs"]
+# The hand-drawn styles also share tools/common.js.
+COMMON_JS_STYLES = {"whiteboard", "chalkboard", "blueprint", "single-line"}
 
 
 def probe(clip):
@@ -63,6 +67,17 @@ def check_pages(s, problems):
         problems.append("missing or stale styles/<slug>/README.md")
 
 
+def check_shared_scripts(s, problems):
+    folder = ROOT / "styles" / s["slug"]
+    names = SHARED_SCRIPTS + (["common.js"] if s["slug"] in COMMON_JS_STYLES else [])
+    for name in names:
+        copy = folder / name
+        if not copy.is_file():
+            problems.append(f"missing {name}")
+        elif copy.read_bytes() != (ROOT / "tools" / name).read_bytes():
+            problems.append(f"{name} differs from tools/{name}")
+
+
 def main():
     failed = False
     for s in MANIFEST["styles"]:
@@ -76,6 +91,7 @@ def main():
                      if u not in MANIFEST["use_cases"]]
         if not (ROOT / "styles" / s["slug"] / "preview.gif").is_file():
             problems.append("missing preview.gif")
+        check_shared_scripts(s, problems)
         check_clip(s, problems)
         check_pages(s, problems)
         status = "ok" if not problems else "; ".join(problems)
