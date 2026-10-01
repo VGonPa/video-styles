@@ -1,6 +1,11 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><style>html,body{margin:0;background:#f3eee4}canvas{display:block}</style></head>
-<body><canvas id="c" width="1920" height="1080"></canvas>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>html, body { margin: 0; background: #f3eee4; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
 <script src="common.js"></script>
 <script>
 // SINGLE LINE — "Good morning.": one unbroken line of ink draws a coffee cup, its steam becomes a bird,
@@ -11,18 +16,24 @@ const X0 = -80, X1 = 2000;
 // every scene is five segments with fixed point counts, so each part morphs into its counterpart
 const CNT = [360, 760, 560, 620, 300];
 const N = CNT.reduce((a, b) => a + b, 0);
-
-// --- Paper texture (once) ---
+// --- warm drawing paper, painted once: centre lift, grain, curled fibres ---
 const paper = mk(W, H);
-{ const c = paper.getContext('2d'); c.fillStyle = PAPER; c.fillRect(0, 0, W, H);
-  const g = c.createRadialGradient(960, 520, 500, 960, 540, 1300); g.addColorStop(0, 'rgba(255,252,245,0.22)'); g.addColorStop(1, 'rgba(120,100,70,0.13)');
-  c.fillStyle = g; c.fillRect(0, 0, W, H);
-  const id = c.getImageData(0, 0, W, H), d = id.data, r = rng(7);
-  for (let k = 0; k < d.length; k += 4) { const n = (r() - .5) * 10; d[k] += n; d[k + 1] += n; d[k + 2] += n; }
-  c.putImageData(id, 0, 0);
-  c.strokeStyle = 'rgba(110,90,60,0.05)'; c.lineWidth = 1;
-  for (let i = 0; i < 900; i++) { const x = r() * W, y = r() * H, a = r() * Math.PI, l = 6 + r() * 22; c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + Math.cos(a) * l * .5 + (r() - .5) * 6, y + Math.sin(a) * l * .5 + (r() - .5) * 6, x + Math.cos(a) * l, y + Math.sin(a) * l); c.stroke(); }
-}
+{ const g = paper.getContext('2d'), rand = rng(7);
+  g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
+  const lift = g.createRadialGradient(960, 520, 500, 960, 540, 1300);
+  lift.addColorStop(0, 'rgba(255,252,245,0.22)'); lift.addColorStop(1, 'rgba(120,100,70,0.13)');
+  g.fillStyle = lift; g.fillRect(0, 0, W, H);
+  const img = g.getImageData(0, 0, W, H), px = img.data;
+  for (let i = 0; i < px.length; i += 4) { const n = (rand() - .5) * 10; for (let ch = 0; ch < 3; ch++) px[i + ch] += n; }
+  g.putImageData(img, 0, 0);
+  g.strokeStyle = 'rgba(110,90,60,0.05)'; g.lineWidth = 1;
+  for (let n = 0; n < 900; n++) {
+    const x = rand() * W, y = rand() * H, ang = rand() * Math.PI, len = 6 + rand() * 22;
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    g.beginPath(); g.moveTo(x, y);
+    g.quadraticCurveTo(x + dx * len * .5 + (rand() - .5) * 6, y + dy * len * .5 + (rand() - .5) * 6, x + dx * len, y + dy * len);
+    g.stroke();
+  } }
 
 // --- helpers ---
 const lead = (xa, xb) => P().M(xa, HY).L(xb, HY);
@@ -123,31 +134,67 @@ const WORDSC = SC[4](0);
 const WI0 = (() => { let i = 0; while (WORDSC.p[i][0] < WORD.x0 - 4) i++; return i; })();                          // first ink of "g"
 const WI1 = (() => { let i = N - 1; while (WORDSC.p[i][0] > WORD.end - 0.1 * WS) i--; return i; })();              // just past the period
 
-// thickness (pen pressure) — slow wave along the line
-const WID = new Float32Array(N); { for (let i = 0; i < N; i++) { const u = i / N; WID[i] = 5.6 + 1.2 * Math.sin(u * 37.0) * Math.sin(u * 11.3 + 1) + 0.6 * Math.sin(u * 91); } }
+// Pen pressure: line width wanders along the line as a mix of slow sine waves (one value per point).
+const WID = new Float32Array(N);
+for (let i = 0; i < N; i++) {
+  const u = i / N;
+  WID[i] = 5.6 + 1.2 * Math.sin(u * 37.0) * Math.sin(u * 11.3 + 1) + 0.6 * Math.sin(u * 91);
+}
 
+// Ink points i0..i1 of the line in short runs, each run with the pressure width at its start.
 function strokePts(pts, i0, i1) {
+  const RUN = 6, first = Math.max(0, Math.floor(i0)), last = Math.ceil(i1) - 1;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = INK;
-  const CH = 6;
-  for (let a = Math.max(0, Math.floor(i0)); a < i1 - 1; a += CH) {
-    const b = Math.min(Math.ceil(i1) - 1, a + CH);
-    ctx.lineWidth = WID[a]; ctx.beginPath(); ctx.moveTo(pts[a][0], pts[a][1]);
+  for (let a = first; a < i1 - 1; a += RUN) {
+    const b = Math.min(last, a + RUN);
+    ctx.lineWidth = WID[a];
+    ctx.beginPath(); ctx.moveTo(pts[a][0], pts[a][1]);
     for (let k = a + 1; k <= b; k++) ctx.lineTo(pts[k][0], pts[k][1]);
     ctx.stroke();
   }
 }
+// Blend scene A into scene B point by point; `stag` makes the start of the line change before its end.
 function morph(A, B, tau, stag = 0.55) {
-  const out = new Array(N);
-  for (let i = 0; i < N; i++) { const u = eio(clamp(tau * (1 + stag) - stag * (i / N))); out[i] = [lerp(A.p[i][0], B.p[i][0], u), lerp(A.p[i][1], B.p[i][1], u)]; }
-  return out;
+  return Array.from({ length: N }, (_, i) => {
+    const u = eio(clamp(tau * (1 + stag) - stag * (i / N)));
+    return [lerp(A.p[i][0], B.p[i][0], u), lerp(A.p[i][1], B.p[i][1], u)];
+  });
 }
 // index at a fraction of the total arc length (so the pen moves at a steady speed)
 function idxAt(path, u) { const s = u * path.len; let lo = 0, hi = N - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (path.cum[m] < s) lo = m; else hi = m; } return lo + (s - path.cum[lo]) / ((path.cum[hi] - path.cum[lo]) || 1); }
-function dot(x, y, r, a = 1) { ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = ACC; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.restore(); }
+// accent dot (the pen nib)
+function dot(x, y, r, a = 1) {
+  ctx.save();
+  ctx.globalAlpha = a; ctx.fillStyle = ACC;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  ctx.restore();
+}
 
 // timeline
 const TL = { in0: 0.3, in1: 2.5, m: [[2.8, 3.9], [4.3, 5.35], [5.6, 6.6], [7.4, 8.5]], out0: 8.75, out1: 9.7, end: 10 };
 
+// The visible line at time t: its points, the inked range [i0, i1], and where to put the nib dots.
+function lineAt(t) {
+  const view = { pts: null, i0: 0, i1: N, head: null, tail: null };
+  if (t < TL.m[0][0]) {                           // first drawing: the pen travels along the cup at steady speed
+    const path = SC[0](t), u = eio2(seg(t, TL.in0, TL.in1));
+    view.pts = path.p;
+    view.i1 = u >= 1 ? N : idxAt(path, u) + 1;
+    if (u > 0 && u < 1) view.head = view.pts[Math.min(N - 1, Math.floor(view.i1))];
+    if (u <= 0) view.i1 = 0;
+  } else {
+    const k = TL.m.findIndex(([, end]) => t < end);   // current or next morph
+    if (k < 0) view.pts = WORDSC.p;
+    else if (t < TL.m[k][0]) view.pts = SC[k](t).p;
+    else view.pts = morph(SC[k](t), SC[k + 1](t), seg(t, TL.m[k][0], TL.m[k][1]));
+  }
+  if (t >= TL.out0) {                             // the line retracts from both ends onto the words
+    const u = eio(seg(t, TL.out0, TL.out1));
+    view.i0 = u * WI0; view.i1 = N - 1 - u * (N - 1 - WI1);
+    if (u < 1) { view.tail = view.pts[Math.floor(view.i0)]; view.head = view.pts[Math.ceil(view.i1)]; }
+  }
+  return view;
+}
 function render(t) {
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(paper, 0, 0);
   // soft sunrise warmth behind the sun loop
@@ -157,17 +204,7 @@ function render(t) {
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
   const sc = 1 + 0.025 * eio(seg(t, 0, 10));
   ctx.setTransform(sc, 0, 0, sc, 960 - 960 * sc, 540 - 540 * sc);
-  let pts, i0 = 0, i1 = N, head = null, tail = null;
-  const k = TL.m.findIndex(([a, b]) => t < b);
-  if (t < TL.m[0][0]) {
-    const path = SC[0](t); pts = path.p;
-    const u = eio2(seg(t, TL.in0, TL.in1)); i1 = u >= 1 ? N : idxAt(path, u) + 1;
-    if (u > 0 && u < 1) head = pts[Math.min(N - 1, Math.floor(i1))]; if (u <= 0) i1 = 0;
-  } else if (k < 0) pts = WORDSC.p;
-  else if (t < TL.m[k][0]) pts = SC[k](t).p;
-  else pts = morph(SC[k](t), SC[k + 1](t), seg(t, TL.m[k][0], TL.m[k][1]));
-  if (t >= TL.out0) { const u = eio(seg(t, TL.out0, TL.out1)); i0 = u * WI0; i1 = N - 1 - u * (N - 1 - WI1);
-    if (u < 1) { tail = pts[Math.floor(i0)]; head = pts[Math.ceil(i1)]; } }
+  const { pts, i0, i1, head, tail } = lineAt(t);
   if (i1 - i0 > 1) strokePts(pts, i0, i1);
   if (head) dot(head[0], head[1], 7.5);
   if (tail && i0 > 1) dot(tail[0], tail[1], 7.5);
@@ -189,5 +226,11 @@ window.events = () => [
   { t: TL.out0, k: 'retract', d: TL.out1 - TL.out0 },
 ];
 window.ready = loadFont('Cormorant Garamond', 'CormorantGaramond-500', 500, 'italic').then(() => document.fonts.load("italic 500 40px 'Cormorant Garamond'", 'one line, a new day.'));
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
-</script></body></html>
+window.draw = ({ t }) => {
+  render(t);
+  const url = cv.toDataURL('image/jpeg', 0.92);
+  return url.slice(url.indexOf(',') + 1);
+};
+</script>
+</body>
+</html>
