@@ -27,11 +27,11 @@ const eIn = k => k * k * k;
 const hash = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
 const rng = (s => () => { s = s + 0x6D2B79F5 | 0; let q = Math.imul(s ^ s >>> 15, 1 | s); q = q + Math.imul(q ^ q >>> 7, 61 | q) ^ q; return ((q ^ q >>> 14) >>> 0) / 4294967296; })(17);
 
-const MONO = "'JetBrains Mono', monospace";
+const MONO = '"JetBrains Mono", monospace';     // the only face on screen
 const FS = 32;                                   // font size
 const LH = 52;                                   // line height
 const X0 = 140, Y0 = 118;                        // top-left of the text grid
-let CW = 16.8, COLS = 96;                        // cell width and columns, measured from the font in prep()
+let CW = 16.8, COLS = 96;                        // cell width and columns, measured from the font in setup()
 const ROWS = 16;
 // phosphor colours: normal, dim, bright, and the background used for inverted text
 const C = {
@@ -139,25 +139,25 @@ window.events = () => {
 };
 
 // ── display content: character cells at time t ───────────────────────────────
-function build(t) {
-  const it = [];                                  // text runs: { r: row, c: column, s: string, st: style }
-  let cur = null;                                 // cursor cell, if one is shown
+const screenAt = t => {
+  // frame = { it: text runs { r: row, c: column, s: string, st: style }, cur: cursor cell or null }
+  const frame = { it: [], cur: null };
   // adds a run and returns the column just after it (counting code points, so ° and █ take one cell)
-  const put = (r, c, str, st = 'n') => { it.push({ r, c, s: str, st }); return c + Array.from(str).length; };
+  const put = (r, c, str, st = 'n') => { frame.it.push({ r, c, s: str, st }); return c + Array.from(str).length; };
   const putSegs = (r, c, segs) => segs.reduce((col, [s, st]) => put(r, col, s, st), c);
-  if (t < 0.40) return { it, cur };               // screen still warming up
+  if (t < 0.40) return frame;                     // screen still warming up
   if (t < CUP) {
     const vis = LOG.filter(l => t >= l.t).slice(-ROWS);
     const shift = t >= ROLL ? Math.floor(eIn(seg(t, ROLL, CUP)) * (ROWS + 1)) : 0;   // roll-up clear
     vis.forEach((l, i) => {
       const r = i - shift; if (r < 0) return;
       const c = putSegs(r, 0, l.f(t));
-      if (l.p && i === vis.length - 1 && !shift) cur = { r, c };
+      if (l.p && i === vis.length - 1 && !shift) frame.cur = { r, c };
     });
     // cursor: steady while typing, blinking while idle
-    if (cur) { const k = CMDS.findIndex((cm, i) => t >= cm[1] && t < ENT[i]);
-      cur.blink = k < 0 || t - TT[k][Math.max(0, TT[k].findLastIndex(x => t >= x))] > 0.3; }
-    return { it, cur };
+    if (frame.cur) { const k = CMDS.findIndex((cm, i) => t >= cm[1] && t < ENT[i]);
+      frame.cur.blink = k < 0 || t - TT[k][Math.max(0, TT[k].findLastIndex(x => t >= x))] > 0.3; }
+    return frame;
   }
   // cup scene
   const c0 = Math.floor((COLS - CUPW) / 2), r0 = 3;
@@ -182,15 +182,15 @@ function build(t) {
     }
   }
   if (t >= CAPTION) {
-    const cap = 'order #042 is live  ·  enjoy'; const n = Math.min(cap.length, Math.floor((t - CAPTION) / 0.018));
+    const cap = 'order #042 is live  ·  enjoy'; const n = Math.min(cap.length, Math.floor((t - CAPTION) / 0.016));
     put(r0 + CUPART.length + 1, Math.floor((COLS - cap.length) / 2), cap.slice(0, n), 'b');
   }
-  if (t >= PROMPT_END) { const c = putSegs(ROWS - 1, 0, PROMPT); cur = { r: ROWS - 1, c, blink: true }; }
-  return { it, cur };
-}
+  if (t >= PROMPT_END) frame.cur = { r: ROWS - 1, c: putSegs(ROWS - 1, 0, PROMPT), blink: true };
+  return frame;
+};
 
 // ── drawing: character grid ──────────────────────────────────────────────────
-let dith = null;                                  // colour → checkerboard pattern, made in prep()
+let dith = null;                                  // colour → checkerboard pattern, made in setup()
 // One character cell. Block glyphs are painted as rectangles so bars join up seamlessly.
 function cell(g, ch, x, y, col) {
   if (ch === ' ') return;
@@ -212,11 +212,12 @@ function cell(g, ch, x, y, col) {
 }
 // phosphor trails only while the layout holds still (a scroll or clear would smear whole lines)
 const layout = t => t >= CUP ? -1 : t >= ROLL ? -2 - Math.floor(t * 30) : Math.max(0, LOG.filter(l => t >= l.t).length - ROWS);
-function renderScreen(g, t, alpha) {
-  const screen = build(t);
+function paintText(g, t, alpha) {
+  const { it, cur } = screenAt(t);
+  g.save();
   g.globalAlpha = alpha;
   g.textBaseline = 'alphabetic';
-  for (const run of screen.it) {
+  for (const run of it) {
     const glyphs = [...run.s], top = Y0 + run.r * LH;
     let st = run.st;
     if (st === 'e') st = (t - ERR < 0.5 && Math.floor((t - ERR) * 12) % 2 === 1) ? 'b' : 'i';   // error flashes, then stays inverted
@@ -229,24 +230,24 @@ function renderScreen(g, t, alpha) {
     g.font = `${bold ? 700 : 400} ${FS}px ${MONO}`;
     glyphs.forEach((ch, k) => cell(g, ch, X0 + (run.c + k) * CW, top, ink));
   }
-  const cur = screen.cur;
-  const lit = cur && (!cur.blink || Math.floor(t * 1.9) % 2 === 0);
-  if (lit) { g.fillStyle = C.n; g.fillRect(X0 + cur.c * CW, Y0 + cur.r * LH + 4, CW, LH - 8); }
-  g.globalAlpha = 1;
+  const blinkOn = Math.floor(t * 1.9) % 2 === 0;
+  if (cur && (blinkOn || !cur.blink)) { g.fillStyle = C.n; g.fillRect(X0 + cur.c * CW, Y0 + cur.r * LH + 4, CW, LH - 8); }
+  g.restore();
 }
 
 // ── CRT layers ───────────────────────────────────────────────────────────────
-// P: text with phosphor trails; B1/B2: two blurred downsamples of P for bloom; S: the composed tube image.
-const P = mk(W, H), pg = P.getContext('2d');
-const S = mk(W, H), sg = S.getContext('2d');
-const B1 = mk(480, 270), b1 = B1.getContext('2d');
-const B2 = mk(240, 135), b2 = B2.getContext('2d');
-// Static overlays, built in prep(): glass tint, scanlines, bezel/vignette, noise tiles, power-on line and power-off dot.
+// Working surfaces, each a [canvas, context] pair.
+const surface = (w, h) => { const cnv = mk(w, h); return [cnv, cnv.getContext('2d')]; };
+const [TEXT, tg] = surface(W, H);                 // text plus phosphor trails
+const [TUBE, sg] = surface(W, H);                 // the composed tube image
+const [GLOW_A, ga] = surface(W / 4, H / 4);       // two blurred downsamples of TEXT for bloom
+const [GLOW_B, gb] = surface(W / 8, H / 8);
+// Static overlays, built in setup(): glass tint, scanlines, bezel/vignette, noise tiles, power-on line and power-off dot.
 let BG, SCAN, VIG, LINE, DOT;
 const NOISE = [];
 const stops = (grad, list) => { for (const [at, col] of list) grad.addColorStop(at, col); return grad; };
 function layer(w, h, paint) { const cnv = mk(w, h); paint(cnv.getContext('2d')); return cnv; }
-function prep() {
+function setup() {
   dith = {};
   for (const key of ['n', 'd', 'b']) {
     const tile = layer(6, 6, g => { g.fillStyle = C[key]; g.fillRect(0, 0, 2, 2); g.fillRect(3, 3, 2, 2); });
@@ -263,10 +264,13 @@ function prep() {
     }
   });
   VIG = layer(W, H, g => {
-    g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
-    g.globalCompositeOperation = 'destination-out'; g.filter = 'blur(18px)';    // cut out the rounded screen
-    g.beginPath(); g.roundRect(34, 30, W - 68, H - 60, 90); g.fill();
-    g.filter = 'none'; g.globalCompositeOperation = 'source-over';
+    // bezel: a black frame around a rounded screen opening, edges softened by a blur
+    g.save();
+    g.filter = 'blur(18px)';
+    g.fillStyle = '#000';
+    g.beginPath(); g.rect(-120, -120, W + 240, H + 240); g.roundRect(34, 30, W - 68, H - 60, 90);
+    g.fill('evenodd');
+    g.restore();
     g.fillStyle = stops(g.createRadialGradient(W / 2, H / 2, 380, W / 2, H / 2, 1180), [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0.62)']]);
     g.fillRect(0, 0, W, H);
     g.fillStyle = stops(g.createRadialGradient(560, 220, 10, 560, 220, 700), [[0, 'rgba(210,255,225,0.045)'], [1, 'rgba(210,255,225,0)']]);
@@ -297,7 +301,7 @@ function prep() {
 
 // ── CRT power on/off ─────────────────────────────────────────────────────────
 // Picture scale (sx, sy) and the strength of the bright centre line, the warm-up flash and the after-glow dot.
-function crt(t) {
+function tubeAt(t) {
   const tube = { sx: 1, sy: 1, line: 0, flash: 0, dot: 0 };
   const warmFlash = () => 0.38 * (1 - seg(t, 0.10, 0.7));
   if (t < 0.10) {                                 // a line grows out from the centre
@@ -318,54 +322,71 @@ function crt(t) {
 }
 // Additive overlay helper for flashes and glows.
 function additive(g, fn) { g.globalCompositeOperation = 'lighter'; fn(); g.globalCompositeOperation = 'source-over'; }
-function render(t) {
-  // phosphor persistence: the last few frames faintly behind the current one, only while the layout is still
-  pg.clearRect(0, 0, W, H);
-  for (const [lag, a] of [[0.12, 0.10], [0.08, 0.17], [0.04, 0.30]]) {
-    if (t - lag > 0.4 && layout(t - lag) === layout(t)) renderScreen(pg, t - lag, a);
+// TEXT: the current screen over a few faded copies of the recent past (only while the layout is still)
+const TRAILS = [[0.12, 0.10], [0.08, 0.17], [0.04, 0.30]];
+function drawPhosphor(t) {
+  tg.clearRect(0, 0, W, H);
+  const now = layout(t);
+  for (const [lag, a] of TRAILS) {
+    const past = t - lag;
+    if (past > 0.4 && layout(past) === now) paintText(tg, past, a);
   }
-  renderScreen(pg, t, 1);
-  // bloom sources
-  const shrink = (g, src, blur) => {
-    const { width, height } = g.canvas;
-    g.clearRect(0, 0, width, height); g.filter = `blur(${blur}px)`; g.drawImage(src, 0, 0, width, height); g.filter = 'none';
-  };
-  shrink(b1, P, 2);
-  shrink(b2, B1, 3);
-  // compose the tube image
+  paintText(tg, t, 1);
+}
+// blurred, shrunken copy of src into the small glow canvas g
+function downsample(g, src, px) {
+  const w = g.canvas.width, h = g.canvas.height;
+  g.clearRect(0, 0, w, h);
+  g.filter = `blur(${px}px)`;
+  g.drawImage(src, 0, 0, w, h);
+  g.filter = 'none';
+}
+// TUBE: glass, refresh band, text, bloom, grain and flicker
+function drawTube(t, fi) {
   sg.globalCompositeOperation = 'source-over'; sg.globalAlpha = 1;
   sg.drawImage(BG, 0, 0);
   const bandY = ((t * 0.18) % 1) * (H + 400) - 200;                                // slow rolling refresh band
   sg.fillStyle = stops(sg.createLinearGradient(0, bandY - 160, 0, bandY + 160), [[0, 'rgba(120,255,160,0)'], [0.5, 'rgba(120,255,160,0.035)'], [1, 'rgba(120,255,160,0)']]);
   sg.fillRect(0, bandY - 160, W, 320);
-  sg.drawImage(P, 0, 0);
-  const frame = Math.floor(t * 30);
+  sg.drawImage(TEXT, 0, 0);
+  downsample(ga, TEXT, 2);
+  downsample(gb, GLOW_A, 3);
   additive(sg, () => {
-    sg.globalAlpha = 0.55; sg.drawImage(B1, 0, 0, W, H);
-    sg.globalAlpha = 0.45; sg.drawImage(B2, 0, 0, W, H);
+    sg.globalAlpha = 0.55; sg.drawImage(GLOW_A, 0, 0, W, H);
+    sg.globalAlpha = 0.45; sg.drawImage(GLOW_B, 0, 0, W, H);
     sg.globalAlpha = 0.045;
-    const tile = NOISE[frame % 4];
-    for (let y = 0; y < H; y += 512) for (let x = 0; x < W; x += 512) sg.drawImage(tile, x, y);
+    const grain = NOISE[fi % NOISE.length];
+    for (let y = 0; y < H; y += grain.height) for (let x = 0; x < W; x += grain.width) sg.drawImage(grain, x, y);
     sg.globalAlpha = 1;
   });
-  sg.fillStyle = `rgba(0,0,0,${0.03 + 0.035 * hash(frame)})`; sg.fillRect(0, 0, W, H);   // flicker
-
-  // put the tube image on screen, scaled by the power on/off animation
-  const tube = crt(t);
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  ctx.save();
-  ctx.translate(W / 2, H / 2); ctx.scale(tube.sx, tube.sy); ctx.translate(-W / 2, -H / 2);
-  ctx.drawImage(S, 0, 0);
-  const f = frame;
-  const gl = t >= ERR && t < ERR + 0.34 ? 1 - seg(t, ERR, ERR + 0.34) : 0;          // error glitch: sliced horizontal tearing
-  if (gl > 0) {
-    for (let k = 0; k < 7; k++) { if (hash(f * 13 + k) < 0.3) continue;
-      const y = Math.floor(hash(f * 7 + k * 3) * H), hh = 12 + Math.floor(hash(f + k * 5) * 70), dx = (hash(f * 11 + k) - 0.5) * 120 * gl;
-      ctx.drawImage(S, 0, y, W, hh, dx, y, W, hh); }
-    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(150,255,180,${0.10 * gl})`; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over';
+  sg.fillStyle = `rgba(0,0,0,${0.03 + 0.035 * hash(fi)})`;                         // flicker
+  sg.fillRect(0, 0, W, H);
+}
+// error glitch: a few horizontal slices of the tube image shoved sideways, plus a green wash
+function drawGlitch(t, fi) {
+  const amt = t >= ERR && t < ERR + 0.34 ? 1 - seg(t, ERR, ERR + 0.34) : 0;
+  if (amt <= 0) return;
+  for (let k = 0; k < 7; k++) {
+    if (hash(fi * 13 + k) < 0.3) continue;
+    const y = Math.floor(hash(fi * 7 + k * 3) * H), h = 12 + Math.floor(hash(fi + k * 5) * 70);
+    ctx.drawImage(TUBE, 0, y, W, h, (hash(fi * 11 + k) - 0.5) * 120 * amt, y, W, h);
   }
+  additive(ctx, () => { ctx.fillStyle = `rgba(150,255,180,${0.10 * amt})`; ctx.fillRect(0, 0, W, H); });
+}
+function frameAt(t) {
+  const fi = Math.floor(t * 30);
+  drawPhosphor(t);
+  drawTube(t, fi);
+  // the tube image goes on screen squashed about the centre by the power on/off state
+  const tube = tubeAt(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(tube.sx, 0, 0, tube.sy, (1 - tube.sx) * W / 2, (1 - tube.sy) * H / 2);
+  ctx.drawImage(TUBE, 0, 0);
+  drawGlitch(t, fi);
   if (tube.flash > 0) additive(ctx, () => { ctx.fillStyle = `rgba(150,255,180,${tube.flash})`; ctx.fillRect(0, 0, W, H); });
-  ctx.restore();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   // unscaled extras: the bright line during power on/off and the after-glow dot
   if (tube.line > 0) additive(ctx, () => {
     const len = W * Math.max(tube.sx, 0.002);
@@ -376,7 +397,7 @@ function render(t) {
   ctx.drawImage(VIG, 0, 0);
 }
 window.draw = job => {
-  render(job.t);
+  frameAt(job.t);
   const url = cv.toDataURL('image/jpeg', job.q || 0.92);
   return url.slice(url.indexOf(',') + 1);
 };
@@ -386,7 +407,7 @@ window.ready = document.fonts.ready
     document.fonts.load(`400 ${FS}px 'JetBrains Mono'`, glyphProbe + '°·»'),
     document.fonts.load(`700 ${FS}px 'JetBrains Mono'`, glyphProbe),
   ]))
-  .then(prep);
+  .then(setup);
 </script>
 </body>
 </html>
