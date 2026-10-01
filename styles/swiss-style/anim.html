@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="fonts.css"></head>
+<body style="margin:0;background:#f1eee6"><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+//  swiss-style — International Typographic Style. window.draw({t}) → JPEG base64
+//  A poster for an invented concert, "musica viva 1959", builds itself on a
+//  12-column modular grid: columns drop in, a giant 1959 rolls up like an
+//  odometer, shrinks into the bottom-left field while concentric rings sweep
+//  open, text blocks snap onto the baseline grid, the rings pulse to the beat.
+// ─────────────────────────────────────────────────────────────────────────────
+const W = 1920, H = 1080, DUR = 10;
+const cv = document.getElementById('c'); const ctx = cv.getContext('2d');
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, p) => a + (b - a) * p;
+const eOut = x => 1 - Math.pow(1 - x, 3), eOut5 = x => 1 - Math.pow(1 - x, 5);
+const eIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const eExpIO = x => x <= 0 ? 0 : x >= 1 ? 1 : x < .5 ? Math.pow(2, 20 * x - 10) / 2 : (2 - Math.pow(2, -20 * x + 10)) / 2;
+const eBack = (x, s = 1.4) => x <= 0 ? 0 : x >= 1 ? 1 : 1 + (s + 1) * Math.pow(x - 1, 3) + s * Math.pow(x - 1, 2);
+function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let x = s; x = Math.imul(x ^ (x >>> 15), x | 1); x ^= x + Math.imul(x ^ (x >>> 7), x | 61); return ((x ^ (x >>> 14)) >>> 0) / 4294967296; }; }
+const PAPER = '#f1eee6', INK = '#141414', RED = '#e2231a', GRIDC = '#d9d4c8';
+const FONT = "'Inter', sans-serif";
+
+// ── grid: 12 columns, 24 px baseline ─────────────────────────────────────────
+const M = 96, TOP = 84, BOT = 996, GUT = 24, COLW = (W - 2 * M - 11 * GUT) / 12, B = 24;
+const CX = i => M + i * (COLW + GUT);
+const BL = n => TOP + n * B;                       // baseline n
+const ROWY = [0, 1, 2, 3, 4, 5].map(i => TOP + i * (912 + GUT) / 6);
+
+// ── timeline ─────────────────────────────────────────────────────────────────
+const T = { rule: 0.25, cols: 0.35, rows: 0.95, roll: 0.9, move: 3.75, rings: 4.0, text: 4.75,
+  beat0: 5.75, beatN: 8.25, out: 9.25 };
+
+// ── giant number ─────────────────────────────────────────────────────────────
+const NUM = [1, 9, 5, 9];
+const BIG = 760, LS = -0.045;                        // base font size, tracking (em)
+const S1 = { x: M - 6, y: 842, s: 1 }, S2 = { x: M - 4, y: BOT, s: 455 / BIG };
+let DX = [], DW = [], CAP = 0;
+const rollStart = i => T.roll + i * 0.12;           // digits rise in, staggered
+const C0 = 1.3, C1 = 3.6;                           // the counter runs 1000 → 1959
+function countVal(t) { return 1000 + 959 * (1 - Math.pow(1 - seg(t, C0, C1), 2.6)); }
+// odometer: digit i shows k and rolls toward k+1 only while every lower digit is 9 (true carry)
+function digitRoll(i, t) {
+  const v = countVal(t), base = Math.floor(v + 1e-6), m = Math.pow(10, 3 - i);
+  const f = eIO(clamp((v - base - 0.55) / 0.45));       // rest, then snap
+  return { k: Math.floor(base / m), f: base % m === m - 1 ? f : 0 };
+}
+const landing = t => t > C1 ? Math.sin((t - C1) / 0.22 * Math.PI * 2) * Math.exp(-(t - C1) / 0.09) : 0;
+function numState(t) {
+  const u = eExpIO(seg(t, T.move, T.move + 0.85));
+  return { x: lerp(S1.x, S2.x, u), y: lerp(S1.y, S2.y, u), s: lerp(S1.s, S2.s, u) };
+}
+
+// ── rings (Hofmann / Müller-Brockmann concentric study) ──────────────────────
+const RC = { x: 1280, y: 492 };
+const RINGS = [  // radius, width, colour
+  [216, 14, INK], [248, 5, INK], [284, 22, INK], [320, 4, INK], [348, 10, INK], [382, 3, INK], [412, 22, INK],
+];
+const DISC = 168;
+const OFF = { x: RC.x - 92, y: RC.y + 34, r: 272, w: 5 };   // offset red ring for tension
+const BEATS = []; for (let tb = T.beat0; tb <= T.beatN + 1e-6; tb += 0.5) BEATS.push(tb);
+const bump = (x, tau) => x <= 0 ? 0 : (x / tau) * Math.exp(1 - x / tau);
+function pulse(t, i) {                              // outward travelling wave per ring index
+  let a = 0;
+  BEATS.forEach((tb, k) => { const acc = k % 4 === 0 ? 1 : 0.55; a += acc * bump(t - tb - i * 0.03, 0.075); });
+  return a;
+}
+
+// ── text blocks: [text, x, baseline, size, weight, colour, start] ────────────
+const TXT = [];
+const add = (s, x, y, size, w, c, t0) => TXT.push({ s, x, y, size, w, c, t0 });
+add('Concert series for new music', CX(0), BL(1) + 12, 22, 600, INK, 1.25);
+add('Season 1959/60', CX(4), BL(1) + 12, 22, 500, INK, 1.33);
+add('musica', CX(0) - 6, BL(9), 156, 800, INK, T.text);
+add('viva', CX(0) - 6, BL(15), 156, 800, RED, T.text + 0.14);
+[['Thursday', 'Large Hall'], ['12 November', 'Neustadt'], ['20.15 hrs', 'Tickets 4.50']].forEach(([a, b], k) => {
+  add(a, CX(0), BL(19) + k * 36, 26, 600, INK, T.text + 0.42 + k * 0.08);
+  add(b, CX(2), BL(19) + k * 36, 26, 500, INK, T.text + 0.54 + k * 0.08);
+});
+add('Ostwald Chamber Orchestra', CX(9), BL(36), 20, 600, INK, T.text + 0.86);
+add('Works for strings, percussion', CX(9), BL(37), 20, 500, INK, T.text + 0.94);
+add('and magnetic tape', CX(9), BL(38), 20, 500, INK, T.text + 1.02);
+// red rules that announce each block
+const RULES = [
+  { x: CX(0), y: BL(17), w: CX(4) - GUT - CX(0), h: 6, t0: T.text + 0.30 },
+  { x: CX(9), y: BL(35) - 16, w: W - M - CX(9), h: 6, t0: T.text + 0.74 },
+];
+
+// ── precomputed layers ───────────────────────────────────────────────────────
+let paper, ringL, numL, ovL;
+function prep() {
+  paper = mk(W, H); const p = paper.getContext('2d'); p.fillStyle = PAPER; p.fillRect(0, 0, W, H);
+  const id = p.getImageData(0, 0, W, H), d = id.data, r = rng(7);
+  for (let i = 0; i < d.length; i += 4) { const n = (r() - 0.5) * 9; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+  p.putImageData(id, 0, 0);
+  // faint long paper fibres
+  p.globalAlpha = 0.035; p.strokeStyle = '#8a8170'; p.lineWidth = 1;
+  for (let k = 0; k < 260; k++) { const x = r() * W, y = r() * H, a = r() * Math.PI, l = 10 + r() * 40; p.beginPath(); p.moveTo(x, y); p.quadraticCurveTo(x + Math.cos(a) * l * .5 + r() * 6, y + Math.sin(a) * l * .5, x + Math.cos(a) * l, y + Math.sin(a) * l); p.stroke(); }
+  ringL = mk(W, H); numL = mk(W, H); ovL = mk(W, H);
+  ctx.font = `800 ${BIG}px ${FONT}`; ctx.letterSpacing = `${LS * BIG}px`;
+  let x = 0; DX = []; DW = [];
+  NUM.forEach(n => { const w = ctx.measureText(String(n)).width; DX.push(x); DW.push(w); x += w; });
+  CAP = ctx.measureText('1959').actualBoundingBoxAscent;
+  ctx.letterSpacing = '0px';
+}
+
+// ── drawing ──────────────────────────────────────────────────────────────────
+function drawGrid(t) {
+  const fadeHair = lerp(1, 0.55, seg(t, 6.6, 7.6));
+  for (let i = 0; i < 12; i++) {
+    const t0 = T.cols + i * 0.05, u = eOut5(seg(t, t0, t0 + 0.55));
+    if (u <= 0) continue;
+    const band = 1 - eIO(seg(t, 2.0 + i * 0.03, 2.9 + i * 0.03));
+    ctx.fillStyle = `rgba(214,208,194,${0.55 * band})`;
+    ctx.fillRect(CX(i), TOP, COLW, (BOT - TOP) * u);
+    ctx.fillStyle = GRIDC; ctx.globalAlpha = fadeHair;
+    ctx.fillRect(Math.round(CX(i)), TOP, 1, (BOT - TOP) * u);
+    ctx.fillRect(Math.round(CX(i) + COLW), TOP, 1, (BOT - TOP) * u);
+    ctx.globalAlpha = 1;
+  }
+  ctx.fillStyle = GRIDC; ctx.globalAlpha = fadeHair;
+  ROWY.concat([BOT]).forEach((y, k) => {
+    const u = eOut5(seg(t, T.rows + k * 0.06, T.rows + k * 0.06 + 0.6));
+    if (u > 0) ctx.fillRect(M, Math.round(y), (W - 2 * M) * u, 1);
+  });
+  ctx.globalAlpha = 1;
+  // baseline grid flashes in red while the text snaps to it
+  const bA = 0.22 * seg(t, T.text - 0.25, T.text) * (1 - seg(t, 6.3, 7.0));
+  if (bA > 0) { ctx.fillStyle = RED; ctx.globalAlpha = bA;
+    for (let n = 1; n <= 38; n++) ctx.fillRect(M, BL(n), W - 2 * M, 1); ctx.globalAlpha = 1; }
+}
+function drawRule(t) {
+  const u = eExpIO(seg(t, T.rule, T.rule + 0.7));
+  ctx.fillStyle = RED; ctx.fillRect(M, 44, (W - 2 * M) * u, 14);
+  RULES.forEach(r => { const v = eOut5(seg(t, r.t0, r.t0 + 0.4)); if (v > 0) ctx.fillRect(r.x, r.y, r.w * v, r.h); });
+}
+function drawRings(c, t) {
+  c.clearRect(0, 0, W, H);
+  const fade = 1;
+  RINGS.forEach(([r, w, col], i) => {
+    const t0 = T.rings + 0.12 + i * 0.07, u = eIO(seg(t, t0, t0 + 0.62));
+    if (u <= 0) return;
+    const rr = r + 18 * pulse(t, i + 1), ww = w * (1 + 0.25 * pulse(t, i + 1));
+    c.strokeStyle = col; c.lineWidth = ww * fade; c.lineCap = 'butt';
+    c.beginPath(); c.arc(RC.x, RC.y, rr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * u); c.stroke();
+  });
+  const ud = eBack(seg(t, T.rings, T.rings + 0.5), 1.6);
+  if (ud > 0) {
+    c.fillStyle = RED; c.beginPath(); c.arc(RC.x, RC.y, DISC * ud * (1 + 0.05 * pulse(t, 0)), 0, Math.PI * 2); c.fill();
+  }
+  const uo = eIO(seg(t, T.rings + 0.75, T.rings + 1.5));
+  if (uo > 0) {
+    c.strokeStyle = RED; c.lineWidth = OFF.w;
+    c.beginPath(); c.arc(OFF.x, OFF.y, OFF.r + 8 * pulse(t, 3), Math.PI / 2, Math.PI / 2 - Math.PI * 2 * uo, true); c.stroke();
+  }
+}
+function drawNumber(c, t) {
+  c.clearRect(0, 0, W, H);
+  const st = numState(t);
+  c.save(); c.translate(st.x, st.y); c.scale(st.s, st.s);
+  c.font = `800 ${BIG}px ${FONT}`; c.letterSpacing = `${LS * BIG}px`;
+  c.fillStyle = INK; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+  const step = BIG * 1.02;
+  NUM.forEach((n, i) => {
+    if (t < rollStart(i) - 0.35) return;
+    const appear = eOut5(seg(t, rollStart(i) - 0.35, rollStart(i)));
+    const { k, f } = digitRoll(i, t);
+    const cx = DX[i] + DW[i] / 2 - LS * BIG / 2;
+    c.save(); c.beginPath(); c.rect(DX[i] - 20, -CAP - BIG * 0.018, DW[i] + 40, CAP + BIG * 0.036); c.clip();
+    const y0 = (1 - appear) * step + BIG * 0.025 * landing(t);   // rises in from below; lands with a small bounce
+    c.fillText(String(((k % 10) + 10) % 10), cx, y0 + f * step);
+    if (f > 0) c.fillText(String((((k + 1) % 10) + 10) % 10), cx, y0 + (f - 1) * step);
+    c.restore();
+  });
+  c.restore();
+}
+function drawText(t) {
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  TXT.forEach(o => {
+    const u = seg(t, o.t0, o.t0 + 0.32); if (u <= 0) return;
+    const e = eBack(u, 1.5);
+    const ls = o.size > 100 ? -0.045 * o.size : o.size < 24 ? 0.01 * o.size : -0.005 * o.size;
+    ctx.font = `${o.w} ${o.size}px ${FONT}`; ctx.letterSpacing = `${ls}px`; ctx.fillStyle = o.c;
+    const top = o.y - o.size * (o.size > 100 ? 0.98 : 1.0), bot = o.y + o.size * 0.26;
+    ctx.save(); ctx.beginPath(); ctx.rect(o.x - 12, top, 1400, bot - top); ctx.clip();
+    ctx.fillText(o.s, o.x, o.y + (1 - e) * (bot - top + 4));
+    ctx.restore();
+  });
+  ctx.letterSpacing = '0px';
+}
+function render(t) {
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  ctx.drawImage(paper, 0, 0);
+  drawGrid(t);
+  drawRings(ringL.getContext('2d'), t);
+  ctx.drawImage(ringL, 0, 0);
+  drawNumber(numL.getContext('2d'), t);
+  ctx.drawImage(numL, 0, 0);
+  // where the numeral crosses ring ink it knocks out to paper (overprint inversion)
+  const o = ovL.getContext('2d'); o.globalCompositeOperation = 'source-over'; o.clearRect(0, 0, W, H);
+  o.drawImage(numL, 0, 0); o.globalCompositeOperation = 'source-in'; o.fillStyle = PAPER; o.fillRect(0, 0, W, H);
+  o.globalCompositeOperation = 'destination-in'; o.drawImage(ringL, 0, 0); o.globalCompositeOperation = 'source-over';
+  ctx.drawImage(ovL, 0, 0);
+  drawRule(t);
+  drawText(t);
+  // ending: gentle dissolve back to blank paper
+  const fo = eIO(seg(t, T.out, DUR - 0.05));
+  if (fo > 0) { ctx.globalAlpha = fo; ctx.drawImage(paper, 0, 0); ctx.globalAlpha = 1; }
+}
+
+// sound events (events.mjs → events.json → audio.py)
+window.events = () => {
+  const ev = [];
+  ev.push({ k: 'swipe', t: T.rule, d: 0.7 });
+  for (let i = 0; i < 12; i++) ev.push({ k: 'col', t: T.cols + i * 0.05, v: i / 11 });
+  ev.push({ k: 'swipe', t: T.rows, d: 0.6, v: 0.5 });
+  // odometer ticks: every integer the strips cross (thinned to ≤ 30 per second)
+  let last = -1, prev = NUM.map(() => 0);
+  for (let f = 0; f <= 5 * 240; f++) {
+    const t = f / 240; const cur = NUM.map((_, i) => digitRoll(i, t).k);
+    cur.forEach((c, i) => { if (c !== prev[i] && t - last > 1 / 30) { ev.push({ k: 'tick', t, v: 0.5 + 0.5 * (i / 3) }); last = t; } });
+    prev = cur;
+  }
+  [1, 2].forEach(i => { let tl = C0; for (let f = 0; f <= 5 * 240; f++) { const t = f / 240; if (digitRoll(i, t).k !== digitRoll(i, t - 1 / 240).k) tl = t; } ev.push({ k: 'clunk', t: tl + 0.1, v: 0.6 }); });
+  ev.push({ k: 'clunk', t: C1, v: 1 });
+  ev.push({ k: 'whoosh', t: T.move - 0.05, d: 0.9 });
+  ev.push({ k: 'thump', t: T.rings + 0.12 });
+  RINGS.forEach((_, i) => ev.push({ k: 'ping', t: T.rings + 0.12 + i * 0.07 + 0.55, n: i }));
+  TXT.forEach(o => { if (o.t0 > 2) ev.push({ k: 'snap', t: o.t0 + 0.16, v: o.size > 100 ? 1 : 0.55 }); });
+  BEATS.forEach((tb, k) => ev.push({ k: 'beat', t: tb, n: k, acc: k % 4 === 0 }));
+  ev.push({ k: 'chord', t: T.beatN });
+  return ev.sort((a, b) => a.t - b.t);
+};
+window.draw = function (job) { render(job.t); return cv.toDataURL('image/jpeg', job.q || 0.92).split(',')[1]; };
+window.ready = document.fonts.ready.then(() => Promise.all([500, 600, 800].map(w => document.fonts.load(`${w} 40px 'Inter'`, 'musica viva 1959/60 Concert')))).then(prep);
+</script></body></html>
