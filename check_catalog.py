@@ -78,7 +78,18 @@ def check_shared_scripts(s, problems):
             problems.append(f"{name} differs from tools/{name}")
 
 
-ORIGINAL = "8228b1f"  # the unlicensed original catalog; our code must not carry it forward
+# The unlicensed original catalog; our code must not carry it forward. A tag rather than a
+# commit hash, so it survives history rewrites (git filter-repo rewrites tags with the commits).
+ORIGINAL = "original-catalog"
+
+
+def require_original():
+    """Fail loudly when the original is unreachable: without it the derived-code check is void."""
+    found = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ORIGINAL}^{{commit}}"],
+                           capture_output=True, cwd=ROOT).returncode == 0
+    if not found:
+        sys.exit(f"tag {ORIGINAL} not found: run `git fetch --tags` (a full, non-shallow clone "
+                 "is needed to check styles against the original catalog)")
 
 
 def derived_lines(slug):
@@ -86,14 +97,15 @@ def derived_lines(slug):
     try:
         old = subprocess.run(["git", "show", f"{ORIGINAL}:styles/{slug}/anim.html"],
                              capture_output=True, text=True, check=True, cwd=ROOT).stdout
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return 0  # style not in the original, or no git history available
+    except subprocess.CalledProcessError:
+        return 0  # style not in the original
     orig = {l.strip() for l in old.splitlines() if len(l.strip()) > 15}
     cur = (ROOT / "styles" / slug / "anim.html").read_text().splitlines()
     return sum(1 for l in cur if l.strip() in orig)
 
 
 def main():
+    require_original()
     failed = False
     for s in MANIFEST["styles"]:
         problems = []

@@ -3,7 +3,8 @@
 
 Clips run in manifest.shuffled() order. Each card names the style's family, the style and its
 credits. Intermediate files go to _catalog_build/ (git-ignored). The reel is scaled to 720p and
-compressed hard enough to stay under GitHub's 100 MB file limit.
+compressed hard. It is not committed: catalog/*.mp4 is git-ignored and the reel is uploaded as
+the catalog.mp4 asset of each GitHub release.
 """
 
 from pathlib import Path
