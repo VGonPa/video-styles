@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── stencil-street · spray-paint stencil on a whitewashed brick wall ──────────────────────────────
+// A manila stencil slides onto the wall and is taped down → a black can sprays the boy on his crate,
+// a red can sprays the floating lightbulb → the tape is ripped off and the stencil is peeled back,
+// revealing crisp paint with overspray halo and drips → a second stencil sprays the caption
+// "ORIGINAL IDEA. / PLEASE DO NOT COPY." → the camera pulls back along the wall: past the drainpipe
+// the same stencil has been sprayed three times before, each copy older and more buffed than the last.
+// Everything is drawn from t alone (seeded RNG, precomputed textures).
+const W = 1920, H = 1080, DUR = 10.0;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const sstep = u => u * u * (3 - 2 * u);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const FONT = '"Big Shoulders Stencil Display"';
+const INK = { k: '#141313', r: '#D3271D' };
+
+// ── world ──
+const WW = 4500, WH = 2200, GROUND = 1765;
+const T = {
+  fadeIn: [0, 0.45], fadeOut: [9.35, 9.98],
+  cam: [                       // [t, cx, cy, z]
+    [0.0, 1366, 1050, 0.71], [4.05, 1368, 1060, 0.72], [4.75, 1352, 1080, 0.735], [6.9, 1356, 1085, 0.745],
+    [8.45, 2250, 1024, 0.53], [10, 2252, 1026, 0.528],
+  ],
+};
+
+// ── shapes: helpers that fill into a mask context ──
+function capsule(g, pts, rs) {
+  // chain of tapered segments: dense circles along each segment (a union, so overlaps are fine)
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], r0 = rs[i], r1 = rs[i + 1];
+    const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 1.5);
+    for (let k = 0; k <= n; k++) { const u = k / n; g.beginPath(); g.arc(lerp(x0, x1, u), lerp(y0, y1, u), lerp(r0, r1, u), 0, 7); g.fill(); }
+  }
+}
+function poly(g, pts, smooth = true) {
+  g.beginPath();
+  if (!smooth) { pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.fill(); return; }
+  // closed quadratic smoothing through midpoints
+  const n = pts.length, mid = i => [(pts[i % n][0] + pts[(i + 1) % n][0]) / 2, (pts[i % n][1] + pts[(i + 1) % n][1]) / 2];
+  const m0 = mid(n - 1); g.moveTo(m0[0], m0[1]);
+  for (let i = 0; i < n; i++) { const m = mid(i); g.quadraticCurveTo(pts[i][0], pts[i][1], m[0], m[1]); }
+  g.closePath(); g.fill();
+}
+const rot = (p, a, c = [0, 0]) => { const s = Math.sin(a), co = Math.cos(a); return [c[0] + p[0] * co - p[1] * s, c[1] + p[0] * s + p[1] * co]; };
+
+// The boy on the crate, in figure coords (feet on y = 0, facing right, ~560 tall). Fills black.
+function drawBoy(g) {
+  // head: profile drawn upright around its centre, then tilted up so he looks at the bulb
+  const HC = [20, -490], HA = -0.36;
+  const head = [[-30, 50], [-47, 24], [-53, -6], [-45, -34], [-24, -52], [6, -56], [30, -48], [45, -31], [50, -14], [47, -6], [52, 4],
+    [61, 15], [61, 19], [53, 23], [55, 29], [51, 33], [53, 37], [49, 44], [46, 52], [33, 58], [12, 57]].map(p => rot(p, HA, HC));
+  poly(g, head);
+  // cap: dome over the skull and a brim pointing up at the bulb
+  poly(g, [[-48, -14], [-46, -40], [-24, -60], [8, -64], [34, -54], [48, -34], [52, -24], [86, -24], [88, -17], [50, -14], [20, -20], [-20, -18]].map(p => rot(p, HA, HC)), false);
+  // neck
+  capsule(g, [[28, -446], [8, -408]], [15, 17]);
+  // t-shirt torso, chest lifted
+  poly(g, [[-34, -420], [-6, -428], [24, -424], [38, -392], [37, -340], [33, -290], [32, -262], [0, -256], [-38, -258], [-44, -300], [-45, -360], [-42, -400]]);
+  // shorts
+  poly(g, [[-41, -272], [33, -274], [42, -236], [44, -200], [16, -192], [4, -214], [-12, -194], [-46, -200], [-46, -240]]);
+  // legs on tiptoe: hip → knee → ankle
+  capsule(g, [[16, -222], [24, -138], [14, -38]], [17, 14, 10]);
+  capsule(g, [[-24, -222], [-30, -136], [-40, -40]], [16, 13.5, 9.5]);
+  // shoes: heel lifted, weight on the ball of the foot
+  poly(g, [[0, -44], [24, -40], [34, -24], [56, -12], [64, -4], [60, 1], [30, 1], [10, -4], [-4, -16], [-6, -34]]);
+  poly(g, [[-54, -46], [-30, -42], [-22, -26], [-2, -13], [6, -4], [2, 1], [-28, 1], [-46, -4], [-60, -18], [-60, -36]]);
+  // back arm swung behind for balance, hand relaxed
+  capsule(g, [[-22, -408], [-62, -334], [-80, -268]], [15, 12.5, 10]);
+  capsule(g, [[-22, -408], [-44, -372]], [18, 16]);   // sleeve
+  poly(g, [[-90, -274], [-70, -276], [-66, -258], [-70, -236], [-80, -228], [-90, -238], [-92, -256]]);
+  capsule(g, [[-86, -244], [-95, -228]], [5, 4.2]);   // thumb
+  // front arm raised to the sky: shoulder → elbow → wrist, hand open (just let go)
+  capsule(g, [[16, -408], [106, -440], [140, -528]], [14.5, 12.5, 10]);
+  capsule(g, [[14, -410], [54, -424]], [19, 17]);     // sleeve
+  const wr = [140, -528], ang = Math.atan2(-88, 34);
+  const pc = [wr[0] + Math.cos(ang) * 14, wr[1] + Math.sin(ang) * 14];
+  g.save(); g.translate(pc[0], pc[1]); g.rotate(ang); g.beginPath(); g.ellipse(2, 0, 17, 12.5, 0, 0, 7); g.fill(); g.restore();
+  [[-0.5, 25, 4.6], [-0.2, 30, 4.8], [0.1, 29, 4.6], [0.38, 24, 4.2]].forEach(([da, len, r], i) => {
+    const a = ang + da, b = [pc[0] + Math.cos(ang) * 10 + Math.cos(ang + Math.PI / 2) * (i - 1.5) * 6.5, pc[1] + Math.sin(ang) * 10 + Math.sin(ang + Math.PI / 2) * (i - 1.5) * 6.5];
+    capsule(g, [b, [b[0] + Math.cos(a) * len, b[1] + Math.sin(a) * len]], [r, r * 0.85]);
+  });
+  const ta = ang - 1.15, tb = [pc[0] - Math.cos(ang + Math.PI / 2) * 9, pc[1] - Math.sin(ang + Math.PI / 2) * 9];
+  capsule(g, [tb, [tb[0] + Math.cos(ta) * 20, tb[1] + Math.sin(ta) * 20]], [6, 4.5]);
+}
+// wooden fruit crate under him (fills black, slat gaps are the stencil bridges)
+function drawCrate(g) {
+  g.fillRect(-128, 5, 22, 145); g.fillRect(106, 5, 22, 145);
+  for (const [y0, y1] of [[6, 50], [58, 102], [110, 150]]) g.fillRect(-100, y0, 200, y1 - y0);
+  g.save(); g.globalCompositeOperation = 'destination-out';
+  g.beginPath(); g.roundRect(-34, 72, 68, 16, 8); g.fill();          // hand hole
+  g.restore();
+}
+// floating lightbulb: string + screw cap in black, glass + glow marks in red
+const BULB = { x: 262, y: -800, a: 0.16 };
+function bulbT(p) { return rot(p, BULB.a, [BULB.x, BULB.y]); }
+function drawString(g) {
+  g.save(); g.lineWidth = 4.2; g.lineCap = 'round'; g.strokeStyle = '#000';
+  const p0 = bulbT([0, 8]);
+  g.beginPath(); g.moveTo(p0[0], p0[1]); g.bezierCurveTo(p0[0] - 20, p0[1] + 90, 236, -680, 196, -628); g.bezierCurveTo(176, -602, 182, -590, 172, -578); g.stroke();
+  g.restore();
+}
+function drawBulbCap(g) {
+  g.save(); g.translate(BULB.x, BULB.y); g.rotate(BULB.a);
+  g.beginPath(); g.roundRect(-23, -40, 46, 38, 5); g.fill();
+  g.beginPath(); g.arc(0, 0, 10, 0, Math.PI); g.lineTo(-10, -4); g.lineTo(10, -4); g.fill();
+  g.beginPath(); g.moveTo(-8, -2); g.lineTo(8, -2); g.lineTo(6, 6); g.lineTo(-6, 6); g.fill();
+  g.globalCompositeOperation = 'destination-out'; g.lineWidth = 4;
+  for (const y of [-31, -21, -11]) { g.beginPath(); g.moveTo(-26, y + 3); g.lineTo(26, y - 3); g.stroke(); }
+  g.restore();
+}
+function drawBulbGlass(g) {
+  g.save(); g.translate(BULB.x, BULB.y); g.rotate(BULB.a);
+  g.beginPath(); g.moveTo(-21, -46);
+  g.bezierCurveTo(-24, -64, -40, -78, -52, -96);
+  g.arc(0, -138, 70, Math.PI * 0.79, Math.PI * 0.21, false);
+  g.bezierCurveTo(40, -78, 24, -64, 21, -46); g.closePath(); g.fill();
+  g.globalCompositeOperation = 'destination-out'; g.lineCap = 'round'; g.lineJoin = 'round';
+  // highlight crescent
+  g.lineWidth = 8; g.beginPath(); g.arc(0, -138, 50, Math.PI * 1.08, Math.PI * 1.42); g.stroke();
+  // filament: two supports and a zigzag coil
+  g.lineWidth = 4; g.beginPath();
+  g.moveTo(-9, -50); g.lineTo(-14, -120); g.moveTo(9, -50); g.lineTo(14, -120);
+  g.moveTo(-14, -120); for (let k = 1; k <= 7; k++) g.lineTo(-14 + k * 4, -120 + (k % 2 ? -11 : 0)); g.stroke();
+  g.restore();
+  // glow marks around the glass
+  g.save(); g.translate(BULB.x, BULB.y); g.rotate(BULB.a); g.lineCap = 'butt';
+  for (const a of [-2.75, -2.25, -1.57, -0.89, -0.39]) {
+    const cx = Math.cos(a), sy = Math.sin(a), r0 = 90, r1 = 128;
+    g.beginPath(); g.moveTo(cx * r0 - sy * 7, -138 + sy * r0 + cx * 7); g.lineTo(cx * r1 - sy * 4, -138 + sy * r1 + cx * 4);
+    g.lineTo(cx * r1 + sy * 4, -138 + sy * r1 - cx * 4); g.lineTo(cx * r0 + sy * 7, -138 + sy * r0 - cx * 7); g.closePath(); g.fill();
+  }
+  g.restore();
+}
+
+// ── stencil objects ──
+const M = 44;   // canvas margin around the paper sheet (tape and overspray)
+function makeStencil(o) {
+  const S = Object.assign({}, o);
+  S.cw = S.pw + 2 * M; S.ch = S.ph + 2 * M;
+  S.masks = {}; S.final = {}; S.cov = {}; S.full = {};
+  for (const k of S.inks) {
+    const c = mk(S.cw, S.ch), g = c.getContext('2d'); g.fillStyle = '#000';
+    S.drawMask(g, k); S.masks[k] = c;
+    S.cov[k] = mk(S.cw, S.ch);
+  }
+  return S;
+}
+
+// paint layer of one ink: crisp core + fuzzy halo + speckles, slightly uneven density
+function buildFinal(S, k, seed) {
+  const r = rng(seed), mask = S.masks[k], col = INK[k];
+  const c = mk(S.cw, S.ch), g = c.getContext('2d');
+  // wide faint haze and tight halo
+  const tint = mk(S.cw, S.ch), tg = tint.getContext('2d');
+  tg.drawImage(mask, 0, 0); tg.globalCompositeOperation = 'source-in'; tg.fillStyle = col; tg.fillRect(0, 0, S.cw, S.ch);
+  g.filter = 'blur(16px)'; g.globalAlpha = 0.16; g.drawImage(tint, 0, 0);
+  g.filter = 'blur(3.5px)'; g.globalAlpha = 0.55; g.drawImage(tint, 0, 0);
+  g.filter = 'none'; g.globalAlpha = 1;
+  // speckles where the halo is thin
+  const blur = mk(S.cw, S.ch), bg = blur.getContext('2d'); bg.filter = 'blur(10px)'; bg.drawImage(mask, 0, 0);
+  const bd = bg.getImageData(0, 0, S.cw, S.ch).data;
+  g.fillStyle = col;
+  for (let n = 0; n < S.cw * S.ch / 40; n++) {
+    const x = r() * S.cw, y = r() * S.ch, a = bd[((y | 0) * S.cw + (x | 0)) * 4 + 3] / 255;
+    if (a > 0.02 && a < 0.55 && r() < 0.8 - a) { g.globalAlpha = 0.35 + r() * 0.5; g.beginPath(); g.arc(x, y, 0.5 + r() * r() * 2.2, 0, 7); g.fill(); }
+  }
+  g.globalAlpha = 1;
+  // core with a little mottling (the can never covers perfectly evenly)
+  const core = mk(S.cw, S.ch), cg = core.getContext('2d');
+  cg.drawImage(tint, 0, 0);
+  cg.globalCompositeOperation = 'source-atop';
+  for (let n = 0; n < 220; n++) {
+    const x = r() * S.cw, y = r() * S.ch, rad = 30 + r() * 90;
+    const gr = cg.createRadialGradient(x, y, 0, x, y, rad);
+    const lt = r() < 0.5; gr.addColorStop(0, lt ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.05)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    cg.fillStyle = gr; cg.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  g.globalAlpha = 0.95; g.drawImage(core, 0, 0); g.globalAlpha = 1;
+  S.final[k] = c;
+  // drips: bottom edges of the shape where paint can pool
+  const md = mask.getContext('2d').getImageData(0, 0, S.cw, S.ch).data, A = (x, y) => md[(y * S.cw + x) * 4 + 3];
+  const cand = [];
+  for (let x = 2; x < S.cw - 2; x += 3) for (let y = 14; y < S.ch - 4; y++) {
+    if (A(x, y) > 128 && A(x, y + 2) < 60 && A(x, y - 12) > 128 && A(x - 2, y) > 128 && A(x + 2, y) > 128) cand.push([x, y]);
+  }
+  const drips = [], want = S.dripN[k];
+  for (let tries = 0; tries < 4000 && drips.length < want && cand.length; tries++) {
+    const [x, y] = cand[(r() * cand.length) | 0];
+    if (drips.some(d => Math.abs(d.x - x) < 34 && Math.abs(d.y - y) < 160)) continue;
+    drips.push({ x, y, len: 22 + r() * r() * 120, w: 2.4 + r() * 3, wob: (r() - 0.5) * 4, t0: r() * 0.5, dur: 1.2 + r() * 1.4, k });
+  }
+  S.drips = (S.drips || []).concat(drips);
+}
+function drawDrips(g, S, t, filter) {
+  for (const d of S.drips) {
+    if (filter && d.k !== filter) continue;
+    const t0 = S.sprayEnd[d.k] + d.t0, u = t === Infinity ? 1 : eOut(seg(t, t0, t0 + d.dur));
+    if (u <= 0) continue;
+    const L = d.len * u; g.strokeStyle = g.fillStyle = INK[d.k]; g.globalAlpha = 0.93; g.lineCap = 'round';
+    g.lineWidth = d.w; g.beginPath(); g.moveTo(d.x, d.y - 3); g.quadraticCurveTo(d.x + d.wob, d.y + L * 0.5, d.x + d.wob * 0.6, d.y + L); g.stroke();
+    g.beginPath(); g.arc(d.x + d.wob * 0.6, d.y + L + d.w * 0.2, d.w * 0.82, 0, 7); g.fill();
+    g.globalAlpha = 1;
+  }
+}
+
+// paper sheet: manila board with knife-cut holes, faint overspray from earlier use
+function buildPaper(S, seed) {
+  const r = rng(seed);
+  const base = mk(S.cw, S.ch), g = base.getContext('2d');
+  g.fillStyle = '#d6c7a1'; g.fillRect(M, M, S.pw, S.ph);
+  for (let n = 0; n < 1400; n++) {
+    const x = M + r() * S.pw, y = M + r() * S.ph;
+    g.fillStyle = r() < 0.5 ? `rgba(120,95,50,${0.04 + r() * 0.05})` : `rgba(255,248,230,${0.05 + r() * 0.06})`;
+    g.fillRect(x, y, 1 + r() * 26, 1 + r() * 1.6);
+  }
+  // soft board mottling
+  for (let n = 0; n < 40; n++) {
+    const x = M + r() * S.pw, y = M + r() * S.ph, rad = 60 + r() * 200, gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, `rgba(140,110,60,${0.04 + r() * 0.05})`); gr.addColorStop(1, 'rgba(140,110,60,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, 2 * rad, 2 * rad);
+  }
+  g.globalCompositeOperation = 'source-atop';
+  // a crease and an edge darkening
+  g.strokeStyle = 'rgba(90,70,40,0.12)'; g.lineWidth = 2; g.beginPath(); g.moveTo(M + S.pw * 0.08, M + S.ph * 0.62); g.lineTo(M + S.pw * 0.94, M + S.ph * 0.55); g.stroke();
+  g.strokeStyle = 'rgba(255,250,235,0.25)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(M + S.pw * 0.08, M + S.ph * 0.62 + 2); g.lineTo(M + S.pw * 0.94, M + S.ph * 0.55 + 2); g.stroke();
+  g.lineWidth = 10; g.strokeStyle = 'rgba(110,85,45,0.18)'; g.strokeRect(M, M, S.pw, S.ph);
+  const back = mk(S.cw, S.ch), bg = back.getContext('2d'); bg.drawImage(base, 0, 0);
+  bg.globalCompositeOperation = 'source-atop'; bg.fillStyle = 'rgba(255,250,236,0.28)'; bg.fillRect(0, 0, S.cw, S.ch);
+  // old overspray around the holes (this stencil has been used before)
+  for (const k of S.inks) {
+    const tint = mk(S.cw, S.ch), tg = tint.getContext('2d');
+    tg.filter = 'blur(26px)'; tg.drawImage(S.masks[k], 0, 0); tg.filter = 'none';
+    tg.globalCompositeOperation = 'source-in'; tg.fillStyle = INK[k]; tg.fillRect(0, 0, S.cw, S.ch);
+    g.globalAlpha = 0.3; g.drawImage(tint, 0, 0); g.globalAlpha = 1;
+  }
+  // cut the holes
+  for (const c of [g, bg]) { c.globalCompositeOperation = 'destination-out'; for (const k of S.inks) c.drawImage(S.masks[k], 0, 0); c.globalCompositeOperation = 'source-over'; }
+  // cut-edge shading: a thin dark rim inside the board around each hole
+  const rim = mk(S.cw, S.ch), rg = rim.getContext('2d');
+  for (const k of S.inks) { rg.filter = 'blur(1.5px)'; rg.drawImage(S.masks[k], 0, 0); }
+  rg.filter = 'none'; rg.globalCompositeOperation = 'source-in'; rg.fillStyle = 'rgba(70,50,25,0.55)'; rg.fillRect(0, 0, S.cw, S.ch);
+  g.globalCompositeOperation = 'source-atop'; g.drawImage(rim, 1, 1.5); g.globalCompositeOperation = 'source-over';
+  S.paper = base; S.paperBack = back;
+  const sh = mk(S.cw, S.ch), sg = sh.getContext('2d'); sg.filter = 'blur(5px)'; sg.drawImage(base, 0, 0);
+  sg.filter = 'none'; sg.globalCompositeOperation = 'source-in'; sg.fillStyle = 'rgba(30,22,12,1)'; sg.fillRect(0, 0, S.cw, S.ch);
+  S.shadow = sh;
+  S.tmp = mk(S.cw, S.ch); S.tmp2 = mk(S.cw, S.ch);
+  // tape strips at the corners
+  S.tapes = S.tapePts.map(([x, y, a], i) => ({ x, y, a, len: 112 + r() * 26, w: 36, seed: seed * 7 + i, ti: S.tapeIn + i * 0.085, to: S.tapeOff + i * 0.06 }));
+}
+function drawTape(g, tp, alpha = 1) {
+  const r = rng(tp.seed), L = tp.len, w = tp.w;
+  g.save(); g.translate(tp.x, tp.y); g.rotate(tp.a); g.globalAlpha *= alpha;
+  const edge = (x0, s) => { const pts = []; for (let k = 0; k <= 6; k++) pts.push([x0 + s * (r() * 6), -w / 2 + k * w / 6]); return pts; };
+  const lft = edge(-L / 2, 1), rgt = edge(L / 2, -1);
+  const path = () => { g.beginPath(); g.moveTo(lft[0][0], lft[0][1]); g.lineTo(rgt[0][0], -w / 2); rgt.forEach(p => g.lineTo(p[0], p[1])); g.lineTo(lft[6][0], w / 2); for (let k = 6; k >= 0; k--) g.lineTo(lft[k][0], lft[k][1]); g.closePath(); };
+  g.save(); g.translate(2, 3); path(); g.fillStyle = 'rgba(40,30,15,0.18)'; g.fill(); g.restore();
+  path(); g.fillStyle = 'rgba(226,212,168,0.9)'; g.fill();
+  g.save(); g.clip();
+  for (let k = 0; k < 14; k++) { g.fillStyle = `rgba(255,255,255,${0.04 + r() * 0.06})`; g.fillRect(-L / 2, -w / 2 + r() * w, L, 1 + r() * 2); }
+  g.fillStyle = 'rgba(140,120,70,0.12)'; g.fillRect(-L / 2, -w / 2, L, 3); g.restore();
+  g.restore();
+}
+
+// spray path: horizontal zigzag over a box, slowing at the turns (more paint at the edges)
+function zigzag(box, rows, t0, t1) {
+  const [x0, y0, x1, y1] = box;
+  return t => {
+    const u = seg(t, t0, t1) * rows, i = Math.min(rows - 1, Math.floor(u)), f = Math.min(1, u - i);
+    const e = 0.5 - 0.5 * Math.cos(Math.PI * f), x = i % 2 ? lerp(x1, x0, e) : lerp(x0, x1, e);
+    const yy = rows > 1 ? lerp(y0, y1, (i + sstep(seg(f, 0.82, 1)) * (i < rows - 1 ? 1 : 0)) / (rows - 1)) : (y0 + y1) / 2;
+    return [x, yy];
+  };
+}
+let DAB = {};
+function buildDabs() {
+  for (const k of ['k', 'r']) {
+    const c = mk(240, 240), g = c.getContext('2d'), gr = g.createRadialGradient(120, 120, 0, 120, 120, 120);
+    const col = k === 'k' ? '20,19,19' : '211,39,29';
+    gr.addColorStop(0, `rgba(${col},0.3)`); gr.addColorStop(0.35, `rgba(${col},0.22)`); gr.addColorStop(0.7, `rgba(${col},0.07)`); gr.addColorStop(1, `rgba(${col},0)`);
+    g.fillStyle = gr; g.fillRect(0, 0, 240, 240); DAB[k] = c;
+  }
+}
+const DAB_DT = 1 / 220;
+function coverage(S, k, t) {
+  const c = S.cov[k]; if (c.t === t) return c; c.t = t;
+  const g = c.getContext('2d'); g.clearRect(0, 0, S.cw, S.ch);
+  for (const sp of S.sprays) if (sp.k === k && t > sp.t0) {
+    const tEnd = Math.min(t, sp.t1);
+    for (let tt = sp.t0; tt <= tEnd; tt += DAB_DT) { const [x, y] = sp.path(tt); g.drawImage(DAB[k], x - 120, y - 120); }
+  }
+  return c;
+}
+
+// figure coords → paper canvas coords
+const FIG = { x: M + 200, y: M + 1090 };
+const P1 = makeStencil({
+  name: 'boy', inks: ['k', 'r'], pw: 600, ph: 1270, wx: 900 - FIG.x, wy: 1500 - FIG.y, dripN: { k: 11, r: 3 },
+  drawMask(g, k) {
+    g.save(); g.translate(FIG.x, FIG.y);
+    if (k === 'k') { drawBoy(g); drawCrate(g); drawString(g); drawBulbCap(g); } else drawBulbGlass(g);
+    g.restore();
+  },
+});
+const P2_TEXT = ['ORIGINAL IDEA.', 'PLEASE DO NOT COPY.'];
+let P2 = null;
+
+// timings of both stencils
+Object.assign(P1, {
+  arrive: [0.3, 1.0], from: [-1500, -120, -0.16],
+  tapeIn: 0.98, tapeOff: 3.26, peel: [3.5, 4.02], away: [4.0, 4.32], peelDir: [-0.62, 0.78], peelMax: 1060, awayVec: [-1700, 900, -0.5],
+  sprays: [], sprayEnd: {},
+});
+
+// ── wall texture (world canvas) ──
+let WALL = null;
+function buildWall() {
+  const r = rng(12345);
+  WALL = mk(WW, WH);
+  const g = WALL.getContext('2d');
+  // bricks (running bond), whitewashed
+  const BWd = 132, BHt = 44, MO = 9;
+  const bricks = mk(WW, WH), bg = bricks.getContext('2d'), red = mk(WW, WH), rg2 = red.getContext('2d');
+  bg.fillStyle = '#b9b1a1'; bg.fillRect(0, 0, WW, WH); rg2.fillStyle = '#6e4a3c'; rg2.fillRect(0, 0, WW, WH);
+  for (let row = 0, y = 0; y < GROUND; row++, y += BHt + MO) {
+    for (let x = row % 2 ? -BWd / 2 : 0; x < WW; x += BWd + MO) {
+      const j = () => (r() - 0.5) * 2.2, l = 205 + r() * 26 + (r() < 0.06 ? -18 : 0);
+      bg.fillStyle = `rgb(${l + 22},${l + 15},${l})`;
+      bg.beginPath(); bg.moveTo(x + j(), y + j()); bg.lineTo(x + BWd + j(), y + j()); bg.lineTo(x + BWd + j(), y + BHt + j()); bg.lineTo(x + j(), y + BHt + j()); bg.closePath(); bg.fill();
+      bg.fillStyle = 'rgba(255,255,255,0.22)'; bg.fillRect(x + 1, y, BWd - 2, 2);
+      bg.fillStyle = 'rgba(60,50,35,0.16)'; bg.fillRect(x + 1, y + BHt - 3, BWd - 2, 3);
+      const rr = 120 + r() * 40, gg = 60 + r() * 22, bb = 45 + r() * 16;
+      rg2.fillStyle = `rgb(${rr | 0},${gg | 0},${bb | 0})`; rg2.fillRect(x + 1, y + 1, BWd - 2, BHt - 2);
+      rg2.fillStyle = 'rgba(0,0,0,0.25)'; rg2.fillRect(x + 1, y + BHt - 4, BWd - 2, 4);
+    }
+  }
+  // low and mid frequency noise via upscaled random grids
+  const noise = (gw, gh, sd) => { const rr = rng(sd), s = mk(gw, gh), sg = s.getContext('2d'), id = sg.createImageData(gw, gh);
+    for (let i = 0; i < gw * gh; i++) { const v = rr() * 255; id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
+    sg.putImageData(id, 0, 0); const b = mk(WW, WH), bb2 = b.getContext('2d'); bb2.imageSmoothingQuality = 'high'; bb2.drawImage(s, 0, 0, WW, WH); return bb2.getImageData(0, 0, WW, WH).data; };
+  const n1 = noise(26, 13, 7), n2 = noise(300, 150, 8), n3 = noise(1100, 540, 9);
+  const B = bg.getImageData(0, 0, WW, WH).data, R = rg2.getImageData(0, 0, WW, WH).data;
+  const out = g.createImageData(WW, WH), O = out.data;
+  // grime streaks per column
+  const streak = new Float32Array(WW); { let v = 0; for (let x = 0; x < WW; x++) { v = v * 0.93 + (r() - 0.5) * 0.9; streak[x] = v; } }
+  for (let x = 0; x < WW; x++) streak[x] = Math.max(0, streak[x]) * 0.6 + (r() < 0.004 ? 0.8 : 0);
+  // keep the paint zones mostly clean so the stencils read
+  const zones = [[640, 380, 1250, 1720], [1250, 1150, 2240, 1700], [2680, 380, 4100, 1720]];
+  const rr = rng(77);
+  for (let y = 0; y < WH; y++) {
+    const topG = Math.exp(-y / 260), botG = Math.exp(-(GROUND - y) / 90);
+    for (let x = 0; x < WW; x++) {
+      const i = (y * WW + x) * 4;
+      let z = 0; for (const [a, b, c, d] of zones) if (x > a && x < c && y > b && y < d) { z = 1; break; }
+      const pn = n1[i] / 255 * 0.7 + n2[i] / 255 * 0.22 + n3[i] / 255 * 0.08;
+      const thr = 0.71 + z * 0.2, peel = clamp((pn - thr) / 0.012);
+      const edge = clamp(1 - Math.abs(pn - thr - 0.006) / 0.012) * 0.35;
+      let cr = lerp(B[i], R[i], peel), cg = lerp(B[i + 1], R[i + 1], peel), cb = lerp(B[i + 2], R[i + 2], peel);
+      const gr = clamp(streak[x] * (topG * 1.2 + 0.15) * (0.6 + n2[i] / 255 * 0.8) + botG * 0.35 * (0.5 + n3[i] / 255));
+      const m = (1 - gr * 0.42) * (1 - edge) * (0.94 + n2[i] / 255 * 0.08) * (0.97 + rr() * 0.06);
+      O[i] = cr * m * (1 - gr * 0.03); O[i + 1] = cg * m; O[i + 2] = cb * m * (1 - gr * 0.08); O[i + 3] = 255;
+    }
+  }
+  g.putImageData(out, 0, 0);
+  // sidewalk + wall foot
+  const sw = g.createLinearGradient(0, GROUND, 0, WH); sw.addColorStop(0, '#6f6b66'); sw.addColorStop(1, '#8b8781');
+  g.fillStyle = sw; g.fillRect(0, GROUND, WW, WH - GROUND);
+  for (let n = 0; n < 9000; n++) { g.fillStyle = `rgba(${r() < 0.5 ? '0,0,0' : '255,255,255'},${0.03 + r() * 0.06})`; g.fillRect(r() * WW, GROUND + r() * (WH - GROUND), 1 + r() * 3, 1 + r() * 3); }
+  for (let x = 380; x < WW; x += 900) { g.fillStyle = 'rgba(40,38,35,0.5)'; g.fillRect(x, GROUND + 30, 3, WH - GROUND); }
+  const ws = g.createLinearGradient(0, GROUND, 0, GROUND + 50); ws.addColorStop(0, 'rgba(0,0,0,0.45)'); ws.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = ws; g.fillRect(0, GROUND, WW, 50);
+  g.fillStyle = 'rgba(70,64,58,0.9)'; g.fillRect(0, GROUND - 26, WW, 26);   // plinth
+  g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(0, GROUND - 26, WW, 3);
+}
+
+// older copies of the same stencil further down the wall
+function drawCopies() {
+  const g = WALL.getContext('2d');
+  const copies = [
+    { x: 2885, s: 0.86, age: 0.55, buff: null, seed: 5 },
+    { x: 3310, s: 0.84, age: 0.62, buff: [-118, -500, 128, 158], tone: '163,160,152', seed: 6 },
+    { x: 3735, s: 0.85, age: 0.75, buff: [-140, -640, 150, 162], tone: '176,168,152', keepBulb: true, seed: 9 },
+  ];
+  for (const C of copies) {
+    const r = rng(C.seed);
+    const tmp = mk(P1.cw, P1.ch), tg = tmp.getContext('2d');
+    for (const k of ['k', 'r']) { tg.drawImage(P1.final[k], 0, 0); drawDrips(tg, P1, Infinity, k); }
+    // fade: flaking holes where the paint has gone
+    tg.globalCompositeOperation = 'destination-out';
+    for (let n = 0; n < 900 * C.age; n++) { tg.globalAlpha = 0.3 + r() * 0.7; tg.beginPath(); tg.ellipse(r() * P1.cw, r() * P1.ch, 2 + r() * 14 * C.age, 1 + r() * 6, r() * 3, 0, 7); tg.fill(); }
+    tg.globalAlpha = 1; tg.globalCompositeOperation = 'source-over';
+    g.save(); g.translate(C.x, 1500); g.scale(C.s, C.s); g.translate(-FIG.x, -FIG.y);
+    g.globalAlpha = 1 - C.age * 0.6; g.filter = `sepia(${C.age * 0.4})`;
+    g.drawImage(tmp, 0, 0); g.filter = 'none'; g.globalAlpha = 1;
+    g.restore();
+    if (C.buff) {
+      // council buff: a slightly-wrong grey roller patch over the boy
+      const [bx0, by0, bx1, by1] = C.buff;
+      g.save(); g.translate(C.x, 1500); g.scale(C.s, C.s);
+      g.fillStyle = `rgba(${C.tone},0.96)`; g.beginPath();
+      g.moveTo(bx0 + r() * 10, by0 + r() * 10); g.lineTo(bx1 - r() * 10, by0 + r() * 14); g.lineTo(bx1 + r() * 8, by1 - r() * 8); g.lineTo(bx0 - r() * 8, by1 + r() * 6); g.closePath(); g.fill();
+      g.save(); g.clip(); for (let k = 0; k < 40; k++) { g.fillStyle = `rgba(${r() < 0.5 ? '255,255,255' : '90,80,60'},${0.03 + r() * 0.04})`; g.fillRect(bx0 - 10, by0 + r() * (by1 - by0), bx1 - bx0 + 20, 4 + r() * 22); } g.restore();
+      g.restore();
+    }
+  }
+}
+
+// ── drainpipe in front of the wall (static) ──
+function drawPipe() {
+  const g = WALL.getContext('2d'), x = 2560, w = 46;
+  const gr = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+  gr.addColorStop(0, '#2f3b38'); gr.addColorStop(0.3, '#5d6c67'); gr.addColorStop(0.45, '#7c8a84'); gr.addColorStop(1, '#222b29');
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(x - w / 2 + 14, 0, w, GROUND - 26);
+  g.fillStyle = gr; g.fillRect(x - w / 2, 0, w, GROUND - 60);
+  for (let y = 180; y < GROUND - 100; y += 420) { g.fillStyle = '#28302e'; g.fillRect(x - w / 2 - 6, y, w + 12, 22); g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(x - w / 2 - 6, y, w + 12, 3); }
+  // shoe at the bottom
+  g.fillStyle = gr; g.beginPath(); g.moveTo(x - w / 2, GROUND - 60); g.lineTo(x + w / 2, GROUND - 60); g.lineTo(x + w / 2 + 34, GROUND - 22); g.lineTo(x + w / 2 + 10, GROUND - 8); g.closePath(); g.fill();
+  const rs = g.createLinearGradient(0, 0, 0, GROUND); rs.addColorStop(0, 'rgba(90,60,30,0)'); rs.addColorStop(1, 'rgba(90,60,30,0.25)');
+  g.fillStyle = rs; g.fillRect(x - w / 2, 0, w, GROUND - 60);
+}
+
+// ── camera ──
+function camera(t) {
+  const K = T.cam; let i = 0; while (i < K.length - 2 && t > K[i + 1][0]) i++;
+  const [ta, xa, ya, za] = K[i], [tb, xb, yb, zb] = K[i + 1], u = eInOut(seg(t, ta, tb));
+  // zoom interpolated in log space so the pull-back feels even
+  const z = Math.exp(lerp(Math.log(za), Math.log(zb), u));
+  return { cx: lerp(xa, xb, u) + Math.sin(t * 0.9) * 4 + Math.sin(t * 2.3 + 1) * 1.5, cy: lerp(ya, yb, u) + Math.cos(t * 0.7) * 3, z };
+}
+let CAM;
+const setCam = () => ctx.setTransform(CAM.z, 0, 0, CAM.z, W / 2 - CAM.cx * CAM.z, H / 2 - CAM.cy * CAM.z);
+
+// ── per-frame drawing ──
+function stencilPhase(S, t) {
+  // pose of the paper sheet: slide in with a small overshoot, flat, then peeled and pulled away
+  const a = seg(t, ...S.arrive);
+  let dx = 0, dy = 0, rr = 0, lift = 0;
+  if (a < 1) {
+    const k = 0.72, v = a < k ? eOut(a / k) : 1, ov = a < k ? 0 : Math.sin((a - k) / (1 - k) * Math.PI) * (1 - (a - k) / (1 - k));
+    dx = S.from[0] * (1 - v) - ov * 18 * Math.sign(S.from[0]); dy = S.from[1] * (1 - v); rr = S.from[2] * (1 - v) + ov * 0.006; lift = 1 - v;
+  }
+  const w = seg(t, ...S.away);
+  if (w > 0) { const e = eIn(w); dx += S.awayVec[0] * e; dy += S.awayVec[1] * e; rr += S.awayVec[2] * e; lift = Math.max(lift, Math.min(1, w * 3)); }
+  return { dx, dy, rr, lift };
+}
+function drawStencil(S, t) {
+  const g = ctx;
+  // paint on the wall (under the paper)
+  const sprayed = S.inks.filter(k => S.sprays.some(sp => sp.k === k && t > sp.t0));
+  if (sprayed.length) {
+    const done = t > S.peel[0];
+    g.save(); setCam(); g.translate(S.wx, S.wy);
+    for (const k of sprayed) {
+      if (done) g.drawImage(S.final[k], 0, 0);
+      else {
+        const tg = S.tmp.getContext('2d'); tg.globalCompositeOperation = 'source-over'; tg.clearRect(0, 0, S.cw, S.ch);
+        tg.drawImage(S.final[k], 0, 0); tg.globalCompositeOperation = 'destination-in';
+        const cv2 = coverage(S, k, t); tg.drawImage(cv2, 0, 0); tg.globalCompositeOperation = 'source-over';
+        g.drawImage(S.tmp, 0, 0);
+      }
+    }
+    drawDrips(g, S, t);
+    g.restore();
+  }
+  if (t < S.arrive[0] || t > S.away[1]) return;
+  // the sheet, tinted by this session's overspray
+  const ph = stencilPhase(S, t);
+  const front = S.tmp2, fg = front.getContext('2d');
+  fg.globalCompositeOperation = 'source-over'; fg.clearRect(0, 0, S.cw, S.ch); fg.drawImage(S.paper, 0, 0);
+  if (sprayed.length) {
+    fg.globalCompositeOperation = 'source-atop';
+    for (const k of sprayed) { fg.globalAlpha = 0.78; fg.drawImage(coverage(S, k, Math.min(t, S.peel[0])), 0, 0); }
+    fg.globalAlpha = 1; fg.globalCompositeOperation = 'source-over';
+  }
+  g.save(); setCam(); g.translate(S.wx + ph.dx, S.wy + ph.dy);
+  g.translate(S.cw / 2, S.ch / 2); g.rotate(ph.rr); g.translate(-S.cw / 2, -S.ch / 2);
+  const pu = seg(t, ...S.peel), s = S.peelMax * eInOut(pu);
+  const ddx = S.peelDir[0] / Math.hypot(...S.peelDir), ddy = S.peelDir[1] / Math.hypot(...S.peelDir), C = [M + S.pw, M], c0 = C[0] * ddx + C[1] * ddy + s;
+  // shadow of the sheet (bigger while lifted)
+  const so = 4 + ph.lift * 30;
+  g.globalAlpha = 0.28 + ph.lift * 0.1;
+  g.save(); if (pu > 0) halfPlane(g, ddx, ddy, c0, false); g.drawImage(S.shadow, so * 0.6, so); g.restore();
+  g.globalAlpha = 1;
+  // tapes under paper? no: tapes sit on top. Front (not lifted) part:
+  g.save(); if (pu > 0) halfPlane(g, ddx, ddy, c0, false); g.drawImage(front, 0, 0); g.restore();
+  // tapes
+  for (const tp of S.tapes) {
+    if (t < tp.ti) continue;
+    const ui = seg(t, tp.ti, tp.ti + 0.09), uo = seg(t, tp.to, tp.to + 0.16);
+    if (uo >= 1) continue;
+    g.save();
+    const sc = 1 + (1 - eOut(ui)) * 0.25, ox = (tp.x - S.cw / 2), oy = (tp.y - S.ch / 2), nrm = Math.hypot(ox, oy);
+    g.translate(tp.x + ox / nrm * eIn(uo) * 260, tp.y + oy / nrm * eIn(uo) * 260 - eIn(uo) * 80); g.rotate(eIn(uo) * 0.9); g.scale(sc, sc); g.translate(-tp.x, -tp.y);
+    drawTape(g, tp, eOut(ui) * (1 - uo));
+    g.restore();
+  }
+  if (pu > 0) {
+    // flap: back of the sheet, reflected across the fold line, lit near the fold
+    const fl = S.tmp.getContext('2d');
+    fl.globalCompositeOperation = 'source-over'; fl.clearRect(0, 0, S.cw, S.ch); fl.drawImage(S.paperBack, 0, 0);
+    fl.globalCompositeOperation = 'destination-in'; fl.beginPath(); halfPath(fl, ddx, ddy, c0, true); fl.fillStyle = '#000'; fl.fill();
+    fl.globalCompositeOperation = 'source-atop';
+    const p0 = [ddx * c0, ddy * c0], p1 = [ddx * (c0 - 260), ddy * (c0 - 260)];
+    const gr = fl.createLinearGradient(p0[0], p0[1], p1[0], p1[1]);
+    gr.addColorStop(0, 'rgba(255,252,240,0.4)'); gr.addColorStop(0.15, 'rgba(255,252,240,0.12)'); gr.addColorStop(1, 'rgba(60,45,20,0.16)');
+    fl.fillStyle = gr; fl.fillRect(0, 0, S.cw, S.ch); fl.globalCompositeOperation = 'source-over';
+    const a = 1 - 2 * ddx * ddx, b = -2 * ddx * ddy, d = 1 - 2 * ddy * ddy;
+    g.save(); g.transform(a, b, b, d, 2 * c0 * ddx, 2 * c0 * ddy);
+    g.globalAlpha = 0.3; g.filter = 'blur(10px)'; g.drawImage(S.tmp, -14, 22); g.filter = 'none'; g.globalAlpha = 1;
+    g.restore();
+    g.save(); g.transform(a, b, b, d, 2 * c0 * ddx, 2 * c0 * ddy); g.drawImage(S.tmp, 0, 0); g.restore();
+  }
+  g.restore();
+}
+function halfPath(g, dx, dy, c0, lifted) {
+  // polygon covering the half-plane p·d < c0 (lifted) or p·d >= c0, big enough for the sheet
+  const B = 5000, px = dx * c0, py = dy * c0, tx = -dy, ty = dx, sgn = lifted ? -1 : 1;
+  g.moveTo(px + tx * B, py + ty * B); g.lineTo(px - tx * B, py - ty * B);
+  g.lineTo(px - tx * B + sgn * dx * B, py - ty * B + sgn * dy * B); g.lineTo(px + tx * B + sgn * dx * B, py + ty * B + sgn * dy * B); g.closePath();
+}
+function halfPlane(g, dx, dy, c0, lifted) { g.beginPath(); halfPath(g, dx, dy, c0, lifted); g.clip(); }
+
+// spray cans: drawn near the camera side, nozzle at the spray point
+function canState(t) {
+  for (const S of [P1, P2]) for (const sp of S.sprays) {
+    const t0 = sp.t0 - sp.pre, t1 = sp.t1 + 0.28;
+    if (t >= t0 && t <= t1) {
+      const [lx, ly] = sp.path(clamp(t, sp.t0, sp.t1));
+      let x = S.wx + lx, y = S.wy + ly, enter = eOut(seg(t, t0, t0 + 0.22)), exit = eIn(seg(t, sp.t1, t1));
+      const off = (1 - enter + exit) * 900;
+      const shake = t < sp.t0 ? Math.sin((t - t0) * 70) * 26 * seg(t, t0 + 0.1, t0 + 0.16) : 0;
+      return { x: x + off * 0.7, y: y + off + shake, k: sp.k, on: t > sp.t0 && t < sp.t1, sp, S };
+    }
+  }
+  return null;
+}
+function drawCan(t) {
+  const st = canState(t); if (!st) return;
+  const g = ctx; g.save(); setCam();
+  const r = rng(Math.floor(t * 30) * 13 + 1);
+  const cx = st.x + 70, cy = st.y + 150, tilt = -0.42 + Math.sin(t * 9) * 0.03;
+  if (st.on) {
+    // mist: a cone from the nozzle, a dense puff where it lands, flying droplets
+    const col = st.k === 'k' ? '34,32,32' : '220,50,40';
+    const nz = rot([0, -164], tilt, [cx, cy]);
+    const ang = Math.atan2(st.y - nz[1], st.x - nz[0]), len = Math.hypot(st.x - nz[0], st.y - nz[1]);
+    g.save(); g.translate(nz[0], nz[1]); g.rotate(ang);
+    const cg2 = g.createLinearGradient(0, 0, len + 60, 0); cg2.addColorStop(0, `rgba(${col},0.05)`); cg2.addColorStop(0.7, `rgba(${col},0.2)`); cg2.addColorStop(1, `rgba(${col},0)`);
+    g.fillStyle = cg2; g.beginPath(); g.moveTo(0, -3); g.lineTo(len + 40, -70); g.quadraticCurveTo(len + 90, 0, len + 40, 70); g.lineTo(0, 3); g.closePath(); g.fill();
+    g.restore();
+    const gr = g.createRadialGradient(st.x, st.y, 0, st.x, st.y, 130);
+    gr.addColorStop(0, `rgba(${col},0.42)`); gr.addColorStop(0.45, `rgba(${col},0.16)`); gr.addColorStop(1, `rgba(${col},0)`);
+    g.fillStyle = gr; g.fillRect(st.x - 130, st.y - 130, 260, 260);
+    for (let n = 0; n < 90; n++) { const a = r() * 7, d = 20 + r() * 150; g.fillStyle = `rgba(${col},${0.25 + r() * 0.45})`; g.fillRect(st.x + Math.cos(a) * d, st.y + Math.sin(a) * d, 1.5 + r() * 2.5, 1.5 + r() * 2.5); }
+  }
+  g.translate(cx, cy); g.rotate(tilt);
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(26, 30, 50, 140, 0, 0, 7); g.fill();
+  const bw = 86, bh = 240;
+  const body = g.createLinearGradient(-bw / 2, 0, bw / 2, 0);
+  const base = st.k === 'k' ? ['#0c0c0c', '#3a3a3a', '#141414', '#050505'] : ['#7d130d', '#e8473a', '#b51d14', '#5a0c08'];
+  body.addColorStop(0, base[0]); body.addColorStop(0.28, base[1]); body.addColorStop(0.55, base[2]); body.addColorStop(1, base[3]);
+  g.fillStyle = body; g.beginPath(); g.roundRect(-bw / 2, -bh / 2, bw, bh, 10); g.fill();
+  g.fillStyle = 'rgba(240,236,226,0.85)'; g.fillRect(-bw / 2, -10, bw, 26);          // plain label band
+  g.fillStyle = base[1]; g.fillRect(-bw / 2 + 14, -4, 28, 14);
+  const sh = g.createLinearGradient(-bw / 2, 0, bw / 2, 0); sh.addColorStop(0, '#6d6d6b'); sh.addColorStop(0.3, '#e2e2dc'); sh.addColorStop(1, '#4a4a48');
+  g.fillStyle = sh; g.beginPath(); g.moveTo(-bw / 2, -bh / 2 + 4); g.quadraticCurveTo(0, -bh / 2 - 46, bw / 2, -bh / 2 + 4); g.closePath(); g.fill();
+  g.fillRect(-bw / 2, -bh / 2 + 2, bw, 8);
+  g.fillStyle = '#efefe9'; g.beginPath(); g.roundRect(-12, -bh / 2 - 52, 24, 22, 4); g.fill();
+  g.fillStyle = '#222'; g.beginPath(); g.arc(0, -bh / 2 - 44, 4, 0, 7); g.fill();
+  g.restore();
+}
+
+// screen-space light + grain
+let LIGHT, GRAIN;
+function buildScreen() {
+  LIGHT = mk(W, H); const g = LIGHT.getContext('2d');
+  const warm = g.createLinearGradient(0, 0, W, H); warm.addColorStop(0, 'rgba(255,214,160,0.10)'); warm.addColorStop(1, 'rgba(40,30,60,0.10)');
+  g.fillStyle = warm; g.fillRect(0, 0, W, H);
+  const v = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.05); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(10,6,0,0.42)');
+  g.fillStyle = v; g.fillRect(0, 0, W, H);
+  const S = 384, c = mk(S, S), cg = c.getContext('2d'), id = cg.createImageData(S, S), r = rng(99);
+  for (let i = 0; i < S * S; i++) { const v2 = r() * 255; id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v2; id.data[i * 4 + 3] = 16; }
+  cg.putImageData(id, 0, 0); GRAIN = ctx.createPattern(c, 'repeat');
+}
+
+window.ready = (async () => {
+  await document.fonts.load(`800 100px ${FONT}`); await document.fonts.ready;
+  buildDabs();
+  // stencil 1 sprays (figure coords → paper canvas coords)
+  const f = (x0, y0, x1, y1) => [FIG.x + x0, FIG.y + y0, FIG.x + x1, FIG.y + y1];
+  P1.sprays = [
+    { k: 'k', t0: 1.34, t1: 2.62, path: (za => zb => tt => tt < 1.66 ? za(tt) : zb(tt))(zigzag(f(140, -850, 300, -600), 3, 1.34, 1.66))(zigzag(f(-150, -600, 200, 150), 9, 1.66, 2.62)), pre: 0.32 },
+    { k: 'r', t0: 2.92, t1: 3.42, path: zigzag(f(110, -1080, 420, -800), 4, 2.92, 3.42), pre: 0.3 },
+  ];
+  P1.sprayEnd = { k: 2.62, r: 3.42 };
+  P1.tapePts = [[M + 6, M + 6, -0.78], [M + P1.pw - 6, M + 6, 0.78], [M + P1.pw - 6, M + P1.ph - 6, -0.78], [M + 6, M + P1.ph - 6, 0.78]];
+  buildFinal(P1, 'k', 31); buildFinal(P1, 'r', 32); buildPaper(P1, 41);
+  // stencil 2: the caption, set in a stencil face sized to one measure
+  ctx.font = `800 200px ${FONT}`;
+  const w1 = ctx.measureText(P2_TEXT[0]).width, w2 = ctx.measureText(P2_TEXT[1]).width, MEAS = 760;
+  const s1 = 200 * MEAS / w1, s2 = 200 * MEAS / w2, PAD = 46, gap = 26;
+  const pw = MEAS + 2 * PAD, ph = Math.round(s1 * 0.74 + s2 * 0.74 + gap + 2 * PAD);
+  P2 = makeStencil({
+    name: 'caption', inks: ['k'], pw, ph, wx: 1340 - M, wy: 1290 - M, dripN: { k: 5 },
+    drawMask(g) { g.textBaseline = 'alphabetic'; g.font = `800 ${s1}px ${FONT}`; g.fillText(P2_TEXT[0], M + PAD, M + PAD + s1 * 0.74);
+      g.font = `800 ${s2}px ${FONT}`; g.fillText(P2_TEXT[1], M + PAD, M + PAD + s1 * 0.74 + gap + s2 * 0.74); },
+  });
+  Object.assign(P2, { arrive: [4.42, 4.98], from: [1400, 60, 0.12], tapeIn: 4.98, tapeOff: 6.42, peel: [6.6, 7.08], away: [7.06, 7.38], peelDir: [-0.45, 0.89], peelMax: 900, awayVec: [-1300, 1100, -0.4], sprayEnd: { k: 6.32 } });
+  P2.sprays = [{ k: 'k', t0: 5.42, t1: 6.32, path: zigzag([M + 20, M + PAD - 10, M + pw - 20, M + ph - PAD + 10], 4, 5.42, 6.32), pre: 0.3 }];
+  P2.tapePts = [[M + 4, M + 4, -0.7], [M + pw - 4, M + 4, 0.7], [M + pw - 4, M + ph - 4, -0.7], [M + 4, M + ph - 4, 0.7]];
+  buildFinal(P2, 'k', 51); buildPaper(P2, 61);
+  buildWall(); drawCopies(); drawPipe(); buildScreen();
+})();
+
+window.draw = ({ t }) => {
+  CAM = camera(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  // wall (crop to view)
+  const vw = W / CAM.z, vh = H / CAM.z, x0 = Math.max(0, CAM.cx - vw / 2 - 4), y0 = Math.max(0, CAM.cy - vh / 2 - 4);
+  const x1 = Math.min(WW, CAM.cx + vw / 2 + 4), y1 = Math.min(WH, CAM.cy + vh / 2 + 4);
+  setCam(); ctx.drawImage(WALL, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+  drawStencil(P1, t); drawStencil(P2, t);
+  drawCan(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(LIGHT, 0, 0);
+  const gf = Math.floor(t * 5); GRAIN.setTransform(new DOMMatrix([1, 0, 0, 1, (gf * 137) % 384, (gf * 71) % 384]));
+  ctx.fillStyle = GRAIN; ctx.globalCompositeOperation = 'overlay'; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over';
+  const fi = 1 - seg(t, ...T.fadeIn), fo = seg(t, ...T.fadeOut), f = Math.max(eInOut(fi), eInOut(fo));
+  if (f > 0) { ctx.fillStyle = `rgba(0,0,0,${f})`; ctx.fillRect(0, 0, W, H); }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+// sound cues for audio.py
+window.events = () => {
+  const ev = [];
+  for (const S of [P1, P2]) {
+    ev.push({ k: 'slide', t: S.arrive[0], d: S.arrive[1] - S.arrive[0] });
+    for (const tp of S.tapes) { ev.push({ k: 'tape', t: tp.ti }); ev.push({ k: 'rip', t: tp.to }); }
+    for (const sp of S.sprays) {
+      if (sp.pre > 0) ev.push({ k: 'rattle', t: sp.t0 - sp.pre + 0.1, d: Math.max(0.12, sp.pre - 0.12) });
+      ev.push({ k: 'hiss', t: sp.t0, d: sp.t1 - sp.t0, ink: sp.k, rows: 0 });
+    }
+    ev.push({ k: 'peel', t: S.peel[0], d: S.peel[1] - S.peel[0] }, { k: 'slide', t: S.away[0], d: S.away[1] - S.away[0], v: 0.7 });
+  }
+  ev.push({ k: 'ping', t: P1.peel[1] - 0.05, f: 2093 }, { k: 'ping', t: P2.peel[1] - 0.05, f: 1568, v: 0.6 });
+  ev.push({ k: 'whoosh', t: 6.9, d: 1.55 });
+  return ev;
+};
+</script>
+</body></html>
