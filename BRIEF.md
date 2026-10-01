@@ -61,4 +61,5 @@ and how it is checked before it is merged.
    must end in `ok`: the clip's codec, size, frame rate, range, duration and audio, the
    preview, the index entries and the shared scripts are all checked.
 5. The catalog reel (`catalog/catalog.mp4`) is rebuilt with `combine.py` after styles are
-   added or remade.
+   added or remade. It is git-ignored: upload it as the `catalog.mp4` asset of a new release
+   (`gh release create vX.Y.Z catalog/catalog.mp4`).

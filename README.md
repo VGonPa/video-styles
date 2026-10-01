@@ -2,7 +2,7 @@
 
 Short HTML canvas films demonstrate different animation styles. Each example is a self-contained clip of roughly 9–10 seconds. Choose a style before commissioning a new animation: “Explain this topic in the `blueprint` style.”
 
-Watch the [complete catalog reel](catalog/catalog.mp4) (128 styles in shuffled order, ~24 min), or browse by use case or visual family, or open a style below to see its video, animated preview, and HTML source.
+Watch the [complete catalog reel](https://github.com/VGonPa/video-styles/releases/latest/download/catalog.mp4) (128 styles in shuffled order, ~24 min, attached to each [release](https://github.com/VGonPa/video-styles/releases)), or browse by use case or visual family, or open a style below to see its video, animated preview, and HTML source.
 
 The catalog began as an English adaptation of [Yasin Özmen’s Turkish catalog](https://github.com/yasinozmeen/animasyon-stil-katalogu) (see [Acknowledgements](#acknowledgements)). Its first 20 styles were originally developed there and have since been re-made with new subjects; each style page credits its origin.
 
@@ -348,7 +348,7 @@ Each film was written by Claude Code (Opus 5.5) against the [production brief](B
 - Every style folder carries identical copies of [`tools/render.mjs`](tools/render.mjs), which renders frames in headless Chromium through Playwright, and [`tools/events.mjs`](tools/events.mjs), which exports the sound cues. An optional `render.json` selects GPU rendering or in-order frame blocks for simulations.
 - Each style's `audio.py` synthesizes its soundtrack from those cues, and ffmpeg encodes H.264 video with AAC audio and the GIF preview.
 - To reproduce a clip, install Node.js, `@playwright/test`, the Chromium headless shell, Python 3 with NumPy, and ffmpeg, then run that style’s `build.sh`.
-- To regenerate the previews, run `python3 make_previews.py`. To assemble the catalog, install Pillow and run `python3 combine.py`. Both commands require ffmpeg on your path.
+- To regenerate the previews, run `python3 make_previews.py`. To assemble the catalog reel, install Pillow and run `python3 combine.py`; it writes `catalog/catalog.mp4`, which is git-ignored and published as a release asset. Both commands require ffmpeg on your path.
 - Each style's metadata (number, name, visual family, use cases, and optional `credits`: `role`, `name`, `url`) lives in `styles/<slug>/meta.json`; the use-case and family definitions live in `styles.json`. After editing either, run `python3 build_index.py` to regenerate this gallery, the pages under `categories/`, and each `styles/<slug>/README.md`, then `python3 check_catalog.py` to verify every style has a valid clip, preview, index entries and unmodified shared scripts.
 - Fonts are self-hosted under each style’s `fonts/` directory; [FONTS.md](FONTS.md) lists every family and its license.
 
