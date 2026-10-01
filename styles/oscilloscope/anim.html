@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── oscilloscope · an analog X-Y vector monitor (the fictional "Halvard Model 12") ───────────────────────
+// Power on → a dot warms up at the left edge → the time base drags it across the screen, slowly drawing one
+// cosine, then spins up until the trace stands still → the FREQ knob turns and the wave packs in more cycles →
+// MODE flips to X-Y and the trace melts into a rotating 3:4 Lissajous knot, which glides into a 2:3 figure →
+// the knot morphs into a rotating wireframe cube → the cube's own path re-forms into the word SIGNAL →
+// the word swells, collapses to a single hot dot, the INTENSITY knob turns down and the screen goes dark.
+//
+// One deflection signal drives everything. It is synthesized at 48 kHz (X, Y in screen units) in `buildSignal`,
+// the phosphor image of each frame is the beam's energy integrated over the recent past of that signal (slow
+// beam = bright, fast jumps = faint, older samples decay), and the soundtrack is the same signal: left = X,
+// right = Y (events.mjs → xy.f32 → audio.py). Shapes are literally what you hear.
+const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2, SR = 48000, NS = SR * DUR;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const sm = u => u * u * (3 - 2 * u);
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eIn = u => u * u * u;
+const eBack = (u, s = 1.6) => 1 + (s + 1) * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const FONT = "'Barlow Condensed'", MONO = "'IBM Plex Mono'";
+
+// ── layout: CRT screen (beam buffer) on the left, control strip on the right ─────────────────────────────
+const SX = 96, SY = 44, SW = 1248, SH = 992;          // screen glass rect = phosphor buffer
+const CX = 720, CY = 540, DIV = 120, U = 450;         // graticule centre, px per division, px per signal unit
+
+// ── timeline ─────────────────────────────────────────────────────────────────────────────────────────────
+const T = { lamp: 0.08, beam: 0.22, sweep: 0.42, spin0: 1.05, spin1: 2.15, knob0: 2.62, knob1: 3.3,
+  xy0: 3.55, xy1: 4.15, glide0: 4.7, glide1: 5.05, cube0: 5.45, cube1: 6.0, word0: 7.0, word1: 7.5,
+  swell: 8.45, dot: 8.8, off0: 9.6, off1: 10.0 };
+const FR = 110;                                       // vector-path refresh rate (cube, word) → the drone pitch
+
+// X frequency of the time base: a crawl that spins up exponentially to 55 Hz
+const fxAt = t => t < T.sweep ? 0 : 0.6 * Math.pow(55 / 0.6, sm(seg(t, T.spin0, T.spin1)));
+// visible cycles across the screen (the FREQ knob): 3 → 5 with a small overshoot
+const cycAt = t => 3 + 2 * eBack(seg(t, T.knob0, T.knob1), 1.3);
+const ampYAt = t => 0.56 * sm(seg(t, T.sweep, T.sweep + 0.5));
+// Lissajous: 3:4 (165:220 Hz, a fourth) glides to 2:3 (220:330 Hz, a fifth); X detuned so the knot rotates
+const liss = t => { const g = eInOut(seg(t, T.glide0, T.glide1)); return [lerp(165, 220, g) + 0.24, lerp(220, 330, g)]; };
+// beam intensity (the INTENSITY knob) and phosphor decay constant
+const beamAt = t => sm(seg(t, T.beam, T.beam + 0.25)) * (1 - sm(seg(t, T.off0 + 0.05, T.off1 - 0.04)));
+const decayAt = t => lerp(0.42, 0.034, sm(seg(t, 1.2, 2.0)));
+// beam spot spread in px (visual only): defocused while the tube warms up, and the parked dot blooms slightly
+const spreadAt = t => 7 * (1 - sm(seg(t, T.beam, T.sweep + 0.25))) + 3.2 * sm(seg(t, T.dot - 0.1, T.dot + 0.25));
+// collapse: anticipation swell, then the figure shrinks to a point
+const sizeAt = t => t < T.swell ? 1 : t < T.swell + 0.11 ? 1 + 0.06 * eOut(seg(t, T.swell, T.swell + 0.11))
+  : 1.06 * (1 - eIn(seg(t, T.swell + 0.11, T.dot)));
+
+// ── shapes as periodic paths (param 0..1 per refresh) ────────────────────────────────────────────────────
+function makePath(pts, wts) {                         // pts [[x,y],...], wts per segment → cumulative table
+  const cum = [0]; for (const w of wts) cum.push(cum[cum.length - 1] + w);
+  const tot = cum[cum.length - 1]; for (let i = 0; i < cum.length; i++) cum[i] /= tot;
+  return { pts, cum };
+}
+function pathAt(P, f, out) {                          // binary search the segment, lerp inside it
+  const c = P.cum; let lo = 0, hi = c.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c[m] <= f) lo = m; else hi = m; }
+  const u = (f - c[lo]) / Math.max(1e-9, c[lo + 1] - c[lo]), a = P.pts[lo], b = P.pts[lo + 1];
+  out[0] = a[0] + (b[0] - a[0]) * u; out[1] = a[1] + (b[1] - a[1]) * u;
+}
+// cube: 16-edge closed walk (the 4 verticals are traced twice, at double speed)
+const CUBE_V = [[-1,-1,-1],[1,-1,-1],[1,-1,1],[-1,-1,1],[-1,1,-1],[1,1,-1],[1,1,1],[-1,1,1]];
+const CUBE_W = [0,1,2,3,0,4,5,1,5,6,2,6,7,3,7,4,0];
+const CUBE_CUM = (() => { const w = []; for (let i = 0; i < 16; i++) { const a = CUBE_W[i], b = CUBE_W[i + 1];
+  w.push(Math.abs(a - b) === 4 ? 0.55 : 1); } return makePath(CUBE_W.map(() => [0, 0]), w).cum; })();
+// stroke lettering for SIGNAL (cap height 1, y down), drawn forward then backward so there is no long return jump
+function arc(cx, cy, rx, ry, a0, a1, n = 28) { const p = []; for (let i = 0; i <= n; i++) { const a = lerp(a0, a1, i / n) * Math.PI / 180;
+  p.push([cx + rx * Math.cos(a), cy + ry * Math.sin(a)]); } return p; }
+const GLYPHS = {
+  S: { w: 0.62, s: [[...arc(0.31, 0.255, 0.29, 0.255, -25, -270), ...arc(0.31, 0.755, 0.31, 0.245, -90, 155).slice(1)]] },
+  I: { w: 0.06, s: [[[0.03, 0], [0.03, 1]]] },
+  G: { w: 0.68, s: [[...arc(0.34, 0.5, 0.34, 0.5, -42, -360, 40), [0.4, 0.5]]] },
+  N: { w: 0.6, s: [[[0, 1], [0, 0], [0.6, 1], [0.6, 0]]] },
+  A: { w: 0.66, s: [[[0, 1], [0.33, 0], [0.66, 1]], [[0.13, 0.64], [0.53, 0.64]]] },
+  L: { w: 0.52, s: [[[0, 0], [0, 1], [0.52, 1]]] },
+};
+const WORD = (() => {
+  const h = 0.47, gap = 0.34, txt = 'SIGNAL';
+  let wsum = 0; for (const ch of txt) wsum += GLYPHS[ch].w; wsum += gap * (txt.length - 1);
+  let x0 = -wsum / 2; const strokes = [];
+  for (const ch of txt) { for (const s of GLYPHS[ch].s) strokes.push(s.map(([x, y]) => [(x0 + x) * h, (0.5 - y) * h]));
+    x0 += GLYPHS[ch].w + gap; }
+  const fwd = []; const wts = [];
+  for (const s of strokes) { s.forEach(p => { if (fwd.length) { const q = fwd[fwd.length - 1], L = Math.hypot(p[0] - q[0], p[1] - q[1]);
+    wts.push(p === s[0] ? 0.001 + L * 0.02 : L); } fwd.push(p); }); }
+  const back = fwd.slice().reverse(), bw = wts.slice().reverse();
+  return makePath([...fwd, ...back.slice(1)], [...wts, ...bw]);
+})();
+
+// ── the deflection signal (48 kHz) ───────────────────────────────────────────────────────────────────────
+let SXa, SYa;
+function buildSignal() {
+  SXa = new Float32Array(NS); SYa = new Float32Array(NS);
+  let px = 0, pa = 0, pb = 0, pr = 0; const o = [0, 0];
+  for (let i = 0; i < NS; i++) {
+    const t = i / SR;
+    px += fxAt(t) / SR; pr += FR / SR;
+    const m1 = sm(seg(t, T.xy0, T.xy1)), m2 = sm(seg(t, T.cube0, T.cube1)), m3 = eInOut(seg(t, T.word0, T.word1));
+    let x = 0, y = 0;
+    if (m1 < 1) {                                     // Y-T mode: triangle time base, Y a function of X
+      const fp = px - Math.floor(px), xs = 1.2 * (1 - 4 * Math.abs(fp - 0.5));
+      x = xs; y = ampYAt(t) * Math.cos(Math.PI * cycAt(t) * (xs / 1.2 + 1));
+      if (t < T.sweep) { x = -1.2; y = 0; }
+    }
+    if (t >= T.xy0 - 0.01) { const [fa, fb] = liss(t); pa += fa / SR; pb += fb / SR; }
+    if (m1 > 0 && m2 < 1) { const lx = 0.84 * Math.sin(TAU * pa), ly = 0.84 * Math.sin(TAU * pb);
+      x = lerp(x, lx, m1); y = lerp(y, ly, m1); }
+    const f = pr - Math.floor(pr);
+    if (m2 > 0 && m3 < 1) {                           // rotating cube, perspective
+      const ry = 0.55 + 1.05 * (t - T.cube0), rx = 0.46 + 0.16 * Math.sin(1.4 * (t - T.cube0));
+      const c = CUBE_CUM; let k = 0; while (k < 15 && c[k + 1] <= f) k++;
+      const u = (f - c[k]) / (c[k + 1] - c[k]);
+      const P = v => { let [a, b, d] = v; const cy = Math.cos(ry), sy = Math.sin(ry), cx = Math.cos(rx), sx = Math.sin(rx);
+        const a1 = a * cy + d * sy, d1 = -a * sy + d * cy; const b1 = b * cx - d1 * sx, d2 = b * sx + d1 * cx;
+        const s = 3.6 / (d2 + 3.6) * 0.4; return [a1 * s, b1 * s]; };
+      const A = P(CUBE_V[CUBE_W[k]]), B = P(CUBE_V[CUBE_W[k + 1]]);
+      const cxv = A[0] + (B[0] - A[0]) * u, cyv = A[1] + (B[1] - A[1]) * u;
+      x = lerp(x, cxv, m2); y = lerp(y, cyv, m2);
+    }
+    if (m3 > 0) { pathAt(WORD, f, o);
+      const sp = t > T.word1 ? 1 + 0.045 * Math.exp(-(t - T.word1) / 0.18) * Math.sin(TAU * 3.2 * (t - T.word1)) : 1;
+      x = lerp(x, o[0] * sp, m3); y = lerp(y, o[1] * sp, m3); }
+    const k = sizeAt(t); SXa[i] = x * k; SYa[i] = y * k;
+  }
+}
+window.signal = () => {                               // interleaved float32 X,Y → base64 (for the soundtrack)
+  const buf = new Float32Array(NS * 2); for (let i = 0; i < NS; i++) { buf[2 * i] = SXa[i]; buf[2 * i + 1] = SYa[i]; }
+  const b = new Uint8Array(buf.buffer); let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+
+// ── phosphor rendering ──────────────────────────────────────────────────────────────────────────────────
+const E = new Float32Array(SW * SH), E2 = new Float32Array(SW * SH);
+const HW = SW / 4, HH = SH / 4, BW = SW / 16, BH = SH / 16;
+const HALO = new Float32Array(HW * HH), BLOOM = new Float32Array(BW * BH), TMP = new Float32Array(HW * HH);
+let BG;                                               // screen background RGB (Uint8ClampedArray, RGBA)
+const IMG = ctx.createImageData(SW, SH);
+function boxBlur(a, w, h, r, passes) {
+  for (let p = 0; p < passes; p++) {
+    for (let y = 0; y < h; y++) { let s = 0; const o = y * w;          // horizontal
+      for (let x = -r; x <= r; x++) s += a[o + clamp(x, 0, w - 1)];
+      for (let x = 0; x < w; x++) { TMP[o + x] = s / (2 * r + 1); s += a[o + Math.min(w - 1, x + r + 1)] - a[o + Math.max(0, x - r)]; } }
+    for (let x = 0; x < w; x++) { let s = 0;                           // vertical
+      for (let y = -r; y <= r; y++) s += TMP[clamp(y, 0, h - 1) * w + x];
+      for (let y = 0; y < h; y++) { a[y * w + x] = s / (2 * r + 1); s += TMP[Math.min(h - 1, y + r + 1) * w + x] - TMP[Math.max(0, y - r) * w + x]; } }
+  }
+}
+function down(src, sw, sh, dst, f) {                  // box downsample by f (sum → mean)
+  const dw = sw / f, dh = sh / f; dst.fill(0);
+  for (let y = 0; y < sh; y++) { const dy = (y / f | 0) * dw, o = y * sw; for (let x = 0; x < sw; x++) dst[dy + (x / f | 0)] += src[o + x]; }
+  const n = f * f; for (let i = 0; i < dw * dh; i++) dst[i] /= n;
+}
+const GAIN = 350000;                                  // energy → exposure
+// the operator's intensity setting: low while the slow, very bright crawl is on screen, full once the trace runs fast
+const expoAt = t => Math.exp(lerp(Math.log(0.012), 0, sm(seg(t, 1.15, 2.05))));
+function phosphor(t) {
+  E.fill(0);
+  const td = decayAt(t), win = Math.min(t, td * 4.5), i1 = Math.floor(t * SR), i0 = Math.max(1, Math.floor((t - win) * SR));
+  const st = win > 0.6 ? 6 : win > 0.2 ? 2 : 1, ex = GAIN * expoAt(t) * (1 + 0.45 * sm(seg(t, T.xy0, T.xy1)) * (1 - sm(seg(t, T.cube0, T.cube1)))), spr = spreadAt(t);
+  const ox = CX - SX, oy = CY - SY;
+  let qx = ox + SXa[i0 - 1] * U, qy = oy - SYa[i0 - 1] * U;
+  for (let i = i0; i <= i1; i += st) {
+    const tt = i / SR, w0 = st / SR * Math.exp(-(t - tt) / td) * beamAt(tt) * ex;
+    const sr = spr * Math.sqrt((i * 0.6180339) % 1), sa = i * 2.3999632, x = ox + SXa[i] * U + sr * Math.cos(sa), y = oy - SYa[i] * U + sr * Math.sin(sa);
+    if (w0 > 1e-6) {
+      const L = Math.hypot(x - qx, y - qy), n = Math.max(1, Math.ceil(L / 0.8)), w = w0 / n;
+      for (let k = 1; k <= n; k++) {
+        const fx = qx + (x - qx) * k / n, fy = qy + (y - qy) * k / n, ix = fx | 0, iy = fy | 0;
+        if (ix < 1 || iy < 1 || ix >= SW - 2 || iy >= SH - 2) continue;
+        const ax = fx - ix, ay = fy - iy, j = iy * SW + ix;
+        E[j] += w * (1 - ax) * (1 - ay); E[j + 1] += w * ax * (1 - ay); E[j + SW] += w * (1 - ax) * ay; E[j + SW + 1] += w * ax * ay;
+      }
+    }
+    qx = x; qy = y;
+  }
+  // beam spot profile: [1,2,1] separable
+  for (let y = 0; y < SH; y++) { const o = y * SW; for (let x = 1; x < SW - 1; x++) E2[o + x] = 0.25 * E[o + x - 1] + 0.5 * E[o + x] + 0.25 * E[o + x + 1]; }
+  for (let y = 1; y < SH - 1; y++) { const o = y * SW; for (let x = 0; x < SW; x++) E[o + x] = 0.25 * E2[o + x - SW] + 0.5 * E2[o + x] + 0.25 * E2[o + x + SW]; }
+  // halo (soft, near) and bloom (wide) from a soft-clipped copy so the final dot does not flood the screen
+  for (let i = 0; i < E.length; i++) { const e = E[i]; E2[i] = e / (1 + e * 0.015); }
+  down(E2, SW, SH, HALO, 4); boxBlur(HALO, HW, HH, 2, 3);
+  down(HALO, HW, HH, BLOOM, 4); boxBlur(BLOOM, BW, BH, 3, 3);
+}
+function compose() {
+  const d = IMG.data;
+  for (let y = 0; y < SH; y++) {
+    const hy = clamp((y + 0.5) / 4 - 0.5, 0, HH - 1.001), hy0 = hy | 0, hfy = hy - hy0;
+    const by = clamp((y + 0.5) / 16 - 0.5, 0, BH - 1.001), by0 = by | 0, bfy = by - by0;
+    for (let x = 0; x < SW; x++) {
+      const i = y * SW + x, j = i * 4;
+      const hx = clamp((x + 0.5) / 4 - 0.5, 0, HW - 1.001), hx0 = hx | 0, hfx = hx - hx0, ho = hy0 * HW + hx0;
+      const h = (HALO[ho] * (1 - hfx) + HALO[ho + 1] * hfx) * (1 - hfy) + (HALO[ho + HW] * (1 - hfx) + HALO[ho + HW + 1] * hfx) * hfy;
+      const bx = clamp((x + 0.5) / 16 - 0.5, 0, BW - 1.001), bx0 = bx | 0, bfx = bx - bx0, bo = by0 * BW + bx0;
+      const b = (BLOOM[bo] * (1 - bfx) + BLOOM[bo + 1] * bfx) * (1 - bfy) + (BLOOM[bo + BW] * (1 - bfx) + BLOOM[bo + BW + 1] * bfx) * bfy;
+      const e = E[i], c = 1 - Math.exp(-e * 1.1), hot = clamp((e - 1.6) / 5);
+      const g = c * 0.92 + h * 0.55 + b * 0.5, glow = h * 0.55 + b * 0.5;
+      d[j] = BG[j] + 255 * (c * 0.30 + hot * 0.62 + glow * 0.16);
+      d[j + 1] = BG[j + 1] + 255 * (g + hot * 0.1);
+      d[j + 2] = BG[j + 2] + 255 * (c * 0.52 + hot * 0.45 + glow * 0.30);
+      d[j + 3] = 255;
+    }
+  }
+}
+
+// ── static layers ────────────────────────────────────────────────────────────────────────────────────────
+let FRONT, GRAT, GLARE;
+function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+function buildStatic() {
+  const R = rng(12);
+  // screen background: dark green-grey glass with faint phosphor grain and a slightly lifted centre
+  const sb = mk(SW, SH), s = sb.getContext('2d');
+  const g0 = s.createRadialGradient(CX - SX, CY - SY, 60, CX - SX, CY - SY, 760);
+  g0.addColorStop(0, '#0e1714'); g0.addColorStop(1, '#060a09'); s.fillStyle = g0; s.fillRect(0, 0, SW, SH);
+  const id = s.getImageData(0, 0, SW, SH);
+  for (let i = 0; i < id.data.length; i += 4) { const n = (R() - 0.5) * 5; id.data[i] += n; id.data[i + 1] += n * 1.2; id.data[i + 2] += n; }
+  BG = id.data;
+  // graticule: 10 × 8 divisions, centre axes with 0.2-div ticks, printed on the inner face
+  GRAT = mk(W, H); const g = GRAT.getContext('2d');
+  g.strokeStyle = 'rgba(255,186,120,1)'; g.lineWidth = 1.6; g.beginPath();
+  for (let i = 0; i <= 10; i++) { const x = CX - 5 * DIV + i * DIV; g.moveTo(x, CY - 4 * DIV); g.lineTo(x, CY + 4 * DIV); }
+  for (let j = 0; j <= 8; j++) { const y = CY - 4 * DIV + j * DIV; g.moveTo(CX - 5 * DIV, y); g.lineTo(CX + 5 * DIV, y); }
+  g.stroke(); g.lineWidth = 1.4; g.beginPath();
+  for (let i = 0; i <= 50; i++) { const x = CX - 5 * DIV + i * DIV / 5, l = i % 5 ? 7 : 0; if (l) { g.moveTo(x, CY - l); g.lineTo(x, CY + l); } }
+  for (let j = 0; j <= 40; j++) { const y = CY - 4 * DIV + j * DIV / 5, l = j % 5 ? 7 : 0; if (l) { g.moveTo(CX - l, y); g.lineTo(CX + l, y); } }
+  for (const yy of [CY - 2.6 * DIV, CY + 2.6 * DIV]) for (let i = 0; i <= 50; i++) { const x = CX - 5 * DIV + i * DIV / 5; if (i % 5) { g.moveTo(x, yy - 3); g.lineTo(x, yy + 3); } }
+  g.stroke();
+  g.font = `600 20px ${FONT}`; g.fillStyle = 'rgba(255,186,120,1)'; g.textBaseline = 'middle';
+  for (const [lab, yy] of [['100', CY - 2.6 * DIV], ['0%', CY + 2.6 * DIV]]) g.fillText(lab, CX - 5 * DIV + 8, yy - 14);
+  // glass: soft top-left sheen, inner rim shadow
+  GLARE = mk(W, H); const q = GLARE.getContext('2d');
+  q.save(); rr(q, SX, SY, SW, SH, 40); q.clip();
+  q.save(); q.translate(SX + 360, SY + 230); q.rotate(-0.55); q.scale(1, 0.5);                 // soft elliptical sheen
+  const gl = q.createRadialGradient(0, 0, 0, 0, 0, 640); gl.addColorStop(0, 'rgba(200,230,220,0.06)'); gl.addColorStop(0.6, 'rgba(200,230,220,0.02)'); gl.addColorStop(1, 'rgba(200,230,220,0)');
+  q.fillStyle = gl; q.fillRect(-700, -700, 1400, 1400); q.restore();
+  q.shadowColor = 'rgba(0,0,0,0.75)'; q.shadowBlur = 50; q.fillStyle = '#000';                 // inset shadow at the rim
+  rr(q, SX, SY, SW, SH, 40); q.rect(SX - 300, SY - 300, SW + 600, SH + 600); q.fill('evenodd');
+  q.restore();
+  // front panel with the screen cut-out
+  FRONT = mk(W, H); const f = FRONT.getContext('2d');
+  const pg = f.createLinearGradient(0, 0, 0, H); pg.addColorStop(0, '#2a2f31'); pg.addColorStop(1, '#1b1f21'); f.fillStyle = pg; f.fillRect(0, 0, W, H);
+  const pid = f.getImageData(0, 0, W, H); const R2 = rng(7);         // brushed metal: horizontal streak noise
+  const rowN = new Float32Array(W); for (let x = 0; x < W; x++) rowN[x] = (R2() - 0.5) * 6;
+  for (let y = 0; y < H; y++) { const sh = (R2() - 0.5) * 4; for (let x = 0; x < W; x++) { const n = rowN[(x + y * 37) % W] * 0.5 + sh + (R2() - 0.5) * 3, k = (y * W + x) * 4;
+    pid.data[k] += n; pid.data[k + 1] += n; pid.data[k + 2] += n; } }
+  f.putImageData(pid, 0, 0);
+  const vg = f.createRadialGradient(W / 2, H / 2, 400, W / 2, H / 2, 1250); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.45)');
+  f.fillStyle = vg; f.fillRect(0, 0, W, H);
+  // bezel: dark moulded ring with a highlight edge
+  f.save(); f.shadowColor = 'rgba(0,0,0,0.8)'; f.shadowBlur = 30; f.shadowOffsetY = 8; f.fillStyle = '#0d0f10'; rr(f, SX - 26, SY - 26, SW + 52, SH + 52, 62); f.fill(); f.restore();
+  const bz = f.createLinearGradient(0, SY - 26, 0, SY + SH + 26); bz.addColorStop(0, '#3a3f42'); bz.addColorStop(0.5, '#15181a'); bz.addColorStop(1, '#2b3033');
+  f.lineWidth = 3; f.strokeStyle = bz; rr(f, SX - 25, SY - 25, SW + 50, SH + 50, 61); f.stroke();
+  f.globalCompositeOperation = 'destination-out'; f.fillStyle = '#000'; rr(f, SX, SY, SW, SH, 40); f.fill(); f.globalCompositeOperation = 'source-over';
+  // bezel corner screws
+  for (const [x, y] of [[SX - 6, SY - 6], [SX + SW + 6, SY - 6], [SX - 6, SY + SH + 6], [SX + SW + 6, SY + SH + 6]]) screw(f, x, y, 7);
+  // control strip
+  const P0 = 1400;
+  f.fillStyle = '#e4ded0'; f.textBaseline = 'alphabetic';
+  f.font = `600 50px ${FONT}`; spaced(f, 'HALVARD', P0, 104, 9);
+  f.font = `600 22px ${FONT}`; f.fillStyle = '#a9a69c'; spaced(f, 'MODEL 12  ·  X–Y VECTOR MONITOR', P0, 140, 3);
+  f.fillStyle = 'rgba(228,222,208,0.25)'; f.fillRect(P0, 166, 440, 2);
+  f.fillStyle = '#c9c4b6'; f.font = `600 22px ${FONT}`;
+  spaced(f, 'POWER', P0 + 48, 214, 2.5); spaced(f, 'MODE', P0 + 180, 214, 2.5);
+  spaced(f, 'Y–T', P0 + 294, 214, 1.5); spaced(f, 'X–Y', P0 + 388, 214, 1.5);
+  // readout window
+  f.fillStyle = '#050807'; rr(f, P0, 250, 440, 196, 10); f.fill();
+  f.lineWidth = 2; f.strokeStyle = '#3c4245'; f.stroke();
+  f.fillStyle = 'rgba(160,255,190,0.04)'; rr(f, P0 + 6, 256, 428, 60, 6); f.fill();
+  // knob scales + labels
+  for (const k of KNOBS) { f.fillStyle = '#c9c4b6'; f.font = `600 22px ${FONT}`; f.textAlign = 'center'; spaced(f, k.lab, k.x, k.ly, 2.5, true);
+    f.strokeStyle = 'rgba(228,222,208,0.55)'; f.lineWidth = 2; f.beginPath();
+    for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 - 2.4 + 4.8 * i / 10, r0 = k.r + 10, r1 = k.r + (i % 5 ? 17 : 24);
+      f.moveTo(k.x + r0 * Math.cos(a), k.y + r0 * Math.sin(a)); f.lineTo(k.x + r1 * Math.cos(a), k.y + r1 * Math.sin(a)); }
+    f.stroke(); f.textAlign = 'left'; }
+  // audio out jacks
+  f.fillStyle = 'rgba(228,222,208,0.25)'; f.fillRect(P0, 862, 440, 2);
+  f.fillStyle = '#c9c4b6'; f.font = `600 22px ${FONT}`; spaced(f, 'AUDIO OUT', P0, 906, 2.5);
+  f.fillStyle = '#8f8c83'; f.font = `600 20px ${FONT}`; spaced(f, 'THE SOUNDTRACK IS THE SIGNAL', P0 + 150, 906, 1.6);
+  for (const [jx, l1] of [[P0 + 60, 'L = X'], [P0 + 280, 'R = Y']]) { jack(f, jx, 968);
+    f.fillStyle = '#e4ded0'; f.font = `600 26px ${FONT}`; spaced(f, l1, jx + 46, 978, 2); }
+}
+function spaced(c, s, x, y, sp, center) {
+  let w = 0; for (const ch of s) w += c.measureText(ch).width + sp; w -= sp;
+  const al = c.textAlign; c.textAlign = 'left'; let xx = center ? x - w / 2 : x;
+  for (const ch of s) { c.fillText(ch, xx, y); xx += c.measureText(ch).width + sp; } c.textAlign = al;
+}
+function screw(c, x, y, r) { const g = c.createRadialGradient(x - 2, y - 2, 1, x, y, r); g.addColorStop(0, '#8d9294'); g.addColorStop(1, '#2c3032');
+  c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); c.strokeStyle = '#1a1d1e'; c.lineWidth = 2; c.beginPath(); c.moveTo(x - r * 0.7, y - r * 0.2); c.lineTo(x + r * 0.7, y + r * 0.2); c.stroke(); }
+function jack(c, x, y) {
+  let g = c.createRadialGradient(x - 8, y - 8, 2, x, y, 30); g.addColorStop(0, '#d8dcdd'); g.addColorStop(0.6, '#7d8386'); g.addColorStop(1, '#3b4043');
+  c.fillStyle = g; c.beginPath(); c.arc(x, y, 30, 0, TAU); c.fill();
+  c.fillStyle = '#1c1f21'; c.beginPath(); c.arc(x, y, 19, 0, TAU); c.fill();
+  c.fillStyle = '#050606'; c.beginPath(); c.arc(x, y, 9, 0, TAU); c.fill();
+}
+
+// ── control strip (dynamic) ─────────────────────────────────────────────────────────────────────────────
+const KNOBS = [{ lab: 'FREQ', x: 1508, y: 584, r: 72, ly: 482 }, { lab: 'INTENSITY', x: 1752, y: 584, r: 56, ly: 482 },
+  { lab: 'X GAIN', x: 1508, y: 790, r: 34, ly: 722 }, { lab: 'Y GAIN', x: 1752, y: 790, r: 34, ly: 722 }];
+function knob(k, ang) {
+  const { x, y, r } = k;
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 7;
+  let g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r);
+  g.addColorStop(0, '#4a4f52'); g.addColorStop(1, '#141718'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.restore();
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1.5;        // knurling
+  ctx.beginPath(); for (let i = 0; i < 48; i++) { const a = ang + i * TAU / 48; ctx.moveTo(x + (r - 7) * Math.cos(a), y + (r - 7) * Math.sin(a)); ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)); } ctx.stroke();
+  g = ctx.createRadialGradient(x - r * 0.25, y - r * 0.3, 2, x, y, r * 0.66);  // metal cap
+  g.addColorStop(0, '#c9cdcf'); g.addColorStop(0.7, '#6d7376'); g.addColorStop(1, '#3a3f42');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 0.64, 0, TAU); ctx.fill();
+  const a = -Math.PI / 2 + ang;                                          // pointer line
+  ctx.strokeStyle = '#f2ede0'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x + r * 0.2 * Math.cos(a), y + r * 0.2 * Math.sin(a)); ctx.lineTo(x + (r - 4) * Math.cos(a), y + (r - 4) * Math.sin(a)); ctx.stroke();
+}
+function lamp(x, y, on, col) {
+  ctx.fillStyle = '#0b0d0d'; ctx.beginPath(); ctx.arc(x, y, 13, 0, TAU); ctx.fill();
+  const [r, g, b] = col;
+  ctx.save(); ctx.shadowColor = `rgba(${r},${g},${b},${on})`; ctx.shadowBlur = 26 * on;
+  const gr = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, 10);
+  gr.addColorStop(0, `rgb(${lerp(60, 255, on) | 0},${lerp(64, 255, on) | 0},${lerp(60, 230, on) | 0})`);
+  gr.addColorStop(1, `rgb(${lerp(30, r, on) | 0},${lerp(34, g, on) | 0},${lerp(32, b, on) | 0})`);
+  ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, 10, 0, TAU); ctx.fill(); ctx.restore();
+}
+const fmtHz = f => f < 10 ? f.toFixed(2) : f < 100 ? f.toFixed(1) : f.toFixed(0);
+function panel(t) {
+  const P0 = 1400, pw = sm(seg(t, T.lamp, T.lamp + 0.12)) * (1 - sm(seg(t, T.off0 + 0.15, T.off1 - 0.02)));
+  const xy = t >= T.xy0 + 0.05 ? 1 : 0;
+  lamp(P0 + 20, 206, pw, [255, 120, 60]);
+  lamp(P0 + 272, 206, (1 - xy) * pw, [110, 255, 150]);
+  lamp(P0 + 366, 206, xy * pw, [110, 255, 150]);
+  // readout lines
+  let l1, l2, l3;
+  if (t < T.xy0 + 0.05) { const fx = fxAt(t), c = cycAt(t); l1 = ['CH1  X', fmtHz(fx) + ' Hz']; l2 = ['CH2  Y', fmtHz(fx * 2 * c) + ' Hz']; l3 = ['RATIO', '1 : ' + (2 * c).toFixed(c % 1 ? 1 : 0)]; }
+  else if (t < (T.cube0 + T.cube1) / 2) { const [fa, fb] = liss(t), g = seg(t, T.glide0, T.glide1); l1 = ['CH1  X', fmtHz(fa) + ' Hz']; l2 = ['CH2  Y', fmtHz(fb) + ' Hz'];
+    l3 = ['RATIO', g < 0.5 ? '3 : 4' : '2 : 3']; if (g > 0.05 && g < 0.95) l3[1] = (fa / fb * 4).toFixed(2) + ' : 4'; }
+  else if (t > T.dot - 0.12) { l1 = ['CH1  X', '0.00 V']; l2 = ['CH2  Y', '0.00 V']; l3 = ['BEAM', 'PARKED']; }
+  else { l1 = ['CH1  X', 'VECTOR']; l2 = ['CH2  Y', 'VECTOR']; l3 = ['PATH', t < (T.word0 + T.word1) / 2 ? 'CUBE  ' + FR + ' Hz' : 'TEXT  ' + FR + ' Hz']; }
+  const vfd = pw * (0.96 + 0.04 * Math.sin(t * 91));
+  ctx.save(); ctx.globalAlpha = vfd; ctx.font = `500 30px ${MONO}`; ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(110,255,160,0.9)'; ctx.shadowBlur = 12;
+  [l1, l2, l3].forEach(([a, b], i) => { const y = 290 + i * 58; ctx.fillStyle = '#5fdc8c'; ctx.textAlign = 'left'; ctx.fillText(a, P0 + 24, y);
+    ctx.fillStyle = '#b8ffd0'; ctx.textAlign = 'right'; ctx.fillText(b, P0 + 416, y); });
+  ctx.restore(); ctx.textAlign = 'left';
+  // knobs
+  const fa = -1.7 + 1.5 * eBack(seg(t, T.knob0, T.knob1), 1.3) + 1.1 * eInOut(seg(t, T.glide0, T.glide1)) - 0.25 * sm(seg(t, T.xy0, T.xy1));
+  const ia = lerp(-2.4, 0.9, eOut(seg(t, 0.02, T.beam + 0.3))) - 3.3 * eInOut(seg(t, T.off0 - 0.05, T.off1 - 0.05));
+  knob(KNOBS[0], fa); knob(KNOBS[1], ia); knob(KNOBS[2], 0.35); knob(KNOBS[3], 0.35);
+}
+
+// ── frame ───────────────────────────────────────────────────────────────────────────────────────────────
+function render(t) {
+  phosphor(t); compose();
+  ctx.putImageData(IMG, SX, SY);
+  const lampL = sm(seg(t, T.lamp + 0.05, T.lamp + 0.35)) * (1 - sm(seg(t, T.off0 + 0.1, T.off1 - 0.02)));
+  ctx.globalAlpha = 0.12 + 0.38 * lampL; ctx.drawImage(GRAT, 0, 0); ctx.globalAlpha = 1;
+  if (!window.NOGLARE) ctx.drawImage(GLARE, 0, 0); ctx.drawImage(FRONT, 0, 0);
+  panel(t);
+  const fo = seg(t, DUR - 0.12, DUR);                  // last few frames settle to black
+  if (fo > 0) { ctx.fillStyle = `rgba(0,0,0,${fo * 0.6})`; ctx.fillRect(0, 0, W, H); }
+}
+window.ready = (async () => {
+  await document.fonts.load(`600 40px ${FONT}`, 'HALVARD MODEL 12 X–Y VECTOR MONITOR POWER AUDIO OUT ·');
+  await document.fonts.load(`500 30px ${MONO}`, 'CH1 X Hz 0123456789.: RATIO PATH CUBE TEXT VECTOR');
+  await document.fonts.ready;
+  buildSignal(); buildStatic();
+})();
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+</script>
+</body></html>
