@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── de-stijl · neoplastic composition → city block plan → title poster ────────────────────────────
+// Black bars slide in and lock into an asymmetric grid → red, blue and yellow planes fill with hard wipes →
+// the composition rebalances (the red plane grows while the grid shifts) → the camera pulls back: the
+// painting is one block of a city, the neighbouring blocks build themselves in a ripple and little
+// coloured squares hop along the black avenues → the camera settles on another block, a poster whose
+// cells receive the title and three words → hold → fade to the canvas.
+// Only horizontals and verticals: no curves, no diagonals. Everything is drawn from t alone.
+const W = 1920, H = 1080, DUR = 10.0;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3);
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eBack = (u, c = 1.7) => 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2);
+const eIOBack = u => { const c = 1.0 * 1.525; return u < .5 ? (Math.pow(2 * u, 2) * ((c + 1) * 2 * u - c)) / 2 : (Math.pow(2 * u - 2, 2) * ((c + 1) * (u * 2 - 2) + c) + 2) / 2; };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const FONT = '"Jost"';
+const PAPER = '#EDE9DF', BLACK = '#141414', RED = '#D1291F', YEL = '#F1C21B', BLUE = '#1B3E95', WHITE = '#F6F3EC';
+
+// ── world: blocks of BW×BH separated by black avenues G wide ──
+const BW = 1920, BH = 1080, G = 90, PX = BW + G, PY = BH + G;
+const T = {
+  rb: [2.85, 3.85],                 // rebalance of the first composition
+  zOut: [4.25, 5.45], pan: [4.9, 7.05], zIn: [6.15, 7.35], zMin: 0.32,
+  car0: 4.5, beat: 60 / 132 / 2,    // squares hop on eighth notes (132 bpm)
+  fade: [9.42, 9.93],
+};
+const P_IJ = [1, 1];                  // the poster block
+
+// slide-in with a small overshoot and a damped settle; returns the offset from the final place
+function snap(u, D, ov) {
+  if (u <= 0) return -D; if (u >= 1) return 0;
+  const k = 0.6;
+  if (u < k) return lerp(-D, ov, eOut(u / k));
+  const v = (u - k) / (1 - k); return ov * Math.cos(v * Math.PI * 1.5) * Math.exp(-3 * v) * (1 - v);
+}
+
+// ── block A: the opening painting (block 0,0). p = [start, after rebalance] ──
+const SL = 0.42, LOCK = SL * 0.6;
+const A = {
+  i: 0, j: 0, rebalance: true,
+  lines: [
+    { id: 'V1', o: 'v', p: [600, 420], a: 0, b: BH, th: 26, from: 'a', t: 0.35 },
+    { id: 'H1', o: 'h', p: [640, 760], a: 0, b: BW, th: 26, from: 'a', t: 0.56 },
+    { id: 'V4', o: 'v', p: [1300, 1720], a: 0, b: 'H1', th: 22, from: 'a', t: 0.78 },
+    { id: 'H2', o: 'h', p: [330, 300], a: 0, b: 'V1', th: 22, from: 'a', t: 0.98 },
+    { id: 'V2', o: 'v', p: [1480, 1560], a: 'H1', b: BH, th: 22, from: 'b', t: 1.16 },
+    { id: 'H3', o: 'h', p: [880, 940], a: 'V2', b: BW, th: 20, from: 'b', t: 1.33 },
+    { id: 'V3', o: 'v', p: [260, 200], a: 'H1', b: BH, th: 20, from: 'b', t: 1.49 },
+  ],
+  fills: [
+    { x0: 'V1', x1: 'V4', y0: 0, y1: 'H1', c: RED, from: 'l', t: 1.92, d: 0.3 },
+    { x0: 0, x1: 'V3', y0: 'H1', y1: BH, c: BLUE, from: 'd', t: 2.16, d: 0.26 },
+    { x0: 'V2', x1: BW, y0: 'H3', y1: BH, c: YEL, from: 'r', t: 2.36, d: 0.24 },
+  ],
+};
+
+// ── block P: the closing poster (block 1,1) ──
+const P = {
+  i: P_IJ[0], j: P_IJ[1],
+  lines: [
+    { id: 'H1', o: 'h', p: [640], a: 0, b: BW, th: 26, from: 'b' },
+    { id: 'V1', o: 'v', p: [1240], a: 0, b: BH, th: 26, from: 'a' },
+    { id: 'V2', o: 'v', p: [1700], a: 0, b: 'H1', th: 22, from: 'a' },
+    { id: 'V3', o: 'v', p: [300], a: 'H1', b: BH, th: 22, from: 'b' },
+    { id: 'V4', o: 'v', p: [700], a: 'H1', b: BH, th: 20, from: 'b' },
+    { id: 'V5', o: 'v', p: [1660], a: 'H1', b: BH, th: 20, from: 'b' },
+    { id: 'H3', o: 'h', p: [210], a: 'V2', b: BW, th: 20, from: 'b' },
+    { id: 'H2', o: 'h', p: [900], a: 0, b: 'V3', th: 20, from: 'a' },
+  ],
+  fills: [
+    { x0: 'V1', x1: 'V2', y0: 0, y1: 'H1', c: RED, from: 'u' },
+    { x0: 0, x1: 'V3', y0: 'H1', y1: 'H2', c: BLUE, from: 'l' },
+    { x0: 'V5', x1: BW, y0: 'H1', y1: BH, c: YEL, from: 'd' },
+    { x0: 'V2', x1: BW, y0: 0, y1: 'H3', c: BLACK, from: 'r' },
+  ],
+};
+const TITLE = { kicker: 'PLAN FOR A NEW CITY', lines: ['A CITY', 'IN BALANCE'], x: 104, size: 156, base: [356, 530], kick: 150, t: [7.42, 7.66], kt: 7.95, d: 0.34 };
+const WORDS = [
+  { text: 'LINE', cell: [300, 700], t: 7.9 },
+  { text: 'PLANE', cell: [700, 1240], t: 8.03 },
+  { text: 'COLOUR', cell: [1240, 1660], t: 8.16 },
+];
+const WORD_Y = 860, POP = 0.36;
+
+// ── neighbouring blocks: seeded asymmetric compositions ──
+function genBlock(i, j) {
+  const r = rng(1000 + i * 97 + j * 31 + 7);
+  const pickSet = (n, lo, hi, gap) => { const out = []; let tries = 0;
+    while (out.length < n && tries++ < 200) { const v = Math.round(lerp(lo, hi, r()) / 10) * 10; if (out.every(o => Math.abs(o - v) >= gap)) out.push(v); }
+    return out.sort((a, b) => a - b); };
+  const xs = pickSet(r() < 0.45 ? 1 : 2, 260, BW - 260, 420), ys = pickSet(r() < 0.6 ? 1 : 2, 200, BH - 200, 300);
+  const lines = [];
+  xs.forEach((x, k) => lines.push({ id: 'V' + k, o: 'v', p: [x], a: 0, b: BH, th: 22 + Math.round(r() * 5), from: r() < .5 ? 'a' : 'b' }));
+  ys.forEach((y, k) => lines.push({ id: 'H' + k, o: 'h', p: [y], a: 0, b: BW, th: 22 + Math.round(r() * 5), from: r() < .5 ? 'a' : 'b' }));
+  // one partial line between an edge and a full line
+  if (r() < 0.5) { const hy = ys[0]; const top = r() < .5; const x = Math.round(lerp(140, BW - 140, r()) / 10) * 10;
+    if (xs.every(v => Math.abs(v - x) > 200)) lines.push({ id: 'P', o: 'v', p: [x], a: top ? 0 : 'H0', b: top ? 'H0' : BH, th: 20, from: top ? 'a' : 'b' });
+  } else { const y = Math.round(lerp(120, BH - 120, r()) / 10) * 10; const left = r() < .5;
+    if (ys.every(v => Math.abs(v - y) > 160)) lines.push({ id: 'P', o: 'h', p: [y], a: left ? 0 : 'V0', b: left ? 'V0' : BW, th: 20, from: left ? 'a' : 'b' });
+  }
+  // fills: one major (red or blue) on the largest-ish cell, one minor on a small one
+  const X = [0, ...xs.map((_, k) => 'V' + k), BW], Y = [0, ...ys.map((_, k) => 'H' + k), BH];
+  const val = v => typeof v === 'number' ? v : (v[0] === 'V' ? xs[+v.slice(1)] : ys[+v.slice(1)]);
+  const cells = [];
+  for (let a = 0; a < X.length - 1; a++) for (let b = 0; b < Y.length - 1; b++)
+    cells.push({ x0: X[a], x1: X[a + 1], y0: Y[b], y1: Y[b + 1], area: (val(X[a + 1]) - val(X[a])) * (val(Y[b + 1]) - val(Y[b])) });
+  cells.sort((a, b) => b.area - a.area);
+  const big = cells[Math.floor(r() * Math.min(2, cells.length))];
+  const majorC = [RED, BLUE, RED, YEL][Math.floor(r() * 4)];
+  const fills = [{ ...big, c: majorC, from: 'lrud'[Math.floor(r() * 4)] }];
+  const small = cells.filter(c => c !== big && !(c.x0 === big.x0 || c.x1 === big.x1) || (c !== big && !(c.y0 === big.y0 || c.y1 === big.y1)));
+  if (small.length && r() < 0.85) { const s = small[small.length - 1 - Math.floor(r() * Math.min(2, small.length))];
+    const pal = [RED, YEL, BLUE, BLACK].filter(c => c !== majorC); fills.push({ ...s, c: pal[Math.floor(r() * pal.length)], from: 'lrud'[Math.floor(r() * 4)] }); }
+  return { i, j, lines, fills };
+}
+// ripple build timing for every block but A
+function schedule(B, t0) {
+  B.t0 = t0; B.lines.forEach((L, k) => { L.t = t0 + k * 0.07; L.d = 0.34; });
+  const lend = t0 + B.lines.length * 0.07 + 0.2;
+  B.fills.forEach((f, k) => { f.t = lend + k * 0.1; f.d = 0.22; });
+}
+const BLOCKS = [A];
+A.lines.forEach(L => L.d = SL);
+for (let i = -2; i <= 3; i++) for (let j = -2; j <= 3; j++) {
+  if (i === 0 && j === 0) continue;
+  const isP = i === P_IJ[0] && j === P_IJ[1];
+  const B = isP ? P : genBlock(i, j);
+  const jr = rng(50 + i * 13 + j * 7)();
+  schedule(B, 4.42 + 0.2 * Math.hypot(i, j) + jr * 0.1);
+  BLOCKS.push(B);
+}
+for (const B of BLOCKS) { B.ox = B.i * PX; B.oy = B.j * PY; B.byId = Object.fromEntries(B.lines.map(L => [L.id, L])); }
+
+// ── camera ──
+function camera(t) {
+  const lz = Math.log(T.zMin);
+  let z = lz * eInOut(seg(t, ...T.zOut)) * (1 - eInOut(seg(t, ...T.zIn)));
+  z = Math.exp(z);
+  const u = eInOut(seg(t, ...T.pan));
+  const cx = lerp(BW / 2, P.i * PX + BW / 2, u), cy = lerp(BH / 2, P.j * PY + BH / 2, u);
+  return { z, cx, cy };
+}
+let CAM;
+const sx = x => (x - CAM.cx) * CAM.z + W / 2, sy = y => (y - CAM.cy) * CAM.z + H / 2;
+const thS = th => th * Math.pow(CAM.z, 0.55);
+
+// ── block geometry at time t ──
+function lpos(B, L, t) { return L.p.length > 1 ? lerp(L.p[0], L.p[1], eIOBack(seg(t, ...T.rb))) : L.p[0]; }
+function ref(B, r, t) { return typeof r === 'number' ? r : lpos(B, B.byId[r], t); }
+function drawBlock(B, t) {
+  const bx = sx(B.ox), by = sy(B.oy), bw = BW * CAM.z, bh = BH * CAM.z;
+  if (bx > W || by > H || bx + bw < 0 || by + bh < 0) return;
+  ctx.save(); ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip();
+  for (const f of B.fills) {
+    if (f.t === undefined || t < f.t) continue;
+    let x0 = ref(B, f.x0, t), x1 = ref(B, f.x1, t), y0 = ref(B, f.y0, t), y1 = ref(B, f.y1, t);
+    if (f.x0 === 0) x0 = -20; if (f.x1 === BW) x1 = BW + 20; if (f.y0 === 0) y0 = -20; if (f.y1 === BH) y1 = BH + 20;
+    const e = eInOut(seg(t, f.t, f.t + f.d));
+    if (f.from === 'l') x1 = lerp(x0, x1, e); else if (f.from === 'r') x0 = lerp(x1, x0, e);
+    else if (f.from === 'u') y1 = lerp(y0, y1, e); else y0 = lerp(y1, y0, e);
+    ctx.fillStyle = f.c;
+    const X0 = sx(B.ox + x0), X1 = sx(B.ox + x1), Y0 = sy(B.oy + y0), Y1 = sy(B.oy + y1);
+    ctx.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
+  }
+  ctx.fillStyle = BLACK;
+  for (const L of B.lines) {
+    if (L.t === undefined || t < L.t) continue;
+    const p = lpos(B, L, t);
+    let a = ref(B, L.a, t), b = ref(B, L.b, t);
+    if (L.a === 0) a = -40; if (L.b === BW || L.b === BH) b += 40;
+    const len = b - a;
+    const off = snap(seg(t, L.t, L.t + L.d), len + 80, 14) * (L.from === 'a' ? 1 : -1);
+    a += off; b += off;
+    const th = thS(L.th);
+    if (L.o === 'v') { const X = sx(B.ox + p); const Y0 = sy(B.oy + a), Y1 = sy(B.oy + b); ctx.fillRect(X - th / 2, Y0, th, Y1 - Y0); }
+    else { const Y = sy(B.oy + p); const X0 = sx(B.ox + a), X1 = sx(B.ox + b); ctx.fillRect(X0, Y - th / 2, X1 - X0, th); }
+  }
+  ctx.restore();
+}
+
+// ── avenues and their hopping squares ──
+const CARS = [], STOPS = [];
+(() => {
+  const r = rng(4242); const cols = [YEL, RED, BLUE, WHITE];
+  for (let k = -2; k <= 4; k++) {
+    const sp = 330 + Math.round(r() * 4) * 40, dir = (k & 1) ? 1 : -1, ph = r() * sp;
+    for (let x = -5 * PX + ph; x < 7 * PX; x += sp) CARS.push({ y: k * PY - G / 2, x, dir, c: cols[Math.floor(r() * 4)], h: r() });
+  }
+  for (let k = -2; k <= 4; k++) for (let j = -2; j <= 3; j++) {
+    const n = 1 + Math.floor(r() * 3), ys = [];
+    for (let q = 0; q < 12 && ys.length < n; q++) { const y = Math.round(lerp(140, BH - 140, r())); if (ys.every(v => Math.abs(v - y) > 220)) ys.push(y); }
+    for (const y of ys) STOPS.push({ x: k * PX - G / 2, y: j * PY + y, c: cols[Math.floor(r() * 4)], h: r() });
+  }
+})();
+const STEP = 150;
+function hopPos(t) { const b = Math.max(0, (t - T.car0) / T.beat), n = Math.floor(b), f = b - n; return STEP * (n + (f < 0.45 ? eBack(f / 0.45, 1.2) : 1)); }
+function drawAvenues(t) {
+  if (CAM.z > 0.995) return;
+  ctx.fillStyle = BLACK; const g = G * CAM.z;
+  for (let k = -2; k <= 4; k++) { const X = sx(k * PX - G / 2); if (X > -g && X < W + g) ctx.fillRect(X - g / 2 - 1, 0, g + 2, H); }
+  for (let k = -2; k <= 4; k++) { const Y = sy(k * PY - G / 2); if (Y > -g && Y < H + g) ctx.fillRect(0, Y - g / 2 - 1, W, g + 2); }
+  const s0 = g * 0.62, hp = hopPos(t);
+  for (const q of CARS) {
+    const sc = eBack(seg(t, T.car0 - 0.1 + q.h * 0.4, T.car0 + 0.15 + q.h * 0.4)); if (sc <= 0) continue;
+    const X = sx(q.x + q.dir * hp), Y = sy(q.y), s = s0 * sc;
+    if (X < -s || X > W + s || Y < -s || Y > H + s) continue;
+    ctx.fillStyle = q.c; ctx.fillRect(X - s / 2, Y - s / 2, s, s);
+  }
+  for (const q of STOPS) {
+    const dd = Math.hypot(q.x / PX, q.y / PY);
+    const st = 4.55 + 0.16 * dd + q.h * 0.15, sc = eBack(seg(t, st, st + 0.25)); if (sc <= 0) continue;
+    const X = sx(q.x), Y = sy(q.y), s = s0 * sc;
+    if (X < -s || X > W + s || Y < -s || Y > H + s) continue;
+    ctx.fillStyle = q.c; ctx.fillRect(X - s / 2, Y - s / 2, s, s);
+  }
+}
+
+// ── typography in the poster cells ──
+function drawType(t) {
+  if (t < TITLE.t[0]) return;
+  const z = CAM.z, ox = sx(P.ox), oy = sy(P.oy);
+  ctx.save(); ctx.setTransform(z, 0, 0, z, ox, oy);
+  ctx.fillStyle = BLACK; ctx.textBaseline = 'alphabetic';
+  // title lines: hard wipe left → right, like the colour planes
+  ctx.font = `600 ${TITLE.size}px ${FONT}`;
+  TITLE.lines.forEach((s, k) => {
+    const e = eInOut(seg(t, TITLE.t[k], TITLE.t[k] + TITLE.d)); if (e <= 0) return;
+    const w = ctx.measureText(s).width;
+    ctx.save(); ctx.beginPath(); ctx.rect(TITLE.x - 10, TITLE.base[k] - TITLE.size, (w + 20) * e, TITLE.size * 1.3); ctx.clip();
+    ctx.fillText(s, TITLE.x, TITLE.base[k]); ctx.restore();
+  });
+  { const e = eInOut(seg(t, TITLE.kt, TITLE.kt + 0.3));
+    if (e > 0) { ctx.font = `500 34px ${FONT}`; ctx.letterSpacing = '9px'; const w = ctx.measureText(TITLE.kicker).width;
+      ctx.save(); ctx.beginPath(); ctx.rect(TITLE.x - 4, TITLE.kick - 40, (w + 10) * e, 56); ctx.clip();
+      ctx.fillText(TITLE.kicker, TITLE.x + 4, TITLE.kick); ctx.restore(); ctx.letterSpacing = '0px'; } }
+  // words: pop in with overshoot, centred in their cell (sized so the overshoot never reaches a bar)
+  ctx.font = `600 ${WORD_SIZE}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const wd of WORDS) {
+    const u = seg(t, wd.t, wd.t + POP); if (u <= 0) continue;
+    const sc = eBack(u, 2.2), cx = (wd.cell[0] + wd.cell[1]) / 2;
+    ctx.save(); ctx.translate(cx, WORD_Y); ctx.scale(sc, sc); ctx.fillText(wd.text, 0, 0); ctx.restore();
+  }
+  ctx.restore();
+}
+let WORD_SIZE = 72;
+
+// ── paint texture (world-anchored, so it never swims) ──
+let GRAIN;
+function buildGrain() {
+  const S = 512, c = mk(S, S), g = c.getContext('2d'), r = rng(77);
+  const id = g.createImageData(S, S);
+  for (let k = 0; k < S * S; k++) { const v = r(); const dark = v < 0.5; id.data[k * 4] = id.data[k * 4 + 1] = id.data[k * 4 + 2] = dark ? 0 : 255; id.data[k * 4 + 3] = Math.floor(Math.abs(v - 0.5) * 16); }
+  g.putImageData(id, 0, 0);
+  // brush streaks, wrapped so the tile repeats seamlessly
+  for (let k = 0; k < 900; k++) {
+    const x = r() * S, y = r() * S, l = 20 + r() * 140, h = 1 + r() * 2, dark = r() < 0.5;
+    g.fillStyle = dark ? `rgba(0,0,0,${0.01 + r() * 0.018})` : `rgba(255,255,255,${0.015 + r() * 0.03})`;
+    for (const dx of [0, -S]) for (const dy of [0, -S]) g.fillRect(x + dx, y + dy, l, h);
+  }
+  GRAIN = ctx.createPattern(c, 'repeat');
+}
+
+window.ready = (async () => {
+  await document.fonts.load(`600 100px ${FONT}`); await document.fonts.load(`500 34px ${FONT}`); await document.fonts.ready;
+  buildGrain();
+  ctx.font = `600 100px ${FONT}`;
+  const pad = 40;
+  WORD_SIZE = Math.min(88, ...WORDS.map(wd => 100 * (wd.cell[1] - wd.cell[0] - 2 * pad) / (ctx.measureText(wd.text).width * 1.16)));
+})();
+window.draw = ({ t }) => {
+  CAM = camera(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+  for (const B of BLOCKS) drawBlock(B, t);
+  drawAvenues(t);
+  drawType(t);
+  GRAIN.setTransform(new DOMMatrix([CAM.z, 0, 0, CAM.z, sx(0), sy(0)]));
+  ctx.fillStyle = GRAIN; ctx.fillRect(0, 0, W, H);
+  const f = seg(t, ...T.fade); if (f > 0) { ctx.fillStyle = PAPER; ctx.globalAlpha = eInOut(f); ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+// sound cues for audio.py
+window.events = () => {
+  const ev = [];
+  for (const L of A.lines) ev.push({ k: 'slide', t: L.t, d: L.d * 0.6, o: L.o }, { k: 'lock', t: L.t + L.d * 0.6, v: 1 });
+  for (const f of A.fills) ev.push({ k: 'wipe', t: f.t, d: f.d, v: 1 });
+  ev.push({ k: 'shift', t: T.rb[0], d: T.rb[1] - T.rb[0] }, { k: 'lock', t: T.rb[1] - 0.25, v: 1.2 });
+  ev.push({ k: 'whoosh', t: T.zOut[0], d: T.zOut[1] - T.zOut[0] }, { k: 'whoosh', t: T.zIn[0], d: T.zIn[1] - T.zIn[0], v: 0.7 });
+  for (const B of BLOCKS) if (B !== A && Math.hypot(B.i - 0.5, B.j - 0.5) < 2.3) { ev.push({ k: 'tick', t: B.t0 + 0.2 }); if (B.fills[0]) ev.push({ k: 'wipe', t: B.fills[0].t, d: B.fills[0].d, v: 0.25 }); }
+  for (let n = 0; T.car0 + n * T.beat < T.zIn[1] - 0.1; n++) ev.push({ k: 'hop', t: T.car0 + n * T.beat, n });
+  TITLE.t.forEach(tt => ev.push({ k: 'wipe', t: tt, d: TITLE.d, v: 0.6 }));
+  ev.push({ k: 'wipe', t: TITLE.kt, d: 0.3, v: 0.35 });
+  WORDS.forEach((wd, k) => ev.push({ k: 'pop', t: wd.t, n: [72, 76, 79][k] }));
+  ev.push({ k: 'chord', t: WORDS[2].t + 0.3 });
+  return ev;
+};
+</script>
+</body></html>
