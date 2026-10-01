@@ -1,71 +1,111 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>16 mm documentary</title>
 <link rel="stylesheet" href="fonts.css">
-<style>html,body{margin:0;background:#000}canvas{display:block}</style>
-</head><body>
-<canvas id="c" width="1920" height="1080"></canvas>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; }
+  #c { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" height="1080" width="1920"></canvas>
 <script>
-// ── documentary-16mm · 1930s newsreel "The Night Mail Takes to the Air" ───────────────
-// Leader (3, 2 + pop) → title card → splice → mail biplane on a night airfield, propeller coughs and spins up, rolls off →
-// frameshift → take-off over moonlit fields (parallax) → splice → map insert, route draws north → "THE END" card with
-// changeover cue marks → reel run-out (loop lost, clear leader flapping, lamp dies).
-const W = 1920, H = 1080, DUR = 10.0;
-const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const lerp = (a, b, u) => a + (b - a) * u;
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
-const eOut = u => 1 - Math.pow(1 - u, 3);
-const eIn = u => u * u;
-function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
-const S = mk(W, H), sx = S.getContext('2d');
-const S2 = mk(W, H), sx2 = S2.getContext('2d');
-let GRAIN = [], VIG, TITLE, FIN, PLANE, AIRFIELD, SKY2, HILLS, FIELDS, NEAR, MAP;
-const INK = '#e9e7df', DARK = '#0e0e0d';
-const SERIF = '"Old Standard TT"', MONO = '"Courier Prime"';
+// 16 mm documentary: a 1930s newsreel, "The Night Mail Takes to the Air".
+// Countdown leader (3, 2, pop) → title card → splice → the mail biplane on a night airfield: the engine coughs,
+// the propeller spins up and the plane rolls → frame-line slip → take-off over moonlit fields (parallax) →
+// splice → map insert with the route drawing north → "THE END" with two changeover cues → loop lost, clear
+// tail leader flaps through the gate, the lamp goes out.
+const W = 1920;
+const H = 1080;
+const view = document.querySelector('#c');
+const out = view.getContext('2d');
+
+const clip = (v, lo = 0, hi = 1) => v < lo ? lo : v > hi ? hi : v;
+const mix = (a, b, k) => a * (1 - k) + b * k;
+const ramp = (t, t0, t1) => clip((t - t0) / (t1 - t0));
+const easeIO = k => k < 0.5 ? 4 * k ** 3 : 1 - (2 - 2 * k) ** 3 / 2;
+const easeOut = k => 1 - (1 - k) ** 3;
+const easeIn = k => k * k;
+
+// integer hash (murmur-style finaliser), used to seed streams and for value noise
+function hashU32(n) {
+  n = Math.imul((n | 0) ^ 0x5bd1e995, 0x27d4eb2d);
+  n = Math.imul(n ^ (n >>> 15), 0x85ebca6b);
+  n = Math.imul(n ^ (n >>> 13), 0xc2b2ae35);
+  return (n ^ (n >>> 16)) >>> 0;
+}
+// xorshift32 stream in [0, 1)
+function prng(seed) {
+  let s = hashU32(seed) || 0x2545f491;
+  return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; };
+}
+// smooth 1D value noise in [-1, 1]; ch picks an independent channel
+function wobble(x, ch) {
+  const i = Math.floor(x), f = x - i, s = f * f * (3 - 2 * f);
+  const at = k => hashU32(k * 131 + ch * 7919) / 4294967296;
+  return 2 * mix(at(i), at(i + 1), s) - 1;
+}
+function newCanvas(w, h) { return Object.assign(document.createElement('canvas'), { width: w, height: h }); }
+
+const FRAME = newCanvas(W, H);
+const fctx = FRAME.getContext('2d');
+const SPARE = newCanvas(W, H);
+const sctx = SPARE.getContext('2d');
+const GRAIN = [];
+let VIGNETTE, TITLE, FIN, PLANE, AIRFIELD, SKY2, HILLS, FIELDS, NEAR, MAP;
+const INK = '#e9e7df';
+const DARK = '#0e0e0d';
+const SERIF = "'Old Standard TT'";
+const MONO = '"Courier Prime"';
 // edit (seconds)
-const T = { lead0: 0.1, lead2: 0.62, leadEnd: 1.12, t1: 1.2, air: 2.95, cough: 3.4, catch: 3.75, full: 4.5, roll: 4.6,
+const CUE = { lead0: 0.1, lead2: 0.62, leadEnd: 1.12, t1: 1.2, air: 2.95, cough: 3.4, catch: 3.75, full: 4.5, roll: 4.6,
   slip: 5.3, slipEnd: 5.52, map: 7.0, fin: 8.3, cue1: 8.95, cue2: 9.2, run: 9.4, dark: 9.62, end: 10.0 };
 
-// ── cards ──
-function ornament(x, cx, cy, w) {
-  x.save(); x.strokeStyle = INK; x.fillStyle = INK; x.lineWidth = 2;
-  x.beginPath(); x.moveTo(cx - w / 2, cy); x.lineTo(cx - 22, cy); x.moveTo(cx + 22, cy); x.lineTo(cx + w / 2, cy); x.stroke();
-  x.beginPath(); x.moveTo(cx, cy - 11); x.lineTo(cx + 11, cy); x.lineTo(cx, cy + 11); x.lineTo(cx - 11, cy); x.closePath(); x.fill();
-  [-1, 1].forEach(s => { x.beginPath(); x.arc(cx + s * (w / 2 + 8), cy, 4, 0, Math.PI * 2); x.fill(); });
-  x.restore();
+// ── title cards ──
+// thin rule broken by a diamond, with a dot at each end
+function drawRule(g, cx, cy, span) {
+  const half = span / 2;
+  g.save(); g.fillStyle = INK;
+  g.fillRect(cx - half, cy - 1, half - 22, 2);
+  g.fillRect(cx + 22, cy - 1, half - 22, 2);
+  for (const side of [-1, 1]) { g.beginPath(); g.arc(cx + side * (half + 8), cy, 4, 0, 2 * Math.PI); g.fill(); }
+  g.translate(cx, cy); g.rotate(Math.PI / 4); g.fillRect(-7.8, -7.8, 15.6, 15.6);
+  g.restore();
 }
-function cardFrame(x, fill = DARK) {
-  x.fillStyle = fill; x.fillRect(0, 0, W, H);
-  x.strokeStyle = INK; x.lineWidth = 3; x.strokeRect(120, 90, W - 240, H - 180);
-  x.lineWidth = 1.5; x.strokeRect(138, 108, W - 276, H - 216);
-  [[120, 90, 1, 1], [W - 120, 90, -1, 1], [120, H - 90, 1, -1], [W - 120, H - 90, -1, -1]].forEach(([px, py, sx_, sy]) => {
-    x.save(); x.translate(px, py); x.scale(sx_, sy); x.fillStyle = INK;
-    x.fillRect(-8, -8, 34, 5); x.fillRect(-8, -8, 5, 34); x.fillRect(30, 16, 22, 3); x.fillRect(16, 30, 3, 22);
-    x.beginPath(); x.moveTo(34, 34); x.lineTo(42, 42); x.lineTo(34, 50); x.lineTo(26, 42); x.closePath(); x.fill();
-    x.restore();
-  });
+// dark card with a double border and bracketed corners
+function paintCardBase(g) {
+  g.fillStyle = DARK; g.fillRect(0, 0, W, H);
+  g.strokeStyle = INK;
+  for (const [inset, lw] of [[0, 3], [18, 1.5]]) { g.lineWidth = lw; g.strokeRect(120 + inset, 90 + inset, W - 240 - 2 * inset, H - 180 - 2 * inset); }
+  g.fillStyle = INK;
+  for (const right of [false, true]) for (const bottom of [false, true]) {
+    const ox = right ? W - 120 : 120, oy = bottom ? H - 90 : 90, dx = right ? -1 : 1, dy = bottom ? -1 : 1;
+    // a box given in corner-local coordinates, mirrored into this corner
+    const box = (bx, by, bw, bh) => g.fillRect(dx > 0 ? ox + bx : ox - bx - bw, dy > 0 ? oy + by : oy - by - bh, bw, bh);
+    box(-8, -8, 34, 5); box(-8, -8, 5, 34); box(30, 16, 22, 3); box(16, 30, 3, 22);
+    const kx = ox + dx * 34, ky = oy + dy * 42;
+    g.beginPath(); g.moveTo(kx, ky - 8); g.lineTo(kx + 8, ky); g.lineTo(kx, ky + 8); g.lineTo(kx - 8, ky); g.fill();
+  }
 }
-function buildTitle() {
-  const c = mk(W, H), x = c.getContext('2d'); cardFrame(x);
-  x.fillStyle = INK; x.textAlign = 'center'; x.textBaseline = 'alphabetic';
-  x.font = `400 36px ${SERIF}`; x.letterSpacing = '14px'; x.fillText('WEEKLY PICTORIAL NEWS · No. 47', 967, 300);
-  ornament(x, 960, 356, 560);
-  x.letterSpacing = '3px'; x.font = `700 176px ${SERIF}`; x.fillText('The Night Mail', 960, 560);
-  x.font = `italic 400 96px ${SERIF}`; x.letterSpacing = '2px'; x.fillText('Takes to the Air', 960, 690);
-  ornament(x, 960, 770, 380);
-  x.font = `400 30px ${SERIF}`; x.letterSpacing = '10px'; x.fillText('— MCMXXXIV —', 965, 870);
+// lines: [weight/size, tracking px, text, x, y]; rules: [y, span]
+function typesetCard(lines, rules) {
+  const c = newCanvas(W, H), g = c.getContext('2d');
+  paintCardBase(g);
+  g.fillStyle = INK; g.textAlign = 'center';
+  for (const [face, track, text, tx, ty] of lines) { g.font = `${face} ${SERIF}`; g.letterSpacing = `${track}px`; g.fillText(text, tx, ty); }
+  for (const [ry, span] of rules) drawRule(g, 960, ry, span);
   return c;
 }
-function buildFin() {
-  const c = mk(W, H), x = c.getContext('2d'); cardFrame(x);
-  x.fillStyle = INK; x.textAlign = 'center';
-  x.font = `700 200px ${SERIF}`; x.letterSpacing = '28px'; x.fillText('THE END', 974, 590);
-  ornament(x, 960, 675, 460);
-  x.font = `italic 400 48px ${SERIF}`; x.letterSpacing = '2px'; x.fillText('A Weekly Pictorial News reel', 960, 790);
-  return c;
-}
+const titleCard = () => typesetCard([
+  ['400 36px', 14, 'WEEKLY PICTORIAL NEWS · No. 47', 967, 300],
+  ['700 176px', 3, 'The Night Mail', 960, 560],
+  ['italic 400 96px', 2, 'Takes to the Air', 960, 690],
+  ['400 30px', 10, '— MCMXXXIV —', 965, 870]], [[356, 560], [770, 380]]);
+const endCard = () => typesetCard([
+  ['700 200px', 28, 'THE END', 974, 590],
+  ['italic 400 48px', 2, 'A Weekly Pictorial News reel', 960, 790]], [[675, 460]]);
 
 // ── the mail biplane, side view facing right (local coords ~1000×460, wheels touch y≈424, propeller hub at 822,203) ──
 function airfoil(x, x0, x1, y, th) {
@@ -76,7 +116,7 @@ function airfoil(x, x0, x1, y, th) {
   x.closePath();
 }
 function buildPlane() {
-  const c = mk(1000, 460), x = c.getContext('2d');
+  const c = newCanvas(1000, 460), x = c.getContext('2d');
   const skin = (y0, y1) => { const g = x.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, '#eceae0'); g.addColorStop(0.45, '#b4b2a9'); g.addColorStop(1, '#3e3d3a'); return g; };
   const strut = (x0, y0, x1, y1, w) => { x.strokeStyle = '#1e1e1c'; x.lineWidth = w; x.lineCap = 'round'; x.beginPath(); x.moveTo(x0, y0); x.lineTo(x1, y1); x.stroke();
     x.strokeStyle = 'rgba(240,238,228,0.55)'; x.lineWidth = w * 0.3; x.beginPath(); x.moveTo(x0 - w * 0.2, y0); x.lineTo(x1 - w * 0.2, y1); x.stroke(); };
@@ -134,36 +174,36 @@ function buildPlane() {
 function propeller(x, a, om) {
   const cx = 826, cy = 203, rx = 30, ry = 152;
   const spread = Math.min(Math.PI, om / 30), n = om > 1 ? 10 : 1;
-  const disc = clamp((om - 18) / 45);
+  const disc = clip((om - 18) / 45);
   if (disc > 0) {
     const g = x.createRadialGradient(cx, cy, 10, cx, cy, ry);
     g.addColorStop(0, `rgba(30,30,28,${0.35 * disc})`); g.addColorStop(0.8, `rgba(70,70,66,${0.42 * disc})`); g.addColorStop(1, `rgba(220,220,210,${0.4 * disc})`);
     x.save(); x.translate(cx, cy); x.scale(rx / ry, 1); x.fillStyle = g; x.beginPath(); x.arc(0, 0, ry, 0, Math.PI * 2); x.fill();
     x.strokeStyle = `rgba(245,245,235,${0.5 * disc})`; x.lineWidth = 7; x.beginPath(); x.arc(0, 0, ry - 4, -2.2, -1.0); x.stroke(); x.restore();
   }
-  const bladeAlpha = n === 1 ? 1 : lerp(1.6 / n, 0.5 / n, disc);
+  const bladeAlpha = n === 1 ? 1 : mix(1.6 / n, 0.5 / n, disc);
   for (let k = 0; k < n; k++) {
     const aa = a - (n === 1 ? 0 : spread * k / (n - 1));
     for (const s of [0, Math.PI]) {
       const ex = cx + rx * Math.cos(aa + s), ey = cy + ry * Math.sin(aa + s);
       x.strokeStyle = `rgba(22,22,20,${bladeAlpha})`; x.lineCap = 'round';
-      x.lineWidth = 20; x.beginPath(); x.moveTo(cx, cy); x.lineTo(lerp(cx, ex, 0.55), lerp(cy, ey, 0.55)); x.stroke();
-      x.lineWidth = 14; x.beginPath(); x.moveTo(lerp(cx, ex, 0.5), lerp(cy, ey, 0.5)); x.lineTo(ex, ey); x.stroke();
+      x.lineWidth = 20; x.beginPath(); x.moveTo(cx, cy); x.lineTo(mix(cx, ex, 0.55), mix(cy, ey, 0.55)); x.stroke();
+      x.lineWidth = 14; x.beginPath(); x.moveTo(mix(cx, ex, 0.5), mix(cy, ey, 0.5)); x.lineTo(ex, ey); x.stroke();
     }
   }
   x.fillStyle = '#d9d7cc'; x.beginPath(); x.ellipse(cx - 2, cy, 9, 16, 0, 0, Math.PI * 2); x.fill();
 }
 function omega(t) {
-  if (t < T.cough) return 0;
-  if (t < T.catch) { const u = (t - T.cough) / (T.catch - T.cough); return 14 * Math.exp(-u * 4) + 2; }
-  if (t < T.full) return lerp(3, 72, eIn(seg(t, T.catch, T.full)));
+  if (t < CUE.cough) return 0;
+  if (t < CUE.catch) { const u = (t - CUE.cough) / (CUE.catch - CUE.cough); return 14 * Math.exp(-u * 4) + 2; }
+  if (t < CUE.full) return mix(3, 72, easeIn(ramp(t, CUE.catch, CUE.full)));
   return 72;
 }
-function spin(t) { let a = 0.35; const dt = 1 / 600; for (let s = T.cough; s < t; s += dt) a += omega(s) * dt; return a; }
+function spin(t) { let a = 0.35; const dt = 1 / 600; for (let s = CUE.cough; s < t; s += dt) a += omega(s) * dt; return a; }
 
 // ── night airfield (static layer) ──
 function buildAirfield() {
-  const c = mk(W, H), x = c.getContext('2d'), r = rng(41);
+  const c = newCanvas(W, H), x = c.getContext('2d'), r = prng(41);
   const sky = x.createLinearGradient(0, 0, 0, 700); sky.addColorStop(0, '#121211'); sky.addColorStop(0.55, '#34342f'); sky.addColorStop(1, '#6a6963');
   x.fillStyle = sky; x.fillRect(0, 0, W, 700);
   for (let i = 0; i < 90; i++) { x.fillStyle = `rgba(240,240,232,${0.2 + r() * 0.5})`; x.beginPath(); x.arc(r() * W, r() * 480, 0.8 + r() * 1.6, 0, Math.PI * 2); x.fill(); }
@@ -194,12 +234,10 @@ function buildAirfield() {
   x.fillStyle = '#1b1b1a'; x.fillRect(150, 690, 170, 12); [[170, 720], [300, 720]].forEach(([a, b]) => { x.beginPath(); x.arc(a, b, 12, 0, Math.PI * 2); x.fill(); });
   [[185, 650, 36, 44], [240, 645, 38, 50], [292, 655, 32, 40]].forEach(([a, b, w, h]) => { x.fillStyle = '#3c3b37'; x.beginPath(); x.ellipse(a, b, w * 0.8, h * 0.8, 0, 0, Math.PI * 2); x.fill(); x.fillStyle = '#1b1b1a'; x.fillRect(a - 6, b - h * 0.85, 12, 10); });
   // light spilling from the door onto the grass
-  x.globalCompositeOperation = 'screen';
-  const sp = x.createLinearGradient(0, 730, 0, 1080); sp.addColorStop(0, 'rgba(255,255,248,0.45)'); sp.addColorStop(1, 'rgba(255,255,248,0)');
+  x.globalCompositeOperation = 'screen'; const sp = x.createLinearGradient(0, 730, 0, 1080); sp.addColorStop(0, 'rgba(255,255,248,0.45)'); sp.addColorStop(1, 'rgba(255,255,248,0)');
   x.filter = 'blur(40px)'; x.fillStyle = sp; x.beginPath(); x.moveTo(90, 730); x.lineTo(380, 730); x.lineTo(1150, 1080); x.lineTo(-200, 1080); x.closePath(); x.fill(); x.filter = 'none';
   const hl = x.createRadialGradient(235, 610, 40, 235, 610, 520); hl.addColorStop(0, 'rgba(255,255,248,0.22)'); hl.addColorStop(1, 'rgba(255,255,248,0)');
-  x.fillStyle = hl; x.fillRect(0, 200, 900, 880);
-  x.globalCompositeOperation = 'source-over';
+  x.fillStyle = hl; x.fillRect(0, 200, 900, 880); x.globalCompositeOperation = 'source-over';
   // lamp over the door
   x.fillStyle = '#f8f6ee'; x.beginPath(); x.arc(235, 455, 9, 0, Math.PI * 2); x.fill();
   // windsock pole
@@ -207,9 +245,9 @@ function buildAirfield() {
   return c;
 }
 function flares(x, t) { // runway flare pots along the mown strip
-  const r = rng(Math.floor(t * 15) * 7 + 3);
+  const r = prng(Math.floor(t * 15) * 7 + 3);
   for (let i = 0; i < 9; i++) {
-    const u = i / 8, px = lerp(1000, 1900, Math.pow(u, 0.8)), py = lerp(965, 742, Math.pow(u, 0.8)), s = lerp(1.0, 0.35, u);
+    const u = i / 8, px = mix(1000, 1900, Math.pow(u, 0.8)), py = mix(965, 742, Math.pow(u, 0.8)), s = mix(1.0, 0.35, u);
     const f = 0.75 + 0.25 * r();
     const g = x.createRadialGradient(px, py, 1, px, py, 42 * s); g.addColorStop(0, `rgba(255,255,248,${0.8 * f})`); g.addColorStop(0.25, `rgba(255,255,248,${0.28 * f})`); g.addColorStop(1, 'rgba(255,255,248,0)');
     x.fillStyle = g; x.fillRect(px - 45 * s, py - 45 * s, 90 * s, 90 * s);
@@ -220,49 +258,49 @@ function windsock(x, t) {
   const px = 1700, py = 512, L = 150;
   for (let i = 0; i < 4; i++) {
     const u0 = i / 4, u1 = (i + 1) / 4;
-    const y = u => py + 14 + u * 22 + Math.sin(t * 7 - u * 6) * 7 * u, h = u => lerp(24, 11, u);
+    const y = u => py + 14 + u * 22 + Math.sin(t * 7 - u * 6) * 7 * u, h = u => mix(24, 11, u);
     x.fillStyle = i % 2 ? '#8e8c85' : '#e4e2d8'; x.strokeStyle = 'rgba(10,10,10,0.7)'; x.lineWidth = 2;
     x.beginPath(); x.moveTo(px + u0 * L, y(u0) - h(u0)); x.lineTo(px + u1 * L, y(u1) - h(u1)); x.lineTo(px + u1 * L, y(u1) + h(u1)); x.lineTo(px + u0 * L, y(u0) + h(u0)); x.closePath(); x.fill(); x.stroke();
   }
 }
 function caption(x, t, text, t0, t1) {
-  const n = Math.floor(seg(t, t0 + 0.25, t0 + 0.25 + text.length * 0.045) * text.length);
+  const n = Math.floor(ramp(t, t0 + 0.25, t0 + 0.25 + text.length * 0.045) * text.length);
   if (n <= 0) return;
-  const a = 1 - seg(t, t1 - 0.3, t1 - 0.05);
+  const a = 1 - ramp(t, t1 - 0.3, t1 - 0.05);
   x.save(); x.globalAlpha = a; x.font = `400 40px ${MONO}`; x.fillStyle = INK; x.textAlign = 'left'; x.textBaseline = 'alphabetic';
   x.shadowColor = 'rgba(0,0,0,0.9)'; x.shadowBlur = 8;
   x.fillText(text.slice(0, n), 170, 980);
-  x.fillRect(170, 998, 60 * seg(t, t0, t0 + 0.3), 3);
+  x.fillRect(170, 998, 60 * ramp(t, t0, t0 + 0.3), 3);
   x.restore();
 }
 function airfield(x, t) {
-  const u = seg(t, T.air, T.slip);
-  const roll = eIn(seg(t, T.roll, T.slip + 0.3));
-  const z = lerp(1.04, 1.1, eInOut(u)), pan = roll * 90;
+  const u = ramp(t, CUE.air, CUE.slip);
+  const roll = easeIn(ramp(t, CUE.roll, CUE.slip + 0.3));
+  const z = mix(1.04, 1.1, easeIO(u)), pan = roll * 90;
   x.save(); x.translate(960, 640); x.scale(z, z); x.translate(-960 - pan, -640);
   x.drawImage(AIRFIELD, 0, 0);
   flares(x, t); windsock(x, t);
-  const om = omega(t), run = clamp(om / 72);
-  const PX = 500 + roll * 520, PY = 478 + Math.sin(t * 83) * 1.4 * run + (t > T.cough && t < T.catch ? Math.sin((t - T.cough) * 60) * 3 * Math.exp(-(t - T.cough) * 8) : 0);
+  const om = omega(t), run = clip(om / 72);
+  const PX = 500 + roll * 520, PY = 478 + Math.sin(t * 83) * 1.4 * run + (t > CUE.cough && t < CUE.catch ? Math.sin((t - CUE.cough) * 60) * 3 * Math.exp(-(t - CUE.cough) * 8) : 0);
   // shadow on the grass
   x.fillStyle = 'rgba(0,0,0,0.5)'; x.beginPath(); x.ellipse(PX + 470, 910, 400, 24, 0, 0, Math.PI * 2); x.fill();
   // exhaust smoke after the cough
-  if (t > T.cough) {
-    const r = rng(19);
+  if (t > CUE.cough) {
+    const r = prng(19);
     for (let i = 0; i < 9; i++) {
-      const born = T.cough + i * 0.07, age = t - born; if (age < 0 || age > 1.6) continue;
+      const born = CUE.cough + i * 0.07, age = t - born; if (age < 0 || age > 1.6) continue;
       const k = age / 1.6, sx_ = PX + 700 - age * (180 + 240 * r()) - roll * 300, sy_ = PY + 280 - age * 60 * r();
       x.fillStyle = `rgba(190,190,182,${0.3 * (1 - k)})`; x.beginPath(); x.arc(sx_, sy_, 14 + age * 90, 0, Math.PI * 2); x.fill();
     }
   }
   x.save(); x.translate(PX, PY); x.drawImage(PLANE, 0, 0); propeller(x, spin(t), om); x.restore();
   x.restore();
-  caption(x, t, 'Hollin Field, 11:40 p.m.', T.air, T.slip);
+  caption(x, t, 'Hollin Field, 11:40 p.m.', CUE.air, CUE.slip);
 }
 
 // ── take-off over moonlit fields (tileable parallax layers) ──
 function buildSky2() {
-  const c = mk(W, H), x = c.getContext('2d'), r = rng(88);
+  const c = newCanvas(W, H), x = c.getContext('2d'), r = prng(88);
   const sky = x.createLinearGradient(0, 0, 0, 760); sky.addColorStop(0, '#111110'); sky.addColorStop(0.75, '#34342f'); sky.addColorStop(1, '#5c5b55');
   x.fillStyle = sky; x.fillRect(0, 0, W, H);
   for (let i = 0; i < 110; i++) { x.fillStyle = `rgba(240,240,232,${0.2 + r() * 0.5})`; x.beginPath(); x.arc(r() * W, r() * 560, 0.8 + r() * 1.5, 0, Math.PI * 2); x.fill(); }
@@ -272,7 +310,7 @@ function buildSky2() {
   return c;
 }
 function buildHills() { // 3840 wide, seamless (periodic sine sum)
-  const c = mk(3840, 200), x = c.getContext('2d');
+  const c = newCanvas(3840, 200), x = c.getContext('2d');
   x.fillStyle = '#1f1f1d'; x.beginPath(); x.moveTo(0, 200);
   for (let px = 0; px <= 3840; px += 8) { const p = px / 3840 * Math.PI * 2; x.lineTo(px, 90 - 40 * Math.sin(p * 2 + 1) - 22 * Math.sin(p * 5 + 2) - 8 * Math.sin(p * 13)); }
   x.lineTo(3840, 200); x.fill();
@@ -286,7 +324,7 @@ function treeRow(x, r, y, s, n, tone) { // bumpy hedgerow / tree-line silhouette
   }
 }
 function buildFields() { // 3840 × 190 patchwork seen low over the ground: bands grow taller toward the camera
-  const c = mk(3840, 190), x = c.getContext('2d'), r = rng(12);
+  const c = newCanvas(3840, 190), x = c.getContext('2d'), r = prng(12);
   const rows = [[0, 22], [22, 42], [64, 56], [120, 70]];
   rows.forEach(([y0, h], ri) => {
     let px = 0; while (px < 3840) {
@@ -305,7 +343,7 @@ function buildFields() { // 3840 × 190 patchwork seen low over the ground: band
   return c;
 }
 function buildNear() { // foreground grass and fence that whip past (pre-smeared horizontally)
-  const c = mk(3840, 240), x = c.getContext('2d'), r = rng(5);
+  const c = newCanvas(3840, 240), x = c.getContext('2d'), r = prng(5);
   const g = x.createLinearGradient(0, 0, 0, 240); g.addColorStop(0, '#262623'); g.addColorStop(1, '#0b0b0a');
   x.fillStyle = g; x.fillRect(0, 30, 3840, 210);
   for (let i = 0; i < 1400; i++) { const px = r() * 3840, h = 10 + r() * 34; x.fillStyle = `rgba(${r() < 0.5 ? '0,0,0' : '120,120,112'},0.35)`; x.fillRect(px, 30 - h * 0.6, 26 + r() * 50, 2); }
@@ -315,25 +353,25 @@ function buildNear() { // foreground grass and fence that whip past (pre-smeared
 }
 function tile(x, img, off, y) { const w = img.width, o = ((off % w) + w) % w; x.drawImage(img, -o, y); x.drawImage(img, w - o, y); }
 function flight(x, t) {
-  const u = seg(t, T.slipEnd, T.map), lt = t - T.slipEnd;
-  const climb = eIn(clamp(u * 1.15));
+  const u = ramp(t, CUE.slipEnd, CUE.map), lt = t - CUE.slipEnd;
+  const climb = easeIn(clip(u * 1.15));
   x.drawImage(SKY2, 0, 0);
   const sink = climb * 90; // camera climbs with the plane: ground slides down a little
   tile(x, HILLS, lt * 50, 600 + sink * 0.4);
   tile(x, FIELDS, lt * 380, 780 + sink * 0.7);
   x.save(); x.globalAlpha = 0.5; tile(x, NEAR, lt * 1500 - 30, 900 + sink * 1.6); x.globalAlpha = 1; tile(x, NEAR, lt * 1500, 900 + sink * 1.6); x.restore();
   // plane: starts wheels-down just above the grass, climbs away and slightly left of centre
-  const sc = 0.78, py = lerp(612, 230, climb) + Math.sin(t * 2.1) * 6, px = lerp(520, 640, u), rot = lerp(-0.02, -0.13, eOut(clamp(u * 2)));
+  const sc = 0.78, py = mix(612, 230, climb) + Math.sin(t * 2.1) * 6, px = mix(520, 640, u), rot = mix(-0.02, -0.13, easeOut(clip(u * 2)));
   x.save(); x.translate(px + 420 * sc, py + 220 * sc); x.rotate(rot); x.scale(sc, sc); x.translate(-420, -220);
   x.drawImage(PLANE, 0, 0); propeller(x, spin(t), 72);
   // moonlight rim along the upper wing and fuselage
   x.restore();
-  caption(x, t, 'Bound north with 9,000 letters', T.slipEnd, T.map);
+  caption(x, t, 'Bound north with 9,000 letters', CUE.slipEnd, CUE.map);
 }
 
 // ── map insert ──
 function jag(pts, seed, depth = 5, amp = 34) {
-  const r = rng(seed); let p = pts.slice();
+  const r = prng(seed); let p = pts.slice();
   for (let d = 0; d < depth; d++) {
     const q = [];
     for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; q.push(a);
@@ -348,7 +386,7 @@ const MAP_A = [520, 700], MAP_B = [1400, 330];
 const ROUTE = [[520, 700], [800, 560], [1110, 400], [1400, 330]];
 function bez(u) { const [p0, p1, p2, p3] = ROUTE, v = 1 - u; return [0, 1].map(i => v * v * v * p0[i] + 3 * v * v * u * p1[i] + 3 * v * u * u * p2[i] + u * u * u * p3[i]); }
 function buildMap() {
-  const c = mk(W, H), x = c.getContext('2d');
+  const c = newCanvas(W, H), x = c.getContext('2d');
   x.fillStyle = '#9d9b93'; x.fillRect(0, 0, W, H);
   x.save(); x.beginPath(); x.rect(150, 110, W - 300, H - 220); x.clip();
   // sea hatching
@@ -364,7 +402,7 @@ function buildMap() {
   land([[980, 60, 'x'], [1060, 200], [1150, 260], [1290, 300], [1420, 380], [1560, 420], [1700, 470], [1830, 480, 'x'], [1830, 60, 'x']], 9);
   land([[960, 560], [1030, 540], [1070, 590], [1010, 630], [950, 610]], 21);
   // relief stipple on land
-  const r = rng(4); x.fillStyle = 'rgba(30,30,28,0.35)';
+  const r = prng(4); x.fillStyle = 'rgba(30,30,28,0.35)';
   for (let i = 0; i < 1400; i++) { const px = 150 + r() * 1620, py = 110 + r() * 860, d = x.getImageData(px, py, 1, 1).data; if (d[0] > 200) { x.beginPath(); x.arc(px, py, 1.4, 0, Math.PI * 2); x.fill(); } }
   x.restore();
   // frame
@@ -389,10 +427,10 @@ function buildMap() {
   return c;
 }
 function mapScene(x, t) {
-  const u = seg(t, T.map, T.fin), z = lerp(1.0, 1.05, eInOut(u));
+  const u = ramp(t, CUE.map, CUE.fin), z = mix(1.0, 1.05, easeIO(u));
   x.save(); x.translate(960, 520); x.scale(z, z); x.translate(-960, -520);
   x.drawImage(MAP, 0, 0);
-  const d = eInOut(seg(t, T.map + 0.2, T.fin - 0.15));
+  const d = easeIO(ramp(t, CUE.map + 0.2, CUE.fin - 0.15));
   if (d > 0) {
     x.strokeStyle = '#141413'; x.lineWidth = 7; x.lineCap = 'round'; x.setLineDash([20, 16]);
     x.beginPath(); const n = Math.max(2, Math.ceil(d * 60));
@@ -408,149 +446,164 @@ function mapScene(x, t) {
   x.restore();
 }
 
-// ── leader, cards, run-out ──
-function leader(x, t) {
-  const n = t < T.lead2 ? 3 : 2, t0 = n === 3 ? T.lead0 : T.lead2, u = seg(t, t0, t0 + (T.lead2 - T.lead0));
-  x.fillStyle = '#b3b2ac'; x.fillRect(0, 0, W, H);
-  x.fillStyle = '#4a4946'; x.beginPath(); x.moveTo(960, 540); x.arc(960, 540, 1400, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * u); x.closePath(); x.fill();
-  x.strokeStyle = '#f4f3ee'; x.lineWidth = 7;
-  x.beginPath(); x.arc(960, 540, 330, 0, Math.PI * 2); x.stroke();
-  x.beginPath(); x.arc(960, 540, 400, 0, Math.PI * 2); x.stroke();
-  x.lineWidth = 4; x.beginPath(); x.moveTo(0, 540); x.lineTo(W, 540); x.moveTo(960, 0); x.lineTo(960, H); x.stroke();
-  x.fillStyle = '#121211'; x.font = `700 460px ${SERIF}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.letterSpacing = '0px';
-  x.fillText(String(n), 960, 560); x.textBaseline = 'alphabetic';
+// ── countdown leader, cards, run-out ──
+function countdown(g, t) {
+  const second = t >= CUE.lead2, start = second ? CUE.lead2 : CUE.lead0;
+  const sweep = ramp(t, start, start + (CUE.lead2 - CUE.lead0)), top = -Math.PI / 2;
+  g.fillStyle = '#b3b2ac'; g.fillRect(0, 0, W, H);
+  if (sweep > 0) { g.fillStyle = '#4a4946'; g.beginPath(); g.moveTo(960, 540); g.arc(960, 540, 1400, top, top + sweep * 2 * Math.PI); g.fill(); }
+  g.strokeStyle = '#f4f3ee';
+  g.lineWidth = 7; for (const rad of [330, 400]) { g.beginPath(); g.arc(960, 540, rad, 0, 2 * Math.PI); g.stroke(); }
+  g.lineWidth = 4; g.beginPath(); g.moveTo(960, 0); g.lineTo(960, H); g.moveTo(0, 540); g.lineTo(W, 540); g.stroke();
+  g.save(); g.fillStyle = '#121211'; g.font = `700 460px ${SERIF}`; g.letterSpacing = '0px';
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(second ? '2' : '3', 960, 560); g.restore();
 }
-function card(x, img, t, t0, t1) {
-  const z = 1 + 0.03 * seg(t, t0, t0 + 3);
-  x.fillStyle = DARK; x.fillRect(0, 0, W, H);
-  x.drawImage(img, W / 2 - W * z / 2, H / 2 - H * z / 2, W * z, H * z);
-  const k = (1 - eOut(seg(t, t0, t0 + 0.3))) + seg(t, t1 - 0.25, t1);
-  if (k > 0) { x.fillStyle = `rgba(0,0,0,${clamp(k)})`; x.fillRect(0, 0, W, H); }
+// a card held in frame: slow push-in, quick fade up from black, fade down before t1
+function showCard(g, img, t, t0, t1) {
+  const z = 1 + 0.03 * ramp(t, t0, t0 + 3), w = W * z, h = H * z;
+  g.fillStyle = DARK; g.fillRect(0, 0, W, H);
+  g.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+  const shade = clip(1 - easeOut(ramp(t, t0, t0 + 0.3)) + ramp(t, t1 - 0.25, t1));
+  if (shade > 0) { g.fillStyle = `rgba(0,0,0,${shade})`; g.fillRect(0, 0, W, H); }
 }
 function runout(x, t) { // clear leader flapping through the gate after the picture ends
   const v = 205 + 30 * Math.sin(t * 90);
   x.fillStyle = `rgb(${v},${v},${v - 5})`; x.fillRect(0, 0, W, H);
   x.fillStyle = 'rgba(60,60,56,0.6)'; x.font = `700 120px ${SERIF}`; x.textAlign = 'center'; x.letterSpacing = '20px';
-  const off = ((t - T.run) * 5200) % (H + 120);
+  const off = ((t - CUE.run) * 5200) % (H + 120);
   x.fillText('TAIL', 960, off - 200);
   x.fillStyle = '#1a1a19'; x.fillRect(0, off - 60, W, 60); x.fillRect(0, off - H - 180, W, 60);
 }
-function sceneAt(x, t) {
-  if (t < T.lead0) { x.fillStyle = '#000'; x.fillRect(0, 0, W, H); return; }
-  if (t < T.leadEnd) return leader(x, t);
-  if (t < T.t1) { x.fillStyle = '#000'; x.fillRect(0, 0, W, H); return; }
-  if (t < T.air) return card(x, TITLE, t, T.t1, T.air + 0.05);
-  if (t < T.slip) return airfield(x, t);
-  if (t < T.map) return flight(x, t);
-  if (t < T.fin) return mapScene(x, t);
-  if (t < T.run) return card(x, FIN, t, T.fin, 99);
-  return runout(x, t);
+function paintScene(g, t) {
+  const blank = () => { g.fillStyle = '#000'; g.fillRect(0, 0, W, H); };
+  const reel = [
+    [CUE.lead0, blank], [CUE.leadEnd, () => countdown(g, t)], [CUE.t1, blank],
+    [CUE.air, () => showCard(g, TITLE, t, CUE.t1, CUE.air + 0.05)],
+    [CUE.slip, () => airfield(g, t)], [CUE.map, () => flight(g, t)], [CUE.fin, () => mapScene(g, t)],
+    [CUE.run, () => showCard(g, FIN, t, CUE.fin, 99)], [Infinity, () => runout(g, t)]];
+  reel.find(([until]) => t < until)[1]();
 }
 
-function render(t) {
-  const f = Math.floor(t * 30), r = rng(f * 977 + 13), gf = Math.floor(t * 15);
-  if (t >= T.slip && t < T.slipEnd) { // frameshift: old frame slides down, frame line, new one enters from the top
-    const u = eInOut(seg(t, T.slip, T.slipEnd)), bar = 90, off = u * (H + bar);
-    sceneAt(sx2, T.slip - 0.01); sx.fillStyle = '#050505'; sx.fillRect(0, 0, W, H); sx.drawImage(S2, 0, off);
-    sceneAt(sx2, T.slipEnd + 0.01); sx.drawImage(S2, 0, off - H - bar);
-    sx.globalAlpha = 0.35; sx.drawImage(S, 0, -24); sx.drawImage(S, 0, 24); sx.globalAlpha = 1;
-  } else if (t >= T.run && t < T.run + 0.2) { // loop lost: the end card rolls out of the gate into clear leader
-    const u = seg(t, T.run, T.run + 0.2), bar = 90, off = eIn(u) * (H + bar);
-    sceneAt(sx2, T.run - 0.01); sx.fillStyle = '#050505'; sx.fillRect(0, 0, W, H); sx.drawImage(S2, 0, off);
-    runout(sx2, t); sx.drawImage(S2, 0, off - H - bar);
-  } else sceneAt(sx, t);
+// ── the projected print ──
+// gate slip: the outgoing frame slides off the bottom while the next one drops in, a black frame line between
+function gateSlide(tBefore, paintAfter, shift, smear) {
+  fctx.fillStyle = '#050505'; fctx.fillRect(0, 0, W, H);
+  paintScene(sctx, tBefore); fctx.drawImage(SPARE, 0, shift);
+  paintAfter(sctx); fctx.drawImage(SPARE, 0, shift - H - 90);
+  if (smear) { fctx.globalAlpha = 0.35; fctx.drawImage(FRAME, 0, -24); fctx.drawImage(FRAME, 0, 24); fctx.globalAlpha = 1; }
+}
+// changeover cue: a rough white dot punched into the top-right corner for a few frames
+function cueMark(t) {
+  if (![CUE.cue1, CUE.cue2].some(c => t >= c && t < c + 0.1)) return;
+  const r = prng(Math.floor(t * 30) * 5 + 2), n = 24;
+  fctx.beginPath();
+  for (let i = 0; i < n; i++) { const a = 2 * Math.PI * i / n, rad = 30 + 7 * (r() - 0.5); fctx.lineTo(1690 + rad * Math.cos(a), 180 + rad * Math.sin(a)); }
+  fctx.closePath(); fctx.fillStyle = '#f4f3ea'; fctx.fill();
+  fctx.lineWidth = 4; fctx.strokeStyle = 'rgba(0,0,0,0.6)'; fctx.stroke();
+}
+function composeFrame(t) {
+  if (t >= CUE.slip && t < CUE.slipEnd) {
+    gateSlide(CUE.slip - 0.01, g => paintScene(g, CUE.slipEnd + 0.01), easeIO(ramp(t, CUE.slip, CUE.slipEnd)) * (H + 90), true);
+  } else if (t >= CUE.run && t < CUE.run + 0.2) {
+    gateSlide(CUE.run - 0.01, g => runout(g, t), easeIn(ramp(t, CUE.run, CUE.run + 0.2)) * (H + 90), false);
+  } else paintScene(fctx, t);
+  cueMark(t);
+}
 
-  // changeover cue marks (top right of the end card)
-  if ([T.cue1, T.cue2].some(a => t >= a && t < a + 0.1)) {
-    const cr = rng(f * 3 + 1); sx.fillStyle = '#f4f3ea'; sx.beginPath();
-    for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2, rr = 30 + (cr() - 0.5) * 7; sx.lineTo(1690 + Math.cos(a) * rr, 180 + Math.sin(a) * rr); }
-    sx.closePath(); sx.fill(); sx.strokeStyle = 'rgba(0,0,0,0.6)'; sx.lineWidth = 4; sx.stroke();
-  }
+const SCRATCHES = [ // position across the frame, visible from..to (s)
+  { at: 0.31, from: 0, to: 5 }, { at: 0.72, from: 1.8, to: 7.5 }, { at: 0.55, from: 4.6, to: 8.3 },
+  { at: 0.18, from: 7, to: 10 }, { at: 0.84, from: 9.4, to: 10 }];
+const SPLICES = [[CUE.leadEnd, 0.6], [CUE.air, 0.85], [CUE.map, 0.85], [CUE.fin, 0.6]]; // time, flash strength
 
-  // copy: gate weave + slight softness (weave grows as the loop is lost)
-  const wv = t > T.run ? 4 : 1;
-  const wx = (noise1(t * 3, 1) * 3 + (r() - 0.5) * 1.2) * wv, wy = (noise1(t * 2.3, 2) * 4 + (r() - 0.5) * 1.5) * wv;
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  ctx.filter = 'blur(1.1px) grayscale(1) contrast(1.12)';
-  ctx.drawImage(S, wx, wy);
-  ctx.filter = 'none';
-
-  // exposure flicker
-  const flick = 0.07 * noise1(t * 9, 3) + (r() - 0.5) * 0.06;
-  if (flick > 0) { ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = `rgba(255,255,255,${flick})`; }
-  else { ctx.globalCompositeOperation = 'multiply'; const v = Math.round(255 * (1 + flick)); ctx.fillStyle = `rgb(${v},${v},${v})`; }
-  ctx.fillRect(0, 0, W, H);
-
-  // grain (refreshed at 15 fps to keep the file small)
-  const gr = rng(gf * 311 + 7);
-  ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.42;
-  ctx.drawImage(GRAIN[gf % GRAIN.length], -gr() * 80, -gr() * 80, W * 2 + 160, H * 2 + 160);
-  ctx.globalAlpha = 0.25; ctx.drawImage(GRAIN[(gf + 3) % GRAIN.length], -gr() * 400, -gr() * 300, W + 400, H + 300);
-  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-
-  // vertical scratches
-  const lines = [[0.31, 0.0, 5.0], [0.72, 1.8, 7.5], [0.55, 4.6, 8.3], [0.18, 7.0, 10], [0.84, 9.4, 10]];
-  lines.forEach(([x0, a, b], i) => {
-    if (t < a || t > b) return;
-    const xx = (x0 + noise1(t * 0.6, 10 + i) * 0.03) * W, al = 0.18 + 0.25 * Math.abs(noise1(t * 12, 20 + i));
-    ctx.fillStyle = `rgba(245,245,240,${al})`; ctx.fillRect(xx, 0, 1.6 + (i % 2), H);
-    if (r() < 0.3) { ctx.fillStyle = `rgba(0,0,0,${al})`; ctx.fillRect(xx + 3, H * r(), 1.2, H * 0.4); }
+function layGrain(t) { // refreshed at 15 fps to keep the file small
+  const tick = Math.floor(t * 15), pick = prng(tick * 97 + 3);
+  out.globalCompositeOperation = 'overlay';
+  out.globalAlpha = 0.42; out.drawImage(GRAIN[tick % GRAIN.length], -80 * pick(), -80 * pick(), 2 * W + 160, 2 * H + 160);
+  out.globalAlpha = 0.25; out.drawImage(GRAIN[(tick + 3) % GRAIN.length], -400 * pick(), -300 * pick(), W + 400, H + 300);
+  out.globalAlpha = 1; out.globalCompositeOperation = 'source-over';
+}
+function scratch(t, jit) {
+  SCRATCHES.forEach((s, i) => {
+    if (t < s.from || t > s.to) return;
+    const sx = W * (s.at + 0.03 * wobble(t * 0.6, 10 + i)), alpha = 0.18 + 0.25 * Math.abs(wobble(t * 12, 20 + i));
+    out.fillStyle = `rgba(245,245,240,${alpha})`; out.fillRect(sx, 0, 1.6 + i % 2, H);
+    if (jit() < 0.3) { out.fillStyle = `rgba(0,0,0,${alpha})`; out.fillRect(sx + 3, H * jit(), 1.2, 0.4 * H); }
   });
-  // dust, fibres, hair (the run-out leader is dirtier)
-  const nd = 3 + Math.floor(r() * 8) + (t > T.run ? 14 : 0);
-  for (let i = 0; i < nd; i++) {
-    const white = t > T.run ? r() < 0.2 : r() < 0.55, px_ = r() * W, py = r() * H, s = 1.5 + r() * r() * 9;
-    ctx.fillStyle = white ? `rgba(250,250,245,${0.5 + r() * 0.4})` : `rgba(0,0,0,${0.55 + r() * 0.4})`;
-    ctx.beginPath(); ctx.ellipse(px_, py, s, s * (0.5 + r() * 0.6), r() * 3, 0, Math.PI * 2); ctx.fill();
+}
+function dirt(t, jit) { // specks and the odd hair; the tail leader is filthier
+  const tail = t > CUE.run, specks = 3 + Math.floor(8 * jit()) + (tail ? 14 : 0);
+  for (let n = 0; n < specks; n++) {
+    const light = jit() < (tail ? 0.2 : 0.55), cx = W * jit(), cy = H * jit(), size = 1.5 + 9 * jit() * jit();
+    out.fillStyle = light ? `rgba(250,250,245,${0.5 + 0.4 * jit()})` : `rgba(0,0,0,${0.55 + 0.4 * jit()})`;
+    out.beginPath(); out.ellipse(cx, cy, size, size * (0.5 + 0.6 * jit()), 3 * jit(), 0, 2 * Math.PI); out.fill();
   }
-  if (r() < 0.22 || (t > T.run && r() < 0.6)) {
-    const px_ = r() * W, py = r() * H, L = 40 + r() * 120;
-    ctx.strokeStyle = r() < 0.5 ? 'rgba(0,0,0,0.7)' : 'rgba(250,250,245,0.6)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(px_, py); ctx.bezierCurveTo(px_ + L * r(), py - L * 0.5, px_ - L * 0.3, py + L * r(), px_ + L * (r() - 0.5), py + L); ctx.stroke();
+  if (jit() < (tail ? 0.7 : 0.22)) {
+    const hx = W * jit(), hy = H * jit(), len = 40 + 120 * jit();
+    out.strokeStyle = jit() < 0.5 ? 'rgba(0,0,0,0.7)' : 'rgba(250,250,245,0.6)'; out.lineWidth = 1.5;
+    out.beginPath(); out.moveTo(hx, hy);
+    out.bezierCurveTo(hx + len * jit(), hy - len / 2, hx - 0.3 * len, hy + len * jit(), hx + len * (jit() - 0.5), hy + len); out.stroke();
   }
-  // splice flashes (cuts) and the countdown end flash
-  const flash = [[T.leadEnd, 0.6], [T.air, 0.85], [T.map, 0.85], [T.fin, 0.6]].find(([a]) => t >= a && t < a + 1 / 30);
-  if (flash) {
-    ctx.fillStyle = `rgba(255,255,250,${flash[1]})`; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0, H * 0.18, W, 5);
-  }
-  ctx.drawImage(VIG, 0, 0);
-  // projector lamp dies after the run-out
-  const lamp = eInOut(seg(t, T.dark, T.end - 0.06));
-  if (lamp > 0) { ctx.fillStyle = `rgba(0,0,0,${lamp})`; ctx.fillRect(0, 0, W, H); }
-  ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgb(${Math.round(14 * (1 - lamp))},${Math.round(14 * (1 - lamp))},${Math.round(13 * (1 - lamp))})`; ctx.fillRect(0, 0, W, H);
-  ctx.globalCompositeOperation = 'source-over';
+}
+function project(t) {
+  const jit = prng(Math.floor(t * 30) * 613 + 29);
+  // gate weave (grows once the loop is lost), softness, monochrome stock
+  const weave = t > CUE.run ? 4 : 1;
+  const dx = weave * (3 * wobble(t * 3, 1) + 1.2 * (jit() - 0.5)), dy = weave * (4 * wobble(t * 2.3, 2) + 1.5 * (jit() - 0.5));
+  out.fillStyle = '#000'; out.fillRect(0, 0, W, H);
+  out.filter = 'blur(1.1px) grayscale(1) contrast(1.12)'; out.drawImage(FRAME, dx, dy); out.filter = 'none';
+  // lamp flicker: lift with screen, dip with multiply
+  const fl = 0.07 * wobble(t * 9, 3) + 0.06 * (jit() - 0.5);
+  if (fl >= 0) { out.globalCompositeOperation = 'screen'; out.fillStyle = `rgba(255,255,255,${fl})`; }
+  else { const v = Math.round(255 + 255 * fl); out.globalCompositeOperation = 'multiply'; out.fillStyle = `rgb(${v},${v},${v})`; }
+  out.fillRect(0, 0, W, H); out.globalCompositeOperation = 'source-over';
+  layGrain(t); scratch(t, jit); dirt(t, jit);
+  const hit = SPLICES.find(([at]) => t >= at && t < at + 1 / 30);
+  if (hit) { out.fillStyle = `rgba(255,255,250,${hit[1]})`; out.fillRect(0, 0, W, H); out.fillStyle = 'rgba(0,0,0,0.8)'; out.fillRect(0, 0.18 * H, W, 5); }
+  out.drawImage(VIGNETTE, 0, 0);
+  // the lamp dies after the run-out; until then the print's black level sits slightly lifted
+  const dark = easeIO(ramp(t, CUE.dark, CUE.end - 0.06)), lift = 1 - dark;
+  if (dark > 0) { out.fillStyle = `rgba(0,0,0,${dark})`; out.fillRect(0, 0, W, H); }
+  out.globalCompositeOperation = 'lighter';
+  out.fillStyle = `rgb(${Math.round(14 * lift)},${Math.round(14 * lift)},${Math.round(13 * lift)})`; out.fillRect(0, 0, W, H);
+  out.globalCompositeOperation = 'source-over';
 }
 
-// ── film texture ──
-function buildGrain(seed) {
-  const w = 960, h = 540, c = mk(w, h), x = c.getContext('2d'), d = x.createImageData(w, h), r = rng(seed);
-  for (let i = 0; i < w * h; i++) { const v = 128 + (r() + r() + r() + r() - 2) * 170; d.data[i * 4] = d.data[i * 4 + 1] = d.data[i * 4 + 2] = v; d.data[i * 4 + 3] = 255; }
-  x.putImageData(d, 0, 0); return c;
+// ── film textures ──
+function grainTile(seed) { // Gaussian luminance noise (Box-Muller), opaque grey
+  const w = 960, h = 540, c = newCanvas(w, h), g = c.getContext('2d'), img = g.createImageData(w, h);
+  const px = new Uint32Array(img.data.buffer), r = prng(seed);
+  const put = (k, z) => { const v = clip(Math.round(128 + 98 * z), 0, 255); px[k] = 0xff000000 | v << 16 | v << 8 | v; };
+  for (let i = 0; i < px.length; i += 2) {
+    const m = Math.sqrt(-2 * Math.log(1 - r())), a = 2 * Math.PI * r();
+    put(i, m * Math.cos(a)); put(i + 1, m * Math.sin(a));
+  }
+  g.putImageData(img, 0, 0); return c;
 }
-function buildVig() {
-  const c = mk(W, H), x = c.getContext('2d');
-  const g = x.createRadialGradient(W / 2, H / 2, H * 0.28, W / 2, H / 2, H * 1.02);
-  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.7, 'rgba(0,0,0,0.35)'); g.addColorStop(1, 'rgba(0,0,0,0.88)');
-  x.fillStyle = g; x.fillRect(0, 0, W, H); return c;
-}
-function noise1(t, seed) {
-  const i = Math.floor(t), f = t - i, a = rng(i * 131 + seed)(), b = rng((i + 1) * 131 + seed)();
-  return lerp(a, b, f * f * (3 - 2 * f)) * 2 - 1;
+function vignetteLayer() {
+  const c = newCanvas(W, H), g = c.getContext('2d');
+  const shade = g.createRadialGradient(W / 2, H / 2, 0.28 * H, W / 2, H / 2, 1.02 * H);
+  [[0, 0], [0.7, 0.35], [1, 0.88]].forEach(([at, a]) => shade.addColorStop(at, `rgba(0,0,0,${a})`));
+  g.fillStyle = shade; g.fillRect(0, 0, W, H); return c;
 }
 
-window.ready = (async () => {
-  const sample = 'The Night Mail Takes to the Air WEEKLY PICTORIAL NEWS No. 47 MCMXXXIV THE END HARWICK PORT ELDEN 0123456789 ·—,.';
-  await Promise.all([`700 100px ${SERIF}`, `400 100px ${SERIF}`, `italic 400 100px ${SERIF}`, `400 40px ${MONO}`].map(f => document.fonts.load(f, sample)));
+window.ready = (async function prepare() {
+  const glyphs = 'The Night Mail Takes to the Air WEEKLY PICTORIAL NEWS No. 47 MCMXXXIV THE END A Weekly Pictorial News reel '
+    + 'AIR MAIL N·47 Hollin Field, 11:40 p.m. Bound north with 9,000 letters HARWICK PORT ELDEN North Channel THE NIGHT ROUTE 312 MILES 3 HRS 10 MIN TAIL —';
+  const faces = [`700 64px ${SERIF}`, `400 64px ${SERIF}`, `italic 400 64px ${SERIF}`, `400 40px ${MONO}`];
+  await Promise.all(faces.map(f => document.fonts.load(f, glyphs)));
   await document.fonts.ready;
-  for (let i = 0; i < 8; i++) GRAIN.push(buildGrain(i * 37 + 5));
-  VIG = buildVig(); TITLE = buildTitle(); FIN = buildFin(); PLANE = buildPlane(); AIRFIELD = buildAirfield();
-  SKY2 = buildSky2(); HILLS = buildHills(); FIELDS = buildFields(); NEAR = buildNear(); MAP = buildMap();
+  for (let k = 0; k < 8; k++) GRAIN.push(grainTile(1009 + 61 * k));
+  VIGNETTE = vignetteLayer(); TITLE = titleCard(); FIN = endCard();
+  PLANE = buildPlane(); AIRFIELD = buildAirfield(); SKY2 = buildSky2(); HILLS = buildHills(); FIELDS = buildFields(); NEAR = buildNear(); MAP = buildMap();
   return true;
 })();
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
-window.events = () => [{ t: T.lead2, k: 'pop' }, { t: T.t1 + 0.1, k: 'motif' }, { t: T.air, k: 'splice' }, { t: T.cough, k: 'cough' },
-  { t: T.catch, k: 'engine', a: T.catch, b: T.full, e: T.map }, { t: T.slip, k: 'slip' }, { t: T.map, k: 'splice' }, { t: T.map + 0.05, k: 'chord' },
-  { t: T.fin + 0.05, k: 'low' }, { t: T.run, k: 'runout', e: T.end }];
+window.draw = ({ t }) => { composeFrame(t); project(t); return view.toDataURL('image/jpeg', 0.92).slice('data:image/jpeg;base64,'.length); };
+// sound cues for audio.py
+window.events = () => [
+  ['pop', CUE.lead2], ['motif', CUE.t1 + 0.1], ['splice', CUE.air], ['cough', CUE.cough],
+  ['engine', CUE.catch, { a: CUE.catch, b: CUE.full, e: CUE.map }], ['slip', CUE.slip], ['splice', CUE.map], ['chord', CUE.map + 0.05],
+  ['low', CUE.fin + 0.05], ['runout', CUE.run, { e: CUE.end }]
+].map(([k, t, extra]) => ({ t, k, ...extra }));
 </script>
-</body></html>
+</body>
+</html>
