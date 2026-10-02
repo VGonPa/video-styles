@@ -338,7 +338,7 @@ The catalog began as an English adaptation of [Yasin Özmen’s Turkish catalog]
 | [Single Line](styles/single-line/) | One continuous, minimal line | Elegant intros, outros, and transitions | [Hand Drawn](categories/families/hand-drawn.md) | [Intros, Titles & Transitions](categories/use-cases/titles.md), [Storytelling & Brand](categories/use-cases/story.md) |
 <!-- styles:end -->
 
-The gallery above is shuffled so no family or era clusters together; the category pages list styles alphabetically. Each linked directory has its own page with the clip, preview GIF, `anim.html` source, and credits. Animated previews and videos are hosted as individual assets of the pinned [v1.0.0 release](https://github.com/VGonPa/video-styles/releases/tag/v1.0.0); clicking a preview opens its clip. Cloning the code does not download them.
+The gallery above is shuffled so no family or era clusters together; the category pages list styles alphabetically. Each linked directory has its own page with the clip, preview GIF, `anim.html` source, and credits. Animated previews and videos are hosted as individual assets of the pinned [v1.0.0 release](https://github.com/VGonPa/video-styles/releases/tag/v1.0.0); each preview links to its MP4 clip. Cloning the code does not download them.
 
 ## Download the code or selected clips
 
