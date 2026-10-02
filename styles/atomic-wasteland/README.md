@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="atomic-wasteland.mp4"><img src="preview.gif" alt="Atomic Wasteland" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/atomic-wasteland.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/atomic-wasteland-preview.gif" alt="Atomic Wasteland" width="640"></a>
 
 **Feel:** Cheerful 50s mascot, burning world  
 **Best for:** Dark satire, survival tips, and deadpan corporate optimism  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Fallout's Pip-Boy and Vault Boy
 
-▶ [Watch the clip](atomic-wasteland.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/atomic-wasteland.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

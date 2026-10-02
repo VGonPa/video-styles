@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="relatable-webcomic.mp4"><img src="preview.gif" alt="Relatable Webcomic" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/relatable-webcomic.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/relatable-webcomic-preview.gif" alt="Relatable Webcomic" width="640"></a>
 
 **Feel:** Pastel panels, messy bun, cosy honesty  
 **Best for:** Everyday confessions, self-care gags and warm relatable punchlines  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Sarah's Scribbles (Sarah Andersen)
 
-▶ [Watch the clip](relatable-webcomic.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/relatable-webcomic.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="blob-sim.mp4"><img src="preview.gif" alt="Blob Simulation" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/blob-sim.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/blob-sim-preview.gif" alt="Blob Simulation" width="640"></a>
 
 **Feel:** Cute 3D blobs obeying simple rules  
 **Best for:** Game theory, evolution sims, and data-driven explainers  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Primer (Justin Helps)
 
-▶ [Watch the clip](blob-sim.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/blob-sim.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

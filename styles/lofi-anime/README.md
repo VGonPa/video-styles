@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="lofi-anime.mp4"><img src="preview.gif" alt="Lo-Fi Anime" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/lofi-anime.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/lofi-anime-preview.gif" alt="Lo-Fi Anime" width="640"></a>
 
 **Feel:** Rainy cozy 90s anime dusk  
 **Best for:** Calm moods, quiet stories, and study-night atmosphere  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by the Lofi Girl stream
 
-▶ [Watch the clip](lofi-anime.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/lofi-anime.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

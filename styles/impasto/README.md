@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="impasto.mp4"><img src="preview.gif" alt="Impasto Oil" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impasto.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impasto-preview.gif" alt="Impasto Oil" width="640"></a>
 
 **Feel:** Thick ridged oil strokes, swirling night  
 **Best for:** Dreamy stories, painterly title cards and night scenes  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Vincent van Gogh
 
-▶ [Watch the clip](impasto.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impasto.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

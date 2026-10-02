@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="clay.mp4"><img src="preview.gif" alt="Clay" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clay.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clay-preview.gif" alt="Clay" width="640"></a>
 
 **Feel:** Warm stop motion  
 **Best for:** Friendly, playful storytelling  
@@ -11,4 +11,4 @@
 
 **Credits:** Originally developed by <a href="https://github.com/yasinozmeen/animasyon-stil-katalogu">Yasin Özmen</a>
 
-▶ [Watch the clip](clay.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clay.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

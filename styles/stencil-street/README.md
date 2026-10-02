@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="stencil-street.mp4"><img src="preview.gif" alt="Stencil Street Art" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stencil-street.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stencil-street-preview.gif" alt="Stencil Street Art" width="640"></a>
 
 **Feel:** Spray, peel, reveal, red accent  
 **Best for:** Punchy social posts, protest messages, and witty one-liners  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Banksy's stencil street art
 
-▶ [Watch the clip](stencil-street.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stencil-street.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

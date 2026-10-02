@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="history-comedy.mp4"><img src="preview.gif" alt="History Comedy" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/history-comedy.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/history-comedy-preview.gif" alt="History Comedy" width="640"></a>
 
 **Feel:** Big-headed kings on parchment maps  
 **Best for:** Funny history, wars, treaties, and absurd true-ish stories  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Oversimplified
 
-▶ [Watch the clip](history-comedy.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/history-comedy.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

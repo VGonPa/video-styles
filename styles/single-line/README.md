@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="single-line.mp4"><img src="preview.gif" alt="Single Line" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/single-line.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/single-line-preview.gif" alt="Single Line" width="640"></a>
 
 **Feel:** One continuous, minimal line  
 **Best for:** Elegant intros, outros, and transitions  
@@ -11,4 +11,4 @@
 
 **Credits:** Originally developed by <a href="https://github.com/yasinozmeen/animasyon-stil-katalogu">Yasin Özmen</a>
 
-▶ [Watch the clip](single-line.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/single-line.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

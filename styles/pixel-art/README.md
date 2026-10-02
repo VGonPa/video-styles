@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="pixel-art.mp4"><img src="preview.gif" alt="Pixel Art" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pixel-art.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pixel-art-preview.gif" alt="Pixel Art" width="640"></a>
 
 **Feel:** 16-bit video game level  
 **Best for:** Progress, milestones, and game-like scenes  
@@ -11,4 +11,4 @@
 
 **Credits:** Originally developed by <a href="https://github.com/yasinozmeen/animasyon-stil-katalogu">Yasin Özmen</a>
 
-▶ [Watch the clip](pixel-art.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pixel-art.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

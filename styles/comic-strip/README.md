@@ -2,11 +2,11 @@
 
 [← All styles](../../README.md)
 
-<a href="comic-strip.mp4"><img src="preview.gif" alt="Newspaper Comic Strip" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/comic-strip.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/comic-strip-preview.gif" alt="Newspaper Comic Strip" width="640"></a>
 
 **Feel:** Four panels, ink on newsprint  
 **Best for:** Dry wit, a setup, a beat, and a punchline  
 **Visual family:** [Comics & Cartoons](../../categories/families/comics.md)  
 **Use cases:** [Social & Short-Form](../../categories/use-cases/social.md), [Storytelling & Brand](../../categories/use-cases/story.md)
 
-▶ [Watch the clip](comic-strip.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/comic-strip.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

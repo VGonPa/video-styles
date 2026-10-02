@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="pencil-sketch.mp4"><img src="preview.gif" alt="Pencil Sketch" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pencil-sketch.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pencil-sketch-preview.gif" alt="Pencil Sketch" width="640"></a>
 
 **Feel:** Graphite sketchbook  
 **Best for:** Showing how an idea develops  
@@ -11,4 +11,4 @@
 
 **Credits:** Originally developed by <a href="https://github.com/yasinozmeen/animasyon-stil-katalogu">Yasin Özmen</a>
 
-▶ [Watch the clip](pencil-sketch.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pencil-sketch.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

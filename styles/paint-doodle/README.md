@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="paint-doodle.mp4"><img src="preview.gif" alt="Paint Doodle" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/paint-doodle.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/paint-doodle-preview.gif" alt="Paint Doodle" width="640"></a>
 
 **Feel:** Crude mouse lines, deadpan captions  
 **Best for:** Silly history bits and dry jokes for social feeds  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Sam O'Nella Academy
 
-▶ [Watch the clip](paint-doodle.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/paint-doodle.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

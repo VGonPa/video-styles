@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="existential-stick.mp4"><img src="preview.gif" alt="Existential Stick Figures" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/existential-stick.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/existential-stick-preview.gif" alt="Existential Stick Figures" width="640"></a>
 
 **Feel:** Deadpan pencil lives, sudden colour  
 **Best for:** Quiet, funny stories about memory and ordinary days  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Don Hertzfeldt
 
-▶ [Watch the clip](existential-stick.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/existential-stick.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

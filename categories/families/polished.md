@@ -10,8 +10,8 @@ Visual family · Glossy materials, glass, and light.
 
 <table>
 <tr>
-<td width="25%" align="center"><a href="../../styles/liquid-glass/liquid-glass.mp4"><img src="../../styles/liquid-glass/preview.gif" alt="Liquid Glass" width="100%"></a><br><b>Liquid Glass</b><br><a href="../../styles/liquid-glass/liquid-glass.mp4">video</a> · <a href="../../styles/liquid-glass">source</a></td>
-<td width="25%" align="center"><a href="../../styles/liquid-motion/liquid-motion.mp4"><img src="../../styles/liquid-motion/preview.gif" alt="Liquid Motion" width="100%"></a><br><b>Liquid Motion</b><br><a href="../../styles/liquid-motion/liquid-motion.mp4">video</a> · <a href="../../styles/liquid-motion">source</a></td>
+<td width="25%" align="center"><a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-glass.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-glass-preview.gif" alt="Liquid Glass" width="100%"></a><br><b>Liquid Glass</b><br><a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-glass.mp4">video</a> · <a href="../../styles/liquid-glass">source</a></td>
+<td width="25%" align="center"><a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-motion.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-motion-preview.gif" alt="Liquid Motion" width="100%"></a><br><b>Liquid Motion</b><br><a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-motion.mp4">video</a> · <a href="../../styles/liquid-motion">source</a></td>
 </tr>
 </table>
 

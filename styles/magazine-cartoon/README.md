@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="magazine-cartoon.mp4"><img src="preview.gif" alt="Magazine Cartoon" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/magazine-cartoon.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/magazine-cartoon-preview.gif" alt="Magazine Cartoon" width="640"></a>
 
 **Feel:** Dry wit, pen and wash  
 **Best for:** Punchlines, wry observations, and understated social commentary  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by <a href="https://www.newyorker.com/cartoons">The New Yorker's cartoons</a>
 
-▶ [Watch the clip](magazine-cartoon.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/magazine-cartoon.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

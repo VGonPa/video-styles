@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="voxel.mp4"><img src="preview.gif" alt="Voxel Blocks" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/voxel.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/voxel-preview.gif" alt="Voxel Blocks" width="640"></a>
 
 **Feel:** Blocky sandbox, built block by block  
 **Best for:** Step-by-step tutorials, building processes and game-style explainers  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Minecraft
 
-▶ [Watch the clip](voxel.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/voxel.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

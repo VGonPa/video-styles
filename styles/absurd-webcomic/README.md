@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="absurd-webcomic.mp4"><img src="preview.gif" alt="Absurd Webcomic" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/absurd-webcomic.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/absurd-webcomic-preview.gif" alt="Absurd Webcomic" width="640"></a>
 
 **Feel:** Loud flat cartoons, unhinged overreactions  
 **Best for:** Relatable gripes, product pain points, and escalating social gags  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by <a href="https://theoatmeal.com">The Oatmeal (Matthew Inman)</a>
 
-▶ [Watch the clip](absurd-webcomic.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/absurd-webcomic.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

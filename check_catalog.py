@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Check that every style is complete: metadata, clip specs, preview, and index pages.
 
-Run after build_index.py. Exits non-zero and lists every problem found.
+Run after build_index.py. Add --media to also validate downloaded or rebuilt clips and GIFs.
 """
 
 import json
+import argparse
 import subprocess
 import sys
 
 import manifest
+import media
 
 ROOT = manifest.ROOT
 MANIFEST = manifest.load()
@@ -56,14 +58,16 @@ def check_clip(s, problems):
 
 
 def check_pages(s, problems):
-    target = f"styles/{s['slug']}/preview.gif"
+    target = media.url(s["slug"], "preview")
+    video = media.url(s["slug"], "video")
     pages = [ROOT / "README.md", ROOT / "categories" / "families" / f"{s['family']}.md"]
     pages += [ROOT / "categories" / "use-cases" / f"{u}.md" for u in s["use_cases"]]
     for page in pages:
-        if not page.is_file() or target not in page.read_text():
+        if not page.is_file() or target not in page.read_text() or video not in page.read_text():
             problems.append(f"not listed in {page.relative_to(ROOT)}")
     style_page = ROOT / "styles" / s["slug"] / "README.md"
-    if not style_page.is_file() or f"# {s['name']}\n" not in style_page.read_text():
+    if not style_page.is_file() or f"# {s['name']}\n" not in style_page.read_text() \
+            or target not in style_page.read_text() or video not in style_page.read_text():
         problems.append("missing or stale styles/<slug>/README.md")
 
 
@@ -105,6 +109,10 @@ def derived_lines(slug):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--media", action="store_true", help="also probe local clips and check GIFs")
+    args = parser.parse_args()
+    media.load()
     require_original()
     failed = False
     for s in MANIFEST["styles"]:
@@ -116,10 +124,11 @@ def main():
             problems.append(f"unknown family {s.get('family')}")
         problems += [f"unknown use case {u}" for u in s.get("use_cases", [])
                      if u not in MANIFEST["use_cases"]]
-        if not (ROOT / "styles" / s["slug"] / "preview.gif").is_file():
+        if args.media and not (ROOT / "styles" / s["slug"] / "preview.gif").is_file():
             problems.append("missing preview.gif")
         check_shared_scripts(s, problems)
-        check_clip(s, problems)
+        if args.media:
+            check_clip(s, problems)
         check_pages(s, problems)
         if (n := derived_lines(s["slug"])) > 5:
             problems.append(f"{n} lines shared with the original catalog")

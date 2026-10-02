@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="surreal-loop.mp4"><img src="preview.gif" alt="Surreal Replication" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/surreal-loop.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/surreal-loop-preview.gif" alt="Surreal Replication" width="640"></a>
 
 **Feel:** Cloning sheep, kaleidoscopic infinite zoom  
 **Best for:** Hypnotic loops, playful titles and scroll-stopping social openers  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Cyriak
 
-▶ [Watch the clip](surreal-loop.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/surreal-loop.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

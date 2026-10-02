@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="dark-documentary.mp4"><img src="preview.gif" alt="Dark Documentary" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dark-documentary.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dark-documentary-preview.gif" alt="Dark Documentary" width="640"></a>
 
 **Feel:** Cold, quiet, redacted mystery  
 **Best for:** Unsolved mysteries, investigations, and slow-burn true stories  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by LEMMiNO
 
-▶ [Watch the clip](dark-documentary.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dark-documentary.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

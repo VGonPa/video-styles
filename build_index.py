@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import manifest
+import media
 
 ROOT = manifest.ROOT
 MANIFEST = manifest.load()
@@ -30,12 +31,14 @@ def gallery(styles, prefix):
         cells = []
         for s in styles[i:i + COLUMNS]:
             base = f"{prefix}styles/{s['slug']}"
+            video = media.url(s["slug"], "video")
+            preview = media.url(s["slug"], "preview")
             cells.append(
-                f'<td width="25%" align="center"><a href="{base}/{s["slug"]}.mp4">'
-                f'<img src="{base}/preview.gif" alt="{s["name"]}" width="100%"></a><br>'
+                f'<td width="25%" align="center"><a href="{video}">'
+                f'<img src="{preview}" alt="{s["name"]}" width="100%"></a><br>'
                 f'<b>{s["name"]}</b><br>'
                 + (f'<sub>{credits(s, prefix, "<br>")}</sub><br>' if s.get("credits") else "")
-                + f'<a href="{base}/{s["slug"]}.mp4">video</a> · <a href="{base}">source</a></td>')
+                + f'<a href="{video}">video</a> · <a href="{base}">source</a></td>')
         rows.append("<tr>\n" + "\n".join(cells) + "\n</tr>")
     return "<table>\n" + "\n".join(rows) + "\n</table>"
 
@@ -86,21 +89,21 @@ def write_style_page(s):
     if (folder / "build.sh").is_file():
         files.append("rebuild with `./build.sh`")
     lines = [f"# {s['name']}", "", "[← All styles](../../README.md)", "",
-             f'<a href="{s["slug"]}.mp4"><img src="preview.gif" alt="{s["name"]}" width="640"></a>', "",
+             f'<a href="{media.url(s["slug"], "video")}"><img src="{media.url(s["slug"], "preview")}" alt="{s["name"]}" width="640"></a>', "",
              f"**Feel:** {s['feel']}  ", f"**Best for:** {s['best_for']}  ",
              f"**Visual family:** {link('families', s['family'], '../../')}  ",
              f"**Use cases:** {uses}", ""]
     if s.get("credits"):
         lines += ["**Credits:** " + credits(s, "../../"), ""]
-    lines += [f"▶ [Watch the clip]({s['slug']}.mp4) · Source: " + " · ".join(files), ""]
+    lines += [f"▶ [Watch the clip]({media.url(s['slug'], 'video')}) · Source: " + " · ".join(files), ""]
     (folder / "README.md").write_text("\n".join(lines))
 
 
 def validate():
+    media.load()
     for s in MANIFEST["styles"]:
         assert s["family"] in MANIFEST["families"], s["slug"]
         assert all(u in MANIFEST["use_cases"] for u in s["use_cases"]), s["slug"]
-        assert (ROOT / "styles" / s["slug"] / "preview.gif").is_file(), s["slug"]
         for c in s.get("credits", []):
             assert {"role", "name"} <= c.keys() <= {"role", "name", "url"}, s["slug"]
 

@@ -1,5 +1,7 @@
 _catalog_build/
 catalog/*.mp4
+*.mp4
+*.gif
 **/_frames/
 **/out/
 **/__pycache__/

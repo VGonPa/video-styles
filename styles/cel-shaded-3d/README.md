@@ -2,11 +2,11 @@
 
 [← All styles](../../README.md)
 
-<a href="cel-shaded-3d.mp4"><img src="preview.gif" alt="Cel-Shaded 3D" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cel-shaded-3d.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cel-shaded-3d-preview.gif" alt="Cel-Shaded 3D" width="640"></a>
 
 **Feel:** Toon-shaded 3D with ink outlines  
 **Best for:** Playful 3D worlds, game-style stories and product scenes  
 **Visual family:** [Generative & 3D](../../categories/families/generative-3d.md)  
 **Use cases:** [Storytelling & Brand](../../categories/use-cases/story.md), [Product & Launches](../../categories/use-cases/product.md)
 
-▶ [Watch the clip](cel-shaded-3d.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cel-shaded-3d.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

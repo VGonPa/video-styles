@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="pointillism.mp4"><img src="preview.gif" alt="Pointillism" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pointillism.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pointillism-preview.gif" alt="Pointillism" width="640"></a>
 
 **Feel:** Sunlit park built from pure dots  
 **Best for:** Gentle stories, nostalgic scenes and painterly social posts  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Georges Seurat and Paul Signac
 
-▶ [Watch the clip](pointillism.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pointillism.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="office-strip.mp4"><img src="preview.gif" alt="Office Satire Strip" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/office-strip.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/office-strip-preview.gif" alt="Office Satire Strip" width="640"></a>
 
 **Feel:** Deadpan cubicle wit, flat ink  
 **Best for:** Workplace satire, buzzwords, and a dry final-panel punchline  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Dilbert (Scott Adams)
 
-▶ [Watch the clip](office-strip.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/office-strip.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

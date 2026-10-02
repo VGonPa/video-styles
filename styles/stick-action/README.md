@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="stick-action.mp4"><img src="preview.gif" alt="Stick-Figure Action" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-action.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-action-preview.gif" alt="Stick-Figure Action" width="640"></a>
 
 **Feel:** Snappy stick-figure fights on paper  
 **Best for:** Punchy social clips, rivalries, and playful action beats  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Alan Becker
 
-▶ [Watch the clip](stick-action.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-action.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

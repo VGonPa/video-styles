@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="storytime.mp4"><img src="preview.gif" alt="Storytime Animation" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/storytime.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/storytime-preview.gif" alt="Storytime Animation" width="640"></a>
 
 **Feel:** Expressive self-insert, deadpan inner thoughts  
 **Best for:** Personal anecdotes, embarrassing mishaps, and relatable confessions  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Jaiden Animations and TheOdd1sOut
 
-▶ [Watch the clip](storytime.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/storytime.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

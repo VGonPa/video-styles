@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="3blue1brown.mp4"><img src="preview.gif" alt="3Blue1Brown" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/3blue1brown.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/3blue1brown-preview.gif" alt="3Blue1Brown" width="640"></a>
 
 **Feel:** Manim-style math on black  
 **Best for:** Math intuition, visual proofs, and step-by-step derivations  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by <a href="https://www.3blue1brown.com">3Blue1Brown (Grant Sanderson)</a>
 
-▶ [Watch the clip](3blue1brown.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/3blue1brown.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

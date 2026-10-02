@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="dither-1bit.mp4"><img src="preview.gif" alt="1-Bit Dither" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dither-1bit.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dither-1bit-preview.gif" alt="1-Bit Dither" width="640"></a>
 
 **Feel:** Two inks, ordered dither, stormy night  
 **Best for:** Moody stories, mysteries and atmospheric title cards  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Return of the Obra Dinn (Lucas Pope)
 
-▶ [Watch the clip](dither-1bit.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dither-1bit.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

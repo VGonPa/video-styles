@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="stick-webcomic.mp4"><img src="preview.gif" alt="Stick-Figure Webcomic" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-webcomic.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-webcomic-preview.gif" alt="Stick-Figure Webcomic" width="640"></a>
 
 **Feel:** Dry nerdy wit in black ink  
 **Best for:** Wry explainers, tradeoffs, and charts with a punchline  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by <a href="https://xkcd.com">xkcd (Randall Munroe)</a>
 
-▶ [Watch the clip](stick-webcomic.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-webcomic.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`

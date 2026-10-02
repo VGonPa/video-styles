@@ -2,7 +2,7 @@
 
 [← All styles](../../README.md)
 
-<a href="clear-line.mp4"><img src="preview.gif" alt="Clear-Line Comic" width="640"></a>
+<a href="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clear-line.mp4"><img src="https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clear-line-preview.gif" alt="Clear-Line Comic" width="640"></a>
 
 **Feel:** Clean ink, flat colour, adventure  
 **Best for:** Journeys, places, and stories told panel by panel  
@@ -11,4 +11,4 @@
 
 **Credits:** Inspired by Hergé's ligne claire
 
-▶ [Watch the clip](clear-line.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
+▶ [Watch the clip](https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clear-line.mp4) · Source: [`anim.html`](anim.html) · rebuild with `./build.sh`
