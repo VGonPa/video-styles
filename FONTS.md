@@ -68,6 +68,8 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | KaTeX_Math | MIT ([KaTeX fonts](https://github.com/KaTeX/katex-fonts/blob/master/LICENSE)) | [3blue1brown](styles/3blue1brown) |
 | [Lato](https://fonts.google.com/specimen/Lato) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [flat-design](styles/flat-design) |
 | [Libre Baskerville](https://fonts.google.com/specimen/Libre+Baskerville) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [single-panel-absurd](styles/single-panel-absurd) |
+| [Libre Caslon Display](https://fonts.google.com/specimen/Libre+Caslon+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [classical-collage](styles/classical-collage) |
+| [Libre Caslon Text](https://fonts.google.com/specimen/Libre+Caslon+Text) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [classical-collage](styles/classical-collage) |
 | [Libre Franklin](https://fonts.google.com/specimen/Libre+Franklin) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [data-visualization](styles/data-visualization) |
 | [Lilita One](https://fonts.google.com/specimen/Lilita+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [cel-shaded-3d](styles/cel-shaded-3d), [clear-line](styles/clear-line) |
 | [Limelight](https://fonts.google.com/specimen/Limelight) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-deco](styles/art-deco) |
@@ -176,6 +178,8 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Kalam**: Copyright (c) 2014 Indian Type Foundry (info@indiantypefoundry.com)
 - **Lato**: Copyright (c) 2011-2015 by tyPoland Lukasz Dziedzic (http://www.typoland.com/) with Reserved Font Name "Lato". Licensed under the SIL Open Font License, Version 1.1 (http://scripts.sil.org/OFL).
 - **Libre Baskerville**: Copyright 2012 The Libre Baskerville Project Authors (https://github.com/impallari/Libre-Baskerville)
+- **Libre Caslon Display**: Copyright 2012 The Libre Caslon Display Authors (https://github.com/impallari/Libre-Caslon-Display)
+- **Libre Caslon Text**: Copyright 2012 The Libre Caslon Text Project Authors (https://github.com/impallari/Libre-Caslon-Text)
 - **Libre Franklin**: Copyright 2020 The Libre Franklin Project Authors (https://github.com/googlefonts/Libre-Franklin)
 - **Lilita One**: Copyright (c) 2011 Juan Montoreano (juan@remolacha.biz), with Reserved Font Names "Lilita One"
 - **Limelight**: Copyright (c) 2010 by Sorkin Type Co (eben@eyebytes.com) with Reserved Font Name Limelight. This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL

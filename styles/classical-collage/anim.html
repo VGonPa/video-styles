@@ -1,0 +1,1232 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#fff;overflow:hidden}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+'use strict';
+// Classical Collage: a fast white-field collage of engraved plates. A black Caslon question mark pops in,
+// melts into "Stars." through a signed-distance morph (its dot slides off as the terracotta period), a
+// planisphere pops small then big and the camera punches into a ringed star; "Bones." comes with a skull in
+// side view, "Lines." with a compass-and-square construction of a capital C that fills with ink; six
+// cut-outs land on eighth notes, the camera dives into the engraved rhombicuboctahedron, the engraving
+// dissolves into a plaster solid that turns and settles beside "Form.", and the word melts into the title
+// while the solid shrinks into the lockup mark. Every plate is drawn here from seeded numbers as swelling
+// engraver's hatching; frames depend only on t.
+const W = 1920, H = 1080, DUR = 10.08;
+const INK = '#111111', TERRA = '#C0552F';
+const DISPLAY = '"Libre Caslon Display"', ITALIC = '"Libre Caslon Text"';
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d', { alpha: false });
+
+/* ------------------------------------------------------------ numbers */
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let z = Math.imul(a ^ (a >>> 15), 1 | a);
+    z = (z + Math.imul(z ^ (z >>> 7), 61 | z)) ^ z;
+    return ((z ^ (z >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const fit = (v, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
+const prog = (t, a, b) => fit((t - a) / (b - a));
+const mixv = (a, b, k) => a + (b - a) * k;
+const smooth = k => (k = fit(k), k * k * (3 - 2 * k));
+const inOut = k => (k = fit(k), k < 0.5 ? 4 * k * k * k : 1 - Math.pow(2 - 2 * k, 3) / 2);
+const outCub = k => 1 - Math.pow(1 - fit(k), 3);
+const inCub = k => Math.pow(fit(k), 3);
+const backOut = (k, o = 1.7) => { k = fit(k) - 1; return 1 + k * k * ((o + 1) * k + o); };
+const rad = d => d * Math.PI / 180;
+function mk(w, h) { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
+
+// Catmull-Rom through control points, returned as a dense polyline.
+function spline(pts, closed, per = 10) {
+  const n = pts.length, out = [];
+  const at = i => closed ? pts[(i + n) % n] : pts[Math.max(0, Math.min(n - 1, i))];
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const a = at(i - 1), b = at(i), c = at(i + 1), d = at(i + 2);
+    for (let j = 0; j < per; j++) {
+      const s = j / per, s2 = s * s, s3 = s2 * s;
+      out.push([0, 1].map(q => 0.5 * (2 * b[q] + (c[q] - a[q]) * s + (2 * a[q] - 5 * b[q] + 4 * c[q] - d[q]) * s2 + (3 * b[q] - a[q] - 3 * c[q] + d[q]) * s3)));
+    }
+  }
+  if (!closed) out.push(pts[n - 1].slice());
+  return out;
+}
+function polyPath(pts, closed = true, P = new Path2D()) {
+  pts.forEach(([x, y], i) => (i ? P.lineTo(x, y) : P.moveTo(x, y)));
+  if (closed) P.closePath();
+  return P;
+}
+// Outline pushed outward by m (vertex normals), for the paper margin of a cut-out.
+function grow(pts, m) {
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; area += a[0] * b[1] - b[0] * a[1]; }
+  const sg = area > 0 ? 1 : -1, n = pts.length;
+  return pts.map((p, i) => {
+    const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n];
+    const tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty) || 1;
+    return [p[0] + sg * ty / l * m, p[1] - sg * tx / l * m];
+  });
+}
+function hull(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const q of p) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.slice().reverse()) { while (up.length > 1 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+
+/* ------------------------------------------------------------ distance fields */
+// Felzenszwalb-Huttenlocher squared distance transform of one row or column, in place.
+function edt1(g, off, step, n, f, v, z) {
+  for (let i = 0; i < n; i++) f[i] = g[off + i * step];
+  let k = 0; v[0] = 0; z[0] = -1e20; z[1] = 1e20;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+    k++; v[k] = q; z[k] = s; z[k + 1] = 1e20;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1] < q) k++;
+    const r = q - v[k];
+    g[off + q * step] = r * r + f[v[k]];
+  }
+}
+function edt(g, w, h) {
+  const n = Math.max(w, h), f = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+  for (let x = 0; x < w; x++) edt1(g, x, w, h, f, v, z);
+  for (let y = 0; y < h; y++) edt1(g, y * w, 1, w, f, v, z);
+}
+// Signed distance from coverage (0..1): positive outside, negative inside, sub-pixel from the antialiasing.
+function signedField(a, w, h) {
+  const out = new Float64Array(w * h), inn = new Float64Array(w * h), res = new Float32Array(w * h);
+  for (let i = 0; i < a.length; i++) {
+    const c = a[i];
+    out[i] = c >= 0.999 ? 0 : c <= 0.001 ? 1e20 : Math.max(0, 0.5 - c) ** 2;
+    inn[i] = c <= 0.001 ? 0 : c >= 0.999 ? 1e20 : Math.max(0, c - 0.5) ** 2;
+  }
+  edt(out, w, h); edt(inn, w, h);
+  for (let i = 0; i < res.length; i++) res[i] = Math.sqrt(out[i]) - Math.sqrt(inn[i]);
+  return res;
+}
+// A raster in plate units (1 px per unit) with bilinear lookups.
+class Grid {
+  constructor(w, h, x0, y0, a) { this.w = w; this.h = h; this.x0 = x0; this.y0 = y0; this.a = a; }
+  at(x, y) {
+    let u = x - this.x0, v = y - this.y0;
+    if (u < 0 || v < 0 || u > this.w - 1.001 || v > this.h - 1.001) return 0;
+    const i = u | 0, j = v | 0, fx = u - i, fy = v - j, k = j * this.w + i, a = this.a;
+    return (a[k] * (1 - fx) + a[k + 1] * fx) * (1 - fy) + (a[k + this.w] * (1 - fx) + a[k + this.w + 1] * fx) * fy;
+  }
+}
+function raster(w, h, x0, y0, paint, blur = 0) {
+  const c = mk(w, h).getContext('2d', { willReadFrequently: true });
+  if (blur) c.filter = `blur(${blur}px)`;
+  c.translate(-x0, -y0); c.fillStyle = '#fff'; c.strokeStyle = '#fff';
+  paint(c);
+  const d = c.getImageData(0, 0, w, h).data, a = new Float32Array(w * h);
+  for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3] / 255;
+  return new Grid(w, h, x0, y0, a);
+}
+// Depth inside a mask (distance to its outline, 0 outside).
+function depth(g) {
+  const f = signedField(g.a, g.w, g.h), a = new Float32Array(f.length);
+  for (let i = 0; i < f.length; i++) a[i] = f[i] < 0 ? -f[i] : 0;
+  return new Grid(g.w, g.h, g.x0, g.y0, a);
+}
+const LIGHT = (() => { const v = [-0.55, -0.62, 0.56], l = Math.hypot(...v); return v.map(q => q / l); })();
+// Lambert on a dome raised over a mask: the surface tilts outward toward the outline, lit from the upper left.
+function lit(D, x, y, R) {
+  const d = D.at(x, y);
+  if (d <= 0) return LIGHT[2];
+  const gx = (D.at(x + 1.5, y) - D.at(x - 1.5, y)) / 3, gy = (D.at(x, y + 1.5) - D.at(x, y - 1.5)) / 3;
+  const q = Math.min(d / R, 1), sl = q >= 1 ? 0 : (1 - q) / Math.sqrt(Math.max(2e-3, 1 - (1 - q) * (1 - q)));
+  const nx = -sl * gx, ny = -sl * gy, l = Math.hypot(nx, ny, 1);
+  return Math.max(0, (nx * LIGHT[0] + ny * LIGHT[1] + LIGHT[2]) / l);
+}
+
+/* ------------------------------------------------------------ engraving kit */
+// One colour of line work kept as chunked Path2D: very long paths get slow to build and fill.
+class Ink {
+  constructor(fill, color, width = 1, dash = null) { this.fill = fill; this.color = color; this.width = width; this.dash = dash; this.paths = [new Path2D()]; this.n = 0; }
+  next() { if (++this.n > 1000) { this.paths.push(new Path2D()); this.n = 1; } return this.paths[this.paths.length - 1]; }
+  paint(c) {
+    if (this.fill) { c.fillStyle = this.color; for (const p of this.paths) c.fill(p); return; }
+    c.strokeStyle = this.color; c.lineWidth = this.width; c.lineCap = 'round'; c.lineJoin = 'round';
+    if (this.dash) c.setLineDash(this.dash);
+    for (const p of this.paths) c.stroke(p);
+    if (this.dash) c.setLineDash([]);
+  }
+}
+class Plate {
+  // w, h: the box in plate units around (ox, oy); ref: the plate dimension that the on-screen size refers to.
+  constructor(w, h, ref, ox = 0, oy = 0, margin = 16) { Object.assign(this, { w, h, ref, ox, oy, margin }); this.inks = []; this.labels = []; this.sil = new Path2D(); }
+  fill(color = INK) { const k = new Ink(true, color); this.inks.push(k); return k; }
+  line(width, color = INK, dash = null) { const k = new Ink(false, color, width, dash); this.inks.push(k); return k; }
+  paint(c) {
+    c.save(); c.translate(-this.ox, -this.oy);
+    for (const k of this.inks) k.paint(c);
+    c.fillStyle = INK; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (const l of this.labels) {
+      c.save(); c.translate(l.x, l.y); c.rotate(l.rot || 0); c.font = l.font; c.letterSpacing = l.ls || '0px';
+      if (l.halo) { c.strokeStyle = '#fff'; c.lineWidth = l.halo; c.lineJoin = 'round'; c.strokeText(l.text, 0, 0); }
+      c.fillText(l.text, 0, 0); c.restore();
+    }
+    c.restore();
+  }
+  bake(bs) {
+    this.bs = bs;
+    const paper = c => { c.translate(-this.ox, -this.oy); c.fillStyle = '#fff'; c.strokeStyle = '#fff'; c.lineJoin = 'round'; c.lineWidth = this.margin * 2; c.fill(this.sil); c.stroke(this.sil); };
+    this.cut = mk(this.w * bs, this.h * bs);
+    let c = this.cut.getContext('2d'); c.setTransform(bs, 0, 0, bs, this.w * bs / 2, this.h * bs / 2); paper(c);
+    this.bmp = mk(this.w * bs, this.h * bs);
+    c = this.bmp.getContext('2d'); c.setTransform(bs, 0, 0, bs, this.w * bs / 2, this.h * bs / 2); c.save(); paper(c); c.restore(); this.paint(c);
+  }
+}
+// A filled stroke whose width follows ws: the engraver's swelling line.
+function ribbon(ink, pts, ws) {
+  const n = pts.length;
+  if (n < 2) return;
+  const L = [], R = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    const tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty) || 1, h = ws[i] / 2;
+    L.push(pts[i][0] - ty / l * h, pts[i][1] + tx / l * h); R.push(pts[i][0] + ty / l * h, pts[i][1] - tx / l * h);
+  }
+  const P = ink.next();
+  P.moveTo(L[0], L[1]);
+  for (let i = 2; i < L.length; i += 2) P.lineTo(L[i], L[i + 1]);
+  for (let i = R.length - 2; i >= 0; i -= 2) P.lineTo(R[i], R[i + 1]);
+  P.closePath();
+}
+// Hatching: lines v = const of a map (u, v) -> point, each swelling with width(x, y) and broken where it is 0.
+function hatch(ink, o) {
+  const rnd = mulberry(o.seed || 7), min = o.min ?? 0.3;
+  for (let v = o.v0; v <= o.v1; v += o.gap) {
+    const vj = v + (rnd() - 0.5) * o.gap * (o.jit ?? 0.12);
+    let run = [], ws = [];
+    const flush = () => {
+      const m = run.length;
+      if (m >= 3) { ws[0] *= 0.2; ws[m - 1] *= 0.2; ws[1] *= 0.6; ws[m - 2] *= 0.6; ribbon(ink, run, ws); }
+      run = []; ws = [];
+    };
+    const [u0, u1] = o.span ? o.span(vj) : [o.u0, o.u1];
+    for (let u = u0; u <= u1;) {
+      const q = o.map(u, vj), w = o.width(q[0], q[1]);
+      if (w > min) { run.push(q); ws.push(w); } else flush();
+      u += typeof o.du === 'function' ? o.du(u, vj) : o.du;
+    }
+    flush();
+  }
+}
+const straight = (deg, cx, cy) => { const c = Math.cos(rad(deg)), s = Math.sin(rad(deg)); return (u, v) => [cx + u * c - v * s, cy + u * s + v * c]; };
+function stipple(ink, o) {
+  const rnd = mulberry(o.seed || 3);
+  for (let i = 0; i < o.n; i++) {
+    const x = mixv(o.x0, o.x1, rnd()), y = mixv(o.y0, o.y1, rnd()), p = o.density(x, y);
+    if (p > 0 && rnd() < p) { const r = o.r * (0.6 + 0.7 * rnd()), P = ink.next(); P.moveTo(x + r, y); P.arc(x, y, r, 0, Math.PI * 2); }
+  }
+}
+// Outline as a ribbon, heavier on the side turned away from the light.
+function contour(ink, pts, closed, w0, w1) {
+  const n = pts.length, ws = [];
+  let area = 0;
+  for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+  const sg = area > 0 ? 1 : -1;
+  for (let i = 0; i < n; i++) {
+    const a = pts[closed ? (i - 1 + n) % n : Math.max(0, i - 1)], b = pts[closed ? (i + 1) % n : Math.min(n - 1, i + 1)];
+    const tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty) || 1;
+    const nx = sg * ty / l, ny = -sg * tx / l;
+    ws.push(w0 + (w1 - w0) * fit(0.5 + 0.7 * (nx * 0.62 + ny * 0.78)));
+  }
+  ribbon(ink, closed ? pts.concat([pts[0], pts[1]]) : pts, closed ? ws.concat([ws[0], ws[1]]) : ws);
+}
+// A closed outline drawn only where hide(x, y) is false (the part behind another bone stays hidden).
+function clipped(ink, pts, w0, w1, hide) {
+  const n = pts.length;
+  let start = 0;
+  while (start < n && hide(...pts[start])) start++;
+  if (start === n) return;
+  let run = [];
+  for (let i = 0; i <= n; i++) {
+    const p = pts[(start + i) % n];
+    if (!hide(...p)) run.push(p);
+    else { if (run.length > 1) contour(ink, run, false, w0, w1); run = []; }
+  }
+  if (run.length > 1) contour(ink, run, false, w0, w1);
+}
+// A serrated suture line along a curve.
+function suture(ink, pts, amp, seed) {
+  const rnd = mulberry(seed), out = [];
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    for (let s = 0; s < l; s += 5) {
+      const k = s / l, x = mixv(a[0], b[0], k), y = mixv(a[1], b[1], k);
+      const side = (Math.floor(acc / 5) % 2 ? 1 : -1) * amp * (0.4 + 0.8 * rnd());
+      out.push([x - (b[1] - a[1]) / l * side, y + (b[0] - a[0]) / l * side]); acc += 5;
+    }
+  }
+  const P = ink.next();
+  out.forEach(([x, y], i) => (i ? P.lineTo(x, y) : P.moveTo(x, y)));
+}
+function inPoly(pts, x, y) {
+  let c = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], b = pts[j];
+    if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+  }
+  return c;
+}
+const fillPts = (...sets) => c => { c.beginPath(); for (const s of sets) polyPath(s, true, c); c.fill(); };
+
+/* ------------------------------------------------------------ plate 1: the planisphere */
+const CH = {};
+function buildChart() {
+  const pl = new Plate(2140, 2140, 2000, 0, 0, 34);
+  pl.sil = new Path2D(); pl.sil.arc(0, 0, 1000, 0, Math.PI * 2);
+  const heavy = pl.line(10), mid = pl.line(4.4), fine = pl.line(2.6), grat = pl.line(2.4, INK, [16, 12]);
+  const milky = pl.fill(), band = pl.fill(), halo = pl.fill('#fff'), stars = pl.fill();
+  const circle = (ink, r, cx = 0, cy = 0) => { const P = ink.next(); P.moveTo(cx + r, cy); P.arc(cx, cy, r, 0, Math.PI * 2); };
+  circle(heavy, 1000); circle(mid, 982); circle(mid, 930); circle(mid, 842);
+  for (let d = 0; d < 360; d++) {
+    const r1 = d % 10 === 0 ? 940 : d % 5 === 0 ? 952 : 966, a = rad(d), P = (d % 5 ? fine : mid).next();
+    P.moveTo(982 * Math.cos(a), 982 * Math.sin(a)); P.lineTo(r1 * Math.cos(a), r1 * Math.sin(a));
+  }
+  const ROMAN = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
+  ROMAN.forEach((s, i) => {
+    const a = rad(-90 + i * 30 + 15);
+    pl.labels.push({ text: s, x: 886 * Math.cos(a), y: 886 * Math.sin(a), rot: a + Math.PI / 2, font: `400 54px ${DISPLAY}`, ls: '4px' });
+  });
+  for (let i = 0; i < 12; i++) { const a = rad(-90 + i * 30), P = fine.next(); P.moveTo(60 * Math.cos(a), 60 * Math.sin(a)); P.lineTo(842 * Math.cos(a), 842 * Math.sin(a)); }
+  for (const r of [210, 420, 630]) circle(grat, r);
+  { const P = mid.next(); P.moveTo(-26, 0); P.lineTo(26, 0); P.moveTo(0, -26); P.lineTo(0, 26); }
+  // the ecliptic: an off-centre band of alternating filled steps, clipped to the dial
+  const EC = [0, -170, 556, 570];
+  for (let d = 0; d < 360; d += 4) {
+    const pts = [];
+    for (let s = 0; s <= 4; s++) { const a = rad(d + s); pts.push([EC[0] + EC[2] * Math.cos(a), EC[1] + EC[2] * Math.sin(a)]); }
+    for (let s = 4; s >= 0; s--) { const a = rad(d + s); pts.push([EC[0] + EC[3] * Math.cos(a), EC[1] + EC[3] * Math.sin(a)]); }
+    if (pts.some(p => Math.hypot(...p) > 830)) continue;
+    if ((d / 4) % 2 === 0) polyPath(pts, true, band.next());
+    else { const P = fine.next(); polyPath(pts, true, P); }
+  }
+  // the Milky Way: a stippled band
+  stipple(milky, { seed: 11, n: 26000, x0: -840, x1: 840, y0: -840, y1: 840, r: 2.6,
+    density: (x, y) => { if (Math.hypot(x, y) > 830) return 0; const c = -250 + 90 * Math.sin(y / 380), q = (x - c) / 150; return 0.42 * Math.exp(-q * q); } });
+  // constellations: [x, y, magnitude]
+  const S = {
+    betel: [-70, -250, 0.5], bella: [130, -230, 1.6], meissa: [25, -340, 3.4], alnitak: [-10, -40, 1.8], alnilam: [40, -25, 1.7],
+    mintaka: [90, -10, 2.2], saiph: [-40, 150, 2.1], rigel: [170, 130, 0.2], sw1: [25, 45, 4.2], sw2: [30, 75, 2.9], sw3: [36, 105, 4.3],
+    sh1: [250, -260, 4.1], sh2: [272, -200, 3.7], sh3: [280, -140, 4.0], sh4: [266, -80, 4.2], club1: [-160, -330, 4.2], club2: [-190, -400, 4.4],
+    sirius: [-380, 200, -1.4], mirzam: [-290, 170, 2.0], muli: [-430, 120, 4.1], cmd: [-440, 290, 3.0], wezen: [-450, 380, 1.8],
+    adhara: [-400, 470, 1.5], aludra: [-545, 430, 2.4], cm2: [-340, 320, 4.0],
+    arneb: [60, 300, 2.6], nihal: [10, 360, 2.8], le1: [150, 272, 3.3], le2: [215, 300, 4.3], le3: [-70, 330, 3.6], le4: [-40, 425, 3.8], le5: [125, 400, 3.3],
+    er1: [240, 100, 2.8], er2: [310, 50, 3.2], er3: [390, 110, 3.5], er4: [460, 50, 3.9], er5: [530, 130, 3.0], er6: [580, 230, 3.7],
+    er7: [540, 330, 3.8], er8: [600, 420, 3.6], er9: [560, 520, 3.3], er10: [480, 590, 4.0],
+    menkar: [380, -420, 2.5], ce1: [460, -470, 3.5], ce2: [430, -540, 4.0], ce3: [360, -500, 4.3], ce4: [520, -380, 3.6],
+    ce5: [620, -330, 3.7], diphda: [700, -400, 2.0], ce6: [660, -250, 3.6], ce7: [560, -260, 3.9],
+  };
+  const links = [['meissa', 'betel'], ['meissa', 'bella'], ['betel', 'alnitak'], ['bella', 'mintaka'], ['alnitak', 'alnilam'], ['alnilam', 'mintaka'],
+    ['alnitak', 'saiph'], ['mintaka', 'rigel'], ['bella', 'sh1'], ['sh1', 'sh2'], ['sh2', 'sh3'], ['sh3', 'sh4'], ['betel', 'club1'], ['club1', 'club2'],
+    ['muli', 'sirius'], ['sirius', 'mirzam'], ['sirius', 'cmd'], ['cmd', 'wezen'], ['wezen', 'adhara'], ['wezen', 'aludra'],
+    ['le2', 'le1'], ['le1', 'arneb'], ['arneb', 'nihal'], ['nihal', 'le3'], ['nihal', 'le4'], ['arneb', 'le5'],
+    ['rigel', 'er1'], ['er1', 'er2'], ['er2', 'er3'], ['er3', 'er4'], ['er4', 'er5'], ['er5', 'er6'], ['er6', 'er7'], ['er7', 'er8'], ['er8', 'er9'], ['er9', 'er10'],
+    ['menkar', 'ce1'], ['ce1', 'ce2'], ['ce2', 'ce3'], ['ce3', 'menkar'], ['menkar', 'ce4'], ['ce4', 'ce5'], ['ce5', 'diphda'], ['ce5', 'ce6'], ['ce6', 'ce7'], ['ce7', 'ce4']];
+  const all = Object.values(S).map(s => s.slice());
+  const LABELS = [['ORION', -210, -130], ['CANIS MAIOR', -290, 610], ['LEPUS', 70, 495], ['ERIDANUS', 360, 255], ['CETUS', 560, -165]];
+  const rnd = mulberry(5);
+  while (all.length < 124) {
+    const a = rnd() * Math.PI * 2, r = 800 * Math.sqrt(rnd()), x = r * Math.cos(a), y = r * Math.sin(a);
+    if (all.some(s => Math.hypot(s[0] - x, s[1] - y) < 48)) continue;
+    if (LABELS.some(([t, lx, ly]) => Math.abs(x - lx) < t.length * 24 + 20 && Math.abs(y - ly) < 40)) continue;
+    all.push([x, y, 3.9 + 1.7 * rnd() * rnd() + (rnd() < 0.08 ? -1.4 : 0)]);
+  }
+  const size = m => (m > 4.6 ? 6 + (5.6 - m) * 3 : 13 + (4.6 - m) * 7.4);
+  for (const [x, y, m] of all) {
+    const r = size(m);
+    { const P = halo.next(); P.moveTo(x + r * 1.15 + 6, y); P.arc(x, y, r * 1.15 + 6, 0, Math.PI * 2); }
+    const P = stars.next();
+    if (m > 4.6) { P.moveTo(x + r, y); P.arc(x, y, r, 0, Math.PI * 2); continue; }
+    const k = m < 1 ? 8 : 6, rot = rad(-90) + (x * 0.01) % 0.3;
+    for (let i = 0; i < k * 2; i++) {
+      const a = rot + i * Math.PI / k, rr = i % 2 ? r * 0.3 : (k === 8 && (i / 2) % 2 ? r * 0.62 : r);
+      i ? P.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)) : P.moveTo(x + rr * Math.cos(a), y + rr * Math.sin(a));
+    }
+    P.closePath();
+  }
+  const mc = mk(8, 8).getContext('2d'); mc.font = `400 40px ${DISPLAY}`; mc.letterSpacing = '12px';
+  CH.boxes = [];
+  for (const [t, x, y] of LABELS) {
+    pl.labels.push({ text: t, x, y, font: `400 40px ${DISPLAY}`, ls: '12px', halo: 14 });
+    const w = mc.measureText(t).width;
+    CH.boxes.push([x - w / 2 - 16, y - 34, x + w / 2 + 16, y + 34]);
+  }
+  CH.links = links.map(([a, b]) => {
+    const A = S[a], B = S[b], d = Math.hypot(B[0] - A[0], B[1] - A[1]), ga = size(A[2]) * 1.2 + 8, gb = size(B[2]) * 1.2 + 8;
+    return [A[0] + (B[0] - A[0]) * ga / d, A[1] + (B[1] - A[1]) * ga / d, B[0] - (B[0] - A[0]) * gb / d, B[1] - (B[1] - A[1]) * gb / d];
+  });
+  CH.star = S.sirius;
+  pl.bake(0.9);
+  return pl;
+}
+
+/* ------------------------------------------------------------ plate 2: the skull, side view */
+// gm scales the hatch pitch and line weights: the hero plate is fine, the small copy (pop-in, collage) coarser so
+// its lines stay ≥ 3.5 px apart on screen instead of beating into moiré.
+function buildSkull(gm = 1, bs = 1.9) {
+  const pl = new Plate(1100, 1000, 900, 525, 445, 16);
+  const cran = spline([[168, 352], [150, 318], [156, 262], [184, 196], [234, 132], [304, 82], [396, 48], [500, 36], [604, 44], [702, 74],
+    [788, 126], [854, 196], [900, 278], [924, 362], [922, 444], [902, 508], [878, 548], [840, 572], [806, 588], [786, 604], [776, 626],
+    [760, 646], [738, 644], [722, 622], [706, 604], [660, 608], [580, 640], [494, 648], [466, 618], [400, 604], [345, 596], [250, 592], [134, 590],
+    [126, 562], [112, 530], [106, 500], [110, 472], [118, 452], [134, 412], [156, 380]], true, 8);
+  // a shallow jaw: body about as deep as the teeth are long plus a little, a broad ramus with notch, coronoid and condyle
+  const mand = spline([[140, 652], [136, 690], [144, 728], [160, 758], [196, 778], [300, 778], [420, 766], [530, 750], [588, 742], [624, 720],
+    [632, 680], [638, 630], [644, 590], [652, 562], [670, 542], [656, 522], [630, 528], [598, 566], [572, 548], [554, 506], [536, 528],
+    [508, 590], [480, 640], [446, 660], [340, 664], [240, 660], [152, 654]], true, 8);
+  const orbit = spline([[180, 362], [214, 340], [262, 344], [298, 368], [308, 410], [292, 446], [250, 458], [208, 450], [182, 422], [174, 392]], true, 8);
+  // the cheekbone under the orbit and the arch running back to the ear
+  const zyg = spline([[232, 458], [270, 452], [306, 448], [336, 462], [420, 470], [520, 472], [600, 478], [640, 490], [632, 512], [560, 506],
+    [460, 504], [384, 508], [348, 534], [304, 552], [262, 546], [238, 516]], true, 8);
+  const nasal = spline([[122, 456], [146, 472], [156, 494], [140, 514], [118, 524], [112, 500], [114, 474]], true, 8);
+  const ear = []; for (let i = 0; i < 40; i++) { const q = i / 40 * Math.PI * 2; ear.push([704 + 19 * Math.cos(q), 500 + 24 * Math.sin(q)]); }
+  const archShadow = [[352, 510], [640, 510], [622, 540], [560, 556], [420, 562], [356, 550]];
+  const gap = [[372, 514], [636, 514], [650, 556], [610, 600], [480, 620], [400, 600], [372, 570]];
+  const fossa = [[296, 350], [324, 252], [418, 172], [560, 142], [700, 172], [800, 252], [840, 362], [822, 462], [760, 522], [640, 490], [420, 470], [334, 462], [300, 446]];
+  const R = (paint, blur) => raster(1000, 900, 0, 0, paint, blur);
+  const mC = R(fillPts(cran)), mM = R(fillPts(mand)), mO = R(fillPts(orbit)), mZ = R(fillPts(zyg)), mN = R(fillPts(nasal)), mE = R(fillPts(ear));
+  const sArch = R(fillPts(archShadow), 10), sGap = R(fillPts(gap), 10), mF = R(fillPts(fossa), 10);
+  const rim = R(c => { c.beginPath(); c.arc(704, 500, 44, 0, Math.PI * 2); c.fill(); }, 10);
+  const maxLit = R(c => { c.beginPath(); c.ellipse(300, 548, 170, 46, 0.05, 0, Math.PI * 2); c.fill(); }, 22);
+  const dC = depth(mC), dM = depth(mM), dZ = depth(mZ);
+  const ramus = (x, y) => x > 470 && y < 700;
+  const tone = (x, y) => {
+    const inO = mO.at(x, y) > 0.5, inZ = mZ.at(x, y) > 0.5 && !inO, inM = mM.at(x, y) > 0.5 && !inZ;
+    if (!inM && mC.at(x, y) < 0.5) return -1;
+    let t;
+    if (inZ) t = 0.86 - 1.2 * lit(dZ, x, y, 26);
+    else if (inM) {
+      t = 0.98 - 1.25 * lit(dM, x, y, 60);
+      if (ramus(x, y)) t += 0.26 + 0.12 * fit((y - 560) / 120);   // the ramus turns away from the light
+    } else {
+      t = 1.0 - 1.22 * lit(dC, x, y, 330);
+      t += 0.14 * mF.at(x, y) + 0.2 * sArch.at(x, y) + 0.26 * sGap.at(x, y) - 0.4 * rim.at(x, y) - 0.24 * maxLit.at(x, y);
+      const o = mO.at(x, y);
+      if (o > 0) t = mixv(t, 1.08 - 0.5 * smooth(((x - 240) / 70) * 0.5 + ((y - 400) / 60) * 0.7), o);
+      const n = mN.at(x, y);
+      if (n > 0) t = mixv(t, 1.0 - 0.35 * smooth((x - 108) / 50), n);
+    }
+    return fit(t, 0, 1.2);
+  };
+  const H1 = pl.fill(), H2 = pl.fill(), H3 = pl.fill(), DOTS = pl.fill(), MOUTH = pl.fill(), WHITE = pl.fill('#fff'), TSH = pl.fill(), OUT = pl.fill(), SUT = pl.line(1.6 * gm),
+    TEETH = pl.line(1.2 * gm), FAINT = pl.line(1.3 * gm, INK, [5, 7]);
+  const inCran = (x, y) => mC.at(x, y) > 0.5 && (mM.at(x, y) < 0.5 || mZ.at(x, y) > 0.5);
+  // contour hatching round the vault crossed by its meridians, straight hatching along the jaw, upright on the ramus
+  hatch(H1, { seed: 21, map: (u, v) => [560 + v * Math.cos(u / v), 760 + v * Math.sin(u / v)], v0: 120, v1: 760, gap: 6.4 * gm,
+    span: v => [-Math.PI * v, Math.PI * v], du: 3.2, width: (x, y) => (inCran(x, y) ? 4.3 * gm * fit((tone(x, y) - 0.2) / 0.75) : 0) });
+  hatch(H1, { seed: 22, map: straight(-11, 400, 740), u0: -420, u1: 420, v0: -330, v1: 160, gap: 5.8 * gm, du: 3,
+    width: (x, y) => (mM.at(x, y) > 0.5 && !ramus(x, y) ? 4.0 * gm * fit((tone(x, y) - 0.18) / 0.75) : 0) });
+  hatch(H1, { seed: 27, map: straight(80, 580, 620), u0: -260, u1: 260, v0: -200, v1: 200, gap: 5.6 * gm, du: 3,
+    width: (x, y) => (mM.at(x, y) > 0.5 && mZ.at(x, y) < 0.5 && ramus(x, y) ? 3.8 * gm * fit((tone(x, y) - 0.16) / 0.75) : 0) });
+  hatch(H2, { seed: 23, map: (u, v) => [560 + u * Math.cos(v), 760 + u * Math.sin(v)], u0: 110, u1: 820, v0: -Math.PI, v1: 0.2, gap: 0.0165 * gm, du: 3, jit: 0.3,
+    width: (x, y) => (inCran(x, y) ? 3.4 * gm * fit((tone(x, y) - 0.52) / 0.45) : 0) });
+  hatch(H2, { seed: 26, map: straight(62, 400, 740), u0: -420, u1: 420, v0: -330, v1: 330, gap: 6.6 * gm, du: 3,
+    width: (x, y) => (mM.at(x, y) > 0.5 && mZ.at(x, y) < 0.5 ? 3.2 * gm * fit((tone(x, y) - 0.55) / 0.42) : 0) });
+  hatch(H3, { seed: 24, map: straight(-50, 520, 450), u0: -700, u1: 700, v0: -700, v1: 700, gap: 7.6 * gm, du: 3,
+    width: (x, y) => { const t = tone(x, y); return t < 0 ? 0 : 3.2 * gm * fit((t - 0.8) / 0.3); } });
+  stipple(DOTS, { seed: 25, n: Math.round(60000 / gm), x0: 100, x1: 940, y0: 30, y1: 850, r: 1.15 * gm,
+    density: (x, y) => { const t = tone(x, y); return t < 0 ? 0 : 0.16 * Math.max(0, 1 - Math.abs(t - 0.2) / 0.16); } });
+  // teeth, seated on both bone edges from the front back under the root of the arch: narrow chisel incisors, a
+  // taller pointed canine, then lower, wider premolars and molars that shrink toward the back. Crowns are knocked
+  // out white, shaded on their shadow side, inked where they meet, and the bone line runs over their necks.
+  const upY = x => (x < 250 ? mixv(590, 592, fit((x - 134) / 116)) : mixv(592, 606, fit((x - 250) / 220)));
+  const loY = x => (x < 240 ? mixv(652, 660, fit((x - 150) / 90)) : mixv(660, 664, fit((x - 240) / 100))) - 6 * fit((x - 390) / 80);
+  const occ = x => mixv(623, 633, fit((x - 140) / 330));
+  const crown = (x0, x1, neck, edge, kind, sg) => {
+    const w = x1 - x0, xc = (x0 + x1) / 2, L = Math.abs(edge - neck), lean = kind === 'i' ? -4 * sg : 0;
+    const P = [[x0 + 0.16 * w, neck], [x0 + 0.03 * w, neck + sg * L * 0.35], [x0 - 0.5, neck + sg * L * 0.72], [x0 + 2 + lean, edge - sg * 2]];
+    if (kind === 'i') P.push([x0 + 3 + lean, edge], [x1 - 3 + lean, edge + sg]);
+    else if (kind === 'c') P.push([x0 + 0.3 * w, edge - sg * 1], [xc - 1, edge + sg * 14], [x1 - 0.28 * w, edge - sg * 1]);
+    else if (kind === 'p') P.push([x0 + 0.28 * w, edge], [xc, edge + sg * 5], [x1 - 0.28 * w, edge]);
+    else P.push([x0 + 0.26 * w, edge + sg * 4], [x0 + 0.5 * w, edge - sg * 2], [x1 - 0.26 * w, edge + sg * 4]);
+    P.push([x1 - 2 + lean, edge - sg * 2], [x1 + 0.5, neck + sg * L * 0.72], [x1 - 0.03 * w, neck + sg * L * 0.35], [x1 - 0.16 * w, neck]);
+    return P;
+  };
+  // the dark of the mouth behind the crowns, so every gap between two teeth reads
+  polyPath([[130, upY(130) + 2], [470, upY(470) + 2], [474, loY(470) - 2], [138, loY(138) - 2]], true, MOUTH.next());
+  const row = (x, sg, spec) => {
+    const necks = [];
+    spec.forEach(([kind, w], i) => {
+      const x0 = x + 0.8, x1 = x + w - 0.8, xc = (x0 + x1) / 2, neck = (sg > 0 ? upY(xc) - 2 : loY(xc) + 2) - (kind === 'c' ? sg * 6 : 0);
+      const edge = occ(xc) + (sg > 0 && kind === 'i' ? 6 : 0) + (sg < 0 && kind === 'i' ? 2 : 0) + (kind === 'c' ? sg * 2 : 0);
+      const P = spline(crown(x0, x1, neck, edge, kind, sg), true, 3);
+      polyPath(P, true, WHITE.next());
+      // enamel shading: strokes crowding toward the shadow side, heavier near the bone
+      const n = Math.max(2, Math.round(w / 8));
+      for (let k = 0; k < n; k++) {
+        const lx = x1 - 2.5 - k * (w * 0.45 / n), wk = (1.9 - 1.4 * k / n) * gm;
+        ribbon(TSH, [[lx, neck + sg * 4], [lx - sg * 0.5, mixv(neck, edge, 0.5)], [lx - sg * 0.8, mixv(neck, edge, 0.85 - 0.1 * k / n)]], [wk * 1.2, wk, wk * 0.3]);
+      }
+      polyPath(P, true, TEETH.next());
+      necks.push([x0 + 0.5, neck + sg * 1], [xc, neck + sg * 4]);
+      x += w;
+    });
+    necks.push([x - 1, necks[necks.length - 1][1] - sg * 3]);
+    contour(OUT, spline(necks, false, 3), false, 1.4 * gm, 2.0 * gm);
+  };
+  row(140, -1, [['i', 17], ['i', 20], ['c', 28], ['p', 38], ['p', 38], ['m', 68], ['m', 64], ['m', 54]]);
+  row(132, 1, [['i', 21], ['i', 24], ['c', 31], ['p', 40], ['p', 38], ['m', 66], ['m', 62], ['m', 54]]);
+  clipped(OUT, cran, 2.4 * gm, 5.2 * gm, (x, y) => inPoly(mand, x, y) && !inPoly(zyg, x, y)); clipped(OUT, mand, 2.4 * gm, 5.0 * gm, (x, y) => inPoly(zyg, x, y));
+  contour(OUT, orbit, true, 3.6 * gm, 2.0 * gm); clipped(OUT, zyg, 1.8 * gm, 3.6 * gm, (x, y) => inPoly(orbit, x, y)); contour(OUT, nasal, true, 2.6 * gm, 1.8 * gm);
+  // the ear hole: an inked pit just behind the condyle, at the level of the arch, with a lit bony rim
+  polyPath(ear, true, OUT.next()); contour(OUT, ear.map(([x, y]) => [704 + (x - 704) * 1.5, 500 + (y - 500) * 1.4]), true, 1.2 * gm, 2.4 * gm);
+  contour(OUT, spline([[724, 566], [738, 600], [750, 628]], false, 8), false, 1.2 * gm, 2.2 * gm);
+  contour(OUT, spline([[150, 318], [176, 334], [214, 338]], false, 8), false, 1.4 * gm, 2.6 * gm);
+  suture(SUT, spline([[432, 42], [410, 140], [380, 232], [350, 300], [330, 344]], false, 6), 3.2, 31);
+  suture(SUT, spline([[344, 392], [420, 344], [520, 322], [620, 344], [690, 400], [716, 444]], false, 6), 2.6, 32);
+  suture(SUT, spline([[802, 140], [850, 260], [872, 380], [852, 470], [804, 540]], false, 6), 3.4, 33);
+  { const P = FAINT.next(); polyPath(spline([[300, 340], [330, 250], [420, 172], [560, 142], [700, 172], [800, 252], [838, 362], [820, 456]], false, 8), false, P); }
+  { const P = OUT.next(); P.moveTo(232, 726); P.arc(226, 726, 5.5, 0, Math.PI * 2); }
+  pl.sil = polyPath(cran); polyPath(mand, true, pl.sil);
+  pl.temple = [392, 300];
+  pl.bake(bs);
+  return pl;
+}
+
+/* ------------------------------------------------------------ plate 5: the nautilus in half-section */
+function buildNautilus() {
+  const pl = new Plate(1000, 800, 900, 0, 0, 16);
+  const b = Math.log(3.1) / (2 * Math.PI), TH = 5 * Math.PI, R0 = 452;
+  const r = th => R0 * Math.exp(b * (th - TH));
+  const ROT = 0.62, P = (th, f = 1) => [r(th) * f * Math.cos(th + ROT) + 60, -r(th) * f * Math.sin(th + ROT) + 40];
+  const WALL = 0.955;
+  const outer = []; for (let th = TH - 2 * Math.PI; th <= TH + 1e-6; th += 0.02) outer.push(P(th));
+  // the aperture: a lip that bulges forward from the last whorl back onto the one inside it
+  const LIP = TH + 0.42;
+  const lipA = P(TH), lipB = P(TH - 2 * Math.PI), lipC = P(LIP, 0.62);
+  const lip = []; for (let s = 0.05; s < 1; s += 0.05) lip.push([(1 - s) ** 2 * lipA[0] + 2 * s * (1 - s) * lipC[0] + s * s * lipB[0], (1 - s) ** 2 * lipA[1] + 2 * s * (1 - s) * lipC[1] + s * s * lipB[1]]);
+  const shell = outer.concat(lip);
+  pl.sil = polyPath(shell);
+  const SH = pl.fill(), WALLS = pl.fill(), SEPTA = pl.fill(), FINE = pl.line(1.4);
+  // chambers: hatching that follows the spiral, darker where each septum curves away
+  const DS = 0.44, BODY = TH - 2.3;
+  hatch(SH, { seed: 51, v0: 0.04, v1: 0.96, gap: 0.034, jit: 0.2, u0: TH - 2 * Math.PI * 3.2, u1: LIP,
+    map: (u, v) => { const a = r(u - 2 * Math.PI), c = r(u) * WALL; const rr = mixv(a, c, v); return [rr * Math.cos(u + ROT) + 60, -rr * Math.sin(u + ROT) + 40]; },
+    du: u => 3.2 / Math.max(8, r(u) * 0.8),
+    width: (x, y) => {
+      if (!inPoly(shell, x, y)) return 0;
+      const dx = x - 60, dy = -(y - 40); let th = Math.atan2(dy, dx) - ROT; const rr = Math.hypot(dx, dy);
+      // unwrap to the turn whose whorl contains this point
+      let best = -1; for (let k = -1; k < 4; k++) { const tt = th + 2 * Math.PI * (2 - k); if (tt > LIP || tt < TH - 8 * Math.PI) continue; if (rr <= r(tt) * WALL && rr >= r(tt - 2 * Math.PI)) { best = tt; break; } }
+      if (best < 0) return 0;
+      const whorl = r(best) * (1 - 1 / 3.1);
+      if (whorl < 34) return 2.2;
+      const scale = Math.min(1, whorl / 300);
+      if (best > BODY) return (0.5 + 2.4 * smooth((best - BODY) / 1.6) * (1 - (rr - r(best - 2 * Math.PI)) / whorl * 0.6)) * (0.5 + 0.5 * scale);
+      const ph = ((BODY - best) / DS) % 1;
+      return (0.4 + 3.4 * Math.pow(ph, 3) + 0.8 * (1 - (rr - r(best - 2 * Math.PI)) / whorl)) * (0.45 + 0.55 * scale);
+    } });
+  // the shell wall: a dark band along the whole spiral
+  for (let th = TH - 2 * Math.PI * 3.6; th < TH; th += 0.5) {
+    const pts = [], ws = [];
+    for (let s = th; s <= Math.min(TH, th + 0.52); s += 0.02) { pts.push(P(s, (1 + WALL) / 2)); ws.push(r(s) * (1 - WALL) * 1.05); }
+    ribbon(WALLS, pts, ws);
+  }
+  for (let ph = BODY; ph > TH - 2 * Math.PI * 3.4; ph -= DS) {
+    const a = P(ph - 2 * Math.PI), c = P(ph, WALL), m = (r(ph - 2 * Math.PI) + r(ph) * WALL) / 2, k = P(ph - 0.34, m / r(ph - 0.34));
+    const pts = []; for (let s = 0; s <= 1; s += 0.05) pts.push([(1 - s) * (1 - s) * a[0] + 2 * s * (1 - s) * k[0] + s * s * c[0], (1 - s) * (1 - s) * a[1] + 2 * s * (1 - s) * k[1] + s * s * c[1]]);
+    const w = Math.max(1.2, r(ph) * 0.011);
+    ribbon(SEPTA, pts, pts.map((_, i) => w * (0.7 + 0.6 * Math.sin(Math.PI * i / (pts.length - 1)))));
+    const sp = pts[10], Q = FINE.next(); Q.moveTo(sp[0] + w * 1.6, sp[1]); Q.arc(sp[0], sp[1], w * 1.6, 0, Math.PI * 2);
+  }
+  contour(SEPTA, shell, true, 2.8, 4.8);
+  pl.bake(0.7);
+  return pl;
+}
+
+/* ------------------------------------------------------------ plate 6: a Doric capital in elevation */
+function buildDoric() {
+  const pl = new Plate(1000, 1000, 900, 0, 0, 16);
+  const ech = s => 296 + 124 * (0.35 * s + 0.65 * (1 - Math.sqrt(Math.max(0, 1 - s * s))));
+  const shaftR = y => 288 + (y + 190) * 0.018;
+  const brk = []; for (let x = -300; x <= 300; x += 20) brk.push([x, 430]);
+  const outline = [[-440, -420], [440, -420], [440, -330]];
+  for (let s = 1; s >= 0; s -= 0.05) outline.push([ech(s), -230 - 100 * s]);
+  outline.push([300, -200], [shaftR(-190), -190], [shaftR(brk[brk.length - 1][1]), brk[brk.length - 1][1]]);
+  for (let i = brk.length - 1; i >= 0; i--) outline.push([brk[i][0] * shaftR(brk[i][1]) / 300, brk[i][1]]);
+  outline.push([-shaftR(-190), -190], [-300, -200]);
+  for (let s = 0; s <= 1; s += 0.05) outline.push([-ech(s), -230 - 100 * s]);
+  outline.push([-440, -330]);
+  pl.sil = polyPath(outline);
+  const SH = pl.fill(), X = pl.fill(), OUT = pl.fill(), FINE = pl.line(1.5);
+  const cyl = (phi, extra = 0) => { const p = phi - extra; return fit(1.04 - 1.15 * (-0.62 * Math.sin(p) + 0.72 * Math.cos(p))); };
+  const FL = rad(18);
+  // shaft and echinus: lines in angle space so they crowd toward the turning edges
+  const bottom = x => { const i = fit(Math.round((x + 300) / 20), 0, brk.length - 1); return brk[i][1] - 4; };
+  hatch(SH, { seed: 62, v0: -1.52, v1: 1.52, gap: 0.037, jit: 0.1, u0: -186, u1: 440, du: 4, map: (u, v) => [shaftR(u) * Math.sin(v), u],
+    width: (x, y) => {
+      if (y > bottom(x)) return 0;
+      const phi = Math.asin(fit(x / shaftR(y), -1, 1)), q = ((phi + Math.PI) % FL) / FL - 0.5;
+      let t = cyl(phi, q * 1.1);
+      if (y < -150) t += 0.25 * (1 - (y + 186) / 36);
+      return 3.8 * fit((t - 0.14) / 0.8);
+    } });
+  hatch(SH, { seed: 63, v0: -1.5, v1: 1.5, gap: 0.035, jit: 0.1, u0: -328, u1: -232, du: 3, map: (u, v) => [ech(fit((-230 - u) / 100)) * Math.sin(v), u],
+    width: (x, y) => { const phi = Math.asin(fit(x / ech(fit((-230 - y) / 100)), -1, 1)); const t = cyl(phi) + 0.5 * fit((y + 300) / -30) + 0.12; return 3.6 * fit((t - 0.14) / 0.8); } });
+  hatch(X, { seed: 64, map: straight(0, 0, -375), u0: -436, u1: 436, v0: -42, v1: 42, gap: 9.5, du: 4,
+    width: x => 3.2 * fit(0.3 + 0.45 * (x + 440) / 880) });
+  hatch(X, { seed: 65, map: straight(52, 0, 0), u0: -700, u1: 700, v0: -700, v1: 700, gap: 10, du: 4,
+    width: (x, y) => { if (y < -180 || y > bottom(x) || Math.abs(x) > shaftR(y)) return 0; const phi = Math.asin(fit(x / shaftR(y), -1, 1)); return 3 * fit((cyl(phi) - 0.62) / 0.35); } });
+  // arrises of the flutes, annulets, necking groove
+  for (let k = -5; k <= 5; k++) {
+    const phi = (k + 0.5) * FL; if (Math.abs(phi) >= Math.PI / 2) continue;
+    const pts = [], ws = [];
+    for (let y = -190; y <= 430; y += 8) { const x = shaftR(y) * Math.sin(phi); if (y > bottom(x)) break; pts.push([x, y]); ws.push(1.2 + 1.4 * cyl(phi)); }
+    ribbon(OUT, pts, ws);
+  }
+  for (const y of [-226, -214, -202]) { const P = FINE.next(); P.moveTo(-300, y); P.lineTo(300, y); }
+  contour(OUT, [[-shaftR(-160), -160], [shaftR(-160), -160]], false, 2.2, 2.2);
+  { const P = FINE.next(); P.moveTo(-shaftR(-152), -152); P.lineTo(shaftR(-152), -152); }
+  contour(OUT, [[-440, -330], [440, -330]], false, 3.2, 3.2);
+  contour(OUT, outline, true, 3.2, 5.4);
+  pl.bake(0.6);
+  return pl;
+}
+
+/* ------------------------------------------------------------ the rhombicuboctahedron */
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const SQ = 1 + Math.SQRT2;
+const VERTS = [];
+for (const [a, b, c] of [[1, 1, SQ], [1, SQ, 1], [SQ, 1, 1]])
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) VERTS.push([sx * a, sy * b, sz * c]);
+const FACES = [];
+for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+  if (!x && !y && !z) continue;
+  const l = Math.hypot(x, y, z), n = [x / l, y / l, z / l];
+  const top = Math.max(...VERTS.map(v => dot3(v, n)));
+  const ids = VERTS.map((_, i) => i).filter(i => Math.abs(dot3(VERTS[i], n) - top) < 1e-6);
+  const c = [0, 1, 2].map(q => ids.reduce((s, i) => s + VERTS[i][q], 0) / ids.length);
+  const e1 = [0, 1, 2].map(q => VERTS[ids[0]][q] - c[q]), e2 = [n[1] * e1[2] - n[2] * e1[1], n[2] * e1[0] - n[0] * e1[2], n[0] * e1[1] - n[1] * e1[0]];
+  const ang = i => { const d = [0, 1, 2].map(q => VERTS[i][q] - c[q]); return Math.atan2(dot3(d, e2), dot3(d, e1)); };
+  ids.sort((i, j) => ang(i) - ang(j));
+  FACES.push({ n, ids, c, front: x === 0 && y === 0 && z === 1 });
+}
+const CAMD = 11;
+const LIGHT3 = (() => { const v = [-0.55, 0.66, 0.52], l = Math.hypot(...v); return v.map(q => q / l); })();
+function rotm(yaw, pitch, roll) {
+  const [cy, sy, cp, sp, cr, sr] = [Math.cos(yaw), Math.sin(yaw), Math.cos(pitch), Math.sin(pitch), Math.cos(roll), Math.sin(roll)];
+  const Ry = [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]], Rx = [[1, 0, 0], [0, cp, -sp], [0, sp, cp]], Rz = [[cr, -sr, 0], [sr, cr, 0], [0, 0, 1]];
+  const mul = (A, B) => A.map(r => [0, 1, 2].map(j => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]));
+  return mul(Rz, mul(Rx, Ry));
+}
+const apply = (M, v) => M.map(r => r[0] * v[0] + r[1] * v[1] + r[2] * v[2]);
+// The solid in a pose: projected points, and the faces that turn toward the camera with their light.
+function pose(p, cx, cy, sc) {
+  const M = rotm(p[0], p[1], p[2]);
+  const V = VERTS.map(v => apply(M, v));
+  const pr = v => { const f = CAMD / (CAMD - v[2]); return [cx + sc * v[0] * f, cy - sc * v[1] * f]; };
+  const S = V.map(pr), faces = [];
+  for (const F of FACES) {
+    const n = apply(M, F.n), c = apply(M, F.c);
+    if (n[0] * -c[0] + n[1] * -c[1] + n[2] * (CAMD - c[2]) <= 0) continue;
+    faces.push({ F, n, pts: F.ids.map(i => S[i]), lam: Math.max(0, dot3(n, LIGHT3)), c, M });
+  }
+  return { S, faces, pr, M, sc };
+}
+const P0 = [rad(-24 - 90), rad(24), rad(-4)], P1 = [rad(-26), rad(17), rad(0)];
+function poseAt(t) {
+  const k = backOut(prog(t, TL.turn[0], TL.turn[1]), 1.2);
+  const p = [0, 1, 2].map(i => mixv(P0[i], P1[i], k));
+  p[0] += rad(1.6) * smooth(prog(t, 8.0, 9.7));
+  return p;
+}
+function drawSolid(p, cx, cy, sc, alpha = 1, shadow = 1) {
+  const G = pose(p, cx, cy, sc);
+  ctx.save(); ctx.globalAlpha = alpha;
+  if (shadow > 0) {
+    const low = Math.max(...G.S.map(q => q[1])), rx = sc * 2.6, ry = sc * 0.36;
+    ctx.save(); ctx.translate(cx, low + sc * 0.16); ctx.scale(1, ry / rx);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, `rgba(0,0,0,${0.2 * shadow})`); g.addColorStop(0.55, `rgba(0,0,0,${0.07 * shadow})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  }
+  const lo = [142, 140, 136], hi = [236, 234, 231];
+  for (const f of G.faces) {
+    const k = fit(0.1 + 0.98 * f.lam), col = lo.map((v, i) => Math.round(mixv(v, hi[i], k)));
+    ctx.fillStyle = `rgb(${col})`; ctx.beginPath(); polyPath(f.pts, true, ctx); ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(70,68,64,0.75)'; ctx.lineWidth = Math.max(1.25, sc * 0.008); ctx.lineJoin = 'round';
+  for (const f of G.faces) { ctx.beginPath(); polyPath(f.pts, true, ctx); ctx.stroke(); }
+  // the asterisk incised on the front square, laid on the face plane
+  const fr = G.faces.find(f => f.F.front);
+  if (fr) {
+    const c = G.pr(apply(G.M, [0, 0, SQ])), ex = G.pr(apply(G.M, [1, 0, SQ])), ey = G.pr(apply(G.M, [0, -1, SQ]));
+    const k = 0.013;
+    ctx.save();
+    ctx.setTransform((ex[0] - c[0]) * k, (ex[1] - c[1]) * k, (ey[0] - c[0]) * k, (ey[1] - c[1]) * k, c[0], c[1]);
+    ctx.font = fontOf(100); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = 'rgba(90,40,22,0.55)'; ctx.fillText('*', -20.4 + 1.4, 55.8 + 1.4);
+    ctx.fillStyle = TERRA; ctx.fillText('*', -20.4, 55.8);
+    ctx.restore();
+  }
+  ctx.restore();
+  return G;
+}
+// The same solid as an engraved plate in the pose P0 (plate units = projection at scale POLY_SC).
+const POLY_SC = 170;
+function buildPoly() {
+  const G = pose(P0, 0, 0, POLY_SC);
+  const hp = hull(G.S);
+  const xs = hp.map(q => q[0]), ys = hp.map(q => q[1]);
+  const pl = new Plate(1100, 1100, 1000, 0, 0, 18);
+  pl.sil = polyPath(hp);
+  pl.span = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const SH = pl.fill(), X = pl.fill(), OUT = pl.fill();
+  const inside = (pts, x, y) => { for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; if ((b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]) < 0) return false; } return true; };
+  G.faces.forEach((f, i) => {
+    let pts = f.pts;
+    let area = 0; for (let j = 0; j < pts.length; j++) { const a = pts[j], b = pts[(j + 1) % pts.length]; area += a[0] * b[1] - b[0] * a[1]; }
+    if (area < 0) pts = pts.slice().reverse();
+    const cx = pts.reduce((s, q) => s + q[0], 0) / pts.length, cy = pts.reduce((s, q) => s + q[1], 0) / pts.length;
+    const ang = Math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0]) * 180 / Math.PI;
+    const tn = fit(1.05 - 1.2 * f.lam);
+    const shade = (x, y) => (inside(pts, x, y) ? tn + 0.12 * ((x - cx) * 0.6 + (y - cy) * 0.8) / 120 : 0);
+    hatch(SH, { seed: 70 + i, map: straight(ang, cx, cy), u0: -320, u1: 320, v0: -320, v1: 320, gap: 8.5, du: 4, jit: 0.05,
+      width: (x, y) => { const t = shade(x, y); return 4.4 * fit((t - 0.1) / 0.85); } });
+    hatch(X, { seed: 90 + i, map: straight(ang + 62, cx, cy), u0: -320, u1: 320, v0: -320, v1: 320, gap: 9, du: 4, jit: 0.05,
+      width: (x, y) => { const t = shade(x, y); return 3.4 * fit((t - 0.58) / 0.4); } });
+  });
+  for (const f of G.faces) contour(OUT, f.pts, true, 2.4, 2.4);
+  contour(OUT, hp, true, 3.6, 5.4);
+  pl.bake(1.15);
+  return pl;
+}
+
+/* ------------------------------------------------------------ plate 3: the constructed C (drawn live) */
+// Outer circle on the square's centre and a counter circle shifted right: a heavy left stem, the top and bottom
+// about 60 % of it. The opening is cut on a vertical; the top ends in a vertical serif whose beak rises above the
+// bowl, the bottom in a flat cut with a small spur, and each serif is bracketed by a compass arc tangent inside the
+// counter. The construction draws exactly those circles, centred on the terracotta compass points.
+const CS = (() => {
+  const o = { R1: 380, R2: 318, cx2: 40, cut: 272, beak: -304, spur: 290, join: 196 };
+  const dx = o.cut - o.cx2;
+  o.fillets = [-180, 200].map(tip => {
+    const r = (o.R2 ** 2 - dx * dx - tip * tip) / (2 * (o.R2 - dx)), cx = o.cut - r, d = Math.hypot(cx - o.cx2, tip);
+    const tx = o.cx2 + (cx - o.cx2) / d * o.R2, ty = tip / d * o.R2;
+    return { tip, r, cx, cy: tip, tx, ty, ta: Math.atan2(ty - tip, tx - cx) };
+  });
+  o.jy = Math.sqrt(o.R1 ** 2 - o.join ** 2);
+  return o;
+})();
+function cPath() {
+  const o = CS, [U, L] = o.fillets, P = new Path2D(), tx = o.jy / o.R1, ty = o.join / o.R1;
+  P.moveTo(o.cut, o.beak);
+  P.quadraticCurveTo(o.join + 45 * tx, -o.jy + 45 * ty, o.join, -o.jy);
+  P.arc(0, 0, o.R1, Math.atan2(-o.jy, o.join), Math.atan2(o.jy, o.join), true);
+  P.quadraticCurveTo(o.join + 40 * tx, o.jy - 40 * ty, o.cut, o.spur);
+  P.lineTo(o.cut, L.tip);
+  P.arc(L.cx, L.cy, L.r, 0, L.ta, false);
+  P.arc(o.cx2, 0, o.R2, Math.atan2(L.ty, L.tx - o.cx2), Math.atan2(U.ty, U.tx - o.cx2) + Math.PI * 2, false);
+  P.arc(U.cx, U.cy, U.r, U.ta, 0, false);
+  P.closePath();
+  return P;
+}
+let CPATH = null;
+// Construction strokes: [t0, t1, kind, args]; times are offsets from the start of the build.
+const CBUILD = [
+  [0.00, 0.12, 'line', [-380, -380, 380, -380]], [0.03, 0.15, 'line', [380, -380, 380, 380]], [0.06, 0.18, 'line', [380, 380, -380, 380]], [0.09, 0.21, 'line', [-380, 380, -380, -380]],
+  [0.12, 0.30, 'line', [-380, -380, 380, 380]], [0.15, 0.33, 'line', [380, -380, -380, 380]],
+  [0.20, 0.34, 'line', [0, -420, 0, 420]], [0.23, 0.37, 'line', [-420, 0, 420, 0]],
+  [0.28, 0.54, 'arc', [0, 0, 380, -90, 270]], [0.38, 0.62, 'arc', [40, 0, 318, -90, 270]],
+  [0.48, 0.62, 'line', [272, -420, 272, 420]],
+  [0.56, 0.74, 'arc', [CS.fillets[0].cx, CS.fillets[0].cy, CS.fillets[0].r, -200, 40]], [0.60, 0.76, 'arc', [CS.fillets[1].cx, CS.fillets[1].cy, CS.fillets[1].r, -60, 200]],
+  [0.64, 0.86, 'outline', null],
+];
+const CDOTS = [[0.28, 0, 0], [0.38, 40, 0], [0.56, CS.fillets[0].cx, CS.fillets[0].cy], [0.60, CS.fillets[1].cx, CS.fillets[1].cy]];
+function drawConstruction(t, x, y, px, rot = 0, alpha = 1) {
+  const k = px / 1000, T0 = 3.84;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(k, k); ctx.globalAlpha = alpha;
+  ctx.shadowColor = `rgba(0,0,0,${0.1 * alpha})`; ctx.shadowBlur = 26; ctx.shadowOffsetY = 6;
+  ctx.fillStyle = '#fff'; ctx.fillRect(-500, -500, 1000, 1000); ctx.shadowColor = 'rgba(0,0,0,0)';
+  ctx.strokeStyle = INK; ctx.lineCap = 'round';
+  ctx.lineWidth = 2.4; ctx.strokeRect(-462, -462, 924, 924); ctx.lineWidth = 1.2; ctx.strokeRect(-450, -450, 900, 900);
+  const lw = Math.max(1.5, 1.25 / k);
+  const fillK = prog(t, TL.fill[0], TL.fill[1]);
+  for (const [a, b, kind, g] of CBUILD) {
+    const q = outCub(prog(t - T0, a, b));
+    if (q <= 0) continue;
+    ctx.lineWidth = kind === 'outline' ? lw * 1.4 : lw; ctx.globalAlpha = alpha * (kind === 'outline' ? 1 : 1 - 0.35 * fillK);
+    ctx.beginPath();
+    if (kind === 'line') { ctx.moveTo(g[0], g[1]); ctx.lineTo(mixv(g[0], g[2], q), mixv(g[1], g[3], q)); }
+    else if (kind === 'arc') { const a0 = rad(g[3]), a1 = rad(g[4]); ctx.arc(g[0], g[1], g[2], a0, mixv(a0, a1, q)); }
+    if (kind === 'outline') { ctx.save(); ctx.setLineDash([3600 * q, 8000]); ctx.stroke(CPATH); ctx.restore(); }
+    else ctx.stroke();
+  }
+  ctx.globalAlpha = alpha;
+  if (fillK > 0) {
+    const e = inOut(fillK), a0 = rad(-22), a1 = a0 - rad(306) * e;
+    ctx.save(); ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 700, a0, a1, true); ctx.closePath(); ctx.clip();
+    ctx.fillStyle = INK; ctx.fill(CPATH); ctx.restore();
+  }
+  for (const [a, cx, cy] of CDOTS) {
+    const q = backOut(prog(t - T0, a, a + 0.12), 2.4);
+    if (q <= 0) continue;
+    ctx.fillStyle = TERRA; ctx.beginPath(); ctx.arc(cx, cy, 7.5 * q, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+// The C for the collage (finished, as a plate).
+function buildCPlate() {
+  const pl = new Plate(1100, 1100, 1000, 0, 0, 0);
+  pl.sil = new Path2D(); pl.sil.rect(-500, -500, 1000, 1000);
+  pl.paint = c => {
+    c.save(); c.strokeStyle = INK; c.lineWidth = 3; c.strokeRect(-462, -462, 924, 924); c.lineWidth = 1.5; c.strokeRect(-450, -450, 900, 900);
+    c.lineWidth = 2; c.globalAlpha = 0.65;
+    for (const [, , kind, g] of CBUILD) {
+      c.beginPath();
+      if (kind === 'line') { c.moveTo(g[0], g[1]); c.lineTo(g[2], g[3]); c.stroke(); }
+      else if (kind === 'arc') { c.arc(g[0], g[1], g[2], rad(g[3]), rad(g[4])); c.stroke(); }
+    }
+    c.globalAlpha = 1; c.fillStyle = INK; c.fill(CPATH);
+    c.fillStyle = TERRA; for (const [, x, y] of CDOTS) { c.beginPath(); c.arc(x, y, 8, 0, Math.PI * 2); c.fill(); }
+    c.restore();
+  };
+  pl.bake(0.6);
+  return pl;
+}
+
+/* ------------------------------------------------------------ drawing plates */
+function drawPlate(pl, x, y, px, rot = 0, alpha = 1, shadow = 1) {
+  if (alpha <= 0.002 || px <= 0.5) return;
+  const k = px / pl.ref;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(k, k); ctx.globalAlpha = alpha;
+  const m = ctx.getTransform(), dev = Math.hypot(m.a, m.b);
+  if (pl.small && dev < pl.small.useBelow) pl = pl.small;
+  if (shadow > 0) {
+    ctx.shadowColor = `rgba(0,0,0,${0.11 * shadow * alpha})`; ctx.shadowBlur = 26; ctx.shadowOffsetY = 6;
+    ctx.drawImage(pl.cut, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
+    ctx.shadowColor = 'rgba(0,0,0,0)';
+  }
+  if (dev <= pl.bs * 1.06) ctx.drawImage(pl.bmp, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
+  else { ctx.drawImage(pl.cut, -pl.w / 2, -pl.h / 2, pl.w, pl.h); pl.paint(ctx); }
+  ctx.restore();
+}
+
+/* ------------------------------------------------------------ words and the SDF morph */
+const fontOf = fs => `400 ${fs}px ${DISPLAY}`;
+const MEAS = mk(8, 8).getContext('2d');
+const GLYPHS = new Map();
+function glyph(text, fs) {
+  const key = text + '@' + fs;
+  if (GLYPHS.has(key)) return GLYPHS.get(key);
+  MEAS.font = fontOf(fs);
+  const m = MEAS.measureText(text), pad = Math.ceil(fs * 0.1) + 30;
+  const ox = pad + Math.ceil(m.actualBoundingBoxLeft), oy = pad + Math.ceil(m.actualBoundingBoxAscent);
+  const w = ox + Math.ceil(m.actualBoundingBoxRight) + pad, h = oy + Math.ceil(m.actualBoundingBoxDescent) + pad;
+  const c = mk(w, h).getContext('2d', { willReadFrequently: true });
+  c.font = fontOf(fs); c.fillStyle = '#000'; c.fillText(text, ox, oy);
+  const px = c.getImageData(0, 0, w, h).data, a = new Float32Array(w * h);
+  for (let i = 0; i < a.length; i++) a[i] = px[i * 4 + 3] / 255;
+  const rowInk = y => { let s = 0; for (let x = 0; x < w; x++) s += a[y * w + x]; return s; };
+  let dot = null, cut = h;
+  if (text === '?' || text === '.') {
+    // the dot is the lowest separate blob: find its rows, measure it, and take it out of the field
+    let yb = h - 1; while (yb > 0 && rowInk(yb) < 0.5) yb--;
+    let yt = yb; while (yt > 0 && rowInk(yt) >= 0.5) yt--;
+    let sx = 0, sy = 0, sa = 0;
+    for (let y = yt; y <= yb; y++) for (let x = 0; x < w; x++) { const v = a[y * w + x]; sx += v * x; sy += v * y; sa += v; }
+    dot = { x: sx / sa, y: sy / sa, r: Math.sqrt(sa / Math.PI) };
+    if (text === '?') { cut = yt + 1; for (let i = cut * w; i < a.length; i++) a[i] = 0; }
+  }
+  let x0 = w, y0 = h, x1 = 0, y1 = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (a[y * w + x] > 0.5) { x0 = Math.min(x0, x); x1 = Math.max(x1, x + 1); y0 = Math.min(y0, y); y1 = Math.max(y1, y + 1); }
+  const field = signedField(a, w, h);
+  let deep = 0; for (let i = 0; i < field.length; i++) if (-field[i] > deep) deep = -field[i];
+  // the same word melted: coverage blurred (three box passes, radius tied to the stroke) and read as a distance to a level
+  const r = Math.max(3, Math.round(MELT.radius * deep)), blob = Float32Array.from(a), tmp = new Float32Array(w * h);
+  for (let pass = 0; pass < 3; pass++) {
+    for (let y = 0; y < h; y++) { let acc = 0; for (let x = -r; x <= r; x++) acc += x >= 0 && x < w ? blob[y * w + x] : 0;
+      for (let x = 0; x < w; x++) { tmp[y * w + x] = acc / (2 * r + 1); const xo = x - r, xi = x + r + 1; if (xo >= 0) acc -= blob[y * w + xo]; if (xi < w) acc += blob[y * w + xi]; } }
+    for (let x = 0; x < w; x++) { let acc = 0; for (let y = -r; y <= r; y++) acc += y >= 0 && y < h ? tmp[y * w + x] : 0;
+      for (let y = 0; y < h; y++) { blob[y * w + x] = acc / (2 * r + 1); const yo = y - r, yi = y + r + 1; if (yo >= 0) acc -= tmp[yo * w + x]; if (yi < h) acc += tmp[yi * w + x]; } }
+  }
+  // never inside the sharp letters' outline (so melting only fattens and fuses, never thins a stroke away),
+  // and still growing with distance far from the word
+  for (let i = 0; i < blob.length; i++) blob[i] = Math.min(Math.max((MELT.level - blob[i]) * 2.6 * r, field[i] - 1.6 * r), field[i]);
+  const g = { text, fs, w, h, ox, oy, adv: m.width, field, blob, box: { x0, y0, x1, y1 }, dot, cut, deep, melt: r };
+  GLYPHS.set(key, g);
+  return g;
+}
+const at = (text, fs, x, y) => ({ text, fs, x, y, g: glyph(text, fs) });
+const inkBox = P => ({ x0: P.x + P.g.box.x0 - P.g.ox, y0: P.y + P.g.box.y0 - P.g.oy, x1: P.x + P.g.box.x1 - P.g.ox, y1: P.y + P.g.box.y1 - P.g.oy });
+let DOTK = null;  // the font's own period, per pixel of font size
+function periodOf(P) {
+  if (P.text === '?') return { x: P.x + P.g.dot.x - P.g.ox, y: P.y + P.g.dot.y - P.g.oy, r: P.g.dot.r };
+  return { x: P.x + P.g.adv + DOTK.x * P.fs, y: P.y + DOTK.y * P.fs, r: DOTK.r * P.fs };
+}
+// Draw a placed word scaled by s about (ax, ay), shifted by (dx, dy).
+function drawWord(P, s = 1, alpha = 1, ax = P.x, ay = P.y, dx = 0, dy = 0, period = true) {
+  if (alpha <= 0.002) return;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.translate(ax + dx, ay + dy); ctx.scale(s, s); ctx.translate(-ax, -ay);
+  if (P.text === '?') { ctx.beginPath(); ctx.rect(0, 0, W, P.y + P.g.cut - P.g.oy); ctx.clip(); }
+  ctx.font = fontOf(P.fs); ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(P.text, P.x, P.y);
+  ctx.restore();
+  if (period) { const d = periodOf(P); drawDot((ax + dx) + (d.x - ax) * s, (ay + dy) + (d.y - ay) * s, d.r * s, alpha); }
+}
+function drawDot(x, y, r, alpha = 1) {
+  if (alpha <= 0.002 || r <= 0) return;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = TERRA; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
+// The period slides between two words on a raised arc.
+function slideDot(A, B, e, alpha = 1) {
+  const a = periodOf(A), b = periodOf(B), lift = Math.hypot(b.x - a.x, b.y - a.y) * 0.28 + 30;
+  const mx = (a.x + b.x) / 2, my = Math.min(a.y, b.y) - lift;
+  const x = (1 - e) * (1 - e) * a.x + 2 * e * (1 - e) * mx + e * e * b.x, y = (1 - e) * (1 - e) * a.y + 2 * e * (1 - e) * my + e * e * b.y;
+  drawDot(x, y, mixv(a.r, b.r, e), alpha);
+}
+const MC = mk(W, H), MX = MC.getContext('2d');
+function sampleField(g, x, y, f = g.field) {
+  const cx = x < 0 ? 0 : x > g.w - 1.001 ? g.w - 1.001 : x, cy = y < 0 ? 0 : y > g.h - 1.001 ? g.h - 1.001 : y;
+  const i = cx | 0, j = cy | 0, fx = cx - i, fy = cy - j, k = j * g.w + i;
+  const v = (f[k] * (1 - fx) + f[k + 1] * fx) * (1 - fy) + (f[k + g.w] * (1 - fx) + f[k + g.w + 1] * fx) * fy;
+  return cx !== x || cy !== y ? v + Math.hypot(x - cx, y - cy) : v;
+}
+// Both words' fields are mapped onto one box that eases from A's footprint to B's, each eroded toward its
+// skeleton by its own stroke half-width, and joined with a smooth minimum: one liquid shape, never a partial word.
+// Both words' fields are sampled through one box that eases from A's footprint to B's, distances scaled back to
+// screen pixels. Each field slides from its sharp letters toward a melted blob of itself and back; the two are
+// mixed (pure A until e = 0.28, pure B from 0.72) and dilated mid-way, so the middle frames are one ink puddle
+// with no letters in it and no in-between state can read as another word.
+// Melt tuning: blur radius in units of the word's stroke half-width, the coverage level the melted outline sits at,
+// how sharply the melt peaks mid-morph, the mid-morph dilation and beading (in stroke widths), and how far the
+// ink sags toward the baseline at the peak (0..1).
+const MELT = { radius: 1.7, level: 0.2, peak: 1.9, dil: 0.14, sag: 0.62, bead: 0.42 };
+function morph(A, B, e, alpha = 1) {
+  const ga = A.g, gb = B.g, ba = inkBox(A), bb = inkBox(B);
+  const bt = { x0: mixv(ba.x0, bb.x0, e), y0: mixv(ba.y0, bb.y0, e), x1: mixv(ba.x1, bb.x1, e), y1: mixv(ba.y1, bb.y1, e) };
+  const tw = bt.x1 - bt.x0, th = bt.y1 - bt.y0;
+  const sA = Math.sqrt(tw / (ba.x1 - ba.x0) * th / (ba.y1 - ba.y0)), sB = Math.sqrt(tw / (bb.x1 - bb.x0) * th / (bb.y1 - bb.y0));
+  const mid = Math.sin(Math.PI * e), lam = Math.pow(mid, MELT.peak), wB = smooth(prog(e, 0.28, 0.72));
+  const dil = MELT.dil * (ga.deep * sA + gb.deep * sB) * mid * mid, amp = 7 * mid * mid;
+  const m = 10 + dil + amp + Math.max(ga.melt * sA, gb.melt * sB) * 2;
+  const x0 = Math.max(0, Math.floor(bt.x0 - m)), y0 = Math.max(0, Math.floor(bt.y0 - m));
+  const x1 = Math.min(W, Math.ceil(bt.x1 + m)), y1 = Math.min(H, Math.ceil(bt.y1 + m));
+  const w = x1 - x0, h = y1 - y0;
+  if (w <= 0 || h <= 0) return;
+  const img = MX.createImageData(w, h), D = img.data;
+  const kxA = (ga.box.x1 - ga.box.x0) / tw, kyA = (ga.box.y1 - ga.box.y0) / th, kxB = (gb.box.x1 - gb.box.x0) / tw, kyB = (gb.box.y1 - gb.box.y0) / th;
+  const ph = e * 6.5, a255 = 255 * alpha;
+  // at the peak the ink sags toward the baseline and spreads a little: a low pool, not a slab
+  const sq = 1 - MELT.sag * lam, spread = 1 + 0.1 * MELT.sag * lam, base = mixv(A.y, B.y, e), cxm = (bt.x0 + bt.x1) / 2, ds = Math.sqrt(sq);
+  // and the pool beads: a slow ripple pinches it into rounded drops with white between them
+  const bead = MELT.bead * (ga.deep * sA + gb.deep * sB) * Math.pow(lam, 6), bx0 = new Float32Array(w);
+  for (let i = 0; i < w; i++) bx0[i] = bead * (0.5 + 0.5 * Math.sin((x0 + i) * 0.052 + ph * 1.3));
+  const wy = new Float32Array(h), wx = new Float32Array(w);
+  for (let j = 0; j < h; j++) wy[j] = amp * Math.sin((y0 + j) * 0.043 + ph);
+  for (let i = 0; i < w; i++) wx[i] = amp * 0.8 * Math.cos((x0 + i) * 0.031 - ph * 0.8);
+  for (let j = 0; j < h; j++) {
+    const py = y0 + j + 0.5;
+    for (let i = 0; i < w; i++) {
+      const qx = cxm + (x0 + i + 0.5 - cxm) / spread + wy[j] - bt.x0, qy = base + (py - base) / sq + wx[i] - bt.y0;
+      const ax = ga.box.x0 + qx * kxA - 0.5, ay = ga.box.y0 + qy * kyA - 0.5, bx = gb.box.x0 + qx * kxB - 0.5, by = gb.box.y0 + qy * kyB - 0.5;
+      let a = sampleField(ga, ax, ay) * sA, b = sampleField(gb, bx, by) * sB;
+      if (lam > 0.01) {
+        a = (a * (1 - lam) + lam * sampleField(ga, ax, ay, ga.blob) * sA) * ds;
+        b = (b * (1 - lam) + lam * sampleField(gb, bx, by, gb.blob) * sB) * ds;
+      }
+      const d = a + (b - a) * wB - dil + bx0[i];
+      if (d >= 0.7) continue;
+      const p = (j * w + i) * 4, cov = d <= -0.7 ? 1 : 0.5 - d / 1.4;
+      D[p] = 17; D[p + 1] = 17; D[p + 2] = 17; D[p + 3] = cov * a255;
+    }
+  }
+  MX.clearRect(0, 0, w, h); MX.putImageData(img, 0, 0);
+  ctx.drawImage(MC, 0, 0, w, h, x0, y0, w, h);
+}
+
+/* ------------------------------------------------------------ motion blur for the punches */
+// The finished sharp frame is copied N times at scales spread over the shutter and averaged (each copy at
+// 1/(i+1) over the running mean). N keeps neighbouring copies about 4.5 px apart at the far corner, and a longer
+// travel is clipped, so the smear stays a smear and never a row of stamps.
+const LAYER = mk(W, H), LX = LAYER.getContext('2d');
+function streak(cx, cy, rEnd) {
+  const R = Math.max(Math.hypot(cx, cy), Math.hypot(W - cx, cy), Math.hypot(cx, H - cy), Math.hypot(W - cx, H - cy));
+  let travel = (rEnd - 1) * R;
+  if (Math.abs(travel) < 1.5) return;
+  travel = Math.sign(travel) * Math.min(Math.abs(travel), 150);
+  const re = 1 + travel / R, n = Math.min(32, Math.max(4, Math.ceil(Math.abs(travel) / 4.5)));
+  LX.drawImage(cv, 0, 0);
+  for (let i = 1; i < n; i++) {
+    const r = Math.pow(re, i / (n - 1));
+    ctx.globalAlpha = 1 / (i + 1);
+    ctx.setTransform(r, 0, 0, r, cx * (1 - r), cy * (1 - r));
+    ctx.drawImage(LAYER, 0, 0);
+  }
+  ctx.globalAlpha = 1; ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+/* ------------------------------------------------------------ the timeline */
+const TL = { qIn: 0.10, m1: [0.96, 1.36], jump: 1.44, chartIn: 1.44, big: 1.92, lines: 1.95, ring: [2.08, 2.36], ringOut: [2.66, 2.76],
+  z1: [2.40, 2.84], wordOut1: [2.40, 2.50], back: 2.88, m2: [2.94, 3.32], big2: 3.36, label: [3.44, 3.66], aster: 3.50,
+  m3: [3.84, 4.22], fill: [4.70, 4.88], wordOut2: [5.07, 5.17], out: [5.18, 5.28], pops: 5.28, z2: [6.24, 6.60],
+  dis: [6.72, 6.90], turn: [6.90, 7.40], formIn: [6.90, 7.18], fly: [7.56, 8.02], m4: [7.70, 8.04], fade: [9.70, 10.03] };
+const sine = k => 0.5 - 0.5 * Math.cos(Math.PI * fit(k));
+const SHUTTER = 1 / 60;
+const PL = {};
+let Q, SC, SL, BL, LL, FL, CC, CC_LAYOUT;
+const CHART_SMALL = { x: 1400, y: 540, d: 380 }, CHART_BIG = { x: 1330, y: 540, d: 860 };
+const SKULL_SMALL = { x: 1420, y: 540, h: 400 }, SKULL_BIG = { x: 1330, y: 500, h: 800 };
+const CARD = { x: 1330, y: 540, s: 780 };
+// The several-at-once layout: plate, centre, size, tilt (deg).
+const COLLAGE = [
+  ['chart', 430, 420, 640, -2.5], ['skull', 1500, 330, 470, 3], ['c', 740, 820, 280, -3],
+  ['nautilus', 1590, 820, 440, -2], ['doric', 1010, 290, 340, 1.5], ['poly', 1130, 790, 250, 2.2],
+];
+const POLY_TARGET = { x: 1200, y: 520, h: 700 };
+
+function chartNow(t) {
+  const k1 = backOut(prog(t, TL.chartIn, TL.chartIn + 0.14), 2.0), k2 = backOut(prog(t, TL.big, TL.big + 0.14), 1.6);
+  if (t >= TL.big) return { x: mixv(CHART_SMALL.x, CHART_BIG.x, k2), y: 540, d: mixv(CHART_SMALL.d, CHART_BIG.d, k2) };
+  return { x: CHART_SMALL.x, y: 540, d: CHART_SMALL.d * k1 };
+}
+// Stick lines drawing on (kept out of the label boxes), and the painted ring round the brightest star, whose
+// stroke stays a thin screen-space line however far the camera punches in, then fades.
+function chartMarks(t, c, camS = 1) {
+  const k = c.d / 2000;
+  ctx.save(); ctx.translate(c.x, c.y); ctx.scale(k, k);
+  ctx.save(); ctx.beginPath(); ctx.rect(-1100, -1100, 2200, 2200);
+  for (const b of CH.boxes) ctx.rect(b[0], b[1], b[2] - b[0], b[3] - b[1]);
+  ctx.clip('evenodd');
+  ctx.strokeStyle = INK; ctx.lineWidth = 3.4; ctx.lineCap = 'round';
+  CH.links.forEach((L, i) => {
+    const q = outCub(prog(t, TL.lines + i * 0.0075, TL.lines + i * 0.0075 + 0.1));
+    if (q <= 0) return;
+    ctx.beginPath(); ctx.moveTo(L[0], L[1]); ctx.lineTo(mixv(L[0], L[2], q), mixv(L[1], L[3], q)); ctx.stroke();
+  });
+  ctx.restore();
+  const q = inOut(prog(t, TL.ring[0], TL.ring[1])), ra = 1 - smooth(prog(t, TL.ringOut[0], TL.ringOut[1]));
+  if (q > 0 && ra > 0) {
+    const [sx, sy] = CH.star, a0 = rad(-120), sweep = rad(372) * q, pts = [], ws = [];
+    for (let a = 0; a <= sweep; a += 0.04) {
+      const rr = 112 + 6 * Math.sin(a * 1.5 + 0.4) + a * 2.2;
+      pts.push([sx + rr * Math.cos(a0 + a), sy + rr * Math.sin(a0 + a)]);
+      ws.push(11.5 / camS * Math.min(1, a / 0.5, (rad(372) - a) / 0.6 + 0.35) * (0.85 + 0.15 * Math.sin(a * 3)));
+    }
+    const ink = new Ink(true, TERRA);
+    ctx.globalAlpha = ra; ribbon(ink, pts, ws); ink.paint(ctx); ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+function chartScene(t, camS = 1) {
+  const c = chartNow(t);
+  if (c.d < 1) return;
+  drawPlate(PL.chart, c.x, c.y, c.d);
+  chartMarks(t, c, camS);
+}
+// Word of the first act: the question mark, the morph, the jump to the left.
+function wordActOne(t) {
+  if (t < TL.qIn) return;
+  if (t < TL.m1[0]) {
+    const b = inkBox(Q), cx = (b.x0 + b.x1) / 2, cy = 540;
+    let s = mixv(0.55, 1, backOut(prog(t, TL.qIn, TL.qIn + 0.2), 2.3));
+    s *= 1 + 0.014 * Math.sin((t - 0.3) * Math.PI * 2 / 0.66) * smooth(prog(t, 0.3, 0.5)) * (1 - smooth(prog(t, 0.8, 0.95)));
+    drawWord(Q, s, 1, cx, cy);
+    return;
+  }
+  if (t < TL.m1[1]) { const e = sine(prog(t, TL.m1[0], TL.m1[1])); morph(Q, SC, e); slideDot(Q, SC, e); return; }
+  const k = backOut(prog(t, TL.jump, TL.jump + 0.14), 1.4), f = SC.fs / SL.fs;
+  const s = mixv(f, 1, k), x = mixv(SC.x, SL.x, k), y = mixv(SC.y, SL.y, k);
+  drawWord(SL, s, 1, SL.x, SL.y, x - SL.x, y - SL.y);
+}
+function actOne(t) { chartScene(t); wordActOne(t); }
+// The punch into the ringed star: only the chart rides the camera; the word holds and fades out whole.
+function zoomOne(t) {
+  const k = prog(t, TL.z1[0], TL.z1[1]);
+  if (k < 1) {
+    const zs = kk => Math.exp(Math.log(46) * Math.pow(fit(kk), 2.1));
+    const c = CHART_BIG, kc = c.d / 2000, tx = c.x + CH.star[0] * kc, ty = c.y + (CH.star[1] - 70) * kc;
+    const s = zs(k), px = mixv(tx, 960, smooth(k)), py = mixv(ty, 540, smooth(k));
+    ctx.setTransform(s, 0, 0, s, px - s * tx, py - s * ty);
+    chartScene(t, s);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    streak(px, py, zs(k + SHUTTER / (TL.z1[1] - TL.z1[0])) / s);
+    const wf = smooth(prog(k, 0.78, 1));
+    if (wf > 0) { ctx.fillStyle = `rgba(255,255,255,${wf})`; ctx.fillRect(0, 0, W, H); }
+  }
+  const wk = prog(t, TL.wordOut1[0], TL.wordOut1[1]);
+  if (wk < 1) drawWord(SL, 1, 1 - smooth(wk), SL.x, SL.y, -24 * wk, 0);
+}
+
+function skullNow(t) {
+  const k1 = backOut(prog(t, TL.back, TL.back + 0.13), 2.0), k2 = backOut(prog(t, TL.big2, TL.big2 + 0.14), 1.5);
+  if (t >= TL.big2) return { x: mixv(SKULL_SMALL.x, SKULL_BIG.x, k2), y: mixv(SKULL_SMALL.y, SKULL_BIG.y, k2), h: mixv(SKULL_SMALL.h, SKULL_BIG.h, k2) };
+  return { x: SKULL_SMALL.x, y: SKULL_SMALL.y, h: SKULL_SMALL.h * k1 };
+}
+function actTwo(t) {
+  const s = skullNow(t), pl = PL.skull;
+  drawPlate(pl, s.x, s.y, s.h);
+  const k = s.h / pl.ref;
+  const la = smooth(prog(t, TL.label[0], TL.label[1]));
+  if (la > 0) {
+    ctx.save(); ctx.globalAlpha = la; ctx.font = `italic 400 34px ${ITALIC}`; ctx.fillStyle = INK; ctx.textAlign = 'center';
+    ctx.fillText('Plate VI', s.x, s.y + (790 - pl.oy) * k + 62); ctx.restore();
+  }
+  const aq = backOut(prog(t, TL.aster, TL.aster + 0.13), 2.2);
+  if (aq > 0) {
+    const ax = s.x + (pl.temple[0] - pl.ox) * k, ay = s.y + (pl.temple[1] - pl.oy) * k;
+    ctx.save(); ctx.translate(ax, ay); ctx.scale(aq, aq); ctx.rotate((1 - aq) * 0.6);
+    ctx.font = fontOf(150); ctx.fillStyle = TERRA; ctx.textAlign = 'left'; ctx.fillText('*', -30.6, 83.6); ctx.restore();
+  }
+  const pop = backOut(prog(t, TL.back, TL.back + 0.1), 2);
+  if (t < TL.m2[0]) drawWord(SL, mixv(0.82, 1, pop), 1, SL.x, SL.y - 100);
+  else if (t < TL.m2[1]) { const e = sine(prog(t, TL.m2[0], TL.m2[1])); morph(SL, BL, e); slideDot(SL, BL, e); }
+  else drawWord(BL);
+}
+// The C: built 3.84–4.70, filled 4.70–4.88, held crisp, then a fast blurred zoom-out; the word fades out whole first.
+function actThree(t) {
+  const o = prog(t, TL.out[0], TL.out[1]), zr = q => mixv(1, 0.1, inCub(q)), zs = zr(o), fade = 1 - smooth(prog(o, 0.5, 1));
+  const popIn = backOut(prog(t, 3.84, 3.94), 1.8);
+  drawConstruction(t, CARD.x, CARD.y, CARD.s * mixv(0.9, 1, popIn) * zs, 0, fade);
+  if (o > 0 && o < 1) streak(CARD.x, CARD.y, zr(o + SHUTTER / (TL.out[1] - TL.out[0])) / zs);
+  if (t < TL.m3[1]) { const e = sine(prog(t, TL.m3[0], TL.m3[1])); morph(BL, LL, e); slideDot(BL, LL, e); }
+  else { const wk = prog(t, TL.wordOut2[0], TL.wordOut2[1]); if (wk < 1) drawWord(LL, 1, 1 - smooth(wk), LL.x, LL.y, -24 * wk, 0); }
+}
+// Collage: the six cut-outs on eighth notes, a slow push, and the dive into the polyhedron.
+function collagePose(t, i) {
+  const [name, x, y, sz, tilt] = COLLAGE[i];
+  const pop = backOut(prog(t, TL.pops + i * 0.12, TL.pops + i * 0.12 + 0.13), 2.0);
+  return { name, x, y, sz: sz * pop, rot: rad(tilt), pop };
+}
+function zoomCam(t) {
+  const k = inOut(prog(t, TL.z2[0], TL.z2[1]));
+  const p = COLLAGE[5], Z = POLY_TARGET.h / p[3], push = 1 + 0.03 * smooth(prog(t, 5.5, TL.z2[0]));
+  return { k, s: Math.pow(Z, k) * mixv(push, 1, k), cx: mixv(p[1], POLY_TARGET.x, k), cy: mixv(p[2], POLY_TARGET.y, k), ox: p[1], oy: p[2] };
+}
+function actFour(t) {
+  const cam = zoomCam(t);
+  for (let i = 0; i < 6; i++) {
+    const c = collagePose(t, i);
+    if (c.pop <= 0) continue;
+    let x = cam.cx + (c.x - cam.ox) * cam.s, y = cam.cy + (c.y - cam.oy) * cam.s, rot = c.rot;
+    if (i === 5) rot = mixv(c.rot, 0, cam.k);
+    else {
+      const dx = c.x - cam.ox, dy = c.y - cam.oy, l = Math.hypot(dx, dy) || 1, fly = 1500 * inCub(cam.k);
+      x += dx / l * fly; y += dy / l * fly; rot += cam.k * (i % 2 ? 0.3 : -0.3);
+    }
+    if (c.name === 'c') drawPlate(PL.cplate, x, y, c.sz * cam.s, rot);
+    else if (c.name === 'poly') drawPlate(PL.poly, x, y, c.sz * cam.s * (PL.poly.ref / (PL.poly.span[3] - PL.poly.span[2])), rot);
+    else drawPlate(PL[c.name], x, y, c.sz * cam.s, rot);
+  }
+  if (cam.k > 0 && cam.k < 1) streak(cam.cx, cam.cy, zoomCam(t + SHUTTER).s / cam.s);
+}
+// The poly plate drawn so its projection matches drawSolid(p, x, y, sc).
+function drawPolyPlate(x, y, sc, alpha = 1, shadow = 1) {
+  drawPlate(PL.poly, x, y, PL.poly.ref * sc / POLY_SC, 0, alpha, shadow);
+}
+const POLY_SC_T = () => POLY_TARGET.h / (PL.poly.span[3] - PL.poly.span[2]) * POLY_SC;
+// The solid's flight into the lockup mark: it shrinks and rises first, runs along the top above the words and
+// drops into place from the left, so it never crosses the type.
+function solidFlight(t) {
+  const L = CC_LAYOUT, s0 = POLY_SC_T();
+  const P = [[POLY_TARGET.x, POLY_TARGET.y, Math.log(s0)], [1040, 232, Math.log(s0 * 0.38)], [214, 250, Math.log(L.sc * 1.2)], [L.mx, L.my, Math.log(L.sc)]];
+  const u = sine(prog(t, TL.fly[0], TL.fly[1])) * 3, i = Math.min(2, Math.floor(u)), f = u - i;
+  const at = j => P[Math.max(0, Math.min(3, j))];
+  const q = [0, 1, 2].map(c => {
+    const a = at(i - 1)[c], b = at(i)[c], d = at(i + 1)[c], e = at(i + 2)[c];
+    return 0.5 * (2 * b + (d - a) * f + (2 * a - 5 * b + 4 * d - e) * f * f + (3 * b - a - 3 * d + e) * f * f * f);
+  });
+  return { x: q[0], y: q[1], sc: Math.exp(q[2]) };
+}
+// From the dissolve on: the engraving turns to plaster in place, the solid turns and settles beside "Form.", then
+// flies into the mark while the word melts into the title.
+function actFive(t) {
+  const d = smooth(prog(t, TL.dis[0], TL.dis[1])), f = solidFlight(t);
+  if (t < TL.m4[0]) { const fa = smooth(prog(t, TL.formIn[0], TL.formIn[1])); if (fa > 0) drawWord(FL, 1, fa, FL.x, FL.y, 0, 12 * (1 - fa)); }
+  else if (t < TL.m4[1]) { const e = sine(prog(t, TL.m4[0], TL.m4[1])); morph(FL, CC, e); slideDot(FL, CC, e); }
+  else drawWord(CC);
+  if (d > 0) drawSolid(poseAt(t), f.x, f.y, f.sc, 1, d);
+  if (d < 1) drawPolyPlate(f.x, f.y, f.sc, 1 - d, 1 - d);
+}
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  if (t < TL.z1[0]) actOne(t);
+  else if (t < TL.back) zoomOne(t);
+  else if (t < TL.m3[0]) actTwo(t);
+  else if (t < TL.pops) actThree(t);
+  else if (t < TL.dis[0]) {
+    if (t < TL.z2[1]) actFour(t);
+    else drawPolyPlate(POLY_TARGET.x, POLY_TARGET.y, POLY_SC_T());
+  }
+  else actFive(t);
+  const f = smooth(prog(t, TL.fade[0], TL.fade[1]));
+  if (f > 0) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(255,255,255,${f})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.draw = function ({ t }) { render(t); const u = cv.toDataURL('image/jpeg', 0.92); return u.slice(u.indexOf(',') + 1); };
+
+window.events = function () {
+  const r3 = v => Math.round(v * 1000) / 1000, pan = x => r3(fit((x - W / 2) / (W / 2), -1, 1)), ev = [];
+  ev.push({ k: 'bed', t: 0.48, end: 7.68, bpm: 125 });
+  ev.push({ k: 'pop', t: TL.qIn, p: 0, v: 1 });
+  ev.push({ k: 'glide', t: TL.m1[0], d: r3(TL.m1[1] - TL.m1[0]), m0: 67, m1: 74, p: 0 });
+  ev.push({ k: 'snap', t: TL.jump, p: pan(SL.x + 200), v: 0.7 });
+  ev.push({ k: 'pop', t: TL.chartIn, p: pan(CHART_SMALL.x), v: 0.9 });
+  ev.push({ k: 'snap', t: TL.big, p: pan(CHART_BIG.x), v: 1 });
+  ev.push({ k: 'scratch', t: TL.lines, d: r3(CH.links.length * 0.0075 + 0.1), p: pan(CHART_BIG.x), v: 0.8 });
+  ev.push({ k: 'brush', t: TL.ring[0], d: r3(TL.ring[1] - TL.ring[0]), p: pan(1170) });
+  ev.push({ k: 'whoosh', t: TL.z1[0], d: r3(TL.z1[1] - TL.z1[0]), p: 0.15, up: 1 });
+  ev.push({ k: 'pop', t: TL.back, p: pan(SL.x + 250), v: 0.7 }, { k: 'pop', t: TL.back + 0.02, p: pan(SKULL_SMALL.x), v: 0.9 });
+  ev.push({ k: 'glide', t: TL.m2[0], d: r3(TL.m2[1] - TL.m2[0]), m0: 74, m1: 69, p: -0.5 });
+  ev.push({ k: 'snap', t: TL.big2, p: pan(SKULL_BIG.x), v: 1 });
+  ev.push({ k: 'tick', t: TL.aster, p: pan(1150), v: 0.8 });
+  ev.push({ k: 'cut', t: 3.84, p: pan(CARD.x), v: 0.9 });
+  ev.push({ k: 'glide', t: TL.m3[0], d: r3(TL.m3[1] - TL.m3[0]), m0: 69, m1: 72, p: -0.5 });
+  for (const [a, b, kind] of CBUILD) ev.push({ k: 'scratch', t: r3(3.84 + a), d: r3(b - a), p: pan(CARD.x), v: kind === 'line' ? 0.45 : 0.6 });
+  for (const [a, x] of CDOTS) ev.push({ k: 'tick', t: r3(3.84 + a), p: pan(CARD.x + x * 0.78), v: 0.5 });
+  ev.push({ k: 'fill', t: TL.fill[0], d: r3(TL.fill[1] - TL.fill[0]), p: pan(CARD.x) });
+  ev.push({ k: 'whoosh', t: TL.out[0], d: r3(TL.out[1] - TL.out[0]), p: 0.2, up: 0 });
+  COLLAGE.forEach((c, i) => ev.push({ k: 'pop', t: r3(TL.pops + i * 0.12), p: pan(c[1]), v: 0.75 + 0.05 * i }));
+  ev.push({ k: 'whoosh', t: TL.z2[0], d: r3(TL.z2[1] - TL.z2[0]), p: 0.1, up: 1 });
+  ev.push({ k: 'snap', t: TL.z2[1], p: pan(POLY_TARGET.x), v: 0.8 });
+  ev.push({ k: 'shimmer', t: TL.dis[0], d: r3(TL.dis[1] - TL.dis[0]), p: pan(POLY_TARGET.x) });
+  ev.push({ k: 'turn', t: TL.turn[0], d: r3(TL.turn[1] - TL.turn[0]), p: pan(POLY_TARGET.x) });
+  ev.push({ k: 'turn', t: TL.fly[0], d: r3(TL.fly[1] - TL.fly[0]), p: 0 });
+  ev.push({ k: 'riser', t: 6.92, d: r3(TL.m4[0] - 6.92) });
+  ev.push({ k: 'glide', t: TL.m4[0], d: r3(TL.m4[1] - TL.m4[0]), m0: 72, m1: 79, p: 0 });
+  ev.push({ k: 'chord', t: r3(TL.m4[1] - 0.02) });
+  ev.push({ k: 'fade', t: TL.fade[0], d: r3(TL.fade[1] - TL.fade[0]) });
+  return ev.sort((a, b) => a.t - b.t);
+};
+
+window.ready = (async () => {
+  await Promise.all([document.fonts.load(fontOf(200)), document.fonts.load(`italic 400 34px ${ITALIC}`)]);
+  await document.fonts.ready;
+  const dg = glyph('.', 400);
+  DOTK = { x: (dg.dot.x - dg.ox) / 400, y: (dg.dot.y - dg.oy) / 400, r: dg.dot.r / 400 };
+  // words: centred question mark, centred then left "Stars", the left words, and the title
+  const qg = glyph('?', 590);
+  Q = at('?', 590, 960 - ((qg.box.x0 + qg.box.x1) / 2 - qg.ox), 540 + 0.355 * 590);
+  { const g = glyph('Stars', 377), wd = g.adv + (DOTK.x + DOTK.r) * 377 - (g.box.x0 - g.ox); SC = at('Stars', 377, 960 - wd / 2 - (g.box.x0 - g.ox), 540 + 0.345 * 377); }
+  const left = text => { const g = glyph(text, 290); return at(text, 290, 150 - (g.box.x0 - g.ox), 540 + 0.345 * 290); };
+  SL = left('Stars'); BL = left('Bones'); LL = left('Lines'); FL = left('Form');
+  {
+    const fs = 182, g = glyph("Classical Collage", fs), mark = 230, gap = 72;
+    const wordW = g.adv + (DOTK.x + DOTK.r) * fs - (g.box.x0 - g.ox), total = mark + gap + wordW, x0 = (W - total) / 2 + 30;
+    const base = 540 + 0.345 * fs;
+    CC = at('Classical Collage', fs, x0 + mark + gap - (g.box.x0 - g.ox), base);
+    CC_LAYOUT = { mx: x0 + mark / 2, my: 540 - 4, sc: mark / 5.6 };
+  }
+  PL.chart = buildChart(); PL.skull = buildSkull(); PL.skull.small = buildSkull(1.75, 0.66); PL.skull.small.useBelow = 0.66; PL.nautilus = buildNautilus(); PL.doric = buildDoric();
+  PL.poly = buildPoly(); CPATH = cPath(); PL.cplate = buildCPlate();
+})();
+</script>
+</body></html>
