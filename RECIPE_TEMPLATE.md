@@ -90,7 +90,8 @@ never does.>
 | <0–0.8> | <title types on> | `<T key or function>` |
 
 <How a scene opens, holds and hands over to the next; typical beat length; which beats are reusable patterns
-(title card, reveal, transition, sign-off) and which are one-off demo content.>
+(title card, reveal, transition, sign-off) and which are one-off demo content. The moments a reviewer must see
+in full (the punchline held, the reveal, the end card), with their demo times, for `contact_sheet.sh` `KEYS`.>
 
 ## Sound
 <What audio.py synthesizes, which cue kinds trigger each sound and the fields and ranges they carry (d, v, f,
@@ -112,7 +113,8 @@ that passes ±1 gives NaN and a silent track).>
 - **New subject:** <what to keep, what to rewrite, common traps>
 - **Length:** <how it stretches past 10 s: repeatable beats, what gets tiresome, rendering cost, and what in
   audio.py must be re-timed>
-- **Shorter:** <how it compresses to 3–6 s: cut whole beats rather than compressing each; which to keep, which to
+- **Shorter:** <how it compresses below the demo's length: between about 6 s and the demo, which holds and how
+  much copy shorten within the style's minimums; for 3–6 s, cut whole beats rather than compressing each; which to keep, which to
   drop first, the shortest opening that still shows the signature, what a title card costs, and any helper that
   must be removed with a dropped scene; a tested plan for 4 s if you can>
 - **Other formats:** <9:16 and 1:1: what recomposes easily and what does not; rendered values for the subject

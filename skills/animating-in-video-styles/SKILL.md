@@ -53,8 +53,9 @@ timeline, and the cue kinds audio.py handles.
    named with letters, digits and dashes (the output file takes that name). Inside a clone of the catalog, use
    `projects/<name>` (git-ignored), not a folder under `styles/`. No network, as in some sandboxes? Ask for
    network access, or pass `--repo <path to a clone>`.
-3. Before editing, render the original at full resolution: `bash <skill>/scripts/contact_sheet.sh <project-dir>
-   10 16 _reference/original`. Look at `_reference/original/` (sheet and two key frames) now, so you know what
+3. Before editing, render the original at full resolution: `KEYS=<times> bash <skill>/scripts/contact_sheet.sh
+   <project-dir> 10 16 _reference/original`, with `KEYS` set to the moments the recipe's Film grammar names (the
+   default stills can miss a punchline or a reveal). This render, not the catalog's preview GIF, is the reference. Look at `_reference/original/` (sheet and two key frames) now, so you know what
    the result should feel like; `_reference/original-sheet.jpg` comes from the catalog's small GIF.
 
 Work only inside the project folder. Read `<skill>/references/contract.md` before editing: it explains the
@@ -64,8 +65,9 @@ anim.html contract, where duration and size live, how to use the user's images, 
 Write a beat sheet: time ranges, what is on screen, what moves, what sounds. Put the style's signature in the
 first 3 seconds, keep one focus at a time, include at least one transformation or scene change, and end on a
 settle, fade or held final pose. Borrow the recipe's film grammar: how its scenes open, hold and hand over.
-Keep what the recipe calls the style and replace the demo's plot. Most demos run 10 s; for a shorter film
-(under about 6 s) cut whole scenes rather than compressing every beat: keep the signature opening (about
+Keep what the recipe calls the style and replace the demo's plot. Most demos run 10 s. A little shorter (about 6 s up
+to the demo), keep the scenes and shorten holds and copy within the recipe's minimums. Under about 6 s, cut
+whole scenes rather than compressing every beat: keep the signature opening (about
 1–1.5 s), one or two events with a transformation (a change of state such as lights coming on, nightfall or
 an arrival counts), a held final state of at least 0.8 s and a fade of at least 0.25 s. The recipe's "Shorter"
 note says which scenes go first.
@@ -88,8 +90,9 @@ is silently dropped, so check every kind you emit against audio.py.
 
 ### 8. Look, critique, fix
 Run `bash <skill>/scripts/contact_sheet.sh <project-dir> <seconds>` and look at `_review/sheet.jpg` and the
-key frames next to the original's in `_reference/original/`; add `KEYS=<t>` for a full-size still of the
-held final state (e.g. `KEYS=3.6` in a 4 s film). Critique against the recipe's signature and
+key frames next to the original's in `_reference/original/`; add `KEYS=<t1>,<t2>` for full-size stills
+of the beats the film exists for (the punchline, the reveal) and the held final state (e.g. `KEYS=2.9,3.6` in a
+4 s film). Critique against the recipe's signature and
 `<skill>/references/review.md`, fix, and render again. Do at least two passes: first renders almost always have
 clipped text, crowded frames or a weak ending. If you cannot view images, ask the user to compare the sheets
 and describe what they see; do not skip the review.
