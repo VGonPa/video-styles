@@ -45,7 +45,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [EB Garamond](https://fonts.google.com/specimen/EB+Garamond) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [magazine-cartoon](styles/magazine-cartoon), [scientific-plate](styles/scientific-plate) |
 | [Exo 2](https://fonts.google.com/specimen/Exo+2) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [digital-comic](styles/digital-comic), [handheld-lcd](styles/handheld-lcd), [synthwave](styles/synthwave) |
 | [Federo](https://fonts.google.com/specimen/Federo) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-nouveau](styles/art-nouveau) |
-| [Fraunces](https://fonts.google.com/specimen/Fraunces) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [liquid-motion](styles/liquid-motion), [paper-cutout](styles/paper-cutout), [retro-1970s](styles/retro-1970s) |
+| [Fraunces](https://fonts.google.com/specimen/Fraunces) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [feature-animation-3d](styles/feature-animation-3d), [liquid-motion](styles/liquid-motion), [paper-cutout](styles/paper-cutout), [retro-1970s](styles/retro-1970s) |
 | [Fredoka](https://fonts.google.com/specimen/Fredoka) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [clay](styles/clay), [inflated-3d](styles/inflated-3d), [infographic](styles/infographic), [kurzgesagt](styles/kurzgesagt), [retro-1970s](styles/retro-1970s), [surreal-loop](styles/surreal-loop) |
 | [Gaegu](https://fonts.google.com/specimen/Gaegu) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [relatable-webcomic](styles/relatable-webcomic) |
 | [Gochi Hand](https://fonts.google.com/specimen/Gochi+Hand) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [absurd-webcomic](styles/absurd-webcomic), [underground-comix](styles/underground-comix) |
