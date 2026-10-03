@@ -1,0 +1,1286 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── neoclassicism · a portico, a relief and a Doric frieze ─────────────────────────────────────
+// Shot 1, the portico: an oxblood stage wall and a stone floor fade up; a gilt rule runs out from the
+// centre, a three-step stylobate settles, six Ionic columns spring up in pairs from the centre out and
+// drop home, the entablature lands on them, the pediment rises from the cornice on both sides and a
+// gilt laurel grows leaf by leaf in the tympanum while NEOCLASSICISM is cut into the frieze letter by
+// letter, left to right, under the caption "Europe · c. 1760–1830". After a hold the camera pushes into
+// the frieze and the portico fades out against the bare wall, which carries over into
+// shot 2, the relief: a marble panel on an oxblood ground where two draped figures in profile face an
+// altar. They begin as flat contour drawing, fill with marble and rise out of the plane under a raking
+// light, then lift a gilt wreath together (dip, rise, overshoot, settle), and sink back to line into
+// shot 3, the principles: a Doric frieze, line first, whose three metopes receive their emblems (lamp
+// in the middle first, then scales and wreath together) above carved labels, a hold and a fade to dark.
+// Everything is mirror-symmetric about x = 960 and the camera only zooms along that axis. Relief is
+// built from vector paths each frame: a cast shadow to the lower right, a lit inner edge upper-left, a
+// shaded inner edge lower-right and a crisp umber contour. Textures are precomputed once and static.
+// Seeded random numbers only; every frame depends on t alone.
+'use strict';
+const W = 1920, H = 1080, CX = W / 2, DUR = 9.6, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), main = cv.getContext('2d');
+
+// ── small maths ──
+const clamp = (v, a = 0, b = 1) => (v < a ? a : v > b ? b : v);
+const mix = (a, b, u) => a + (b - a) * u;
+const span = (t, a, b) => clamp((t - a) / (b - a));
+const smooth = u => (u = clamp(u), u * u * (3 - 2 * u));
+const eOut = u => 1 - (1 - clamp(u)) ** 3;
+const eIn = u => clamp(u) ** 2;
+const eInOut = u => (u = clamp(u), u < 0.5 ? 4 * u * u * u : 1 - (2 - 2 * u) ** 3 / 2);
+const backOut = (u, s = 1.4) => { const v = clamp(u) - 1; return 1 + v * v * ((s + 1) * v + s); };
+const hop = (v, amp, len) => (v > 0 && v < len ? -amp * Math.sin(Math.PI * v / len) : 0);
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+const len2 = a => Math.hypot(a[0], a[1]);
+const unit = a => { const l = len2(a) || 1; return [a[0] / l, a[1] / l]; };
+const along = (p, d, k) => [p[0] + d[0] * k, p[1] + d[1] * k];
+function seeded(seed) {             // splitmix-style 32-bit generator
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x9e3779b9) >>> 0;
+    let z = s;
+    z = Math.imul(z ^ (z >>> 16), 0x21f0aaad);
+    z = Math.imul(z ^ (z >>> 15), 0x735a2d97);
+    return ((z ^ (z >>> 15)) >>> 0) / 4294967296;
+  };
+}
+const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = Math.ceil(w); c.height = Math.ceil(h); return c; };
+
+// ── palette (nothing outside it) ──
+const P = {
+  ox: '#5e1a17', oxLit: '#7d2a22', oxSh: '#3a0f0d',
+  marble: '#efe9dd', mShade: '#d8cfbf', mDeep: '#a89c88', vein: '#c9c0b0', vein2: '#b5ab9a',
+  stone: '#b9ad98', joint: '#8a7e6c',
+  gilt: '#c4913f', giltHi: '#e3b866', giltDk: '#8a5f22',
+  ink: '#2b1a15',
+};
+const HI = 'rgba(255,251,242,', LO = 'rgba(118,96,76,';
+const GHI = 'rgba(255,230,160,', GLO = 'rgba(92,56,16,';
+
+// ── timeline (seconds) ──
+const T = {
+  fadeIn: [0, 0.55], rule: [0.12, 0.72],
+  steps: [0.32, 0.44, 0.56], stepFall: 0.26,
+  cols: [0.74, 0.92, 1.1], colRise: 0.34, colFall: 0.2,
+  ent: 1.52, entFall: 0.38,
+  ped: 1.92, pedRise: 0.24, pedSettle: 0.12,
+  letters: 2.2, letterStep: 0.038, letterRamp: 0.07,
+  ribbon: [2.27, 2.45], leaves: 2.33, leafStep: 0.035,
+  caption: [2.33, 2.68],
+  creep: [1.2, 3.27],                  // the slow push along the axis, ending in the held portico
+  push: [3.27, 4.07], out1: [3.89, 4.07],
+  // shot 2: contour drawing → marble fill → relief rising under a raking light → the lift → back to line
+  s2: 4.07, lines: [4.07, 4.19], bandsIn: [4.07, 4.42], fill: [4.45, 4.65],
+  rise: [4.62, 5.2], rake: [4.6, 5.5],
+  dip: [5.3, 5.47], lift: [5.47, 6.2],
+  sink: [6.42, 6.56], unfill: [6.54, 6.66], unline: [6.66, 6.79], bandsOut: [6.44, 6.72], pull: [6.4, 6.8],
+  // shot 3: the Doric frieze arrives as line while the relief's last contours are under a quarter, then marble
+  s3: 6.74, lines3: [6.74, 6.88], fill3: [6.92, 7.1],
+  head: [7.0, 7.4], emC: 7.18, emO: 7.56, labC: 7.36, labO: 7.74,
+  cadence: 8.25, fadeOut: [9.0, 9.55],
+};
+
+// ── paths ──
+// Catmull-Rom through points; a truthy third element makes that point a sharp corner.
+function spline(pts, closed = true, p = new Path2D(), join = false) {
+  const n = pts.length, at = i => (closed ? pts[(i + n) % n] : pts[clamp(i, 0, n - 1)]);
+  const tan = i => {
+    if (pts[(i + n) % n][2] && closed) return [0, 0];
+    if (!closed && (i <= 0 || i >= n - 1 || pts[i][2])) return [0, 0];
+    const a = at(i - 1), b = at(i + 1); return [(b[0] - a[0]) / 6, (b[1] - a[1]) / 6];
+  };
+  if (join) p.lineTo(pts[0][0], pts[0][1]); else p.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const a = at(i), b = at(i + 1), ta = tan(i), tb = tan(i + 1);
+    p.bezierCurveTo(a[0] + ta[0], a[1] + ta[1], b[0] - tb[0], b[1] - tb[1], b[0], b[1]);
+  }
+  if (closed) p.closePath();
+  return p;
+}
+function sampleSpline(pts, per = 8) {
+  const n = pts.length, at = i => pts[clamp(i, 0, n - 1)], out = [];
+  for (let i = 0; i < n - 1; i++) {
+    const a = at(i - 1), b = at(i), c = at(i + 1), d = at(i + 2);
+    for (let k = 0; k < per; k++) {
+      const s = k / per, s2 = s * s, s3 = s2 * s;
+      out.push([0, 1].map(j => 0.5 * (2 * b[j] + (c[j] - a[j]) * s + (2 * a[j] - 5 * b[j] + 4 * c[j] - d[j]) * s2 + (3 * b[j] - a[j] - 3 * c[j] + d[j]) * s3)));
+    }
+  }
+  out.push([pts[n - 1][0], pts[n - 1][1]]);
+  return out;
+}
+const bbOf = pts => { let a = 1e9, b = 1e9, c = -1e9, d = -1e9; for (const q of pts) { a = Math.min(a, q[0]); b = Math.min(b, q[1]); c = Math.max(c, q[0]); d = Math.max(d, q[1]); } return [a, b, c, d]; };
+const piece = (p, bb) => ({ p, bb });
+const SP = (pts, closed = true) => piece(spline(pts, closed), bbOf(pts));
+const PL = pts => { const p = new Path2D(); p.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) p.lineTo(q[0], q[1]); p.closePath(); return piece(p, bbOf(pts)); };
+const RC = (x, y, w, h) => { const p = new Path2D(); p.rect(x, y, w, h); return piece(p, [x, y, x + w, y + h]); };
+const EL = (x, y, rx, ry, r = 0) => { const p = new Path2D(); p.ellipse(x, y, rx, ry, r, 0, TAU); const m = Math.max(rx, ry); return piece(p, [x - m, y - m, x + m, y + m]); };
+function stadium(x0, x1, y0, y1) {    // a torus moulding seen in elevation
+  const r = (y1 - y0) / 2, p = new Path2D();
+  p.moveTo(x0 + r, y0); p.lineTo(x1 - r, y0); p.arc(x1 - r, y0 + r, r, -Math.PI / 2, Math.PI / 2);
+  p.lineTo(x0 + r, y1); p.arc(x0 + r, y0 + r, r, Math.PI / 2, Math.PI * 1.5); p.closePath();
+  return piece(p, [x0, y0, x1, y1]);
+}
+// a band of varying width along a smooth centre line; `notch` cuts a swallowtail into the far end
+function band(pts, w0, w1, notch = 0, per = 8) {
+  const c = sampleSpline(pts, per), n = c.length, L = [], R = [];
+  for (let i = 0; i < n; i++) {
+    const a = c[Math.max(0, i - 1)], b = c[Math.min(n - 1, i + 1)], d = unit(sub(b, a)), w = mix(w0, w1, i / (n - 1)) / 2;
+    L.push([c[i][0] - d[1] * w, c[i][1] + d[0] * w]); R.push([c[i][0] + d[1] * w, c[i][1] - d[0] * w]);
+  }
+  const p = new Path2D(); p.moveTo(L[0][0], L[0][1]);
+  for (const q of L) p.lineTo(q[0], q[1]);
+  if (notch) { const d = unit(sub(c[n - 1], c[n - 2])); p.lineTo(c[n - 1][0] - d[0] * notch, c[n - 1][1] - d[1] * notch); }
+  for (let i = n - 1; i >= 0; i--) p.lineTo(R[i][0], R[i][1]);
+  p.closePath();
+  return piece(p, bbOf(L.concat(R)));
+}
+const line = (pts, smoothIt = true) => {
+  if (smoothIt && pts.length > 2) return spline(pts, false);
+  const p = new Path2D(); p.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) p.lineTo(q[0], q[1]); return p;
+};
+const mirrorPiece = (q, cx) => { const p = new Path2D(); p.addPath(q.p, new DOMMatrix([-1, 0, 0, 1, 2 * cx, 0])); return piece(p, [2 * cx - q.bb[2], q.bb[1], 2 * cx - q.bb[0], q.bb[3]]); };
+const mirrorPath = (q, cx) => { const p = new Path2D(); p.addPath(q, new DOMMatrix([-1, 0, 0, 1, 2 * cx, 0])); return p; };
+const flipPts = (pts, cx) => pts.map(q => [2 * cx - q[0], q[1], q[2]]);
+
+// ── relief rendering ──
+// g is the context being drawn (the frame, a layer or a precomputed texture); Z is how many device
+// pixels one world unit covers there, so shadow offsets and blurs keep their size under zoom.
+// INK_ONLY draws pure contour (each fill erases the lines under it, on a transparent layer).
+// RAKE is the low raking light of shot 2: I its strength, x its device-space position.
+let g = main, Z = 1, INK_ONLY = false;
+const RAKE = { I: 0, x: 0 };
+let MARBLE, STONE, PLASTER;
+function giltGrad(b) {
+  const gr = g.createLinearGradient(b[0], b[1], b[2], b[3]);
+  gr.addColorStop(0, P.giltHi); gr.addColorStop(0.45, P.gilt); gr.addColorStop(1, P.giltDk); return gr;
+}
+const GOLD = { fill: giltGrad, hi: GHI, lo: GLO, hiA: 0.8, loA: 0.8 };
+// d: how far the shape stands proud of its ground (0 = flat contour drawing, 1 = full relief)
+// s: extra local scale under the current transform (keeps contour widths in world units)
+function relief(pc, o = {}) {
+  const d = o.d ?? 1, s = o.s ?? 1, b = pc.bb, rule = o.rule ?? 'nonzero';
+  if (INK_ONLY) {
+    g.save(); g.globalCompositeOperation = 'destination-out'; g.fill(pc.p, rule); g.restore();
+    if (o.lw !== 0) inkLine(pc.p, (o.lw ?? 2.2) * 1.25 / s, 1);
+    return;
+  }
+  const fill = typeof o.fill === 'function' ? o.fill(b) : (o.fill ?? MARBLE);
+  // the light: fixed upper-left, unless the raking light is crossing, which stretches the cast shadow
+  // away from itself and brightens the lit edge of whatever it passes
+  let sx = 3.2, sy = 6, hk = 1;
+  if (RAKE.I > 0) {
+    const m = g.getTransform(), xd = m.a * (b[0] + b[2]) / 2 + m.c * (b[1] + b[3]) / 2 + m.e;
+    const dx = (xd - RAKE.x) / Z, k = dx / Math.hypot(dx, 260);
+    sx = mix(3.2, 9.4 * k, RAKE.I); sy = mix(6, 3.4, RAKE.I); hk = 1 + 0.9 * RAKE.I * Math.exp(-((dx / 330) ** 2));
+  }
+  g.save();
+  if (d > 0 && o.cast !== 0) {
+    const c = (o.cast ?? 1) * d * Z;
+    g.shadowColor = `rgba(24,8,6,${(o.sa ?? 0.5) * Math.min(1, d * 1.4)})`;
+    g.shadowBlur = 7 * c; g.shadowOffsetX = sx * c; g.shadowOffsetY = sy * c;
+  }
+  g.fillStyle = fill; g.fill(pc.p, rule);
+  g.restore();
+  if (o.shade || d > 0) {
+    g.save(); g.clip(pc.p, rule);
+    if (o.shade) { g.fillStyle = o.shade; g.fillRect(b[0] - 2, b[1] - 2, b[2] - b[0] + 4, b[3] - b[1] + 4); }
+    if (d > 0 && o.e !== 0) {
+      const m = 10 / s, ring = new Path2D(), e = (o.e ?? 2.2) * Z;
+      ring.rect(b[0] - m, b[1] - m, b[2] - b[0] + 2 * m, b[3] - b[1] + 2 * m); ring.addPath(pc.p);
+      g.shadowBlur = e * 1.2;
+      g.shadowOffsetX = g.shadowOffsetY = e;
+      g.fillStyle = g.shadowColor = (o.hi ?? HI) + Math.min(1, (o.hiA ?? 0.9) * d * hk) + ')';
+      g.fill(ring, 'evenodd');
+      g.shadowOffsetX = g.shadowOffsetY = -e;
+      g.fillStyle = g.shadowColor = (o.lo ?? LO) + (o.loA ?? 0.7) * d + ')';
+      g.fill(ring, 'evenodd');
+    }
+    g.restore();
+  }
+  if (o.lw !== 0) { g.lineJoin = 'round'; g.lineCap = 'round'; g.lineWidth = (o.lw ?? 2.2) / s; g.strokeStyle = o.ink ?? P.ink; g.stroke(pc.p); }
+}
+// contour-only line: the umber cut with a light lip on its lower-right wall, so it reads as incised
+function inkLine(p, w, k) {
+  const m = g.getTransform(), off = 1.2 * Z;
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  g.setTransform(m.a, m.b, m.c, m.d, m.e + off, m.f + off);
+  g.strokeStyle = `rgba(255,244,228,${0.78 * k})`; g.lineWidth = w * 0.62; g.stroke(p);
+  g.setTransform(m);
+  g.strokeStyle = P.ink; g.lineWidth = w; g.stroke(p);
+}
+// an incised line: the dark cut, and the light lip of its lower-right wall
+function groove(p, o = {}) {
+  const d = o.d ?? 1, s = o.s ?? 1, w = (o.w ?? 1.3) / s;
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  if (INK_ONLY) { inkLine(p, w * 1.2, 0.8); return; }
+  if (d > 0 && o.lip !== 0) {
+    const m = g.getTransform(), off = (o.off ?? 1) * Z;
+    g.setTransform(m.a, m.b, m.c, m.d, m.e + off, m.f + off);
+    g.strokeStyle = (o.hi ?? HI) + (o.hiA ?? 0.8) * d + ')'; g.lineWidth = w * 0.85; g.stroke(p);
+    g.setTransform(m);
+  }
+  g.strokeStyle = o.ink ?? 'rgba(43,26,21,0.85)'; g.lineWidth = w; g.stroke(p);
+}
+
+// ── textures (tileable value noise, built once) ──
+function noiseTile(size, cells, octaves, rnd) {
+  const out = new Float32Array(size * size); let amp = 1, tot = 0;
+  for (let o = 0; o < octaves; o++, cells *= 2, amp *= 0.5) {
+    const L = new Float32Array(cells * cells); for (let i = 0; i < L.length; i++) L[i] = rnd();
+    const k = cells / size;
+    for (let y = 0; y < size; y++) {
+      const fy = y * k, iy = fy | 0, ty = fy - iy, sy = ty * ty * (3 - 2 * ty), r0 = (iy % cells) * cells, r1 = ((iy + 1) % cells) * cells;
+      for (let x = 0; x < size; x++) {
+        const fx = x * k, ix = fx | 0, tx = fx - ix, sx = tx * tx * (3 - 2 * tx), c0 = ix % cells, c1 = (ix + 1) % cells;
+        const a = L[r0 + c0] + (L[r0 + c1] - L[r0 + c0]) * sx, b = L[r1 + c0] + (L[r1 + c1] - L[r1 + c0]) * sx;
+        out[y * size + x] += (a + (b - a) * sy) * amp;
+      }
+    }
+    tot += amp;
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= tot;
+  return out;
+}
+function buildTextures() {
+  const rnd = seeded(13901);
+  // veined marble: soft turbulent veins, gated so they come and go, on a faintly mottled ground
+  {
+    const N = 1024, turb = noiseTile(N, 4, 6, rnd), mot = noiseTile(N, 8, 4, rnd), gate = noiseTile(N, 2, 3, rnd);
+    const c = canvas(N, N), x = c.getContext('2d'), im = x.createImageData(N, N), D = im.data;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const k = j * N + i, u = i / N, v = j / N;
+      const a = Math.sin(TAU * (2 * u + v) + 9 * turb[k]), b = Math.sin(TAU * (u - 2 * v) + 7 * mot[k] + 1.7);
+      const thin = Math.exp(-a * a / 0.0022) * smooth((gate[k] - 0.42) / 0.25);
+      const soft = Math.exp(-b * b / 0.03) * 0.55 * smooth((0.6 - gate[k]) / 0.3);
+      const m = (mot[k] - 0.5) * 14;
+      let r = 239 + m, gg = 233 + m, bl = 221 + m * 0.9;
+      r = mix(r, 201, soft); gg = mix(gg, 192, soft); bl = mix(bl, 176, soft);
+      r = mix(r, 181, thin * 0.7); gg = mix(gg, 171, thin * 0.7); bl = mix(bl, 154, thin * 0.7);
+      D[k * 4] = r; D[k * 4 + 1] = gg; D[k * 4 + 2] = bl; D[k * 4 + 3] = 255;
+    }
+    x.putImageData(im, 0, 0);
+    MARBLE = main.createPattern(c, 'repeat'); MARBLE.setTransform(new DOMMatrix([0.5, 0, 0, 0.5, 0, 0]));
+  }
+  // chalky plaster for the oxblood walls (grey, laid on with soft-light)
+  {
+    const N = 512, fine = noiseTile(N, 64, 3, rnd), coarse = noiseTile(N, 4, 4, rnd);
+    const c = canvas(N, N), x = c.getContext('2d'), im = x.createImageData(N, N), D = im.data;
+    for (let k = 0; k < N * N; k++) {
+      const v = 128 + (fine[k] - 0.5) * 70 + (coarse[k] - 0.5) * 80 + (rnd() - 0.5) * 16;
+      D[k * 4] = D[k * 4 + 1] = D[k * 4 + 2] = v; D[k * 4 + 3] = 255;
+    }
+    x.putImageData(im, 0, 0);
+    PLASTER = main.createPattern(c, 'repeat');
+  }
+  // pale stone grain for the floor and the steps
+  {
+    const N = 512, grain = noiseTile(N, 16, 5, rnd);
+    const c = canvas(N, N), x = c.getContext('2d'), im = x.createImageData(N, N), D = im.data;
+    for (let k = 0; k < N * N; k++) {
+      const v = (grain[k] - 0.5) * 26 + (rnd() - 0.5) * 12;
+      D[k * 4] = 185 + v; D[k * 4 + 1] = 173 + v; D[k * 4 + 2] = 152 + v * 0.9; D[k * 4 + 3] = 255;
+    }
+    x.putImageData(im, 0, 0);
+    STONE = main.createPattern(c, 'repeat');
+  }
+}
+// an oxblood wall: plaster over a radial light, as a world-positioned layer
+function buildWall(x0, y0, w, h, lx, ly, r1) {
+  const c = canvas(w, h), x = c.getContext('2d');
+  const gr = x.createRadialGradient(lx - x0, ly - y0, 40, lx - x0, ly - y0 + 60, r1);
+  gr.addColorStop(0, P.oxLit); gr.addColorStop(0.45, '#6c231c'); gr.addColorStop(0.8, P.ox); gr.addColorStop(1, '#4a1512');
+  x.fillStyle = gr; x.fillRect(0, 0, w, h);
+  x.globalCompositeOperation = 'soft-light'; x.globalAlpha = 0.5; x.fillStyle = PLASTER; x.fillRect(0, 0, w, h);
+  return { c, x0, y0 };
+}
+
+// ── camera: zoom about the central axis only ──
+function setCam(z, cy) { g.setTransform(z, 0, 0, z, CX - CX * z, H / 2 - cy * z); Z = z; }
+
+// ── laurel ──
+const LEAF = (() => { const p = new Path2D(); p.moveTo(0, 0); p.quadraticCurveTo(0.38, -0.29, 1, 0); p.quadraticCurveTo(0.38, 0.29, 0, 0); p.closePath(); return piece(p, [0, -0.15, 1, 0.15]); })();
+const MIDRIB = (() => { const p = new Path2D(); p.moveTo(0.1, 0); p.quadraticCurveTo(0.5, -0.02, 0.86, 0); return p; })();
+let LEAF_GOLD;
+function leaf(x, y, ang, l, o) {
+  g.save(); g.translate(x, y); g.rotate(ang); g.scale(l, l);
+  if (o.gold) relief(LEAF, { s: l, d: o.d, fill: LEAF_GOLD, hi: GHI, lo: GLO, hiA: 0.8, loA: 0.7, e: 1.3, lw: o.lw ?? 1.6, cast: 0.5 });
+  else relief(LEAF, { s: l, d: o.d, e: 1.4, lw: o.lw ?? 1.7, cast: 0.6 });
+  groove(MIDRIB, { s: l, d: o.d, w: o.gold ? 1.0 : 1.1, ink: o.gold ? 'rgba(80,46,14,0.9)' : undefined, hi: o.gold ? GHI : HI });
+  g.restore();
+}
+// A wreath of two branches rising from a bottom tie. grow(j) scales station j (0 = bottom) from 0 to 1;
+// tails(side) returns a ribbon centre line for side ±1 (or null), reveal 0..1 draws it outward.
+function wreath(cx, cy, R, o) {
+  const n = o.n ?? 9, a0 = 0.3, a1 = 0.36, d = o.d ?? 1, gold = !!o.gold, grow = o.grow ?? (() => 1);
+  const mat = gold ? GOLD : {};
+  // ribbon tails and the bow
+  if (o.tails) {
+    const f = o.tailF ?? 1;
+    if (f > 0) for (const s of [-1, 1]) {
+      const c = o.tails(s), pts = sampleSpline(c, 6), k = Math.max(2, Math.round(pts.length * f));
+      const b = band(pts.slice(0, k), o.tw ?? 7, (o.tw ?? 7) * 0.75, f > 0.98 ? (o.tw ?? 7) * 0.7 : 0, 1);
+      relief(b, Object.assign({ d, cast: 0.6, e: 1.4, lw: 1.6 }, mat));
+    }
+  }
+  const station = (j, s) => {
+    const th = Math.PI / 2 + s * (a0 + (Math.PI - a0 - a1) * j / (n - 1));
+    const pnt = [cx + R * Math.cos(th), cy + R * Math.sin(th)];
+    const tang = [-Math.sin(th) * s, Math.cos(th) * s], rad = [Math.cos(th), Math.sin(th)];
+    return { pnt, tang, rad };
+  };
+  // the stems, as far as the branch has grown
+  let top = -1; for (let j = 0; j < n; j++) if (grow(j) > 0) top = j;
+  if (top >= 0) for (const s of [-1, 1]) {
+    const pts = []; for (let j = 0; j <= top; j++) pts.push(station(j, s).pnt);
+    pts.unshift([cx + s * R * 0.12, cy + R * 1.0]);
+    if (pts.length > 1) relief(band(pts, R * 0.07, R * 0.045, 0, 6), Object.assign({ d, cast: 0.4, e: 1, lw: 1.3 }, mat));
+  }
+  for (let j = n - 1; j >= 0; j--) {
+    const k = grow(j); if (k <= 0) continue;
+    for (const s of [-1, 1]) {
+      const st = station(j, s), l = R * (o.leaf ?? 0.46) * (1 - 0.22 * j / (n - 1)) * k;
+      for (const [a, f] of [[0.62, 1], [-0.5, 0.86]]) {
+        const dir = [st.tang[0] * Math.cos(a) + st.rad[0] * Math.sin(a), st.tang[1] * Math.cos(a) + st.rad[1] * Math.sin(a)];
+        const base = along(st.pnt, st.tang, -R * 0.05);
+        leaf(base[0], base[1], Math.atan2(dir[1], dir[0]), l * f, { d, gold });
+      }
+      if (j % 2 === 1 && o.berries !== false) {
+        const bp = along(st.pnt, st.rad, -R * 0.1), r = R * 0.055 * k;
+        relief(EL(bp[0], bp[1], r, r), Object.assign({ d, cast: 0.4, e: 0.9, lw: 1.2 }, mat));
+      }
+    }
+  }
+  if (o.tails && (o.tailF ?? 1) > 0) {
+    for (const s of [-1, 1]) relief(EL(cx + s * R * 0.13, cy + R * 1.02, R * 0.13, R * 0.075, s * 0.35), Object.assign({ d, cast: 0.5, e: 1.1, lw: 1.5 }, mat));
+    relief(EL(cx, cy + R * 1.02, R * 0.075, R * 0.075), Object.assign({ d, cast: 0.5, e: 1, lw: 1.5 }, mat));
+  }
+}
+
+// ── carved text sprites: Cinzel cut into marble (dark wall upper-left, lit wall lower-right, light lip) ──
+function carve(text, size, track, S, weight = 700) {
+  const font = `${weight} ${size}px Cinzel`, m = canvas(4, 4).getContext('2d');
+  m.font = font; m.letterSpacing = `${track}px`;
+  const tm = m.measureText(text), asc = tm.actualBoundingBoxAscent, desc = tm.actualBoundingBoxDescent;
+  const w = Math.ceil(tm.width - track) + 14, h = Math.ceil(asc + desc) + 14;
+  const mk = (dx, dy, col, x) => { x.save(); x.scale(S, S); x.font = font; x.letterSpacing = `${track}px`; x.textAlign = 'center'; x.textBaseline = 'alphabetic'; x.fillStyle = col; x.fillText(text, w / 2 + track / 2 + dx, h / 2 + (asc - desc) / 2 + dy); x.restore(); };
+  const c = canvas(w * S, h * S), x = c.getContext('2d');
+  mk(0, 0, '#a99c88', x);
+  const inner = (dx, dy, col, blur) => {
+    const t = canvas(w * S, h * S), y = t.getContext('2d');
+    y.fillStyle = col; y.fillRect(0, 0, t.width, t.height); y.globalCompositeOperation = 'destination-out'; mk(dx, dy, '#000', y);
+    x.save(); x.globalCompositeOperation = 'source-atop'; x.filter = `blur(${blur * S}px)`; x.drawImage(t, 0, 0); x.restore();
+  };
+  inner(1.6, 1.6, 'rgba(43,26,21,0.9)', 0.5);
+  inner(-1.1, -1.1, 'rgba(255,250,238,0.75)', 0.4);
+  x.save(); x.globalCompositeOperation = 'destination-over'; mk(1.1, 1.1, 'rgba(255,250,238,0.7)', x); x.restore();
+  return { img: c, w, h };
+}
+const putSprite = (sp, x, y, a = 1) => { if (a <= 0) return; g.globalAlpha = a; g.drawImage(sp.img, x - sp.w / 2, y - sp.h / 2, sp.w, sp.h); g.globalAlpha = 1; };
+
+// ═════════════════════════════════════════ shot 1 · the portico ═════════════════════════════════
+const FLOOR = 950;
+const STEPS = [[434, 1486, 920], [458, 1462, 890], [482, 1438, 860]];   // x0, x1, top (bottom step first)
+const COLX = [85, 255, 425];                                            // the three pairs, centre first
+const BASE = 860, COLH = 453;
+const EN = { bot: 407, arch: 367, frz: 309, top: 282 };
+const PED = { l: 478, r: 1442, base: 282, pitch: 0.37, th: 24 };
+PED.apex = PED.base - PED.pitch * (CX - PED.l);
+PED.inL = PED.l + PED.th / PED.pitch;
+const WR1 = { x: CX, y: 213, R: 43 };
+const WORD = 'NEOCLASSICISM';
+let WALL1, COL, ENT, PEDI, LETTERS;
+
+function buildColumn() {
+  const r = u => 26 - 4 * u + 1.1 * Math.sin(Math.PI * u), y0 = -31, y1 = -424, at = u => mix(y0, y1, u);
+  const left = [], right = [];
+  for (let i = 1; i < 16; i++) { const u = i / 16; left.push([-r(u), at(u)]); right.push([r(u), at(u)]); }
+  const shaft = SP([[-29, y0, 1], [-26.4, y0 - 5], ...left, [-23.2, y1 + 5], [-24.6, y1, 1], [24.6, y1, 1], [23.2, y1 + 5], ...right.reverse(), [26.4, y0 - 5], [29, y0, 1]]);
+  const shade = main.createLinearGradient(-28, 0, 28, 0);
+  shade.addColorStop(0, 'rgba(122,100,80,0.42)'); shade.addColorStop(0.24, 'rgba(122,100,80,0)'); shade.addColorStop(0.52, 'rgba(255,252,244,0.10)');
+  shade.addColorStop(0.7, 'rgba(122,100,80,0.12)'); shade.addColorStop(1, 'rgba(100,80,62,0.55)');
+  // twelve flutes on the visible half: a shadowed left wall and a lit right wall each
+  const flutes = [];
+  for (let j = 0; j < 12; j++) {
+    const th = -Math.PI / 2 + (j + 0.5) * Math.PI / 12, cs = Math.cos(th);
+    for (const [dt, w, col] of [[-0.3, 2.1, 'rgba(110,90,72,0.55)'], [0.22, 1.2, 'rgba(255,252,244,0.55)']]) {
+      const pts = []; for (let i = 0; i <= 8; i++) { const u = mix(0.035, 0.97, i / 8); pts.push([r(u) * Math.sin(th + dt * Math.PI / 12), at(u)]); }
+      flutes.push({ p: line(pts, false), w: Math.max(0.5, w * cs), col });
+    }
+  }
+  // the volute band: a cushion whose two ends roll up into discs
+  const vt = -447, hb = 8, VR = 13, vx = 29, vcy = vt + VR, dy = hb - VR, sx = Math.sqrt(VR * VR - dy * dy);
+  const vol = new Path2D();
+  vol.moveTo(-vx, vt); vol.lineTo(vx, vt);
+  let e1 = Math.atan2(dy, -sx); if (e1 < -Math.PI / 2) e1 += TAU;
+  vol.arc(vx, vcy, VR, -Math.PI / 2, e1); vol.lineTo(-vx + sx, vt + hb);
+  vol.arc(-vx, vcy, VR, Math.atan2(dy, sx), Math.PI * 1.5); vol.closePath();
+  const spirals = new Path2D();
+  for (const s of [-1, 1]) {
+    for (let i = 0; i <= 70; i++) {
+      const ph = i / 70 * 2.6 * Math.PI, rr = VR * 0.86 * Math.exp(-0.2 * ph), a = -Math.PI / 2 + s * ph;
+      const x = s * vx + rr * Math.cos(a), y = vcy + rr * Math.sin(a);
+      if (i) spirals.lineTo(x, y); else spirals.moveTo(x, y);
+    }
+    spirals.moveTo(s * vx + 2.3, vcy); spirals.arc(s * vx, vcy, 2.3, 0, TAU);
+  }
+  const eggs = new Path2D();
+  for (const ex of [-11, 0, 11]) { eggs.moveTo(ex + 4, -435); eggs.ellipse(ex, -435, 4, 4.4, 0, 0, TAU); }
+  for (const ex of [-5.5, 5.5]) { eggs.moveTo(ex, -439); eggs.lineTo(ex, -431); }
+  const ech = new Path2D();
+  ech.moveTo(-27, -440); ech.lineTo(27, -440); ech.bezierCurveTo(27, -433, 22, -429, 17, -429); ech.lineTo(-17, -429); ech.bezierCurveTo(-22, -429, -27, -433, -27, -440); ech.closePath();
+  COL = {
+    plinth: RC(-33, -9, 66, 9), t1: stadium(-31, 31, -18, -9),
+    scotia: PL([[-27, -18], [27, -18], [25, -21], [27, -24], [-27, -24], [-25, -21]]), t2: stadium(-28.5, 28.5, -31, -24),
+    shaft, shade, flutes, astragal: stadium(-25.5, 25.5, -429.5, -424), echinus: piece(ech, [-27, -440, 27, -429]),
+    volute: piece(vol, [-vx - VR, vt, vx + VR, vcy + VR]), spirals, eggs, abacus: RC(-37, -453, 74, 6),
+    abLine: line([[-35, -450], [35, -450]], false),
+  };
+}
+function drawColumn(x, y, d = 1) {
+  g.save(); g.translate(x, y);
+  for (const q of [COL.plinth, COL.t1, COL.scotia, COL.t2]) relief(q, { d, cast: 0.5, e: 1.6, lw: 1.8 });
+  relief(COL.shaft, { d, shade: COL.shade, e: 2.0 });
+  g.lineCap = 'round';
+  for (const f of COL.flutes) { g.strokeStyle = f.col; g.lineWidth = f.w; g.stroke(f.p); }
+  g.lineWidth = 2.2; g.strokeStyle = P.ink; g.stroke(COL.shaft.p);
+  relief(COL.astragal, { d, cast: 0.4, e: 1.2, lw: 1.6 });
+  relief(COL.echinus, { d, cast: 0.4, e: 1.2, lw: 1.6 });
+  groove(COL.eggs, { d, w: 0.9 });
+  relief(COL.volute, { d, cast: 0.7, e: 1.6, lw: 1.8 });
+  groove(COL.spirals, { d, w: 1.1 });
+  relief(COL.abacus, { d, cast: 0.7, e: 1.4, lw: 1.8 });
+  groove(COL.abLine, { d, w: 0.8 });
+  g.restore();
+}
+function buildEntablature() {
+  const dent = new Path2D();
+  for (let x = 498; x <= 1422; x += 12) { dent.moveTo(x, 300); dent.lineTo(x, 308.5); }
+  ENT = {
+    parts: [RC(509, 395, 902, 12), RC(507, 383, 906, 12), RC(505, 371, 910, 12), RC(500, 367, 920, 4),
+      RC(505, EN.frz, 910, EN.arch - EN.frz), RC(494, 299, 932, 10), RC(482, 288, 956, 11), RC(477, EN.top, 966, 6)],
+    dent, fascia: line([[512, 383], [1408, 383]], false),
+  };
+}
+function drawEntablature(dy, d = 1) {
+  g.save(); g.translate(0, dy);
+  ENT.parts.forEach((q, i) => relief(q, { d, cast: i === 4 ? 0.6 : 0.8, e: 1.6, lw: i === 4 ? 2.2 : 1.8, shade: i === 4 ? null : 'rgba(168,156,136,0.12)' }));
+  groove(ENT.dent, { d, w: 1.2 });
+  g.restore();
+}
+function buildPediment() {
+  // the left half, carried on past the axis: a clip at x = 960 makes its end, so the halves meet
+  // without a seam; the tympanum is everything under the inner raking line (the cornice clip trims it)
+  const B = PED.base, th = PED.th, xe = CX + 60, yo = x => B - PED.pitch * (x - PED.l);
+  const rakeL = PL([[PED.l, B], [xe, yo(xe)], [xe, yo(xe) + th], [PED.inL, B]]);
+  const tymL = PL([[PED.inL, B], [xe, yo(xe) + th], [xe, B + 700], [PED.l, B + 700]]);
+  const mould = x1 => { const p = new Path2D(); for (const o of [7, 15]) { p.moveTo(PED.l + 22, yo(PED.l + 22) + o); p.lineTo(x1, yo(x1) + o); } return p; };
+  const whole = PL([[PED.l, B], [CX, PED.apex], [PED.r, B], [2 * CX - PED.inL, B], [CX, PED.apex + th], [PED.inL, B]]);
+  const tym = PL([[PED.inL, B], [CX, PED.apex + th], [2 * CX - PED.inL, B]]);
+  const linesW = mould(CX); linesW.addPath(mirrorPath(mould(CX), CX));
+  PEDI = { rakeL, tymL, lmL: mould(xe), whole, tym, linesW, rake: Math.atan(PED.pitch) };
+}
+// each half lies flat on the cornice, hinged at its outer corner, and rises to the rake (small overshoot)
+const pedClose = () => T.ped + T.pedRise * 0.5;
+function drawPediment(t, d = 1) {
+  const t1 = T.ped + T.pedRise + T.pedSettle, u = span(t, T.ped, t1);
+  if (u <= 0) return;
+  const TYM = 'rgba(150,134,112,0.32)', whole = smooth(span(t, t1, t1 + 0.2));
+  if (whole < 1) {
+    const beta = PEDI.rake * (1 - backOut(u, 1));
+    for (const s of [-1, 1]) {
+      g.save(); g.beginPath();
+      if (s < 0) g.rect(-3000, -3000, CX + 3000, PED.base + 3000); else g.rect(CX, -3000, 6000, PED.base + 3000);
+      g.clip();
+      if (s > 0) { g.translate(2 * CX, 0); g.scale(-1, 1); }
+      g.translate(PED.l, PED.base); g.rotate(beta); g.translate(-PED.l, -PED.base);
+      relief(PEDI.tymL, { d, cast: 0.3, shade: TYM, e: 1.6 });
+      relief(PEDI.rakeL, { d, cast: 0.9, e: 1.8 });
+      groove(PEDI.lmL, { d, w: 1 });
+      g.restore();
+    }
+  }
+  if (whole > 0) {
+    g.globalAlpha = whole;
+    relief(PEDI.tym, { d, cast: 0.3, shade: TYM, e: 1.6 });
+    relief(PEDI.whole, { d, cast: 0.9, e: 1.8 });
+    groove(PEDI.linesW, { d, w: 1 });
+    g.globalAlpha = 1;
+  }
+}
+function buildLetters() {
+  const size = 39, track = 15, m = canvas(4, 4).getContext('2d'); m.font = `700 ${size}px Cinzel`;
+  const adv = [...WORD].map(ch => m.measureText(ch).width), tot = adv.reduce((a, b) => a + b, 0) + track * (WORD.length - 1);
+  let x = CX - tot / 2;
+  LETTERS = [...WORD].map((ch, i) => { const L = { sp: carve(ch, size, 0, 3.2), x: x + adv[i] / 2, y: (EN.frz + EN.arch) / 2 + 1 }; x += adv[i] + track; return L; });
+}
+// letters are cut in reading order, each one whole: its incision deepens in over letterRamp and it
+// settles a pixel, so every frame reads as the start of the word plus at most the next letter arriving
+const letterTime = i => T.letters + i * T.letterStep;
+function drawLetters(t) {
+  LETTERS.forEach((L, i) => {
+    const t0 = letterTime(i), u = span(t, t0, t0 + T.letterRamp);
+    if (u <= 0) return;
+    putSprite(L.sp, L.x, L.y - 1.2 * (1 - eOut(u)), smooth(u));
+    // chips of marble kicked out by the chisel
+    const v = t - t0;
+    if (v > 0 && v < 0.25) {
+      const rnd = seeded(500 + i);
+      for (let j = 0; j < 5; j++) {
+        const vx = (rnd() * 120 + 30) * (rnd() < 0.5 ? -1 : 1);
+        const vy = -(rnd() * 90 + 40), x = L.x + vx * v * 0.5, y = L.y - 4 + vy * v * 0.5 + 520 * v * v, sz = 0.75 + rnd() * 0.75;
+        g.globalAlpha = 1 - v / 0.25; g.fillStyle = j % 2 ? P.mShade : P.mDeep;
+        g.beginPath(); g.moveTo(x, y - sz); g.lineTo(x + sz, y + sz * 0.7); g.lineTo(x - sz * 0.8, y + sz * 0.5); g.closePath(); g.fill();
+        g.globalAlpha = 1;
+      }
+    }
+  });
+}
+const CAP = { y: 1014, x0: 540, x1: 1380 };   // the clean stone course the caption sits on
+function drawFloor() {
+  g.fillStyle = STONE; g.fillRect(-400, FLOOR, 2720, 500);
+  const gr = g.createLinearGradient(0, FLOOR, 0, FLOOR + 260);
+  gr.addColorStop(0, 'rgba(255,250,240,0.10)'); gr.addColorStop(0.25, 'rgba(43,26,21,0)'); gr.addColorStop(1, 'rgba(43,26,21,0.4)');
+  g.fillStyle = gr; g.fillRect(-400, FLOOR, 2720, 500);
+  const joints = new Path2D(), free = x => x < CAP.x0 || x > CAP.x1;
+  [[FLOOR, 988, 0], [988, 1052, 0.5], [1052, 1112, 0]].forEach(([y0, y1, off], r) => {
+    if (r === 0) { joints.moveTo(-400, y1); joints.lineTo(CAP.x0, y1); joints.moveTo(CAP.x1, y1); joints.lineTo(2320, y1); }
+    else { joints.moveTo(-400, y1); joints.lineTo(2320, y1); }
+    for (let k = -6; k <= 6; k++) { const x = CX + (k + off) * 230; if (r === 2 || free(x)) { joints.moveTo(x, y0); joints.lineTo(x, y1); } }
+  });
+  g.save(); groove(joints, { w: 1.4, ink: 'rgba(138,126,108,0.95)', hiA: 0.35 }); g.restore();
+}
+function drawRule(t) {
+  const u = eOut(span(t, T.rule[0], T.rule[1])); if (u <= 0) return;
+  const L = 1400 * u;
+  g.fillStyle = P.gilt; g.fillRect(CX - L, FLOOR - 3, 2 * L, 6);
+  g.fillStyle = P.giltHi; g.fillRect(CX - L, FLOOR - 3, 2 * L, 1.6);
+  g.fillStyle = P.giltDk; g.fillRect(CX - L, FLOOR + 1.6, 2 * L, 1.4);
+}
+function stepOffset(t, i) {
+  const v = t - T.steps[i]; if (v < 0) return null;
+  return v < T.stepFall ? -30 * (1 - eIn(v / T.stepFall)) : hop(v - T.stepFall, 2, 0.1);
+}
+function columnOffset(t, k) {
+  const v = t - T.cols[k]; if (v < 0) return null;
+  if (v < T.colRise) return mix(COLH + 20, -14, eOut(v / T.colRise));
+  if (v < T.colRise + T.colFall) return -14 * (1 - eIn((v - T.colRise) / T.colFall));
+  return hop(v - T.colRise - T.colFall, 2.5, 0.1);
+}
+function wreath1(t) {
+  const tf = span(t, T.ribbon[0], T.ribbon[1]);
+  if (tf <= 0) return;
+  wreath(WR1.x, WR1.y, WR1.R, {
+    gold: true, n: 8, tw: 6.5, tailF: eOut(tf), leaf: 0.5,
+    tails: s => [[CX + s * 5, WR1.y + WR1.R + 3], [CX + s * 22, WR1.y + WR1.R + 10], [CX + s * 38, WR1.y + WR1.R + 7], [CX + s * 56, WR1.y + WR1.R + 15], [CX + s * 72, WR1.y + WR1.R + 19]],
+    grow: j => backOut(span(t, T.leaves + j * T.leafStep, T.leaves + j * T.leafStep + 0.16), 1.6),
+  });
+}
+function drawCaption(t) {
+  const u = span(t, T.caption[0], T.caption[1]); if (u <= 0) return;
+  const e = eOut(u), y = CAP.y + 10 * (1 - e);
+  g.save(); g.globalAlpha = smooth(u * 1.4);
+  g.font = 'italic 400 44px "Bodoni Moda"'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  const txt = 'Europe \u00b7 c. 1760\u20131830', tw = g.measureText(txt).width;
+  g.fillStyle = P.oxSh; g.fillText(txt, CX, y);
+  const r0 = tw / 2 + 26, r1 = r0 + 110 * e;
+  g.fillStyle = P.giltDk;
+  for (const s of [-1, 1]) { g.fillRect(Math.min(CX + s * r0, CX + s * r1), y - 15, Math.abs(r1 - r0), 2.5); }
+  g.restore();
+}
+// progress of the push into the frieze: speed builds from rest as v^1.4, then over the last 0.24 s it
+// drops to a quarter, so the portico dissolves while the camera is slowing (integrated once into a table)
+const PUSH = (() => {
+  const n = 400, tab = new Float32Array(n + 1), slow = 1 - 0.24 / (T.push[1] - T.push[0]);
+  for (let i = 1; i <= n; i++) { const v = (i - 0.5) / n; tab[i] = tab[i - 1] + v ** 1.4 * mix(1, 0.25, smooth((v - slow) / (1 - slow))); }
+  for (let i = 0; i <= n; i++) tab[i] /= tab[n];
+  return v => { const x = clamp(v) * n, i = Math.min(n - 1, Math.floor(x)); return mix(tab[i], tab[i + 1], x - i); };
+})();
+function cam1(t) {
+  const u = smooth(span(t, T.creep[0], T.creep[1]));
+  let z = 1 + 0.06 * u, cy = mix(540, 556, u);
+  const v = span(t, T.push[0], T.push[1]);
+  if (v > 0) {
+    // zoom and recentring share the eased progress: the frieze slides to the middle of the frame
+    const fy = (EN.frz + EN.arch) / 2, y0 = H / 2 + (fy - 556) * 1.06, p = PUSH(v);
+    z = 1.06 * (2.7 / 1.06) ** p;
+    cy = fy - (mix(y0, H / 2, p) - H / 2) / z;
+  }
+  return { z, cy };
+}
+function portico(t, c) {
+  setCam(c.z, c.cy);
+  drawFloor();
+  drawRule(t);
+  for (let i = 0; i < 3; i++) {
+    const dy = stepOffset(t, i); if (dy === null) continue;
+    const [x0, x1, y] = STEPS[i];
+    g.globalAlpha = smooth((t - T.steps[i]) / 0.1);
+    relief(RC(x0, y + dy, x1 - x0, 30), { fill: STONE, cast: 0.7, e: 1.8, shade: 'rgba(255,250,240,0.06)' });
+    g.globalAlpha = 1;
+  }
+  g.save(); g.beginPath(); g.rect(-500, -600, 2920, BASE + 600); g.clip();
+  for (let k = 0; k < 3; k++) {
+    const dy = columnOffset(t, k); if (dy === null) continue;
+    for (const s of [-1, 1]) drawColumn(CX + s * COLX[k], BASE + dy);
+  }
+  g.restore();
+  if (t >= T.ent) {
+    const v = t - T.ent, dy = v < T.entFall ? -300 * (1 - eIn(v / T.entFall)) : hop(v - T.entFall, 3, 0.12);
+    g.globalAlpha = smooth(v / 0.12); drawEntablature(dy); g.globalAlpha = 1;
+  }
+  drawPediment(t);
+  wreath1(t);
+  drawLetters(t);
+  drawCaption(t);
+}
+function shot1(t) {
+  const c = cam1(t); setCam(c.z, c.cy);
+  g.drawImage(WALL1.c, WALL1.x0, WALL1.y0);
+  // at the end of the push the portico fades out against the bare wall, and the relief's wall takes over
+  const out = smooth(span(t, T.out1[0], T.out1[1]));
+  if (out > 0) { g.globalAlpha = out; drawWall2(cam2(T.s2)); g.globalAlpha = 1; }
+  if (out <= 0) portico(t, c);
+  else if (out < 1) inLayer(LAYER, 1 - out, () => portico(t, c));
+}
+
+// ═════════════════════════════════════════ shot 2 · the relief ══════════════════════════════════
+const GROUND = 905, FIGX = 236, WR2R = 68, WR_REST = 556, WR_UP = 335;
+let PANEL, FIGS, ALTAR, URN;
+// two-bone reach: elbow position for shoulder S, wrist Wr, bone lengths; the elbow bends below the reach
+function elbow(S, Wr, l1, l2) {
+  const v = sub(Wr, S), dd = Math.min(len2(v), l1 + l2 - 0.5), a = Math.atan2(v[1], v[0]);
+  const A = Math.acos(clamp((l1 * l1 + dd * dd - l2 * l2) / (2 * l1 * dd), -1, 1));
+  return [S[0] + l1 * Math.cos(a + A), S[1] + l1 * Math.sin(a + A)];
+}
+// one continuous contour for upper arm + forearm: muscle swell on both, a bump over the elbow on the
+// outside of the bend, a crease on the inside, a taper to the wrist, a rounded shoulder cap
+function limb(S, E, Wr, w0, w1, w2) {
+  const u1 = unit(sub(E, S)), u2 = unit(sub(Wr, E)), n1 = [-u1[1], u1[0]], n2 = [-u2[1], u2[0]];
+  const nb = unit([n1[0] + n2[0], n1[1] + n2[1]]), turn = u1[0] * u2[1] - u1[1] * u2[0];
+  const at = (p, n, w) => [p[0] + n[0] * w, p[1] + n[1] * w], lp = (a, b, k) => [mix(a[0], b[0], k), mix(a[1], b[1], k)];
+  const M1 = lp(S, E, 0.45), M2 = lp(E, Wr, 0.28), M3 = lp(E, Wr, 0.7);
+  const side = sg => {
+    const outer = (turn > 0 ? -1 : 1) === sg;
+    return [at(S, n1, sg * w0 / 2), at(M1, n1, sg * ((w0 + w1) / 4 + 2.2)), at(E, nb, sg * (outer ? w1 / 2 + 3.2 : w1 * 0.36)),
+      at(M2, n2, sg * ((w1 + w2) / 4 + 2)), at(M3, n2, sg * ((w1 + w2) / 4 - 0.4)), at(Wr, n2, sg * w2 / 2)];
+  };
+  const A = side(1), B = side(-1);
+  const p = new Path2D(); spline(A, false, p); spline(B.slice().reverse(), false, p, true);
+  p.arc(S[0], S[1], w0 / 2, Math.atan2(-n1[1], -n1[0]), Math.atan2(n1[1], n1[0]), true);
+  p.closePath();
+  return piece(p, bbOf(A.concat(B, [[S[0] - w0, S[1] - w0], [S[0] + w0, S[1] + w0]])));
+}
+// hands, in hand coordinates: x runs from the wrist along the hand, -y is the thumb side
+const HANDS = {};
+function buildHands() {
+  HANDS.grip = {
+    palm: SP([[0, -7.5, 1], [10, -8.8], [20, -9.6], [29, -9.4], [36, -7.6], [40.5, -3], [40.8, 3], [37, 7.8], [29, 9.6], [18, 9.4], [8, 8.6], [0, 7.5, 1]]),
+    thumb: SP([[11, -8.4], [17, -14], [25, -17.6], [31, -17.2], [33.4, -14.4], [27, -11.2], [20, -8.8]]),
+    lines: (() => { const p = new Path2D(); for (const [y, x1] of [[-4, 39.5], [0.6, 40.4], [5, 38.6]]) { p.moveTo(29.5, y); p.quadraticCurveTo(35, y - 0.8, x1, y + 0.4); } p.moveTo(25.5, -8.6); p.quadraticCurveTo(22.5, 0, 25.5, 9.2); return p; })(),
+    reach: 33,
+  };
+  HANDS.fist = {
+    palm: SP([[0, -8, 1], [9, -9.5], [18, -10], [25, -8.6], [30, -4], [31, 2.5], [28, 8], [19, 10], [9, 9.5], [0, 8, 1]]),
+    thumb: SP([[9, -9.2], [15, -14.6], [22, -16], [27.4, -14], [26.4, -10.6], [20, -9.6]]),
+    lines: (() => { const p = new Path2D(); for (const [y, x1] of [[-4, 29.6], [0.4, 30.8], [4.6, 29.4]]) { p.moveTo(21, y); p.quadraticCurveTo(26, y - 0.8, x1, y + 0.3); } return p; })(),
+    reach: 21,
+  };
+}
+function drawHand(Wr, ang, h, d) {
+  g.save(); g.translate(Wr[0], Wr[1]); g.rotate(ang);
+  relief(h.palm, { d, cast: 0.6, e: 1.4, lw: 1.8 });
+  groove(h.lines, { d, w: 1 });
+  relief(h.thumb, { d, cast: 0.6, e: 1.2, lw: 1.7 });
+  g.restore();
+}
+function buildFigures() {
+  // lower legs below the hem: a knee, the calf swelling behind and tapering to a narrow ankle, sandalled feet
+  const legF = SP([[49, -168, 1], [52.5, -152], [51, -138], [50, -110], [50, -72], [50.5, -40], [51.5, -27], [56, -19], [67, -13.5], [81, -9], [93, -5.5], [100, -2.6], [101, 0.5, 1],
+    [43, 0.5, 1], [38, -3.5], [35.8, -12], [34, -24], [31.5, -45], [26.5, -72], [21.5, -100], [21, -126], [23, -150], [24.5, -168, 1]]);
+  const legB = SP([[-15, -168, 1], [-12.5, -152], [-13.5, -138], [-14, -110], [-14.5, -72], [-15, -40], [-15, -27], [-10.5, -19], [0, -13.5], [13, -9], [24, -5.5], [32.5, -2.6], [33.5, 0.5, 1],
+    [-24, 0.5, 1], [-28.5, -3.5], [-30.5, -12], [-32, -24], [-34.5, -45], [-39, -72], [-44, -100], [-44.5, -126], [-42.5, -150], [-41, -168, 1]]);
+  const legLines = new Path2D();
+  for (const dx of [0, -64]) {
+    legLines.moveTo(47 + dx, -160); legLines.quadraticCurveTo(51.5 + dx, -151, 48 + dx, -141);          // under the kneecap
+    legLines.moveTo(40 + dx, -29); legLines.quadraticCurveTo(43 + dx, -24, 40 + dx, -19.5);              // ankle bone
+  }
+  const sandal = dx => { const p = new Path2D(); p.moveTo(43 + dx, -3.2); p.lineTo(99 + dx, -3.2); p.moveTo(53 + dx, -24); p.quadraticCurveTo(57 + dx, -13, 63 + dx, -3.5); p.moveTo(35 + dx, -17); p.quadraticCurveTo(43 + dx, -20.5, 52 + dx, -26); p.moveTo(88 + dx, -6.8); p.quadraticCurveTo(91 + dx, -5, 90.5 + dx, -3.4); return p; };
+  const neck = SP([[17, -513], [21, -501], [25, -489, 1], [-15, -489, 1], [-14, -504], [-19, -525], [4, -528]]);
+  const chitonOf = b => SP([[26, -491, 1], [35, -481], [42 + b * 0.6, -462], [43 + b, -445], [37 + b * 0.3, -426], [33, -404], [36, -378], [42, -342], [47, -290], [52, -240], [55, -205], [56, -182], [58, -162, 1],
+    [46, -157], [30, -160.5], [14, -156.5], [-2, -160.5], [-18, -156.5], [-34, -160.5], [-50, -158, 1],
+    [-50, -190], [-48, -230], [-48, -262], [-47, -310], [-42, -346], [-31, -390], [-29, -420], [-34, -450], [-31, -474], [-17, -492, 1], [4, -486]]);
+  // folds: parallel catenaries from the shoulder brooch down to the girdle, straight pleats below it
+  const chitonFolds = new Path2D();
+  for (let k = 0; k < 6; k++) {
+    const a = [-27 + 6.4 * k, -476 - 2.4 * k], b = [-1 + 7.4 * k, -430];
+    chitonFolds.moveTo(a[0], a[1]); chitonFolds.quadraticCurveTo((a[0] + b[0]) / 2 - 6, (a[1] + b[1]) / 2 + 6, b[0], b[1]);
+  }
+  for (const x of [-22, -9, 4, 17, 29]) { chitonFolds.moveTo(x, -422); chitonFolds.lineTo(x + 1.5, -330); }
+  for (const [x, f] of [[47, 6], [27, 4], [7, 2], [-13, 0], [-33, -2]]) { chitonFolds.moveTo(x, -250); chitonFolds.quadraticCurveTo(x + f * 0.3, -200, x + f, -162); }
+  const hemLine = line([[55, -166], [30, -166.5], [0, -165.5], [-30, -166.5], [-47, -166]]);
+  const girdle = band([[-29, -423], [4, -428], [37, -427]], 4, 4, 0, 6);
+  // the himation: wrapped round the hips under a rolled edge, one clean swallowtail at its hanging corner
+  const himation = SP([[-30, -397, 1], [-8, -385], [16, -367], [36, -348], [46, -338, 1], [49, -290], [53, -240], [56, -206, 1],
+    [32, -212], [8, -221], [-16, -231], [-31, -238, 1], [-38, -196, 1], [-45, -214, 1], [-53, -192, 1], [-55, -238],
+    [-52, -262], [-50, -310], [-45, -348], [-34, -386]]);
+  const himFolds = new Path2D();
+  for (let k = 0; k < 6; k++) himFolds.addPath(line([[46, -330 + 21 * k], [12, -300 + 21 * k], [-22, -286 + 21 * k], [-52, -284 + 21 * k]]));
+  const roll = band([[-33, -398], [-8, -387], [16, -369], [36, -350], [48, -339]], 12, 10, 0, 6);
+  const rollLines = line([[-29, -398], [-6, -388.5], [17, -371], [37, -352.5]]);
+  // the buttoned chiton sleeve, in upper-arm coordinates (x from the shoulder joint along the arm, -y on top)
+  const sleeve = SP([[0, 14, 1], [0, -15], [8, -16], [16, -12.6], [25, -15.2], [33, -12], [42, -13.8], [50, -11.2, 1], [53, -3], [52, 6], [49, 12.6, 1], [36, 14], [20, 14.6]]);
+  const sleeveFolds = new Path2D();
+  for (const [x0, x1] of [[16, 18], [33, 36]]) { sleeveFolds.moveTo(x0, -11); sleeveFolds.quadraticCurveTo(x0 - 2, 2, x1, 12.5); }
+  const buttons = [EL(8, -13.6, 2.1, 2.1), EL(25, -12.8, 2.1, 2.1), EL(42, -11.6, 2.1, 2.1)];
+  const shoulder = SP([[-27, -483, 1], [-15, -489], [-2, -491], [10, -489.5], [20, -485, 1], [22.5, -470], [21.5, -455, 1],
+    [14.5, -450], [7.5, -454], [0.5, -448.5], [-6.5, -453], [-13.5, -447.5], [-21, -452, 1], [-26.5, -466]]);
+  const shoulderFolds = new Path2D();
+  for (const [x0, x1] of [[-17, -19], [-7, -7], [4, 4], [14, 15.5]]) { shoulderFolds.moveTo(x0, -487); shoulderFolds.quadraticCurveTo(x0 + (x1 - x0) * 0.3 - 1, -470, x1, -451); }
+  const fibula = EL(-2, -489, 2.8, 2.8);
+  // the head, in head coordinates (origin at the bottom of the chin)
+  const head = new Path2D();
+  head.moveTo(-26, -12); head.bezierCurveTo(-38, -22, -46, -38, -44, -52); head.bezierCurveTo(-42, -70, -24, -81, -4, -80); head.bezierCurveTo(10, -79, 19, -72, 23, -63);
+  head.lineTo(31.5, -47.5); head.lineTo(40.5, -30); head.quadraticCurveTo(42, -27.5, 39, -26.5); head.lineTo(33.5, -25.8);
+  head.quadraticCurveTo(32.2, -23.5, 34, -21.2); head.quadraticCurveTo(33.5, -19, 31, -18.6); head.quadraticCurveTo(33.6, -17, 32.6, -14.2);
+  head.quadraticCurveTo(29.4, -12, 29.6, -9.8); head.bezierCurveTo(32.5, -7, 32, -1.5, 27, 0.3); head.quadraticCurveTo(21, 2.2, 13, 1);
+  head.bezierCurveTo(3, -0.5, -5, -6, -9, -14); head.lineTo(-12, -25); head.quadraticCurveTo(-19, -14, -26, -12); head.closePath();
+  const face = new Path2D();
+  face.moveTo(19, -45.2); face.quadraticCurveTo(24, -47.2, 28.2, -42.6);                  // upper lid
+  face.moveTo(20.6, -40.4); face.quadraticCurveTo(24.6, -40, 28.2, -42.6);                // lower lid
+  face.moveTo(26.3, -44.8); face.quadraticCurveTo(25, -42.6, 26.3, -40.7);                // iris edge
+  face.moveTo(14, -50.2); face.quadraticCurveTo(23, -53, 30.6, -48.6);                    // brow
+  face.moveTo(34.4, -29.6); face.quadraticCurveTo(37.6, -28.6, 35.6, -26.6);              // nostril
+  face.moveTo(31, -18.6); face.lineTo(27.2, -19.2);                                       // mouth
+  face.moveTo(29.6, -9.8); face.quadraticCurveTo(26.5, -11, 25, -8.5);                    // chin dimple
+  // the ear: a raised C behind the jaw, with its helix, antihelix and the hollow by the tragus
+  const earP = new Path2D();
+  earP.moveTo(-1.5, -45); earP.bezierCurveTo(-8, -49.5, -15.5, -45, -15, -35); earP.bezierCurveTo(-14.5, -28, -11, -23, -6.5, -22.5);
+  earP.quadraticCurveTo(-3, -22.5, -2.5, -26.5); earP.lineTo(-1, -36); earP.closePath();
+  const ear = piece(earP, [-16, -50, 0, -22]), earLines = new Path2D();
+  earLines.moveTo(-3.5, -42.5); earLines.bezierCurveTo(-9, -45.5, -12.5, -40, -11.5, -33.5);
+  earLines.moveTo(-6, -40); earLines.quadraticCurveTo(-10, -35, -7, -29.5); earLines.moveTo(-4, -34); earLines.quadraticCurveTo(-5.5, -31, -3.5, -29);
+  // man: short curls and a fillet tied at the back
+  const scallop = (p, pts, bump) => { for (let i = 0; i < pts.length - 1; i++) { const a = pts[i], b = pts[i + 1], d = unit(sub(b, a)), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; p.quadraticCurveTo(m[0] - d[1] * bump, m[1] + d[0] * bump, b[0], b[1]); } };
+  const outerM = [[23, -63], [18, -71.5], [9, -77.5], [-2, -80.5], [-14, -79.5], [-25, -75.5], [-34, -68.5], [-41, -58.5], [-45, -47], [-45.5, -35.5], [-42.5, -24.5], [-36, -15.5], [-28, -9.5]];
+  const hairM = new Path2D(); hairM.moveTo(23, -63); scallop(hairM, outerM, 3.4);
+  for (const q of [[-22, -15], [-17, -22], [-15.5, -32], [-12.5, -43], [-5, -49.5], [5, -52.5], [11.5, -50.5]]) hairM.lineTo(q[0], q[1]);
+  scallop(hairM, [[11.5, -50.5], [15, -55], [19, -59.5], [23, -63]], 1.8); hairM.closePath();
+  const curls = new Path2D(), C = [-8, -44], rr = seeded(77);
+  for (const depth of [7.5, 15]) outerM.slice(1, -1).forEach((q, i) => {
+    if (depth > 10 && (i === 0 || i > 9)) return;
+    const d = unit(sub(C, q)), x = q[0] + d[0] * depth + (i % 2 ? 2 : -2) * d[1], y = q[1] + d[1] * depth, a = rr() * TAU;
+    curls.moveTo(x + 2.8 * Math.cos(a), y + 2.8 * Math.sin(a)); curls.arc(x, y, 2.8, a, a + 4.3);
+  });
+  const filletM = band([[22.5, -64.5], [10, -67], [-6, -66.5], [-22, -62.5], [-36, -56], [-44.5, -50.5]], 5.5, 5, 0, 6);
+  const tailsM = [band([[-44, -49], [-50, -37], [-48, -25], [-53, -12]], 4.5, 4, 3.5, 6), band([[-43, -49], [-44, -37], [-40, -27], [-42, -16]], 4.5, 4, 3.5, 6)];
+  // woman: waved hair drawn back over the top of the ear into a bun, a fillet, an earring from the lobe
+  const hairF = SP([[23, -63], [18.5, -72], [9, -78.5], [-3, -81.5], [-16, -80], [-27, -75], [-36, -67], [-41.5, -56], [-42.5, -43], [-39, -31], [-33, -20.5], [-26, -12, 1],
+    [-21, -17], [-17.5, -26], [-16.5, -38], [-12, -46.5], [-4, -49.5], [4, -47.5], [10, -48.5], [16.5, -53], [20.5, -58]]);
+  const waves = new Path2D();
+  [[[20, -66], [6, -74], [-10, -75.5], [-26, -70], [-37, -61]], [[18, -60], [5, -67], [-10, -68], [-25, -63], [-38, -54]], [[14, -54], [3, -59.5], [-11, -60.5], [-25, -56], [-39, -46]],
+   [[8, -51], [-2, -54], [-14, -54], [-26, -49], [-37, -38]], [[-21, -42], [-29, -32], [-31, -21]]]
+    .forEach(f => { const pts = sampleSpline(f, 6).map((q, i) => [q[0], q[1] + (i % 6 < 3 ? -0.9 : 0.9)]); waves.addPath(line(pts)); });
+  const bun = EL(-47, -50, 15, 14);
+  const bunLines = new Path2D();
+  for (let i = 0; i <= 60; i++) { const ph = i / 60 * 3.4 * Math.PI, r = 12 * Math.exp(-0.17 * ph), a = -2.2 + ph; const x = -47 + r * Math.cos(a), y = -50 + r * Math.sin(a) * 0.93; if (i) bunLines.lineTo(x, y); else bunLines.moveTo(x, y); }
+  const filletF = band([[19.5, -69.5], [6, -73.5], [-9, -73], [-24, -67], [-37, -57]], 5.2, 4.6, 0, 6);
+  const earring = [EL(-6, -19.8, 2.2, 2.2), EL(-6, -13.8, 2.6, 3.6)];
+  // the far arm hangs behind the body; only its forearm, fist and what it holds show in front of the hip
+  const FS = [8, -466], FE = [6, -386], FW = [58, -318];
+  const fdir = unit(sub(FW, FE)), G = along(FW, fdir, HANDS.fist.reach);
+  const scroll = { body: RC(G[0] - 7.5, G[1] - 46, 15, 92), end: EL(G[0], G[1] - 46, 7.5, 3), lines: line([[G[0] - 3, G[1] - 43], [G[0] - 3, G[1] + 42]], false), ring: line([[G[0] - 7.5, G[1] + 28], [G[0] + 7.5, G[1] + 28]], false) };
+  const J = [G[0] + 6, G[1] + 1], jt = (x, y) => [J[0] + x, J[1] + y];
+  const jug = {
+    handle: band([jt(1, 7), jt(-6, 0.5), jt(-10.5, 10), jt(-7, 23)], 4.6, 4.2, 0, 6),
+    body: SP([jt(4, 18), jt(-4, 24), jt(-10, 36), jt(-9, 50), jt(-2, 60), jt(2.5, 64.5, 1), jt(16.5, 64.5, 1), jt(21, 60), jt(28, 50), jt(29, 36), jt(23, 24), jt(14, 18)]),
+    neck: SP([jt(-1, 5, 1), jt(27, 1.5, 1), jt(22, 7), jt(15, 12), jt(14, 19, 1), jt(4, 19, 1), jt(3, 11)]),
+    foot: stadium(J[0] - 0.5, J[0] + 19.5, J[1] + 62.5, J[1] + 68), band1: line([jt(-5.5, 30), jt(9, 32), jt(24.5, 30)]),
+  };
+  const common = { legF, legB, legLines, sandals: [sandal(0), sandal(-66)], neck, neckLine: line([[-6, -520], [6, -504], [16, -490]]), chitonFolds, hemLine, girdle,
+    himation, himFolds, roll, rollLines, sleeve, sleeveFolds, buttons, shoulder, shoulderFolds, fibula, head, face, ear, earLines,
+    farArm: limb(FS, FE, FW, 21, 16, 12.5), farW: FW, farDir: fdir };
+  FIGS = [
+    Object.assign({}, common, { side: 1, x: CX - FIGX, hair: 'm', chiton: chitonOf(0), hairP: piece(hairM, [-50, -84, 26, -6]), curls, fillet: filletM, tails: tailsM, scroll }),
+    Object.assign({}, common, { side: -1, x: CX + FIGX, hair: 'f', chiton: chitonOf(3.5), hairP: hairF, waves, bun, bunLines, fillet: filletF, earring, jug }),
+  ];
+}
+// the near, sleeved arm lifts the wreath: shoulder inside the sleeve, elbow from a two-bone reach
+const ARM = { S: [-1, -466], L1: 102, L2: 88 };
+function nearArm(wy) {
+  const Gp = [FIGX - WR2R, wy - GROUND], reach = HANDS.grip.reach;
+  let Wr = along(Gp, unit(sub(Gp, ARM.S)), -reach), E = elbow(ARM.S, Wr, ARM.L1, ARM.L2);
+  Wr = along(Gp, unit(sub(Gp, E)), -reach); E = elbow(ARM.S, Wr, ARM.L1, ARM.L2);
+  return { E, Wr, Gp };
+}
+function clipped(pc, fn) { g.save(); g.clip(pc.p); fn(); g.restore(); }
+function drawFigure(F, d, wy) {
+  g.save(); g.translate(F.x, GROUND); g.scale(F.side, 1);
+  // far arm first: behind the body, holding the scroll or the jug out in front of the hip
+  relief(F.farArm, { d, cast: 0.7, e: 1.6 });
+  if (F.jug) {
+    relief(F.jug.handle, Object.assign({ d, cast: 0.5, e: 1, lw: 1.5 }, GOLD));
+    relief(F.jug.body, Object.assign({ d, cast: 0.8, e: 1.6, lw: 1.8 }, GOLD));
+    relief(F.jug.foot, Object.assign({ d, cast: 0.5, e: 1, lw: 1.5 }, GOLD));
+    relief(F.jug.neck, Object.assign({ d, cast: 0.5, e: 1.2, lw: 1.7 }, GOLD));
+    groove(F.jug.band1, { d, w: 1, ink: 'rgba(80,46,14,0.9)', hi: GHI });
+  }
+  if (F.scroll) { relief(F.scroll.body, { d, cast: 0.8, e: 1.4, lw: 1.8 }); relief(F.scroll.end, { d, cast: 0, e: 1, lw: 1.4, shade: 'rgba(150,134,112,0.4)' }); groove(F.scroll.lines, { d, w: 0.9 }); groove(F.scroll.ring, { d, w: 0.9 }); }
+  drawHand(F.farW, Math.atan2(F.farDir[1], F.farDir[0]), HANDS.fist, d);
+  // legs, then the chiton, the himation over it, the neck and the head
+  relief(F.legB, { d, cast: 0.8, e: 1.6 }); groove(F.sandals[1], { d, w: 1 });
+  relief(F.legF, { d, cast: 0.8, e: 1.6 }); groove(F.sandals[0], { d, w: 1 }); groove(F.legLines, { d, w: 1 });
+  relief(F.neck, { d, cast: 0.5, e: 1.6 }); groove(F.neckLine, { d, w: 0.9, ink: 'rgba(43,26,21,0.45)' });
+  relief(F.chiton, { d, cast: 1, e: 2.2 });
+  clipped(F.chiton, () => groove(F.chitonFolds, { d, w: 1.2 })); groove(F.hemLine, { d, w: 1 });
+  relief(F.girdle, { d, cast: 0.5, e: 1.2, lw: 1.6 });
+  relief(F.himation, { d, cast: 0.9, e: 2.2 });
+  clipped(F.himation, () => groove(F.himFolds, { d, w: 1.3 }));
+  relief(F.roll, { d, cast: 0.7, e: 1.8, lw: 2 }); groove(F.rollLines, { d, w: 1 });
+  g.save(); g.translate(6, -509);
+  if (F.hair === 'f') { relief(F.bun, { d, cast: 0.6, e: 1.6 }); groove(F.bunLines, { d, w: 1 }); }
+  relief(piece(F.head, [-46, -82, 43, 3]), { d, cast: 0.7, e: 1.6, lw: 2 });
+  groove(F.face, { d, w: 1.15 });
+  const ear = () => { relief(F.ear, { d, cast: 0.5, e: 1, lw: 1.6 }); groove(F.earLines, { d, w: 0.95 }); };
+  if (F.hair === 'f') ear();                 // her hair comes down over the top of the ear
+  relief(F.hairP, { d, cast: 0.7, e: 1.6, lw: 1.9 });
+  if (F.hair === 'm') { groove(F.curls, { d, w: 1.05 }); ear(); } else groove(F.waves, { d, w: 1.05 });
+  if (F.tails) for (const tl of F.tails) relief(tl, Object.assign({ d, cast: 0.5, e: 1, lw: 1.4 }, GOLD));
+  relief(F.fillet, Object.assign({ d, cast: 0.6, e: 1.1, lw: 1.5 }, GOLD));
+  if (F.earring) for (const q of F.earring) relief(q, Object.assign({ d, cast: 0.5, e: 0.8, lw: 1.2 }, GOLD));
+  g.restore();
+  // the near arm, in front: it rises from the shoulder inside the sleeve, which turns with the upper arm
+  const A = nearArm(wy);
+  relief(limb(ARM.S, A.E, A.Wr, 24, 17, 12.5), { d, cast: 0.9, e: 1.9 });
+  drawHand(A.Wr, Math.atan2(A.Gp[1] - A.Wr[1], A.Gp[0] - A.Wr[0]), HANDS.grip, d);
+  g.save(); g.translate(ARM.S[0], ARM.S[1]); g.rotate(Math.atan2(A.E[1] - ARM.S[1], A.E[0] - ARM.S[0]));
+  relief(F.sleeve, { d, cast: 0.7, e: 1.6 }); clipped(F.sleeve, () => groove(F.sleeveFolds, { d, w: 1.05 }));
+  for (const q of F.buttons) relief(q, Object.assign({ d, cast: 0.4, e: 0.8, lw: 1.1 }, GOLD));
+  g.restore();
+  relief(F.shoulder, { d, cast: 0.6, e: 1.6 }); clipped(F.shoulder, () => groove(F.shoulderFolds, { d, w: 1.05 }));
+  relief(F.fibula, Object.assign({ d, cast: 0.4, e: 0.8, lw: 1.1 }, GOLD));
+  g.restore();
+}
+function buildAltar() {
+  const x = CX, die = RC(x - 85, 690, 170, 182);
+  const sw = [[x - 58, 724], [x - 40, 760], [x, 784], [x + 40, 760], [x + 58, 724]];
+  const garland = band(sw, 14, 14, 0, 8);
+  const gl = new Path2D(); sampleSpline(sw, 8).forEach((q, i) => { if (i % 3 === 1) { gl.moveTo(q[0] - 4, q[1] - 5); gl.quadraticCurveTo(q[0] + 2, q[1], q[0] - 3, q[1] + 6); } });
+  const ribbons = [-1, 1].map(s => band([[x + s * 58, 730], [x + s * 63, 752], [x + s * 57, 774], [x + s * 64, 798]], 5.5, 4.5, 3.5, 6));
+  const vol = new Path2D();
+  for (const s of [-1, 1]) for (let i = 0; i <= 50; i++) { const ph = i / 50 * 2.4 * Math.PI, r = 11 * Math.exp(-0.22 * ph), a = -Math.PI / 2 + s * ph; const px = x + s * 92 + r * Math.cos(a), py = 641 + r * Math.sin(a); if (i) vol.lineTo(px, py); else vol.moveTo(px, py); }
+  ALTAR = {
+    parts: [RC(x - 105, 880, 210, 25), stadium(x - 96, x + 96, 872, 880.5), die, RC(x - 95, 676, 190, 14), RC(x - 102, 652, 204, 24)],
+    puls: [EL(x - 92, 641, 13, 13), EL(x + 92, 641, 13, 13)], vol, garland, gl, ribbons,
+    ros: [EL(x - 58, 722, 10, 10), EL(x + 58, 722, 10, 10)],
+    rosLines: (() => { const p = new Path2D(); for (const s of [-1, 1]) for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; p.moveTo(x + s * 58, 722); p.lineTo(x + s * 58 + 8 * Math.cos(a), 722 + 8 * Math.sin(a)); } return p; })(),
+    lines: line([[x - 80, 700], [x + 80, 700]], false),
+  };
+}
+function drawAltar(d) {
+  ALTAR.parts.forEach((q, i) => relief(q, { d, cast: 0.9, e: 1.8, shade: i === 2 ? 'rgba(168,156,136,0.12)' : null }));
+  groove(ALTAR.lines, { d, w: 1 });
+  for (const r of ALTAR.ribbons) relief(r, { d, cast: 0.6, e: 1.1, lw: 1.5 });
+  relief(ALTAR.garland, { d, cast: 0.9, e: 1.8 }); groove(ALTAR.gl, { d, w: 1 });
+  for (const q of ALTAR.ros) relief(q, { d, cast: 0.6, e: 1.2, lw: 1.6 });
+  groove(ALTAR.rosLines, { d, w: 0.9 });
+  for (const q of ALTAR.puls) relief(q, { d, cast: 0.8, e: 1.4, lw: 1.8 });
+  groove(ALTAR.vol, { d, w: 1 });
+}
+function buildUrn() {
+  const side = [[-16, -154, 1], [-40, -165], [-62, -189], [-72, -222], [-70, -252], [-60, -276], [-42, -291], [-26, -298], [-21.5, -306], [-23.5, -314], [-33, -320, 1], [-33, -327, 1]];
+  const lid = [[-28, -327, 1], [-25, -340], [-13, -350], [0, -353]];
+  const gad = new Path2D();
+  for (let i = -5; i <= 5; i++) { const x0 = i * 3, x1 = i * 11.5; gad.moveTo(x0, -158); gad.quadraticCurveTo(x1 * 0.9, -180, x1, -214); }
+  URN = {
+    ped: [RC(-80, -16, 160, 16), RC(-66, -100, 132, 84), RC(-76, -116, 152, 16)],
+    pedLine: line([[-58, -90], [58, -90], [58, -26], [-58, -26], [-58, -90]], false),
+    foot: RC(-34, -128, 68, 12), ring: stadium(-26, 26, -134.5, -128), stem: PL([[-13, -134], [13, -134], [17, -154], [-17, -154]]),
+    body: SP([...side, ...flipPts(side, 0).reverse()]), lid: SP([...lid, ...flipPts(lid, 0).reverse().slice(1)]),
+    knob: EL(0, -362, 8, 9.5), knobNeck: RC(-4.5, -356, 9, 5),
+    handles: [-1, 1].map(s => band([[s * 55, -280], [s * 76, -287], [s * 87, -272], [s * 82, -257], [s * 71, -262]], 7.5, 6, 0, 6)),
+    gad, shoulder: line([[-46, -288], [0, -292], [46, -288]]), neckLine: line([[-22, -307], [22, -307]], false),
+    band: band([[-71, -236], [0, -237], [71, -236]], 6, 6, 0, 4),
+  };
+}
+function drawUrn(x, d) {
+  g.save(); g.translate(x, GROUND);
+  URN.ped.forEach((q, i) => relief(q, { d, cast: 0.9, e: 1.8, shade: i === 1 ? 'rgba(168,156,136,0.15)' : null }));
+  groove(URN.pedLine, { d, w: 1 });
+  relief(URN.foot, { d, cast: 0.7, e: 1.4 }); relief(URN.ring, { d, cast: 0.5, e: 1.1 }); relief(URN.stem, { d, cast: 0.5, e: 1.2 });
+  for (const h of URN.handles) relief(h, { d, cast: 0.7, e: 1.2, lw: 1.8 });
+  relief(URN.body, { d, cast: 1, e: 2.1 });
+  groove(URN.gad, { d, w: 1.1 }); groove(URN.shoulder, { d, w: 1 }); groove(URN.neckLine, { d, w: 1 });
+  relief(URN.band, Object.assign({ d, cast: 0.4, e: 0.9, lw: 1.4 }, GOLD));
+  relief(URN.lid, { d, cast: 0.8, e: 1.6 }); relief(URN.knobNeck, { d, cast: 0.4, e: 0.8, lw: 1.4 }); relief(URN.knob, { d, cast: 0.6, e: 1.2, lw: 1.6 });
+  g.restore();
+}
+// a world-positioned layer: draws `paint` (world coordinates) into its own canvas at scale S
+function layer(x0, y0, w, h, S, paint) {
+  const c = canvas(w * S, h * S);
+  g = c.getContext('2d'); Z = S; g.setTransform(S, 0, 0, S, -x0 * S, -y0 * S);
+  paint();
+  g = main; Z = 1;
+  return { c, x0, y0, w, h };
+}
+const putLayer = (L, dy = 0) => g.drawImage(L.c, L.x0, L.y0 + dy, L.w, L.h);
+function oxWall(X0, Y0, w, h, lx, ly) {
+  const gr = g.createRadialGradient(lx, ly, 60, lx, ly + 70, 1150);
+  gr.addColorStop(0, P.oxLit); gr.addColorStop(0.5, '#6c231c'); gr.addColorStop(0.85, P.ox); gr.addColorStop(1, '#4a1512');
+  g.fillStyle = gr; g.fillRect(X0, Y0, w, h);
+  g.save(); g.globalCompositeOperation = 'soft-light'; g.globalAlpha = 0.5; g.fillStyle = PLASTER; g.fillRect(X0, Y0, w, h); g.restore();
+}
+function buildPanel() {
+  const X0 = -170, Y0 = -130, w = 2260, h = 1340;
+  const wall = layer(X0, Y0, w, h, 1, () => oxWall(X0, Y0, w, h, CX, 470));
+  const top = layer(X0, Y0, w, 150 - Y0, 1.2, () => {
+  // top: a fascia, egg-and-dart, bead-and-reel
+  relief(RC(X0, Y0, w, 50 - Y0), { cast: 1, e: 2, shade: 'rgba(168,156,136,0.25)' });
+  groove(line([[X0, 14], [X0 + w, 14]], false), { w: 1.2 }); groove(line([[X0, 32], [X0 + w, 32]], false), { w: 1.2 });
+  relief(RC(X0, 50, w, 54), { cast: 1, e: 1.8, shade: 'rgba(150,134,112,0.45)' });
+  const cups = new Path2D(), darts = new Path2D();
+  for (let k = -24; k <= 24; k++) {
+    const x = CX + 48 * k;
+    cups.moveTo(x - 20, 52); cups.bezierCurveTo(x - 20, 96, x + 20, 96, x + 20, 52);
+    darts.moveTo(x + 24, 54); darts.lineTo(x + 24, 92); darts.moveTo(x + 20.5, 84); darts.lineTo(x + 24, 95); darts.lineTo(x + 27.5, 84);
+  }
+  groove(cups, { w: 1.3 }); groove(darts, { w: 1.2 });
+  for (let k = -24; k <= 24; k++) relief(EL(CX + 48 * k, 75, 14, 19), { cast: 0.6, e: 1.6, lw: 1.8 });
+  relief(RC(X0, 104, w, 12), { cast: 0.8, e: 1.2, shade: 'rgba(150,134,112,0.35)', lw: 1.6 });
+  for (let k = -48; k <= 48; k++) {
+    const x = CX + 24 * k;
+    if (k % 2 === 0) relief(EL(x, 110, 8.5, 4.2), { cast: 0.4, e: 0.9, lw: 1.3 });
+    else for (const dx of [-2.6, 2.6]) relief(EL(x + dx, 110, 1.7, 4.2), { cast: 0.3, e: 0.6, lw: 1.1 });
+  }
+  relief(RC(X0, 116, w, 6), { cast: 1, e: 1, lw: 1.6 });
+  });
+  const bot = layer(X0, 890, w, Y0 + h - 890, 1.2, () => {
+  // bottom: the ground line, a Greek key band mirrored about the axis, a plain plinth
+  relief(RC(X0, 1003, w, h + Y0 - 1003), { cast: 0, e: 2, shade: 'rgba(150,134,112,0.35)' });
+  groove(line([[X0, 1016], [X0 + w, 1016]], false), { w: 1.2 });
+  relief(RC(X0, 925, w, 78), { cast: 0.8, e: 1.8, shade: 'rgba(150,134,112,0.5)' });
+  const key = new Path2D(), u = 9, half = [];
+  let px = CX + 18; half.push([CX, 982], [px, 982]);
+  while (px < X0 + w + 40) { half.push([px, 946], [px + 3 * u, 946], [px + 3 * u, 964], [px + u, 964], [px + u, 982], [px + 4 * u, 982]); px += 4 * u; }
+  key.moveTo(half[0][0], half[0][1]); for (const q of half) key.lineTo(q[0], q[1]);
+  key.moveTo(half[0][0], half[0][1]); for (const q of half) key.lineTo(2 * CX - q[0], q[1]);
+  g.save(); g.lineJoin = 'miter'; g.lineCap = 'square';
+  g.shadowColor = 'rgba(24,8,6,0.45)'; g.shadowBlur = 4 * Z; g.shadowOffsetX = 2 * Z; g.shadowOffsetY = 3.5 * Z;
+  g.strokeStyle = P.ink; g.lineWidth = 9.4; g.stroke(key); g.restore();
+  g.save(); g.lineJoin = 'miter'; g.lineCap = 'square'; g.strokeStyle = P.marble; g.lineWidth = 5.2; g.stroke(key);
+  g.strokeStyle = 'rgba(255,252,244,0.7)'; g.lineWidth = 1.2; g.translate(-1, -1); g.stroke(key); g.restore();
+  relief(EL(CX, 963, 7.5, 7.5), { cast: 0.6, e: 1, lw: 1.6 });
+  relief(RC(X0, GROUND, w, 20), { cast: 1, e: 1.8 });
+  });
+  return { wall, top, bot };
+}
+function wreathY(t) {
+  let y = WR_REST + 9 * smooth(span(t, T.dip[0], T.dip[1]));
+  const u = span(t, T.lift[0], T.lift[1]);
+  if (u > 0) y = mix(WR_REST + 9, WR_UP, backOut(u, 1.25));
+  return y;
+}
+function cam2(t) {
+  let z = mix(0.95, 1, eOut(span(t, T.s2, T.rise[0])));          // still drifting in after the push
+  z *= 1 + 0.03 * eInOut(span(t, T.rise[0], T.pull[0]));
+  z *= mix(1, 0.9, eInOut(span(t, T.pull[0], T.pull[1])));       // and the pull back out of it
+  return { z, cy: 525 };
+}
+function drawWall2(c) { setCam(c.z, c.cy); putLayer(PANEL.wall); }
+function scene2(t, c, d) {
+  setCam(c.z, c.cy);
+  drawUrn(CX - 610, d); drawUrn(CX + 610, d);
+  drawAltar(d);
+  const wy = wreathY(t);
+  wreath(CX, wy, WR2R, {
+    gold: true, n: 9, d, leaf: 0.48, tw: 8,
+    tails: s => [[CX + s * 5, wy + WR2R + 4], [CX + s * 14, wy + WR2R + 22], [CX + s * 10, wy + WR2R + 40], [CX + s * 19, wy + WR2R + 58]],
+  });
+  for (const F of FIGS) drawFigure(F, d, wy);
+}
+function shot2(t) {
+  const c = cam2(t);
+  drawWall2(c);
+  // as the relief goes back to line, the Doric frieze's wall takes over underneath it
+  const w3 = smooth(span(t, T.s3 - 0.14, T.s3));
+  if (w3 > 0) { g.globalAlpha = w3; drawWall3(cam3(T.s3)); g.globalAlpha = 1; setCam(c.z, c.cy); }
+  // the mouldings slide in from the top and bottom edges together, and out again at the end
+  const k = (1 - eOut(span(t, T.bandsIn[0], T.bandsIn[1]))) + eIn(span(t, T.bandsOut[0], T.bandsOut[1]));
+  if (k < 1) { putLayer(PANEL.top, -330 * k); putLayer(PANEL.bot, 360 * k); }
+  // the raking light: barely warms the wall, but drives the relief's shadows and lit edges as it passes
+  const u = span(t, T.rake[0], T.rake[1]);
+  RAKE.I = u > 0 && u < 1 ? Math.sin(Math.PI * u) : 0; RAKE.x = mix(-500, W + 500, eInOut(u));
+  const band = a => { const gr = g.createLinearGradient(RAKE.x - 460, 0, RAKE.x + 460, 0); gr.addColorStop(0, 'rgba(255,226,186,0)'); gr.addColorStop(0.5, `rgba(255,226,186,${a})`); gr.addColorStop(1, 'rgba(255,226,186,0)'); return gr; };
+  if (RAKE.I > 0) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'soft-light'; g.fillStyle = band(0.08 * RAKE.I); g.fillRect(0, 0, W, H); g.restore(); }
+  // the relief: contour drawing → marble fill → rising out of the plane; then the same in reverse
+  const lineA = smooth(span(t, T.lines[0], T.lines[1])) * (1 - smooth(span(t, T.unline[0], T.unline[1])));
+  const fillA = smooth(span(t, T.fill[0], T.fill[1])) * (1 - smooth(span(t, T.unfill[0], T.unfill[1])));
+  const d = smooth(span(t, T.rise[0], T.rise[1])) * (1 - smooth(span(t, T.sink[0], T.sink[1])));
+  if (lineA > 0 && fillA < 1) { INK_ONLY = true; inLayer(LAYER, lineA, () => scene2(t, c, 0)); INK_ONLY = false; }
+  if (fillA > 0) inLayer(LAYER, fillA, () => {
+    scene2(t, c, d);
+    if (RAKE.I > 0) { g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-atop'; g.fillStyle = band(0.3 * RAKE.I); g.fillRect(0, 0, W, H); }
+  });
+  RAKE.I = 0;
+}
+
+// ═════════════════════════════════════════ shot 3 · the principles ══════════════════════════════
+const A3 = { corn: 262, frz: 330, taen: 630, arch: 644, capT: 800 };
+const TRIG = [240, 720, 1200, 1680], MET = [480, 960, 1440], MY = 480;
+let ARCH, LABELS, EMB;
+// the Doric order, drawn once as contour (INK_ONLY) and once in marble, both over a transparent ground
+function archParts() {
+  const X0 = -60, w = 2040, h = 1340, solid = !INK_ONLY;
+  // the dark porch behind the colonnade
+  if (solid) {
+    const dk = g.createLinearGradient(0, A3.capT, 0, 1280);
+    dk.addColorStop(0, '#2c0b09'); dk.addColorStop(1, '#1a0605');
+    g.fillStyle = dk; g.fillRect(X0, A3.capT, w, h);
+  }
+  // Doric columns running out of the frame
+  for (const x of TRIG) {
+    g.save(); g.translate(x, 0);
+    const r = y => mix(60, 67, (y - 856) / 400);
+    const shaft = SP([[-60, 856, 1], [60, 856, 1], [r(1000), 1000], [r(1300), 1300, 1], [-r(1300), 1300, 1], [-r(1000), 1000]]);
+    const shade = g.createLinearGradient(-64, 0, 64, 0);
+    shade.addColorStop(0, 'rgba(110,90,72,0.5)'); shade.addColorStop(0.3, 'rgba(110,90,72,0)'); shade.addColorStop(0.55, 'rgba(255,252,244,0.08)'); shade.addColorStop(1, 'rgba(90,72,56,0.65)');
+    relief(shaft, { cast: 1, e: 2, shade });
+    // a falling-off light down the shaft: the porch roof shades it
+    const fall = g.createLinearGradient(0, 856, 0, 1100); fall.addColorStop(0, 'rgba(43,26,21,0)'); fall.addColorStop(1, 'rgba(43,26,21,0.45)');
+    if (solid) { g.save(); g.clip(shaft.p); g.fillStyle = fall; g.fillRect(-80, 856, 160, 460); g.restore(); }
+    const ar = new Path2D();
+    for (let j = 1; j < 10; j++) { const th = -Math.PI / 2 + j * Math.PI / 10; ar.moveTo(60 * Math.sin(th), 860); ar.lineTo(67 * Math.sin(th), 1300); }
+    groove(ar, { w: 1.2 });
+    g.lineWidth = 2.2; g.strokeStyle = P.ink; g.stroke(shaft.p);
+    for (let k = 0; k < 3; k++) relief(stadium(-63, 63, 846 + k * 3.4, 849.4 + k * 3.4), { cast: 0.3, e: 0.6, lw: 1.2 });
+    relief(SP([[-82, 818, 1], [82, 818, 1], [76, 832], [62, 846, 1], [-62, 846, 1], [-76, 832]]), { cast: 0.8, e: 1.8 });
+    relief(RC(-88, A3.capT, 176, 18), { cast: 1, e: 1.6 });
+    g.restore();
+  }
+  // architrave, taenia, regulae with guttae
+  relief(RC(140, A3.arch, 1640, A3.capT - A3.arch), { cast: 1, e: 2, shade: 'rgba(168,156,136,0.1)' });
+  groove(line([[146, 700], [1774, 700]], false), { w: 1 });
+  relief(RC(130, A3.taen, 1660, 14), { cast: 0.9, e: 1.4, lw: 1.8 });
+  for (const x of TRIG) {
+    relief(RC(x - 84, A3.arch, 168, 8), { cast: 0.6, e: 1, lw: 1.5 });
+    for (let k = 0; k < 6; k++) relief(PL([[x - 76 + k * 30, 652], [x - 64 + k * 30, 652], [x - 66 + k * 30, 666], [x - 74 + k * 30, 666]]), { cast: 0.6, e: 0.8, lw: 1.3 });
+  }
+  // metopes: recessed oxblood fields
+  for (const x of MET) {
+    if (!solid) continue;
+    g.fillStyle = 'rgba(30,8,6,0.22)'; g.fillRect(x - 150, A3.frz, 300, 300);
+    const inner = g.createLinearGradient(0, A3.frz, 0, A3.frz + 40); inner.addColorStop(0, 'rgba(24,8,6,0.5)'); inner.addColorStop(1, 'rgba(24,8,6,0)');
+    g.fillStyle = inner; g.fillRect(x - 150, A3.frz, 300, 40);
+  }
+  // triglyphs: three bars, two whole V-grooves and two half grooves
+  for (const x of TRIG) {
+    const L = x - 90;
+    relief(RC(L, A3.frz, 180, 300), { cast: 1, e: 2 });
+    for (const gx of [L + 45, L + 105]) {
+      if (solid) { g.fillStyle = 'rgba(110,90,72,0.55)'; g.fillRect(gx, A3.frz + 24, 15, 276); g.fillStyle = 'rgba(255,252,244,0.35)'; g.fillRect(gx + 15, A3.frz + 24, 15, 276); }
+      const v = new Path2D(); v.moveTo(gx, A3.taen); v.lineTo(gx, A3.frz + 30); v.lineTo(gx + 15, A3.frz + 18); v.lineTo(gx + 30, A3.frz + 30); v.lineTo(gx + 30, A3.taen);
+      groove(v, { w: 1.3 }); groove(line([[gx + 15, A3.frz + 18], [gx + 15, A3.taen]], false), { w: 0.8, ink: 'rgba(43,26,21,0.5)' });
+    }
+    for (const [gx, s] of [[L, 1], [L + 180, -1]]) {
+      if (solid) { g.fillStyle = s > 0 ? 'rgba(255,252,244,0.3)' : 'rgba(110,90,72,0.5)'; g.fillRect(s > 0 ? gx : gx - 15, A3.frz + 24, 15, 276); }
+      groove(line([[gx + s * 15, A3.taen], [gx + s * 15, A3.frz + 30], [gx, A3.frz + 18]], false), { w: 1.2 });
+    }
+    relief(RC(L, A3.frz, 180, 16), { cast: 0.6, e: 1.2, lw: 1.8 });
+  }
+  // cornice: mutules over every triglyph and metope, corona, cymatium, a gilt fillet
+  relief(RC(124, 306, 1672, 24), { cast: 0.8, e: 1.4, shade: 'rgba(150,134,112,0.3)' });
+  for (let x = 240; x <= 1680; x += 240) {
+    relief(RC(x - 52, 312, 104, 14), { cast: 0.6, e: 1, lw: 1.5 });
+    const gt = new Path2D(); for (let k = 0; k < 6; k++) { gt.moveTo(x - 40 + k * 16 + 3, 322); gt.arc(x - 40 + k * 16, 322, 3, 0, TAU); }
+    groove(gt, { w: 0.9 });
+  }
+  relief(RC(110, 274, 1700, 32), { cast: 1, e: 1.8 });
+  relief(RC(100, A3.corn, 1720, 12), { cast: 0.9, e: 1.4, lw: 1.8 });
+  relief(RC(124, 304, 1672, 3), Object.assign({ cast: 0.3, e: 0.5, lw: 1 }, GOLD));
+}
+function buildArch() {
+  const X0 = -60, Y0 = -60, w = 2040, h = 1340;
+  const wall = layer(X0, Y0, w, h, 1, () => oxWall(X0, Y0, w, h, CX, 300));
+  INK_ONLY = true; const ink = layer(X0, Y0, w, h, 1.2, archParts); INK_ONLY = false;
+  return { wall, ink, solid: layer(X0, Y0, w, h, 1.2, archParts) };
+}
+function buildEmblems() {
+  const scales = {
+    base: [RC(-46, 96, 92, 14), RC(-32, 84, 64, 12)], post: RC(-6, -66, 12, 150), knob: EL(0, -75, 9, 9),
+    beam: RC(-88, -62, 176, 7), ends: [EL(-88, -58.5, 5.5, 5.5), EL(88, -58.5, 5.5, 5.5)],
+    chains: (() => { const p = new Path2D(); for (const s of [-1, 1]) for (const dx of [-30, 0, 30]) { p.moveTo(s * 88, -54); p.lineTo(s * 88 + dx, 20); } return p; })(),
+    pans: [-1, 1].map(s => { const p = new Path2D(), x = s * 88; p.moveTo(x - 36, 20); p.lineTo(x + 36, 20); p.quadraticCurveTo(x + 28, 44, x, 44); p.quadraticCurveTo(x - 28, 44, x - 36, 20); p.closePath(); return piece(p, [x - 36, 20, x + 36, 44]); }),
+    lines: line([[-5, 70], [5, 70]], false),
+  };
+  const bowl = new Path2D();
+  bowl.moveTo(-62, 8); bowl.bezierCurveTo(-94, 12, -88, 40, -40, 45); bowl.quadraticCurveTo(0, 52, 40, 45); bowl.bezierCurveTo(88, 40, 94, 12, 62, 8); bowl.closePath();
+  const lamp = {
+    foot: PL([[-48, 110], [48, 110], [34, 96], [-34, 96]]), ring: stadium(-30, 30, 90, 96.5),
+    stem: PL([[-8, 90], [8, 90], [6.5, 44], [-6.5, 44]]), knop: EL(0, 66, 17, 7), bowl: piece(bowl, [-90, 8, 90, 52]),
+    rim: stadium(-66, 66, 1.5, 10), nozzle: RC(-11, -8, 22, 10), lip: stadium(-15, 15, -12.5, -6.5),
+    handles: [-1, 1].map(s => band([[s * 76, 22], [s * 98, 18], [s * 106, 2], [s * 98, -10], [s * 90, -4]], 7, 5.5, 0, 6)),
+    bands: line([[-74, 26], [-36, 34], [0, 36], [36, 34], [74, 26]]),
+  };
+  EMB = { scales, lamp };
+  LABELS = [carve('I · LAW', 42, 7, 1.6), carve('II · REASON', 42, 7, 1.6), carve('III · VIRTUE', 42, 7, 1.6)];
+}
+function drawScales(o) {
+  const E = EMB.scales, d = o.d;
+  for (const q of E.base) relief(q, { d, cast: 1, e: 1.6 });
+  relief(E.post, { d, cast: 1, e: 1.6 });
+  g.save(); g.lineCap = 'round'; g.strokeStyle = P.ink; g.lineWidth = 3.6; g.stroke(E.chains); g.strokeStyle = P.giltHi; g.lineWidth = 1.6; g.stroke(E.chains); g.restore();
+  for (const q of E.pans) relief(q, Object.assign({ d, cast: 1, e: 1.4 }, GOLD));
+  relief(E.beam, Object.assign({ d, cast: 1, e: 1.2, lw: 1.8 }, GOLD));
+  for (const q of E.ends) relief(q, Object.assign({ d, cast: 0.8, e: 1, lw: 1.6 }, GOLD));
+  relief(E.knob, { d, cast: 0.9, e: 1.4 });
+}
+function flamePath(t, h) {
+  const sway = 3 * Math.sin(t * 9.1) + 1.6 * Math.sin(t * 15.7 + 1), top = -12 - 58 * h * (1 + 0.05 * Math.sin(t * 11.3));
+  const p = new Path2D();
+  p.moveTo(0, -10); p.bezierCurveTo(-16 * h, -14, -15 * h, (top - 10) * 0.55, sway, top);
+  p.bezierCurveTo(15 * h, (top - 10) * 0.55, 16 * h, -14, 0, -10); p.closePath();
+  return piece(p, [-16, top, 16, -8]);
+}
+function drawLamp(o, t) {
+  const E = EMB.lamp, d = o.d;
+  relief(E.foot, { d, cast: 1, e: 1.6 }); relief(E.ring, { d, cast: 0.7, e: 1.2 });
+  relief(E.stem, { d, cast: 0.8, e: 1.2 }); relief(E.knop, { d, cast: 0.8, e: 1.3 });
+  for (const q of E.handles) relief(q, { d, cast: 0.9, e: 1.2, lw: 1.9 });
+  relief(E.bowl, { d, cast: 1, e: 2 }); groove(E.bands, { d, w: 1.1 });
+  relief(E.rim, { d, cast: 0.6, e: 1.2 }); relief(E.nozzle, { d, cast: 0.6, e: 1 }); relief(E.lip, { d, cast: 0.6, e: 1 });
+  const h = o.flame;
+  if (h > 0) {
+    g.save(); g.globalCompositeOperation = 'lighter';
+    const gl = g.createRadialGradient(0, -38, 4, 0, -38, 150);
+    gl.addColorStop(0, `rgba(227,184,102,${0.3 * h})`); gl.addColorStop(0.4, `rgba(196,145,63,${0.1 * h})`); gl.addColorStop(1, 'rgba(196,145,63,0)');
+    g.fillStyle = gl; g.fillRect(-150, -190, 300, 300); g.restore();
+    const f = flamePath(t, h), fg = g.createLinearGradient(0, -10, 0, f.bb[1]);
+    fg.addColorStop(0, P.giltDk); fg.addColorStop(0.35, P.gilt); fg.addColorStop(1, P.giltHi);
+    relief(f, { d: 0.6, fill: fg, cast: 0, hi: 'rgba(255,240,200,', lo: GLO, e: 1.6, lw: 1.6 });
+    const core = flamePath(t * 1.3 + 2, h * 0.5);
+    g.save(); g.translate(0, -2); relief(core, { d: 0, fill: 'rgba(250,226,170,0.9)', cast: 0, lw: 0 }); g.restore();
+  }
+}
+function drawEmblem(i, t) {
+  const t0 = i === 1 ? T.emC : T.emO, r = span(t, t0, t0 + 0.55);
+  if (r <= 0) return;
+  const a = smooth(span(t, t0, t0 + 0.18)), d = smooth(span(t, t0 + 0.08, t0 + 0.62)), s = mix(0.88, 1, backOut(r, 1.5));
+  g.save(); g.translate(MET[i], MY); g.scale(s, s); g.globalAlpha = a;
+  const o = { d };
+  if (i === 0) drawScales(o);
+  else if (i === 1) { o.flame = smooth(span(t, T.emC + 0.38, T.emC + 0.7)); drawLamp(o, t); }
+  else wreath(0, -6, 80, { n: 9, d, leaf: 0.46, tw: 8, tails: s => [[s * 5, 78], [s * 26, 96], [s * 46, 110], [s * 74, 118]] });
+  g.restore();
+}
+// each label arrives whole: its incision deepens in over 0.28 s while it settles 1.5 px into the stone
+function drawLabel(i, t) {
+  const t0 = i === 1 ? T.labC : T.labO, u = span(t, t0, t0 + 0.28);
+  if (u <= 0) return;
+  putSprite(LABELS[i], MET[i], 740 - 1.5 * (1 - eOut(u)), smooth(u));
+}
+function drawHeadline(t) {
+  const u = span(t, T.head[0], T.head[1]); if (u <= 0) return;
+  const e = eOut(u);
+  g.save(); g.globalAlpha = smooth(u * 1.3);
+  g.font = 'italic 500 86px "Bodoni Moda"'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  g.letterSpacing = `${mix(14, 2, e)}px`;
+  const txt = 'Three principles', tw = g.measureText(txt).width, y = 214 + 14 * (1 - e);
+  g.fillStyle = 'rgba(24,8,6,0.55)'; g.fillText(txt, CX + 2.5, y + 4);
+  g.fillStyle = P.marble; g.fillText(txt, CX, y);
+  g.letterSpacing = '0px';
+  const r0 = tw / 2 + 34, r1 = r0 + 170 * eOut(span(t, T.head[0] + 0.15, T.head[1] + 0.2));
+  for (const s of [-1, 1]) {
+    g.fillStyle = P.gilt; g.fillRect(Math.min(CX + s * r0, CX + s * r1), 186, Math.abs(r1 - r0), 3);
+    if (r1 > r0 + 4) { g.save(); g.translate(CX + s * r1, 187.5); g.rotate(Math.PI / 4); g.fillStyle = P.giltHi; g.fillRect(-5, -5, 10, 10); g.strokeStyle = P.giltDk; g.lineWidth = 1.2; g.strokeRect(-5, -5, 10, 10); g.restore(); }
+  }
+  g.restore();
+}
+function cam3(t) {
+  let z = mix(1.08, 1, eOut(span(t, T.s3, T.s3 + 0.6)));
+  z *= 1 + 0.025 * eInOut(span(t, T.s3 + 0.6, DUR));
+  return { z, cy: 522 };
+}
+function drawWall3(c) { setCam(c.z, c.cy); putLayer(ARCH.wall); }
+function shot3(t, wall = true) {
+  const c = cam3(t);
+  if (wall) drawWall3(c); else setCam(c.z, c.cy);
+  // the frieze arrives as contour, then turns to marble
+  const la = smooth(span(t, T.lines3[0], T.lines3[1])), fa = smooth(span(t, T.fill3[0], T.fill3[1]));
+  if (fa < 1 && la > 0) { g.globalAlpha = la; putLayer(ARCH.ink); }
+  if (fa > 0) { g.globalAlpha = fa; putLayer(ARCH.solid); }
+  g.globalAlpha = 1;
+  drawHeadline(t);
+  for (const i of [1, 0, 2]) drawEmblem(i, t);
+  for (const i of [1, 0, 2]) drawLabel(i, t);
+}
+
+// ═════════════════════════════════════════ frame ════════════════════════════════════════════════
+// The shots hand over through the oxblood wall they share: one shot clears down to bare wall (or, into
+// shot 3, to contours under a quarter strength) before the next one draws its first line.
+const LAYER = canvas(W, H);
+function inLayer(L, a, fn) {   // draw fn into a cleared full-frame layer, then lay it on g at opacity a
+  const prev = g, lc = L.getContext('2d');
+  lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalAlpha = 1; lc.globalCompositeOperation = 'source-over'; lc.clearRect(0, 0, W, H);
+  g = lc; fn(); g = prev;
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = a; g.drawImage(L, 0, 0); g.restore();
+}
+function render(t) {
+  g = main; main.setTransform(1, 0, 0, 1, 0, 0); main.globalAlpha = 1; main.globalCompositeOperation = 'source-over';
+  if (t < T.s2) shot1(t);
+  else if (t < T.s3) shot2(t);
+  else if (t < T.unline[1]) { shot2(t); shot3(t, false); }
+  else shot3(t);
+  g = main; main.setTransform(1, 0, 0, 1, 0, 0);
+  const fin = 1 - smooth(span(t, T.fadeIn[0], T.fadeIn[1])), fout = smooth(span(t, T.fadeOut[0], T.fadeOut[1]));
+  if (fin > 0) { main.fillStyle = `rgba(10,3,2,${0.96 * fin})`; main.fillRect(0, 0, W, H); }
+  if (fout > 0) { main.fillStyle = `rgba(14,4,3,${fout})`; main.fillRect(0, 0, W, H); }
+}
+
+window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+
+// sound cues for audio.py
+window.events = () => {
+  const ev = [];
+  ev.push({ k: 'pad', t: 0, c: 0 }, { k: 'pad', t: T.s2, c: 1 }, { k: 'pad', t: T.s3, c: 2 }, { k: 'pad', t: T.cadence, c: 3 });
+  ev.push({ k: 'rule', t: T.rule[0], d: T.rule[1] - T.rule[0] });
+  T.steps.forEach((s, i) => ev.push({ k: 'tock', t: s + T.stepFall, v: 0.45 + 0.1 * i, pan: 0 }));
+  T.cols.forEach((s, k) => { for (const sd of [-1, 1]) ev.push({ k: 'tock', t: s + T.colRise + T.colFall, v: 0.75, pan: sd * COLX[k] / CX }); });
+  ev.push({ k: 'tock', t: T.ent + T.entFall, v: 1.3, pan: 0 });
+  ev.push({ k: 'clack', t: pedClose(), v: 1, pan: 0 });
+  [...WORD].forEach((_, i) => ev.push({ k: 'chisel', t: letterTime(i), pan: (LETTERS[i].x - CX) / CX }));
+  for (let j = 0; j < 8; j++) ev.push({ k: 'leaf', t: T.leaves + j * T.leafStep, v: 0.6 });
+  ev.push({ k: 'air', t: T.push[0], d: T.push[1] - T.push[0], up: 1 });
+  ev.push({ k: 'swell', t: T.rise[0], d: T.rise[1] - T.rise[0] + 0.6 });
+  ev.push({ k: 'sweep', t: T.rake[0], d: T.rake[1] - T.rake[0] });
+  ev.push({ k: 'lift', t: T.lift[0], d: T.lift[1] - T.lift[0], dip: T.dip[0] });
+  ev.push({ k: 'air', t: T.pull[0], d: T.pull[1] - T.pull[0], up: 0 });
+  ev.push({ k: 'draw', t: T.lines[0], d: T.fill[0] - T.lines[0] }, { k: 'draw', t: T.lines3[0], d: T.fill3[0] - T.lines3[0] });
+  ev.push({ k: 'slide', t: T.bandsIn[0], d: T.bandsIn[1] - T.bandsIn[0] }, { k: 'slide', t: T.bandsOut[0], d: T.bandsOut[1] - T.bandsOut[0] });
+  ev.push({ k: 'emblem', t: T.emC + 0.1, pan: 0 }, { k: 'flame', t: T.emC + 0.38 });
+  for (const s of [-1, 1]) ev.push({ k: 'emblem', t: T.emO + 0.1, pan: s * (CX - MET[0]) / CX });
+  for (let j = 0; j < 4; j++) ev.push({ k: 'leaf', t: T.emO + 0.15 + j * 0.06, v: 0.45 });
+  [[T.labC, 0], [T.labO, -1], [T.labO, 1]].forEach(([t0, s]) => { for (let j = 0; j < 4; j++) ev.push({ k: 'chisel', t: t0 + j * 0.075, pan: s * (CX - MET[0]) / CX + (j - 1.5) * 0.04, v: 0.7 }); });
+  ev.push({ k: 'end', t: T.fadeOut[0], d: DUR - T.fadeOut[0] });
+  return ev.sort((a, b) => a.t - b.t);
+};
+
+window.ready = (async () => {
+  await Promise.all([['700 40px Cinzel', 'NEOCLASSICISM I·LAWREASONVIRTUE'], ['italic 400 44px "Bodoni Moda"', 'Europe \u00b7 c. 1760\u20131830'], ['italic 500 86px "Bodoni Moda"', 'Three principles']].map(([f, txt]) => document.fonts.load(f, txt)));
+  await document.fonts.ready;
+  buildTextures();
+  LEAF_GOLD = main.createLinearGradient(0, -0.15, 0.7, 0.18);
+  LEAF_GOLD.addColorStop(0, P.giltHi); LEAF_GOLD.addColorStop(0.5, P.gilt); LEAF_GOLD.addColorStop(1, P.giltDk);
+  WALL1 = buildWall(-260, -220, 2440, 1520, CX, 300, 1250);
+  buildColumn(); buildEntablature(); buildPediment(); buildLetters();
+  buildHands(); buildFigures(); buildAltar(); buildUrn();
+  PANEL = buildPanel();
+  ARCH = buildArch(); buildEmblems();
+  g = main; Z = 1;
+})();
+</script>
+</body></html>
