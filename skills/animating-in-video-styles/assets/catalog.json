@@ -224,7 +224,7 @@
    ],
    "webgl": false,
    "render": {},
-   "recipe": false,
+   "recipe": true,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/blueprint-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/blueprint.mp4"
   },
@@ -1048,7 +1048,7 @@
     "gpu": "full",
     "schedule": "contiguous"
    },
-   "recipe": false,
+   "recipe": true,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/low-poly-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/low-poly.mp4"
   },
@@ -1182,7 +1182,7 @@
    "credits": [],
    "webgl": false,
    "render": {},
-   "recipe": false,
+   "recipe": true,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/comic-strip-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/comic-strip.mp4"
   },
@@ -1345,7 +1345,7 @@
    "credits": [],
    "webgl": false,
    "render": {},
-   "recipe": false,
+   "recipe": true,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/anime-80s-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/anime-80s.mp4"
   },

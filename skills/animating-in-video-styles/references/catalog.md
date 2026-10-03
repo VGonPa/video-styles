@@ -40,7 +40,7 @@ Styles borrowed from art and design history.
 
 Lines that appear as if drawn live.
 
-- `blueprint` **Blueprint** — Engineering drawing. Best for measurements, technical details, and inner workings · explainer, product · Originally developed by Yasin Özmen · *no recipe yet*
+- `blueprint` **Blueprint** — Engineering drawing. Best for measurements, technical details, and inner workings · explainer, product · Originally developed by Yasin Özmen
 - `chalkboard` **Chalkboard** — Chalk-drawn classroom lesson. Best for teaching a rule or memorable point · tutorial, explainer · Originally developed by Yasin Özmen · *no recipe yet*
 - `existential-stick` **Existential Stick Figures** — Deadpan pencil lives, sudden colour. Best for quiet, funny stories about memory and ordinary days · story · Inspired by Don Hertzfeldt · *no recipe yet*
 - `ink-wash` **Ink & Watercolor** — Sumi-e brush and blooming washes. Best for quiet, poetic stories and graceful title openers · story, titles · *no recipe yet*
@@ -78,7 +78,7 @@ Recreations of older media and eras.
 
 - `documentary-16mm` **16 mm Documentary** — Vintage black-and-white film. Best for history and origin stories · story · Originally developed by Yasin Özmen · *no recipe yet*
 - `retro-1970s` **1970s Retro** — Vintage television titles. Best for nostalgic openings and series titles · titles, story · Originally developed by Yasin Özmen · *no recipe yet*
-- `anime-80s` **80s Anime** — Sunset cels, city-pop coastal drive. Best for retro title openers, road-trip stories, and nostalgic intros · titles, story · *no recipe yet*
+- `anime-80s` **80s Anime** — Sunset cels, city-pop coastal drive. Best for retro title openers, road-trip stories, and nostalgic intros · titles, story
 - `weather-tv` **90s Weather Report** — Bevelled map, bouncy icons, synth bed. Best for forecasts, regional updates and nostalgic data roundups · news, data · *no recipe yet*
 - `frutiger-aero` **Frutiger Aero** — Glossy bubbles, blue skies, green grass. Best for cheerful app launches, playful promos, and nostalgic social posts · social, product · *no recipe yet*
 - `lofi-anime` **Lo-Fi Anime** — Rainy cozy 90s anime dusk. Best for calm moods, quiet stories, and study-night atmosphere · story · Inspired by the Lofi Girl stream · *no recipe yet*
@@ -138,7 +138,7 @@ Code-driven systems, particles, and 3D forms.
 - `feature-animation-3d` **Feature-Animation 3D** — Glossy PBR character, studio light. Best for character shorts and playful product stories · story, product · Inspired by @karanC_12's “Asked for a dot” post · *WebGL* · *no recipe yet*
 - `particles` **Generative Particles** — Luminous flow-field particle swarms. Best for tech title reveals, data stories, and abstract openers · titles, data · *WebGL* · *no recipe yet*
 - `inflated-3d` **Inflated 3D** — Puffy pastel balloon icons that squish. Best for playful app features, social teasers and UI reveals · product, social · *WebGL* · *no recipe yet*
-- `low-poly` **Low-Poly 3D** — Faceted, flat-shaded miniature 3D worlds. Best for friendly 3D explainers, world-building and product teasers · explainer, product · *WebGL* · *no recipe yet*
+- `low-poly` **Low-Poly 3D** — Faceted, flat-shaded miniature 3D worlds. Best for friendly 3D explainers, world-building and product teasers · explainer, product · *WebGL*
 - `technical-cutaway` **Technical Cutaway** — Exploded 3D model with callouts. Best for how machines work, product internals and engineering explainers · explainer, product · Inspired by Branch Education and Animagraffs · *WebGL* · *no recipe yet*
 - `watercolor-memory` **Watercolor Memory** — Pencil memory blooming into watercolor. Best for nostalgic stories, memories and soft title reveals · story, titles · Adapted from Memory Fading Into Watercolor by Techartist (MIT) · *WebGL* · *no recipe yet*
 
@@ -156,7 +156,7 @@ Panels, strips, and cartoon traditions from every decade.
 - `magazine-cartoon` **Magazine Cartoon** — Dry wit, pen and wash. Best for punchlines, wry observations, and understated social commentary · social, story · Inspired by The New Yorker's cartoons · *no recipe yet*
 - `manga` **Manga** — Inked panels, screentone and speed lines. Best for tense moments, big reveals, and dramatic countdowns · story, social · *no recipe yet*
 - `minimal-strip` **Minimal Line Strip** — Trembling pen, white space, quiet wit. Best for gentle philosophical humor and a tender four-panel punchline · story · Inspired by Peanuts (Charles M. Schulz) · *no recipe yet*
-- `comic-strip` **Newspaper Comic Strip** — Four panels, ink on newsprint. Best for dry wit, a setup, a beat, and a punchline · social, story · *no recipe yet*
+- `comic-strip` **Newspaper Comic Strip** — Four panels, ink on newsprint. Best for dry wit, a setup, a beat, and a punchline · social, story
 - `office-strip` **Office Satire Strip** — Deadpan cubicle wit, flat ink. Best for workplace satire, buzzwords, and a dry final-panel punchline · social, story · Inspired by Dilbert (Scott Adams) · *no recipe yet*
 - `relatable-webcomic` **Relatable Webcomic** — Pastel panels, messy bun, cosy honesty. Best for everyday confessions, self-care gags and warm relatable punchlines · social, story · Inspired by Sarah's Scribbles (Sarah Andersen) · *no recipe yet*
 - `round-head-dark` **Round-Head Dark Humor** — Deadpan round heads, dark punchline. Best for fast social gags with a dark-but-harmless twist · social · Inspired by Cyanide & Happiness · *no recipe yet*
