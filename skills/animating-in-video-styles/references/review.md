@@ -13,7 +13,8 @@ time), fix them, render again. Stop when a fresh look finds nothing worth fixing
 
 ## Is it a good film?
 - One focus at a time and a deliberate composition; the eye knows where to go in every frame, and no flat or
-  empty area larger than about a fifth of the frame is left unless it is kept for text.
+  empty area larger than about a fifth of the frame is left. In 9:16 the bottom caption band (y 1440–1920) may
+  stay low in detail, but carry the scene's ground and texture into it: without captions a flat band looks unfinished.
 - Text is readable at full size: nothing clipped, overlapping, too small or too close to the edge. For 9:16
   social formats keep key text out of the top ~15%, the bottom ~25% and the right ~12%, where Reels, Shorts
   and TikTok put captions and buttons, and set anything the viewer must read at 20 px or more (the 1080 px
