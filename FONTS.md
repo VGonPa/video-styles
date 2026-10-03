@@ -41,7 +41,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Cormorant SC](https://fonts.google.com/specimen/Cormorant+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [ukiyo-e](styles/ukiyo-e) |
 | [Courier Prime](https://fonts.google.com/specimen/Courier+Prime) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [dark-comic](styles/dark-comic), [dark-documentary](styles/dark-documentary), [documentary-16mm](styles/documentary-16mm), [map-documentary](styles/map-documentary) |
 | [Dela Gothic One](https://fonts.google.com/specimen/Dela+Gothic+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [manga](styles/manga) |
-| [DM Serif Display](https://fonts.google.com/specimen/DM+Serif+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [editorial-illustration](styles/editorial-illustration), [origami](styles/origami) |
+| [DM Serif Display](https://fonts.google.com/specimen/DM+Serif+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [editorial-illustration](styles/editorial-illustration), [impressionism](styles/impressionism), [origami](styles/origami) |
 | [EB Garamond](https://fonts.google.com/specimen/EB+Garamond) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [magazine-cartoon](styles/magazine-cartoon), [scientific-plate](styles/scientific-plate) |
 | [Exo 2](https://fonts.google.com/specimen/Exo+2) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [digital-comic](styles/digital-comic), [handheld-lcd](styles/handheld-lcd), [synthwave](styles/synthwave) |
 | [Federo](https://fonts.google.com/specimen/Federo) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-nouveau](styles/art-nouveau) |
@@ -81,7 +81,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Mr Dafoe](https://fonts.google.com/specimen/Mr+Dafoe) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [synthwave](styles/synthwave) |
 | [Newsreader](https://fonts.google.com/specimen/Newsreader) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [editorial-illustration](styles/editorial-illustration) |
 | [Nunito](https://fonts.google.com/specimen/Nunito) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [blob-sim](styles/blob-sim), [frutiger-aero](styles/frutiger-aero), [history-comedy](styles/history-comedy) |
-| [Old Standard TT](https://fonts.google.com/specimen/Old+Standard+TT) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [dada](styles/dada), [documentary-16mm](styles/documentary-16mm), [newspaper](styles/newspaper) |
+| [Old Standard TT](https://fonts.google.com/specimen/Old+Standard+TT) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [dada](styles/dada), [documentary-16mm](styles/documentary-16mm), [impressionism](styles/impressionism), [newspaper](styles/newspaper) |
 | [Oleo Script](https://fonts.google.com/specimen/Oleo+Script) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [rubber-hose](styles/rubber-hose) |
 | [Open Sans](https://fonts.google.com/specimen/Open+Sans) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [frutiger-aero](styles/frutiger-aero) |
 | [Orbitron](https://fonts.google.com/specimen/Orbitron) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [digital-comic](styles/digital-comic), [synthwave](styles/synthwave) |
