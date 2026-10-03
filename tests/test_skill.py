@@ -113,6 +113,15 @@ class RecipeCheckTests(unittest.TestCase):
             (styles / "voxel.md").write_text(recipe)
             self.assertEqual(self.check(Path(tmp), "voxel"), [])
 
+    def test_shell_commands_cite_skill_scripts_and_style_files(self):
+        problems = []
+        folder = manifest.ROOT / "styles" / "blueprint"
+        check_catalog.cited_names("`python3 <skill>/scripts/check_audio.py audio.wav 4`, `node render.mjs a 30 0 4 1 2`, "
+                                  "`<skill>/scripts/contact_sheet.sh`", folder, self.code, problems, "x")
+        self.assertEqual(problems, [])
+        check_catalog.cited_names("`python3 <skill>/scripts/ghost.py`, `node ghost.mjs`", folder, self.code, problems, "x")
+        self.assertEqual(len(problems), 2)
+
     def test_glsl_definitions_count(self):
         self.assertTrue(check_catalog.defines("nebula", "vec3 nebula(vec3 d){"))
         self.assertTrue(check_catalog.defines("uScol", "uniform vec3 uSd, uScol;"))

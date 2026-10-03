@@ -194,9 +194,24 @@ def colour_in_code(colour, code, flat):
     return any(re.search(f, lower) for f in forms) or bool(re.search(rf"(?<![\d.]){r},{g},{b}(?![\d.])", flat))
 
 
+COMMAND = re.compile(r"\s*(?:python3|bash|node|cd|KEYS=\S*|DUR=\S*|WORKERS=\S*)\s")
+SKILL_SCRIPT = re.compile(r"(?:<skill>/)?scripts/([\w.-]+\.(?:py|sh))")
+
+
 def cited_names(cell, folder, code, problems, where):
-    """Files, folders and identifiers in a cell's backticks must exist in the style."""
+    """Files, folders and identifiers in a cell's backticks must exist in the style. A shell command
+    (`python3 <skill>/scripts/check_audio.py audio.wav 4`) is checked for the files it names only: the skill's
+    scripts in the skill, the rest in the style."""
     for token in re.findall(r"`([^`]+)`", cell):
+        if COMMAND.match(token + " ") or "<skill>/" in token:
+            for name in SKILL_SCRIPT.findall(token):
+                if not (manifest.SKILL / "scripts" / name).is_file():
+                    problems.append(f"recipe {where} cites missing skill script scripts/{name}")
+            for found in FILE.finditer(SKILL_SCRIPT.sub(" ", token)):
+                path = found.group(1) or found.group(2)
+                if path.endswith((".mjs", ".html", ".js")) and not (folder / path).exists():
+                    problems.append(f"recipe {where} cites missing file {path}")
+            continue
         for found in FILE.finditer(token):
             path = found.group(1) or found.group(2)
             if not (any(folder.glob(path)) if "*" in path else (folder / path).exists()):
