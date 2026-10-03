@@ -32,7 +32,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Bungee](https://fonts.google.com/specimen/Bungee) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [papel-picado](styles/papel-picado) |
 | [Caveat](https://fonts.google.com/specimen/Caveat) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [chalkboard](styles/chalkboard), [comic-strip](styles/comic-strip), [lofi-anime](styles/lofi-anime), [pencil-sketch](styles/pencil-sketch), [sand-animation](styles/sand-animation) |
 | [Caveat Brush](https://fonts.google.com/specimen/Caveat+Brush) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [comic-strip](styles/comic-strip), [stick-action](styles/stick-action), [sunday-strip](styles/sunday-strip) |
-| [Chakra Petch](https://fonts.google.com/specimen/Chakra+Petch) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [sci-fi-interface](styles/sci-fi-interface) |
+| [Chakra Petch](https://fonts.google.com/specimen/Chakra+Petch) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [reel-chrome](styles/reel-chrome), [sci-fi-interface](styles/sci-fi-interface) |
 | [Chewy](https://fonts.google.com/specimen/Chewy) | [Apache 2.0](licenses/Apache-2.0.txt) | [vhs-camcorder](styles/vhs-camcorder) |
 | [Cinzel](https://fonts.google.com/specimen/Cinzel) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [greek-pottery](styles/greek-pottery), [roman-mosaic](styles/roman-mosaic), [stained-glass](styles/stained-glass), [viking-runes](styles/viking-runes) |
 | [Cinzel Decorative](https://fonts.google.com/specimen/Cinzel+Decorative) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-nouveau](styles/art-nouveau) |
@@ -71,7 +71,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Manrope](https://fonts.google.com/specimen/Manrope) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [liquid-motion](styles/liquid-motion) |
 | [Marcellus](https://fonts.google.com/specimen/Marcellus) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [egyptian-papyrus](styles/egyptian-papyrus), [islamic-geometric](styles/islamic-geometric) |
 | [Marcellus SC](https://fonts.google.com/specimen/Marcellus+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-deco](styles/art-deco), [egyptian-papyrus](styles/egyptian-papyrus), [islamic-geometric](styles/islamic-geometric) |
-| [Martian Mono](https://fonts.google.com/specimen/Martian+Mono) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [sci-fi-interface](styles/sci-fi-interface) |
+| [Martian Mono](https://fonts.google.com/specimen/Martian+Mono) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [reel-chrome](styles/reel-chrome), [sci-fi-interface](styles/sci-fi-interface) |
 | [Mochiy Pop One](https://fonts.google.com/specimen/Mochiy+Pop+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [kawaii](styles/kawaii) |
 | [Monoton](https://fonts.google.com/specimen/Monoton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [retro-1970s](styles/retro-1970s) |
 | [Montserrat](https://fonts.google.com/specimen/Montserrat) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bold-captions](styles/bold-captions), [cosmic-epic](styles/cosmic-epic) |
