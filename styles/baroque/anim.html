@@ -1,0 +1,1461 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── baroque · one hard light out of the dark ───────────────────────────────────────────────────
+// Black. A hard beam from a high window stutters on and carves a wedge of crimson velvet out of the
+// dark, dust turning inside it → the curtain is hauled up into a diagonal swag (a dip of
+// anticipation, a heavy spring, overshoot, settle) and its tassels swing in → behind it a vanitas
+// on a stone ledge: linen spilling over the edge, a tipped pewter ewer, grapes, a lemon shedding its
+// peel, a running hourglass, a candle just snuffed. The camera creeps in while the beam swings
+// right and narrows, so the highlights travel across the objects → a gold silk whirls across on the
+// diagonal and leaves a gilded title behind it, the light raking its letters → the light irises
+// down and the picture fades to black.
+// The still life and the title card are G-buffers (albedo, normal, material, light visibility)
+// painted once in window.ready. Each frame relights them per pixel under the moving beam, so form
+// shadows, speculars and reflected light all answer to the one source. Everything is seeded.
+const W = 1920, H = 1080, LEN = 10, PI = Math.PI;
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const cl = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const mix = (a, b, k) => a + (b - a) * k;
+const ramp = (t, a, b) => cl((t - a) / (b - a));
+const ease = k => { k = cl(k); return k * k * (3 - 2 * k); };
+const easeIO = k => { k = cl(k); return k < 0.5 ? 4 * k * k * k : 1 - 4 * (1 - k) ** 3; };
+const sineIO = k => 0.5 - 0.5 * Math.cos(PI * cl(k));
+const newCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const unit = (x, y, z) => { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l]; };
+
+// sfc32, seeded through a few warm-up rounds
+function rng(seed) {
+  let a = seed >>> 0, b = 0x85ebca6b, c = 0xc2b2ae35, d = 1;
+  const next = () => {
+    const t = (((a + b) | 0) + d) | 0;
+    d = (d + 1) | 0; a = b ^ (b >>> 9); b = (c + (c << 3)) | 0; c = (c << 21) | (c >>> 11); c = (c + t) | 0;
+    return (t >>> 0) / 4294967296;
+  };
+  for (let i = 0; i < 15; i++) next();
+  return next;
+}
+
+// smooth value noise on a shuffled lattice, with an fbm helper
+function valueNoise(seed) {
+  const r = rng(seed), perm = new Uint16Array(512), val = new Float32Array(256);
+  for (let i = 0; i < 256; i++) { perm[i] = i; val[i] = r(); }
+  for (let i = 255; i > 0; i--) { const j = Math.floor(r() * (i + 1)), s = perm[i]; perm[i] = perm[j]; perm[j] = s; }
+  for (let i = 0; i < 256; i++) perm[i + 256] = perm[i];
+  const n = (x, y) => {
+    const xf = Math.floor(x), yf = Math.floor(y), fx = x - xf, fy = y - yf, X = xf & 255, Y = yf & 255;
+    const u = fx * fx * fx * (fx * (fx * 6 - 15) + 10), v = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+    const p0 = perm[X] + Y, p1 = perm[X + 1] + Y;
+    const a = val[perm[p0]], b = val[perm[p1]], c = val[perm[p0 + 1]], d = val[perm[p1 + 1]];
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  };
+  n.fbm = (x, y, oct = 4) => {
+    let s = 0, amp = 0.5, f = 1, tot = 0;
+    for (let i = 0; i < oct; i++) { s += amp * n(x * f + i * 17.3, y * f - i * 9.1); tot += amp; amp *= 0.5; f *= 2.07; }
+    return s / tot;
+  };
+  return n;
+}
+const hash2 = (x, y) => { let h = (x * 374761393 + y * 668265263) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+
+// ── timeline (seconds) ──
+const TL = {
+  lift: [0.85, 1.2],      // anticipation, then the curtain is hauled up on a heavy spring
+  push: [1.8, 6.6],       // slow dolly into the still life, following the light
+  turn: [3.2, 5.6],       // the beam swings right and narrows
+  silk: [5.7, 8.5],       // gold silk whirls across, the title behind it
+  glint: [7.2, 9.2],      // the light turns over the gilding
+  sheen: [7.8, 8.75],     // and one raking highlight runs across the word
+  iris: [8.7, 9.55], out: [9.25, 9.97],
+};
+
+// ── light: lookup tables shared by the relighting pass and everything drawn by hand ──
+const LIN = new Float32Array(256);
+for (let i = 0; i < 256; i++) LIN[i] = Math.pow(i / 255, 2.2);
+// linear 0..8 → display with a soft shoulder; indexed by √v so the deep shadows keep their gradations
+const TONE = new Float32Array(4096), TQ = 4095 / Math.sqrt(8);
+for (let i = 0; i < 4096; i++) { const x = (i / TQ) ** 2, m = x * (1 + x / 7.5) / (1 + x); TONE[i] = 255 * Math.pow(Math.min(1, m), 1 / 2.2); }
+const DIF = new Float32Array(1024), BNC = new Float32Array(1024);  // indexed by n·l in [-1, 1]
+for (let i = 0; i < 1024; i++) {
+  const d = i / 511.5 - 1, w = cl((d + 0.1) / 1.1);
+  DIF[i] = ease(w / 0.4) * (0.32 + 0.68 * w);       // a soft terminator, then a long fall-off
+  BNC[i] = cl(-d - 0.12) * 0.9;                     // reflected light finds the shadow side
+}
+const SPEC = new Float32Array(16 * 1024);
+for (let l = 0; l < 16; l++) { const e = 3 + (l / 15) ** 2 * 260; for (let j = 0; j < 1024; j++) SPEC[l * 1024 + j] = Math.pow(j / 1023, e); }
+const ENV = new Float32Array(256);                   // metals see the lit table below their horizon
+for (let i = 0; i < 256; i++) { const ry = i / 127.5 - 1; ENV[i] = 0.05 + 0.3 * Math.exp(-(((ry - 0.42) / 0.12) ** 2)) + 0.06 * Math.exp(-(((ry + 0.55) / 0.2) ** 2)); }
+const LC = [2.5, 2.08, 1.55];                        // warm window light (linear)
+const AMB = [0.0011, 0.0009, 0.0008];                // the dark is nearly dead
+const FILL = [0.03, 0.019, 0.009];                   // a whisper of warm light thrown back by whatever the pool hits
+const BOUNCE = [0.11, 0.075, 0.045];
+const toByte = v => Math.round(TONE[v >= 8 ? 4095 : v <= 0 ? 0 : (Math.sqrt(v) * TQ) | 0]);
+// ±½ LSB ordered dither (4×4 Bayer), added before the 8-bit store so slow falloffs into black don't band
+const BAYER = Float32Array.from([0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5], v => (v + 0.5) / 16 - 0.5);
+const css = (r, g2, b, a = 1) => `rgba(${toByte(r)},${toByte(g2)},${toByte(b)},${a})`;
+
+// a beam: origin, unit axis, half-width (as tan of the half angle), softness, intensity, and the
+// matching directional light vector (it comes back up the beam, tilted toward the viewer)
+function makeLight(O, T, tw, soft, I, opt = {}) {
+  const dx = T[0] - O[0], dy = T[1] - O[1], len = Math.hypot(dx, dy), ax = dx / len, ay = dy / len;
+  const rot = opt.az || 0, c = Math.cos(rot), s = Math.sin(rot);
+  const fx = -ax * 0.8, fy = -ay * 0.8;
+  const [lx, ly, lz] = unit(fx * c - fy * s, fx * s + fy * c, opt.lz || 0.6);
+  const [hx, hy, hz] = unit(lx, ly, lz + 1);
+  const pc = opt.pc || T;
+  return { ox: O[0], oy: O[1], ax, ay, tw, soft, I, lx, ly, lz, hx, hy, hz, px: pc[0], py: pc[1], pr: opt.pr || 760, pool: opt.pool ?? 0.45 };
+}
+function beamProfile(q, L) {
+  const t1 = L.tw + L.soft; if (q >= t1) return 0;
+  let k = q <= L.tw - L.soft ? 1 : (t1 - q) / (2 * L.soft);
+  k = k * k * (3 - 2 * k);
+  return k * (1 - 0.3 * q * q / (L.tw * L.tw));
+}
+function beamAt(L, x, y) {
+  const dx = x - L.ox, dy = y - L.oy, al = dx * L.ax + dy * L.ay;
+  if (al <= 0) return 0;
+  const q = Math.abs(dy * L.ax - dx * L.ay) / al, px = x - L.px, py = y - L.py, u = (px * px + py * py) / (L.pr * L.pr);
+  const spot = 1 / (1 + u * u);
+  return beamProfile(q, L) * L.I * (1 - L.pool + L.pool * spot) * Math.max(0.6, 1.2 - al * 1e-4);
+}
+// the shaft in the air (no pool on a surface): what dust, smoke and the flying silk see
+function shaftAt(L, x, y) {
+  const dx = x - L.ox, dy = y - L.oy, al = dx * L.ax + dy * L.ay;
+  if (al <= 0) return 0;
+  return beamProfile(Math.abs(dy * L.ax - dx * L.ay) / al, L) * L.I * Math.max(0.55, 1.15 - al * 1.5e-4);
+}
+// the same beam in screen space, under a camera that scales by s about (fx, fy)
+function camLight(L, cam) {
+  return Object.assign({}, L, { ox: (L.ox - cam.fx) * cam.s + cam.fx, oy: (L.oy - cam.fy) * cam.s + cam.fy, px: (L.px - cam.fx) * cam.s + cam.fx, py: (L.py - cam.fy) * cam.s + cam.fy, pr: L.pr * cam.s });
+}
+
+// ── G-buffer stages ──
+function makeStage() {
+  const st = {};
+  for (const k of ['A', 'N', 'M', 'S', 'F']) { st[k] = newCanvas(W, H); st[k + 'c'] = st[k].getContext('2d', { willReadFrequently: true }); }
+  st.Fc.fillStyle = '#fff'; st.Fc.fillRect(0, 0, W, H);           // F: how much bounce fill a surface takes
+  st.Ac.fillStyle = '#000'; st.Ac.fillRect(0, 0, W, H);
+  st.Nc.fillStyle = 'rgb(128,128,255)'; st.Nc.fillRect(0, 0, W, H);
+  st.Mc.fillStyle = '#000'; st.Mc.fillRect(0, 0, W, H);
+  st.Sc.fillStyle = '#fff'; st.Sc.fillRect(0, 0, W, H);
+  return st;
+}
+// brushwork: short strokes laid along a slowly turning flow; the light catches their ridges
+function brushField(seed) {
+  const c = newCanvas(W, H), x = c.getContext('2d', { willReadFrequently: true }), r = rng(seed), nf = valueNoise(seed + 1);
+  x.fillStyle = '#808080'; x.fillRect(0, 0, W, H); x.lineCap = 'round';
+  for (let i = 0; i < 14000; i++) {
+    const px = r() * W, py = r() * H, a = nf(px / 380, py / 380) * 5 + 0.4, len = 10 + r() * 34, v = 128 + (r() - 0.5) * 120;
+    x.strokeStyle = `rgba(${v},${v},${v},0.22)`; x.lineWidth = 2 + r() * 7;
+    x.beginPath(); x.moveTo(px, py); x.quadraticCurveTo(px + Math.cos(a + 0.3) * len * 0.5, py + Math.sin(a + 0.3) * len * 0.5, px + Math.cos(a) * len, py + Math.sin(a) * len); x.stroke();
+  }
+  x.filter = 'blur(0.8px)'; x.drawImage(c, 0, 0);
+  return x.getImageData(0, 0, W, H).data;
+}
+// brush dabs: pixels fall into elongated, flow-aligned cells (an anisotropic Voronoi) and each
+// cell's albedo and normal are pulled toward its mean, so the light lands in brush-sized patches.
+// Pixels unlike the cell's seed (another object) keep their own values.
+function dabs(st, seed, cell, kA, kN) {
+  const r = rng(seed), nf = valueNoise(seed + 9), gw = Math.ceil(W / cell) + 5, gh = Math.ceil(H / cell) + 5, n = gw * gh;
+  const sx = new Float32Array(n), sy = new Float32Array(n), ca = new Float32Array(n), sa = new Float32Array(n), il = new Float32Array(n), iw = new Float32Array(n);
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+    const k = j * gw + i, x = (i - 2 + r()) * cell, y = (j - 2 + r()) * cell, a = nf(x / 320, y / 320) * 6 + (r() - 0.5) * 0.7;
+    const len = cell * (1.3 + r() * 1.2), wid = cell * (0.5 + r() * 0.25);
+    sx[k] = x; sy[k] = y; ca[k] = Math.cos(a); sa[k] = Math.sin(a); il[k] = 1 / (len * len); iw[k] = 1 / (wid * wid);
+  }
+  const A = st.a, N = st.n, lab = new Int32Array(W * H), sum = new Float32Array(n * 7), ref = new Int32Array(n);
+  for (let k = 0; k < n; k++) { const x = Math.min(W - 1, Math.max(0, sx[k] | 0)), y = Math.min(H - 1, Math.max(0, sy[k] | 0)), p = (y * W + x) * 4; ref[k] = p; }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const ci = Math.floor(x / cell) + 2, cj = Math.floor(y / cell) + 2;
+    let best = 1e9, bk = 0;
+    for (let j = cj - 2; j <= cj + 2; j++) for (let i = ci - 2; i <= ci + 2; i++) {
+      const k = j * gw + i, dx = x - sx[k], dy = y - sy[k], u = dx * ca[k] + dy * sa[k], v = dy * ca[k] - dx * sa[k], d = u * u * il[k] + v * v * iw[k];
+      if (d < best) { best = d; bk = k; }
+    }
+    const p = (y * W + x) * 4, q = ref[bk];
+    if (Math.abs(A[p] - A[q]) + Math.abs(A[p + 1] - A[q + 1]) + Math.abs(A[p + 2] - A[q + 2]) > 60) { lab[y * W + x] = -1; continue; }
+    lab[y * W + x] = bk;
+    const o = bk * 7; sum[o] += A[p]; sum[o + 1] += A[p + 1]; sum[o + 2] += A[p + 2]; sum[o + 3] += N[p]; sum[o + 4] += N[p + 1]; sum[o + 5] += N[p + 2]; sum[o + 6]++;
+  }
+  for (let i = 0, p = 0; i < W * H; i++, p += 4) {
+    const k = lab[i]; if (k < 0) continue;
+    const o = k * 7, c = 1 / sum[o + 6];
+    A[p] = mix(A[p], sum[o] * c, kA); A[p + 1] = mix(A[p + 1], sum[o + 1] * c, kA); A[p + 2] = mix(A[p + 2], sum[o + 2] * c, kA);
+    const nx = mix(N[p], sum[o + 3] * c, kN) / 127.5 - 1, ny = mix(N[p + 1], sum[o + 4] * c, kN) / 127.5 - 1, nz = mix(N[p + 2], sum[o + 5] * c, kN) / 127.5 - 1, l = 1 / Math.hypot(nx, ny, nz);
+    N[p] = (nx * l + 1) * 127.5; N[p + 1] = (ny * l + 1) * 127.5; N[p + 2] = (nz * l + 1) * 127.5;
+  }
+}
+// opt: kA / kN how far brush dabs pull albedo / normals to their cell mean (no dabs at all with kA = 0),
+// kB how strongly the brush strokes tilt the normals
+function sealStage(st, seed, { kA = 0.5, kN = 0.12, kB = 1.3 } = {}) {
+  st.a = st.Ac.getImageData(0, 0, W, H).data; st.m = st.Mc.getImageData(0, 0, W, H).data; st.s = st.Sc.getImageData(0, 0, W, H).data;
+  st.f = st.Fc.getImageData(0, 0, W, H).data;
+  st.n = st.Nc.getImageData(0, 0, W, H).data;
+  if (kA > 0) dabs(st, seed + 3, 8, kA, kN);
+  const B = brushField(seed), A = st.a, N = st.n, n = W * H;
+  // normals go to float and get a 1 px blur, so smooth metal and cloth shade without 8-bit steps
+  const X = new Float32Array(n), Y = new Float32Array(n), Z = new Float32Array(n);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, p = i * 4;
+    let nx = N[p] / 127.5 - 1, ny = N[p + 1] / 127.5 - 1, nz = N[p + 2] / 127.5 - 1;
+    if (x > 0 && y > 0 && x < W - 1 && y < H - 1) {
+      const b = B[p] / 255 - 0.5, gx = (B[p + 4] - B[p - 4]) / 255, gy = (B[p + W * 4] - B[p - W * 4]) / 255, k = 1 + 0.16 * b;
+      A[p] *= k; A[p + 1] *= k; A[p + 2] *= k;
+      if (st.m[p + 1] < 220) { nx -= gx * kB; ny -= gy * kB; }
+    }
+    X[i] = nx; Y[i] = ny; Z[i] = nz;
+  }
+  const blur = F => {
+    const T = new Float32Array(n);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; T[i] = (F[x > 0 ? i - 1 : i] + 2 * F[i] + F[x < W - 1 ? i + 1 : i]) * 0.25; }
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; F[i] = (T[y > 0 ? i - W : i] + 2 * T[i] + T[y < H - 1 ? i + W : i]) * 0.25; }
+  };
+  blur(X); blur(Y); blur(Z);
+  for (let i = 0; i < n; i++) { const l = 1 / (Math.hypot(X[i], Y[i], Z[i]) + 1e-9); X[i] *= l; Y[i] *= l; Z[i] *= l; }
+  st.nx = X; st.ny = Y; st.nz = Z; st.n = null;
+  st.out = new ImageData(W, H); for (let i = 3; i < W * H * 4; i += 4) st.out.data[i] = 255;
+  st.view = newCanvas(W, H); st.vc = st.view.getContext('2d');
+  for (const k of ['A', 'N', 'M', 'S', 'F']) { st[k].width = 1; delete st[k + 'c']; }
+}
+// paint one object: fn(x, y, o) fills o for each pixel centre: coverage a, albedo r g b (display
+// 0..1), normal nx ny nz, specular sp, gloss gl, metal mt. Optional clip path. Returns the
+// object's coverage as a canvas, for casting its shadow.
+const PX = { a: 0, r: 0, g: 0, b: 0, nx: 0, ny: 0, nz: 1, sp: 0, gl: 0, mt: 0 };
+function paint(st, x0, y0, w, h, fn, clip) {
+  x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+  w = Math.min(W - x0, Math.ceil(w)); h = Math.min(H - y0, Math.ceil(h));
+  const ia = new ImageData(w, h), inn = new ImageData(w, h), im = new ImageData(w, h);
+  const A = ia.data, N = inn.data, M = im.data, o = PX;
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+    o.a = 0; fn(x0 + i + 0.5, y0 + j + 0.5, o);
+    if (!(o.a > 0)) continue;
+    const p = (j * w + i) * 4, al = o.a >= 1 ? 255 : o.a * 255, nl = 1 / Math.hypot(o.nx, o.ny, o.nz);
+    A[p] = o.r * 255; A[p + 1] = o.g * 255; A[p + 2] = o.b * 255; A[p + 3] = al;
+    N[p] = (o.nx * nl * 0.5 + 0.5) * 255; N[p + 1] = (o.ny * nl * 0.5 + 0.5) * 255; N[p + 2] = (o.nz * nl * 0.5 + 0.5) * 255; N[p + 3] = al;
+    M[p] = o.sp * 255; M[p + 1] = o.gl * 255; M[p + 2] = o.mt * 255; M[p + 3] = al;
+  }
+  const layers = [ia, inn, im].map(d => { const c = newCanvas(w, h); c.getContext('2d').putImageData(d, 0, 0); return c; });
+  if (clip) for (const c of layers) { const x = c.getContext('2d'); x.globalCompositeOperation = 'destination-in'; x.translate(-x0, -y0); x.fill(clip); }
+  st.Ac.drawImage(layers[0], x0, y0); st.Nc.drawImage(layers[1], x0, y0); st.Mc.drawImage(layers[2], x0, y0);
+  // the object stands in front of any shadow cast so far: give it back its light
+  st.Sc.save(); st.Sc.filter = 'brightness(0) invert(1)'; st.Sc.drawImage(layers[0], x0, y0); st.Sc.restore();
+  st.Fc.save(); st.Fc.filter = 'brightness(0) invert(1)'; st.Fc.drawImage(layers[0], x0, y0); st.Fc.restore();
+  return { c: layers[0], x: x0, y: y0 };
+}
+// darken the light-visibility layer with a transformed, blurred silhouette
+function castShadow(st, sil, m, blur, alpha, clip) {
+  const c = st.Sc; c.save();
+  if (clip) c.clip(clip);
+  c.globalAlpha = alpha; c.filter = `brightness(0) blur(${blur}px)`;
+  c.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+  c.drawImage(sil.c, sil.x, sil.y);
+  c.restore();
+}
+// a shadow laid flat on a horizontal surface, anchored at the object's foot line yb
+const flatShadow = (yb, kx, ky, dx = 0, dy = 0) => [1, 0, -kx, ky, kx * yb + dx, yb * (1 - ky) + dy];
+const offShadow = (dx, dy) => [1, 0, 0, 1, dx, dy];
+
+// surface of revolution about an axis in the picture plane: R = {x, y, c, s, len, r(a)}
+function revAt(R, x, y, o) {
+  const dx = x - R.x, dy = y - R.y, a = dx * R.c + dy * R.s, b = -dx * R.s + dy * R.c;
+  if (a < -1 || a > R.len + 1) return 0;
+  const r = R.r(a); if (r <= 0) return 0;
+  const cov = cl(r - Math.abs(b) + 0.5) * cl(a + 0.5) * cl(R.len - a + 0.5);
+  if (cov <= 0) return 0;
+  const q = cl(b / r, -1, 1), nz = Math.sqrt(1 - q * q), dr = (R.r(a + 1) - R.r(a - 1)) * 0.5;
+  o.nx = -dr * R.c - q * R.s; o.ny = -dr * R.s + q * R.c; o.nz = nz;
+  R.a = a; R.q = q;
+  return cov;
+}
+// a tube following a polyline: T = {pts, r}
+function tubeAt(T, x, y, o) {
+  let best = 1e9, bx = 0, by = 0, bk = 0;
+  const p = T.pts;
+  for (let i = 0; i < p.length - 1; i++) {
+    const ax = p[i][0], ay = p[i][1], ex = p[i + 1][0] - ax, ey = p[i + 1][1] - ay;
+    const k = cl(((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey + 1e-9));
+    const qx = x - ax - ex * k, qy = y - ay - ey * k, d = qx * qx + qy * qy;
+    if (d < best) { best = d; bx = qx; by = qy; bk = i + k; }
+  }
+  const d = Math.sqrt(best), r = typeof T.r === 'function' ? T.r(bk / (p.length - 1)) : T.r;
+  const cov = cl(r - d + 0.5); if (cov <= 0) return 0;
+  const q = Math.min(1, d / r), inv = d > 1e-6 ? 1 / d : 0;
+  o.nx = bx * inv * q; o.ny = by * inv * q; o.nz = Math.sqrt(1 - q * q) + 0.05;
+  T.k = bk / (p.length - 1); T.q = q;
+  return cov;
+}
+const bez = (P, n) => { const out = []; for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t; out.push([u * u * u * P[0][0] + 3 * u * u * t * P[1][0] + 3 * u * t * t * P[2][0] + t * t * t * P[3][0], u * u * u * P[0][1] + 3 * u * u * t * P[1][1] + 3 * u * t * t * P[2][1] + t * t * t * P[3][1]]); } return out; };
+// smooth profile through control points (a, r)
+function profile(pts) {
+  return a => {
+    if (a <= pts[0][0]) return pts[0][1];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [a0, r0] = pts[i], [a1, r1] = pts[i + 1];
+      if (a <= a1) {
+        const m0 = i > 0 ? (r1 - pts[i - 1][1]) / (a1 - pts[i - 1][0]) : (r1 - r0) / (a1 - a0);
+        const m1 = i < pts.length - 2 ? (pts[i + 2][1] - r0) / (pts[i + 2][0] - a0) : (r1 - r0) / (a1 - a0);
+        const h = a1 - a0, t = (a - a0) / h, t2 = t * t, t3 = t2 * t;
+        return (2 * t3 - 3 * t2 + 1) * r0 + (t3 - 2 * t2 + t) * h * m0 + (-2 * t3 + 3 * t2) * r1 + (t3 - t2) * h * m1;
+      }
+    }
+    return pts[pts.length - 1][1];
+  };
+}
+// a height-map relief: blurred mask → normals; coverage from the sharp mask
+function relief(st, mask, box, blurs, k, look, clip) {
+  const [x0, y0, w, h] = box, hc = newCanvas(w, h), hx = hc.getContext('2d', { willReadFrequently: true });
+  hx.fillStyle = '#000'; hx.fillRect(0, 0, w, h);
+  for (const [b, a] of blurs) { hx.globalAlpha = a; hx.filter = `blur(${b}px)`; hx.drawImage(mask, x0, y0, w, h, 0, 0, w, h); }
+  const hd = hx.getImageData(0, 0, w, h).data;
+  const md = mask.getContext('2d', { willReadFrequently: true }).getImageData(x0, y0, w, h).data;
+  const hv = (i, j) => hd[(Math.min(h - 1, Math.max(0, j)) * w + Math.min(w - 1, Math.max(0, i))) * 4] / 255;
+  return paint(st, x0, y0, w, h, (x, y, o) => {
+    const i = (x - x0) | 0, j = (y - y0) | 0, cov = md[(j * w + i) * 4 + 3] / 255;
+    if (cov <= 0) return;
+    o.a = cov;
+    o.nx = -(hv(i + 1, j) - hv(i - 1, j)) * k; o.ny = -(hv(i, j + 1) - hv(i, j - 1)) * k; o.nz = 1;
+    look(x, y, o, hv(i, j));
+  }, clip);
+}
+
+// ── the still life ──
+// stone ledge: the front arris climbs from lower left to mid right; the top recedes behind it
+const yF = x => 965 - 0.1875 * (x + 40);
+const yB = x => 795 - 0.1875 * (x - 30);
+const LEDGE_R = 1560, LEDGE_BR = 1630;
+const yRidge = x => 665 - (x - LEDGE_R) * (170 / 70);
+const N_TOP = unit(0, -0.86, 0.51), N_FRONT = unit(-0.2, 0.03, 0.98), N_END = unit(0.93, 0, 0.36);
+const blendN = (a, b, w) => unit(mix(a[0], b[0], w), mix(a[1], b[1], w), mix(a[2], b[2], w));
+const pathOf = (pts, close = true) => { const p = new Path2D(); pts.forEach((q, i) => i ? p.lineTo(q[0], q[1]) : p.moveTo(q[0], q[1])); if (close) p.closePath(); return p; };
+const CLIP_WALL = pathOf([[-10, -10], [W + 10, -10], [W + 10, yB(W + 10)], [-10, yB(-10)]]);
+const CLIP_TOP = pathOf([[-10, yB(-10)], [LEDGE_BR, yB(LEDGE_BR)], [LEDGE_R, yF(LEDGE_R)], [-10, yF(-10)]]);
+const CLIP_FRONT = pathOf([[-10, yF(-10) - 2], [LEDGE_R, yF(LEDGE_R) - 2], [LEDGE_R, H + 10], [-10, H + 10]]);
+const CLIP_LEDGE = pathOf([[-10, yB(-10)], [LEDGE_BR, yB(LEDGE_BR)], [LEDGE_BR, H + 10], [-10, H + 10]]);
+
+const HG = { x: 300, top: 486, glass0: 514, glass1: 846, rx: 96, ry: 20, th: 28 };   // hourglass
+const hgGlass = yy => {                       // two lobes and a pinched waist
+  const yn = (yy - HG.glass0) / (HG.glass1 - HG.glass0);
+  const lobe = (c, hl) => Math.sqrt(Math.max(0, 1 - ((yn - c) / hl) ** 2));
+  return Math.max(5, 62 * Math.max(lobe(0.27, 0.25), lobe(0.73, 0.25)) ** 0.9 + 5 * (1 - Math.abs(yn - 0.5) * 2) ** 8);
+};
+const EWER = { x: 590, y: 722, ang: -0.21, len: 432 };
+const CANDLE = { x: 1452, top: 398, dish: 602 };
+
+function buildStillLife() {
+  const st = makeStage();
+  const nW = valueNoise(11), nS = valueNoise(23), nL = valueNoise(37), nE = valueNoise(41), nG = valueNoise(53);
+
+  // the back wall: dark umber plaster, mottled, lit only where the beam falls
+  paint(st, 0, 0, W, H, (x, y, o) => {
+    const f = nW.fbm(x / 240, y / 240, 4), f2 = nW(x / 36 + 50, y / 36), v = (0.6 + 0.65 * f + 0.1 * f2) * (0.25 + 0.75 * cl(y / 900));
+    o.a = 1; o.r = 0.25 * v; o.g = 0.19 * v; o.b = 0.135 * v;
+    o.nx = (f2 - 0.5) * 0.16; o.ny = (nW(x / 36, y / 36 + 70) - 0.5) * 0.16; o.nz = 1;
+    o.sp = 0.02; o.gl = 0.1; o.mt = 0;
+  });
+  // the wall stands far back from the light: almost none of it reaches there
+  st.Sc.fillStyle = 'rgba(0,0,0,0.955)'; st.Sc.fillRect(0, 0, W, H);
+  st.Sc.fillStyle = 'rgba(0,0,0,0.97)'; st.Sc.fill(pathOf([[LEDGE_BR, yB(LEDGE_BR) - 4], [W + 10, yB(W + 10) - 4], [W + 10, H + 10], [LEDGE_BR, H + 10]]));
+
+  // the ledge
+  paint(st, 0, yB(LEDGE_BR) - 2, LEDGE_BR + 2, H, (x, y, o) => {
+    const cov = cl(y - yB(x) + 0.5) * cl(LEDGE_BR + 0.5 - x);
+    if (cov <= 0) return;
+    o.a = cov;
+    let n, shade = 1;
+    if (x <= LEDGE_R) {
+      const s = (y - yF(x)) / 5;
+      n = s < -1 ? N_TOP : s > 1 ? N_FRONT : blendN(N_TOP, N_FRONT, ease((s + 1) / 2));
+      if (s > 1) shade = 0.42 - 0.2 * ramp(y - yF(x), 0, 200);
+      if (s > 0 && x > LEDGE_R - 5) n = blendN(n, N_END, ease((x - LEDGE_R + 5) / 10));
+    } else {
+      const s = (y - yRidge(x)) / 2.63 / 4;
+      n = s < -1 ? N_TOP : s > 1 ? N_END : blendN(N_TOP, N_END, ease((s + 1) / 2));
+      if (s > 0) { n = blendN(N_FRONT, n, ease((x - LEDGE_R + 5) / 10)); shade = 0.75; }
+    }
+    const f = nS.fbm(x / 80, y / 80, 5), vein = Math.abs(nS(x / 210 + 9, y / 60 - 3) - 0.5) < 0.012 ? 0.8 : 1;
+    const v = (0.72 + 0.48 * f) * shade * vein;
+    o.r = 0.36 * v; o.g = 0.315 * v; o.b = 0.255 * v;
+    const fb = nS.fbm(x / 22, y / 22, 2);
+    o.nx = n[0] + (nS.fbm((x + 2) / 22, y / 22, 2) - fb) * 1.1; o.ny = n[1] + (nS.fbm(x / 22, (y + 2) / 22, 2) - fb) * 1.1; o.nz = n[2];
+    o.sp = 0.07; o.gl = 0.15; o.mt = 0;
+  });
+
+  // the linen: laid on the ledge, its corner spilling over the arris in heavy tubular folds
+  {
+    const LX = 372, LY = 560, LWd = 900, LHt = 520, CX = 700;
+    // fold height across the hang: irregular ridges that spread apart as they fall toward the corner
+    const fold = (x, y) => {
+      const yy = Math.max(0, y - yF(x)), sp = 1 + 0.5 * yy / 300, xe = CX + (x - CX) / sp;
+      const a = 22 * ease(yy / 70) + 14 * ease(yy / 240);
+      return a * (Math.sin(xe / 25 + 1.2 * Math.sin(xe / 97) + 0.4) * 0.8 + 0.25 * Math.sin(xe / 13 + 2.1) * ease(yy / 120));
+    };
+    const hemBase = x => { const u = (x - 458) / (1214 - 458); return mix(yF(458) + 40, yF(1214) + 30, u) + 175 * Math.sin(PI * Math.pow(u, 0.62)) ** 1.4 + 40 * Math.exp(-(((u - 0.25) / 0.12) ** 2)); };
+    const cloth = new Path2D();
+    cloth.moveTo(432, yB(432) + 22);
+    cloth.bezierCurveTo(640, yB(640) + 12, 930, yB(930) + 22, 1168, yB(1168) + 26);
+    cloth.lineTo(1214, yF(1214) + 1);
+    for (let x = 1214; x >= 458; x -= 3) cloth.lineTo(x, hemBase(x) + 0.55 * fold(x, hemBase(x)));
+    cloth.lineTo(458, yF(458) + 1);
+    cloth.closePath();
+    const silC = newCanvas(W, H); silC.getContext('2d').fill(cloth);
+    castShadow(st, { c: silC, x: 0, y: 0 }, offShadow(28, 18), 10, 0.88, CLIP_FRONT);
+    const N_HANG = unit(-0.14, 0.1, 0.98);
+    paint(st, LX, LY, LWd, LHt, (x, y, o) => {
+      const s = (y - yF(x)) / 15;
+      const n = s < -1 ? N_TOP : s > 1 ? N_HANG : blendN(N_TOP, N_HANG, ease((s + 1) / 2));
+      o.a = 1;
+      let gx = 0, gy = 0, cav = 0, crest = 0;
+      if (s > -1) {
+        const h0 = fold(x, y); gx = (fold(x + 1, y) - h0) * 0.55; gy = (fold(x, y + 1) - h0) * 0.33;
+        cav = cl(-h0 / 30); crest = cl(h0 / 22);
+      } else {   // flat on the ledge: a few soft rumples and one sharp crease from the press
+        const f = nL.fbm(x / 120, y / 60, 3);
+        gx = (nL.fbm((x + 2) / 120, y / 60, 3) - f) * 9; gy = (nL.fbm(x / 120, (y + 2) / 60, 3) - f) * 9;
+        const dc = y - mix(yF(x) - 46, yF(x) - 40, (x - 500) / 700);
+        if (Math.abs(dc) < 2.5 && x > 520 && x < 1180) gy += dc > 0 ? 0.35 : -0.35;
+      }
+      o.nx = n[0] - gx * 1.1; o.ny = n[1] - gy * 1.1; o.nz = n[2];
+      const v = (0.95 + 0.05 * (nL(x / 2.2, y / 2.2) - 0.5) + 0.04 * (nL.fbm(x / 70, y / 70, 3) - 0.5)) * (1 - 0.1 * cav);
+      o.r = 0.63 * v; o.g = 0.6 * v; o.b = 0.54 * v;
+      o.sp = 0.12 + 0.2 * crest; o.gl = 0.32 + 0.12 * crest; o.mt = 0;      // a little sheen along the crests
+    }, cloth);
+  }
+
+  // the hourglass, standing at the left end
+  {
+    const wood = (x, y, o, shade) => {
+      const gr = 0.82 + 0.18 * Math.sin(x * 0.11 + nG(x / 30, y / 6) * 9);
+      o.r = 0.40 * gr * shade; o.g = 0.24 * gr * shade; o.b = 0.12 * gr * shade; o.sp = 0.35; o.gl = 0.42; o.mt = 0;
+    };
+    const disk = (cy) => (x, y, o) => {
+      const dx = (x - HG.x) / HG.rx; if (Math.abs(dx) > 1.02) return;
+      const e = Math.sqrt(Math.max(0, 1 - dx * dx)) * HG.ry, top0 = cy - e, top1 = cy + e, bot = top1 + HG.th;
+      const cov = cl((1 - Math.abs(dx)) * HG.rx + 0.5) * cl(y - top0 + 0.5) * cl(bot - y + 0.5);
+      if (cov <= 0) return;
+      o.a = cov;
+      if (y < top1 - 1.5) { o.nx = 0; o.ny = N_TOP[1]; o.nz = N_TOP[2]; wood(x, y, o, 0.95); }
+      else {
+        const bead = Math.sin(((y - top1) / HG.th) * PI);
+        o.nx = dx; o.ny = (0.5 - (y - top1) / HG.th) * 0.9 * bead; o.nz = Math.sqrt(Math.max(0.02, 1 - dx * dx)); wood(x, y, o, 0.85);
+      }
+    };
+    const spindleR = yy => { const yn = (yy - HG.glass0) / (HG.glass1 - HG.glass0); return 7.5 + 5 * Math.exp(-(((yn - 0.06) / 0.035) ** 2)) + 5 * Math.exp(-(((yn - 0.94) / 0.035) ** 2)) + 4 * Math.exp(-(((yn - 0.5) / 0.06) ** 2)) + 1.5 * Math.sin(yn * PI); };
+    const spindle = sx => { const R = { x: sx, y: HG.glass0, c: 0, s: 1, len: HG.glass1 - HG.glass0, r: a => spindleR(HG.glass0 + a) }; return (x, y, o) => { const cov = revAt(R, x, y, o); if (!cov) return; o.a = cov; wood(x, y, o, 0.9); }; };
+    const box = [HG.x - 110, HG.top - 30, 230, HG.glass1 - HG.top + 90];
+    const all = [];
+    all.push(paint(st, ...box, spindle(HG.x + 8)));
+    const GR = { x: HG.x, y: HG.glass0, c: 0, s: 1, len: HG.glass1 - HG.glass0, r: a => hgGlass(HG.glass0 + a) };
+    all.push(paint(st, ...box, (x, y, o) => {
+      const cov = revAt(GR, x, y, o); if (!cov) return;
+      o.a = cov; const rim = ease((Math.abs(GR.q) - 0.72) / 0.26);
+      o.r = 0.12 + 0.3 * rim; o.g = 0.11 + 0.28 * rim; o.b = 0.1 + 0.25 * rim;
+      o.sp = 1; o.gl = 0.9; o.mt = 0.75;
+    }));
+    all.push(paint(st, ...box, spindle(HG.x - 78)), paint(st, ...box, spindle(HG.x + 78)));
+    all.push(paint(st, ...box, disk(HG.glass1)), paint(st, ...box, disk(HG.top)));
+    // one silhouette for both shadows: on the ledge top, and up the wall behind
+    const sil = newCanvas(W, H), sx = sil.getContext('2d'); for (const s of all) sx.drawImage(s.c, s.x, s.y);
+    const foot = HG.glass1 + HG.ry + HG.th;
+    castShadow(st, { c: sil, x: 0, y: 0 }, flatShadow(foot, 0.85, 0.2, 6, -4), 7, 0.9, CLIP_TOP);
+    castShadow(st, { c: sil, x: 0, y: 0 }, offShadow(120, 70), 12, 0.85, CLIP_WALL);
+    // the shadow went over the hourglass itself: draw it back in light
+    st.Sc.save(); st.Sc.filter = 'brightness(0) invert(1)'; st.Sc.drawImage(sil, 0, 0); st.Sc.restore();
+  }
+
+  // the ewer: pewter, tipped on its side, mouth toward the right
+  {
+    const E = EWER, c = Math.cos(E.ang), s = Math.sin(E.ang);
+    const prof = profile([[0, 52], [16, 58], [24, 50], [34, 46], [62, 80], [110, 107], [160, 111], [212, 96], [256, 62], [292, 40], [330, 31], [378, 35], [408, 45], [426, 54], [432, 51]]);
+    const R = { x: E.x, y: E.y, c, s, len: E.len, r: prof };
+    const toS = (a, b) => [E.x + a * c - b * s, E.y + a * s + b * c];
+    const handle = { pts: bez([[300, -26], [338, -132], [228, -206], [146, -102]].map(([a, b]) => toS(a, b)), 44), r: k => 14 - 4 * Math.sin(k * PI) + 6 * Math.exp(-(((k - 0.08) / 0.05) ** 2)) };
+    const box = [E.x - 70, E.y - 260, E.len + 140, 400];
+    const pew = (x, y, o) => {
+      const t = 0.8 + 0.3 * nE.fbm(x / 60, y / 60, 3), f = nE.fbm(x / 34, y / 34, 2);
+      o.r = 0.48 * t; o.g = 0.47 * t; o.b = 0.44 * t; o.sp = 1; o.gl = 0.58; o.mt = 1;
+      o.nx += (nE.fbm((x + 2) / 34, y / 34, 2) - f) * 1.2; o.ny += (nE.fbm(x / 34, (y + 2) / 34, 2) - f) * 1.2;
+    };
+    const body = (x, y, o) => {
+      const cov = revAt(R, x, y, o); if (!cov) return;
+      o.a = cov; pew(x, y, o);
+      const lipA = E.len - 6, in2 = ((R.a - lipA) / 8) ** 2 + (R.q * prof(R.a) / (prof(lipA) - 7)) ** 2;
+      if (R.a > lipA - 8 && in2 < 1) { o.r *= 0.08; o.g *= 0.08; o.b *= 0.08; o.sp = 0.2; o.nx = c; o.ny = s; o.nz = 0.4; }
+      if (R.a > 20 && R.a < 30) { o.r *= 0.6; o.g *= 0.6; o.b *= 0.6; }
+    };
+    const hnd = (x, y, o) => { const cov = tubeAt(handle, x, y, o); if (!cov) return; o.a = cov; pew(x, y, o); };
+    const sil = newCanvas(W, H), sx = sil.getContext('2d');
+    const tmp = makeStageLike();
+    const a1 = paint(tmp, ...box, body), a2 = paint(tmp, ...box, hnd);
+    sx.drawImage(a1.c, a1.x, a1.y); sx.drawImage(a2.c, a2.x, a2.y);
+    castShadow(st, { c: sil, x: 0, y: 0 }, flatShadow(805, 0.55, 0.28, 10, 6), 12, 0.9, CLIP_LEDGE);
+    st.Sc.save(); st.Sc.clip(CLIP_LEDGE); st.Sc.filter = 'blur(5px)'; st.Sc.fillStyle = 'rgba(0,0,0,0.92)';   // where the belly rests
+    st.Sc.beginPath(); st.Sc.ellipse(752, 803, 112, 11, -0.1, 0, 2 * PI); st.Sc.fill(); st.Sc.restore();
+    castShadow(st, { c: sil, x: 0, y: 0 }, offShadow(110, 66), 14, 0.8, CLIP_WALL);
+    paint(st, ...box, body); paint(st, ...box, hnd);
+  }
+
+  // grapes: a dark bunch hanging over the arris
+  {
+    const r = rng(303), grapes = [];
+    for (let tries = 0; grapes.length < 38 && tries < 6000; tries++) {
+      const k = Math.pow(r(), 0.8), y = 704 + k * 218, half = 112 * Math.pow(1 - k, 0.9) * (0.75 + 0.25 * Math.sin(k * 9)) + 12;
+      const x = 1108 + 40 * k * k + (r() * 2 - 1) * half, rad = 17 + r() * 9;
+      if (grapes.some(q => Math.hypot(q.x - x, q.y - y) < 0.74 * (q.rad + rad))) continue;
+      grapes.push({ x, y, rad, z: r() * 0.55 + 0.45 * (1 - Math.abs(x - 1108 - 40 * k * k) / half), bloom: 0.1 + r() * 0.4, tint: r(), green: r() < 0.14 });
+    }
+    grapes.sort((a, b) => a.z - b.z);
+    const stem = { pts: bez([[1100, 704], [1090, 680], [1070, 668], [1046, 672]], 16), r: 4.5 };
+    const all = [];
+    const stemFn = (x, y, o) => { const cov = tubeAt(stem, x, y, o); if (!cov) return; o.a = cov; o.r = 0.30; o.g = 0.22; o.b = 0.12; o.sp = 0.2; o.gl = 0.3; o.mt = 0; };
+    // the bunch's shadow on linen and stone first
+    const tmp = makeStageLike();
+    for (const q of grapes) all.push(paint(tmp, q.x - q.rad - 2, q.y - q.rad - 2, q.rad * 2 + 4, q.rad * 2 + 4, sphere(q)));
+    const sil = newCanvas(W, H), sx = sil.getContext('2d'); for (const s of all) sx.drawImage(s.c, s.x, s.y);
+    castShadow(st, { c: sil, x: 0, y: 0 }, offShadow(24, 22), 10, 0.85, CLIP_LEDGE);
+    // vine leaves: one lying behind the bunch, one hanging over the arris
+    for (const lf of [{ x: 1125, y: 694, R: 104, ang: -2.35, sq: 0.62, n: unit(0, -0.55, 0.83) }, { x: 1222, y: 748, R: 78, ang: 1.25, sq: 1, n: unit(-0.12, 0.08, 0.99) }]) {
+      const shape = new Path2D(), lr = th => lf.R * (0.62 + 0.38 * Math.abs(Math.cos(2.5 * th)) ** 0.7) * (1 + 0.05 * Math.sin(th * 34)) * (1 - 0.55 * Math.exp(-(((PI - Math.abs(th)) / 0.14) ** 2)));
+      const toW = (th, rr) => { const lx = Math.cos(th) * rr, ly = Math.sin(th) * rr * lf.sq * 0.95; return [lf.x + lx * Math.cos(lf.ang) - ly * Math.sin(lf.ang) * (lf.sq < 1 ? 1 : 1), lf.y + (lx * Math.sin(lf.ang) + ly * Math.cos(lf.ang)) * (lf.sq < 1 ? lf.sq : 1)]; };
+      for (let i = 0; i <= 160; i++) { const th = -PI + i / 160 * 2 * PI, [px, py] = toW(th, lr(th)); i ? shape.lineTo(px, py) : shape.moveTo(px, py); }
+      shape.closePath();
+      const veins = [-1.25, -0.62, 0, 0.62, 1.25].map(th => [toW(th, 0), toW(th, lr(th) * 0.9)]);
+      const hgt = (x, y) => {
+        let v = 0;
+        for (const [[ax, ay], [bx, by]] of veins) { const ex = bx - ax, ey = by - ay, k = cl(((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey)), dx = x - ax - ex * k, dy = y - ay - ey * k; v = Math.max(v, Math.exp(-(dx * dx + dy * dy) / (6 + 10 * (1 - k)))); }
+        return 3.5 * v + 9 * nG.fbm(x / 45, y / 45, 3);
+      };
+      const lsil = paint(makeStageLike(), lf.x - lf.R - 4, lf.y - lf.R - 4, lf.R * 2 + 8, lf.R * 2 + 8, (x, y, o) => { o.a = 1; o.nx = 0; o.ny = 0; o.nz = 1; o.r = o.g = o.b = 0; o.sp = o.gl = o.mt = 0; }, shape);
+      castShadow(st, lsil, offShadow(14, 12), 7, 0.8, CLIP_LEDGE);
+      paint(st, lf.x - lf.R - 4, lf.y - lf.R - 4, lf.R * 2 + 8, lf.R * 2 + 8, (x, y, o) => {
+        const h0 = hgt(x, y); o.a = 1;
+        o.nx = lf.n[0] - (hgt(x + 1, y) - h0) * 0.9; o.ny = lf.n[1] - (hgt(x, y + 1) - h0) * 0.9; o.nz = lf.n[2];
+        const au = nG.fbm(x / 70 + 3, y / 70, 3), spot = 1 - 0.3 * ease((nG(x / 14, y / 14) - 0.7) / 0.15);
+        o.r = mix(0.36, 0.62, ease((au - 0.45) / 0.2)) * spot; o.g = mix(0.4, 0.45, ease((au - 0.45) / 0.2)) * spot; o.b = mix(0.13, 0.12, au) * spot;
+        o.sp = 0.3; o.gl = 0.4; o.mt = 0;
+      }, shape);
+    }
+    paint(st, 1030, 650, 90, 70, stemFn);
+    for (const q of grapes) {
+      const one = paint(tmp, q.x - q.rad - 2, q.y - q.rad - 2, q.rad * 2 + 4, q.rad * 2 + 4, sphere(q));
+      castShadow(st, one, offShadow(9, 9), 5, 0.75);
+      paint(st, q.x - q.rad - 2, q.y - q.rad - 2, q.rad * 2 + 4, q.rad * 2 + 4, sphere(q));
+    }
+    function sphere(q) {
+      return (x, y, o) => {
+        const dx = x - q.x, dy = (y - q.y) / 1.08, d = Math.hypot(dx, dy), cov = cl(q.rad - d + 0.5);
+        if (cov <= 0) return;
+        const u = dx / q.rad, v = dy / q.rad, w = Math.sqrt(Math.max(0, 1 - u * u - v * v));
+        o.a = cov; o.nx = u; o.ny = v; o.nz = w;
+        const bl = q.bloom * (0.5 + 0.9 * nG(x / 4, y / 4)) * (0.4 + 0.6 * (1 - w)), deep = 0.5 + 0.5 * q.z;
+        if (q.green) { o.r = mix(0.6, 0.6, bl) * deep; o.g = mix(0.5, 0.52, bl) * deep; o.b = mix(0.16, 0.3, bl) * deep; }
+        else { o.r = mix(0.12 + q.tint * 0.07, 0.34, bl) * deep; o.g = mix(0.04, 0.3, bl) * deep; o.b = mix(0.1 + q.tint * 0.03, 0.38, bl) * deep; }
+        o.sp = 0.6 * (1 - bl); o.gl = 0.5; o.mt = 0;
+      };
+    }
+  }
+
+  // the lemon, half peeled, its peel hanging over the arris in a loose spiral
+  {
+    const LM = { x: 1288, y: 626, ang: -0.32, A: 84, B: 55 };
+    const c = Math.cos(LM.ang), s = Math.sin(LM.ang);
+    const lprof = a => { const u = (a - LM.A - 12) / (LM.A + 12); const base = LM.B * Math.pow(Math.max(0, 1 - Math.abs(u) ** 2.1), 0.56); return base + 6 * Math.exp(-(((Math.abs(u) - 0.93) / 0.06) ** 2)); };
+    const R = { x: LM.x - (LM.A + 12) * c, y: LM.y - (LM.A + 12) * s, c, s, len: 2 * (LM.A + 12), r: lprof };
+    // peel spiral, built as facets
+    const quads = [], NSg = 170, top = [1336, 676];
+    const P = (k, w) => {
+      const y = mix(top[1], 874, Math.pow(k, 1.1)) + 6 * Math.sin(k * 9 + 1), ang = k * 4.4 * PI + 0.9 + 1.2 * Math.sin(k * 3.7 + 0.4);
+      const rad = (14 + 17 * k) * ease(k / 0.12) * (1 + 0.35 * Math.sin(k * 8.3 + 1)), tilt = 0.6 * Math.sin(k * 6.1 + 0.7);
+      const cx = mix(top[0], 1352, ease(k / 0.3)) + 14 * Math.sin(k * 3.1) + 10 * k;
+      return [cx + (rad + w * Math.sin(tilt)) * Math.cos(ang), y + w * Math.cos(tilt), (rad + w * Math.sin(tilt)) * Math.sin(ang), ang];
+    };
+    for (let i = 0; i < NSg; i++) {
+      const k0 = i / NSg, k1 = (i + 1) / NSg, hw = ((11 - 6 * k0) * (0.9 + 0.1 * Math.sin(i * 0.21)) - 4 * (1 - ease(k0 / 0.1))) * (0.2 + 0.8 * ease((1 - k0) / 0.1));
+      const a = P(k0, -hw), b = P(k1, -hw), cc = P(k1, hw), d = P(k0, hw);
+      const ang = (a[3] + b[3]) / 2, out = Math.sin(ang) >= 0;
+      const n = out ? [Math.cos(ang), 0.1, Math.sin(ang) + 0.3] : [-Math.cos(ang), 0.1, -Math.sin(ang) + 0.3];
+      quads.push({ pts: [a, b, cc, d], z: (a[2] + b[2]) / 2, n, alb: out ? [0.86, 0.7, 0.2] : [0.93, 0.89, 0.7], sp: out ? 0.4 : 0.06, gl: 0.45 });
+    }
+    const silP = meshSil(quads);
+    castShadow(st, { c: silP, x: 0, y: 0 }, offShadow(16, 8), 4, 0.85, CLIP_FRONT);
+    const lemonFn = (x, y, o) => {
+      const cov = revAt(R, x, y, o); if (!cov) return;
+      o.a = cov;
+      const u = (R.a - LM.A - 12) / (LM.A + 12), cut = u + 0.12 * Math.sin(R.q * 4) - 0.42;
+      if (cut > 0.035) {                                  // the pith: creamy, fibrous, slightly wet
+        const fib = nL(x / 2.5 + R.q * 30, y / 14);
+        o.r = 0.9 * (0.92 + 0.08 * fib); o.g = 0.82 * (0.92 + 0.08 * fib); o.b = 0.5 * (0.9 + 0.1 * fib);
+        o.nx += (fib - 0.5) * 0.25; o.sp = 0.22; o.gl = 0.42;
+      } else if (cut > 0) {                               // the cut edge of the rind, standing proud
+        o.r = 0.97; o.g = 0.93; o.b = 0.72; o.nx -= 0.45 * Math.cos(LM.ang); o.ny -= 0.45 * Math.sin(LM.ang); o.sp = 0.3; o.gl = 0.5;
+      } else {
+        const tip = ease((Math.abs(u) - 0.75) / 0.25);
+        const mot = 0.92 + 0.12 * nL.fbm(x / 30, y / 30, 3);
+        o.r = mix(0.88, 0.62, tip) * mot; o.g = mix(0.72, 0.6, tip) * mot; o.b = mix(0.2, 0.16, tip) * mot;
+        o.nx += (nL(x / 3.2, y / 3.2) - 0.5) * 0.14; o.ny += (nL(x / 3.2 + 40, y / 3.2) - 0.5) * 0.14;
+        o.sp = 0.42; o.gl = 0.48;
+      }
+      o.mt = 0;
+    };
+    const tmp = makeStageLike();
+    const ls = paint(tmp, LM.x - 120, LM.y - 90, 240, 180, lemonFn);
+    castShadow(st, ls, offShadow(30, 26), 11, 0.85, CLIP_LEDGE);
+    st.Sc.save(); st.Sc.clip(CLIP_LEDGE); st.Sc.filter = 'blur(4px)'; st.Sc.fillStyle = 'rgba(0,0,0,0.92)';   // where it rests
+    st.Sc.beginPath(); st.Sc.ellipse(1300, 681, 82, 9, -0.12, 0, 2 * PI); st.Sc.fill(); st.Sc.restore();
+    const lp = paint(st, LM.x - 120, LM.y - 90, 240, 180, lemonFn);
+    // out of the beam the lemon takes little of the bounce, so it stays a solid dark fruit, not a pale ghost
+    st.Fc.save(); st.Fc.filter = 'brightness(0) invert(0.15)'; st.Fc.drawImage(lp.c, lp.x, lp.y); st.Fc.restore();
+    paintMesh(st, quads);
+  }
+
+  // the candle, just snuffed, in a pewter chamberstick
+  {
+    const C = CANDLE, box = [C.x - 100, C.top - 40, 200, C.dish - C.top + 80];
+    const pew = (x, y, o) => { const t = 0.85 + 0.25 * nE.fbm(x / 40, y / 40, 3); o.r = 0.55 * t; o.g = 0.55 * t; o.b = 0.52 * t; o.sp = 1; o.gl = 0.6; o.mt = 1; };
+    const dish = (x, y, o) => {
+      const dx = (x - C.x) / 68; if (Math.abs(dx) > 1.02) return;
+      const e = Math.sqrt(Math.max(0, 1 - dx * dx)) * 16, t0 = C.dish - e, t1 = C.dish + e, bot = t1 + 11;
+      const cov = cl((1 - Math.abs(dx)) * 68 + 0.5) * cl(y - t0 + 0.5) * cl(bot - y + 0.5);
+      if (cov <= 0) return;
+      o.a = cov;
+      const rr = Math.hypot(dx, (y - C.dish) / 16);
+      if (y < t1 - 1) { const lip = ease((rr - 0.82) / 0.16); o.nx = dx * 0.6 * lip; o.ny = mix(N_TOP[1], -0.2, lip); o.nz = N_TOP[2] + 0.4 * lip; }
+      else { o.nx = dx; o.ny = 0.25; o.nz = Math.sqrt(Math.max(0.02, 1 - dx * dx)); }
+      pew(x, y, o);
+    };
+    const cupR = profile([[0, 15], [10, 22], [18, 17], [36, 20], [48, 28], [56, 30]]);
+    const cup = { x: C.x, y: C.dish - 56, c: 0, s: 1, len: 56, r: cupR };
+    const cupFn = (x, y, o) => { const cov = revAt(cup, x, y, o); if (!cov) return; o.a = cov; pew(x, y, o); };
+    const wax = { x: C.x, y: C.top, c: 0, s: 1, len: C.dish - 56 - C.top + 8, r: a => 20 - 2 * Math.exp(-a / 6) };
+    const waxFn = (x, y, o) => {
+      const cov = revAt(wax, x, y, o); if (!cov) return;
+      o.a = cov; const glow = 1 - 0.25 * ramp(wax.a, 0, 120);
+      o.r = 0.9 * glow; o.g = 0.86 * glow; o.b = 0.74 * glow; o.sp = 0.3; o.gl = 0.35; o.mt = 0;
+    };
+    const capFn = (x, y, o) => {
+      const dx = (x - C.x) / 20, dy = (y - C.top) / 5.5, rr = dx * dx + dy * dy;
+      const cov = cl((1 - Math.sqrt(rr)) * 5 + 0.5); if (cov <= 0) return;
+      o.a = cov; o.nx = dx * 0.3; o.ny = -0.8; o.nz = 0.5; o.r = 0.86; o.g = 0.8; o.b = 0.66; o.sp = 0.3; o.gl = 0.35; o.mt = 0;
+      if (rr < 0.12) { o.r = 0.2; o.g = 0.17; o.b = 0.14; }
+    };
+    const drip = { pts: bez([[C.x - 17, C.top + 2], [C.x - 22, C.top + 20], [C.x - 15, C.top + 40], [C.x - 19, C.top + 66]], 14), r: k => 4.6 - k * 1.2 };
+    const dripFn = (x, y, o) => { const cov = tubeAt(drip, x, y, o); if (!cov) return; o.a = cov; o.r = 0.92; o.g = 0.88; o.b = 0.76; o.sp = 0.5; o.gl = 0.5; o.mt = 0; };
+    const wick = { pts: bez([[C.x, C.top], [C.x + 1, C.top - 10], [C.x + 6, C.top - 18], [C.x + 3, C.top - 23]], 10), r: 2.2 };
+    const wickFn = (x, y, o) => { const cov = tubeAt(wick, x, y, o); if (!cov) return; o.a = cov; o.r = 0.06; o.g = 0.05; o.b = 0.05; o.sp = 0.1; o.gl = 0.2; o.mt = 0; };
+    const ring = { pts: Array.from({ length: 25 }, (_, i) => { const a = -PI * 0.5 + (i / 24) * PI * 1.6; return [C.x + 76 + 18 * Math.cos(a), C.dish + 2 + 13 * Math.sin(a)]; }), r: 4.5 };
+    const ringFn = (x, y, o) => { const cov = tubeAt(ring, x, y, o); if (!cov) return; o.a = cov; pew(x, y, o); };
+    const tmp = makeStageLike(), parts = [dish, ringFn, cupFn, waxFn, capFn, dripFn, wickFn];
+    const sil = newCanvas(W, H), sx = sil.getContext('2d');
+    for (const f of parts) { const p = paint(tmp, ...box, f); sx.drawImage(p.c, p.x, p.y); }
+    castShadow(st, { c: sil, x: 0, y: 0 }, flatShadow(C.dish + 27, 0.8, 0.2, 4, -2), 6, 0.9, CLIP_TOP);
+    castShadow(st, { c: sil, x: 0, y: 0 }, offShadow(115, 70), 12, 0.8, CLIP_WALL);
+    for (const f of parts) paint(st, ...box, f);
+  }
+  sealStage(st, 501, { kA: 0.5, kN: 0.12, kB: 1.1 });
+  return st;
+}
+// a scratch stage, for silhouettes painted before their shadows are cast
+function makeStageLike() {
+  if (!makeStageLike.s) {
+    const s = {}; for (const k of ['A', 'N', 'M', 'S', 'F']) { s[k] = newCanvas(4, 4); s[k + 'c'] = s[k].getContext('2d'); }
+    makeStageLike.s = s;
+  }
+  return makeStageLike.s;
+}
+function quadPath(q) { const p = new Path2D(); q.pts.forEach((v, i) => i ? p.lineTo(v[0], v[1]) : p.moveTo(v[0], v[1])); p.closePath(); return p; }
+function meshSil(quads) {
+  const c = newCanvas(W, H), x = c.getContext('2d'); x.fillStyle = '#000'; x.strokeStyle = '#000'; x.lineWidth = 0.8;
+  for (const q of quads) { const p = quadPath(q); x.fill(p); x.stroke(p); }
+  return c;
+}
+function paintMesh(st, quads) {
+  quads.sort((a, b) => a.z - b.z);
+  for (const q of quads) {
+    const p = quadPath(q), n = unit(...q.n);
+    const fills = [
+      [st.Ac, `rgb(${q.alb[0] * 255},${q.alb[1] * 255},${q.alb[2] * 255})`],
+      [st.Nc, `rgb(${(n[0] * 0.5 + 0.5) * 255},${(n[1] * 0.5 + 0.5) * 255},${(n[2] * 0.5 + 0.5) * 255})`],
+      [st.Mc, `rgb(${q.sp * 255},${q.gl * 255},0)`], [st.Sc, '#fff'], [st.Fc, '#fff']];
+    for (const [c, col] of fills) { c.fillStyle = col; c.strokeStyle = col; c.lineWidth = 0.8; c.fill(p); c.stroke(p); }
+  }
+}
+
+// ── the title card ──
+const TITLE = { cx: 960, cy: 470, text: 'BAROQUE', sub: '1600–1750' };
+function cartouche(p, cx, cy, w, h, notch) {
+  const x0 = cx - w / 2, x1 = cx + w / 2, y0 = cy - h / 2, y1 = cy + h / 2;
+  p.moveTo(x0 + notch, y0);
+  p.lineTo(cx - 90, y0); p.quadraticCurveTo(cx, y0 - 46, cx + 90, y0);
+  p.lineTo(x1 - notch, y0); p.arc(x1, y0, notch, PI, PI / 2, true);
+  p.lineTo(x1, y1 - notch); p.arc(x1, y1, notch, -PI / 2, PI, true);
+  p.lineTo(cx + 90, y1); p.quadraticCurveTo(cx, y1 + 46, cx - 90, y1);
+  p.lineTo(x0 + notch, y1); p.arc(x0, y1, notch, 0, -PI / 2, true);
+  p.lineTo(x0, y0 + notch); p.arc(x0, y0, notch, PI / 2, 0, true);
+  p.closePath();
+}
+function buildTitle() {
+  const st = makeStage(), nW = valueNoise(61), nM = valueNoise(67), nGd = valueNoise(71);
+  paint(st, 0, 0, W, H, (x, y, o) => {
+    const f = nW.fbm(x / 260, y / 260, 4), v = (0.55 + 0.6 * f) * (0.7 + 0.3 * cl(y / 900));
+    o.a = 1; o.r = 0.27 * v; o.g = 0.21 * v; o.b = 0.155 * v;
+    o.nx = (nW(x / 30, y / 30) - 0.5) * 0.14; o.ny = (nW(x / 30 + 20, y / 30) - 0.5) * 0.14; o.nz = 1;
+    o.sp = 0.02; o.gl = 0.1; o.mt = 0;
+  });
+  st.Sc.fillStyle = 'rgba(0,0,0,0.965)'; st.Sc.fillRect(0, 0, W, H);
+  const TW = 1500, TH = 600, tb = new Path2D(); cartouche(tb, TITLE.cx, TITLE.cy + 60, TW, TH, 64);
+  const mask = (draw) => { const c = newCanvas(W, H), x = c.getContext('2d', { willReadFrequently: true }); x.fillStyle = '#fff'; x.strokeStyle = '#fff'; draw(x); return c; };
+  const box = [TITLE.cx - TW / 2 - 60, TITLE.cy + 60 - TH / 2 - 70, TW + 120, TH + 140];
+  // a polished black marble tablet with a bevelled edge; its shadow on the wall
+  const tabM = mask(x => x.fill(tb));
+  castShadow(st, { c: tabM, x: 0, y: 0 }, offShadow(34, 30), 16, 0.9);
+  relief(st, tabM, box, [[14, 1]], 30, (x, y, o) => {
+    const vein = Math.abs(nM.fbm(x / 160, y / 90, 4) - 0.5), v = 1 + 0.9 * Math.exp(-((vein / 0.01) ** 2));
+    o.r = 0.085 * v; o.g = 0.08 * v; o.b = 0.075 * v; o.sp = 0.4; o.gl = 0.6; o.mt = 0;
+  });
+  const gold = (x, y, o, h) => {
+    const leaf = 0.92 + 0.12 * hash2(Math.floor((x + 7) / 38), Math.floor((y + 3) / 38)) + 0.06 * (nGd(x / 8, y / 8) - 0.5);
+    o.r = 0.86 * leaf; o.g = 0.66 * leaf; o.b = 0.3 * leaf; o.sp = 1; o.gl = 0.55; o.mt = 1;
+  };
+  // gilded moulding inside the tablet edge
+  const mould = new Path2D(); cartouche(mould, TITLE.cx, TITLE.cy + 60, TW - 64, TH - 64, 46);
+  const mM = mask(x => { x.lineWidth = 13; x.stroke(mould); x.lineWidth = 3; const m2 = new Path2D(); cartouche(m2, TITLE.cx, TITLE.cy + 60, TW - 100, TH - 100, 32); x.stroke(m2); });
+  castShadow(st, { c: mM, x: 0, y: 0 }, offShadow(7, 6), 3, 0.8, tb);
+  relief(st, mM, box, [[4, 0.7], [1.5, 0.3]], 26, gold);
+  // the title, letter-spaced capitals in relief, with the flourish under it
+  const tM = mask(x => {
+    x.font = '400 218px "IM Fell English SC"'; x.letterSpacing = '30px'; x.textAlign = 'center'; x.textBaseline = 'alphabetic';
+    x.fillText(TITLE.text, TITLE.cx + 15, TITLE.cy + 70);
+    // flourish: a rule ending in scrolls either side of a lozenge
+    const y = TITLE.cy + 136; x.lineCap = 'round'; x.lineWidth = 5;
+    for (const sgn of [-1, 1]) {
+      x.beginPath(); x.moveTo(TITLE.cx + sgn * 40, y); x.lineTo(TITLE.cx + sgn * 330, y); x.stroke();
+      x.beginPath();
+      for (let i = 0; i <= 60; i++) { const a = i / 60 * 3.6 * PI, rr = 30 * (1 - i / 60 * 0.85); x.lineTo(TITLE.cx + sgn * (330 + rr * Math.sin(a)), y - 30 + rr * Math.cos(a)); }
+      x.stroke();
+      x.beginPath(); x.moveTo(TITLE.cx + sgn * 120, y); x.quadraticCurveTo(TITLE.cx + sgn * 200, y + 34, TITLE.cx + sgn * 270, y + 6); x.lineWidth = 3; x.stroke(); x.lineWidth = 5;
+    }
+    x.beginPath(); x.moveTo(TITLE.cx - 26, y); x.lineTo(TITLE.cx, y - 16); x.lineTo(TITLE.cx + 26, y); x.lineTo(TITLE.cx, y + 16); x.closePath(); x.fill();
+  });
+  castShadow(st, { c: tM, x: 0, y: 0 }, offShadow(14, 12), 6, 0.85, tb);
+  relief(st, tM, box, [[4.5, 0.5], [1.8, 0.5]], 30, gold);
+  const sM = mask(x => { x.font = 'italic 400 56px "IM Fell English"'; x.letterSpacing = '8px'; x.textAlign = 'center'; x.fillText(TITLE.sub, TITLE.cx, TITLE.cy + 222); });
+  castShadow(st, { c: sM, x: 0, y: 0 }, offShadow(4, 4), 2, 0.7, tb);
+  relief(st, sM, box, [[1.5, 1]], 14, (x, y, o) => { o.r = 0.78; o.g = 0.62; o.b = 0.34; o.sp = 0.7; o.gl = 0.55; o.mt = 0.6; });
+  sealStage(st, 777, { kA: 0, kB: 0.3 });   // gilding is laid smoother than paint: no dabs, crisp letters
+  return st;
+}
+
+// ── relighting: every pixel of a stage under the current beam ──
+function relight(st, L) {
+  const A = st.a, NX = st.nx, NY = st.ny, NZ = st.nz, M = st.m, S = st.s, F = st.f, O = st.out.data;
+  const { lx, ly, lz, hx, hy, hz, ax, ay, I } = L;
+  const t0 = L.tw - L.soft, t1 = L.tw + L.soft, isoft = 1 / (2 * L.soft), hot = 0.3 / (L.tw * L.tw);
+  const ipr = 1 / (L.pr * L.pr), ifr = ipr * 0.45, pool = L.pool, LR = LC[0], LG = LC[1], LB = LC[2];
+  const [AR, AG, AB] = AMB, [BR, BG, BB] = BOUNCE, [FR, FG, FB] = FILL;
+  const gk = L.gk || 0, gx = L.gx, gy = L.gy, igw = 1 / ((L.gw || 1) ** 2);
+  for (let y = 0; y < H; y++) {
+    const dy = y + 0.5 - L.oy, dpy = y + 0.5 - L.py, dpy2 = dpy * dpy;
+    let al = (0.5 - L.ox) * ax + dy * ay, pe = dy * ax - (0.5 - L.ox) * ay, dpx = 0.5 - L.px;
+    let p = y * W * 4;
+    const dr = (y & 3) << 2;
+    for (let x = 0; x < W; x++, p += 4, al += ax, pe -= ay, dpx += 1) {
+      let bm = 0;
+      const d2 = dpx * dpx + dpy2;
+      if (al > 0 && I > 0) {
+        const ap = pe < 0 ? -pe : pe;
+        if (ap < t1 * al) {
+          const q = ap / al, u = d2 * ipr;
+          let k = q <= t0 ? 1 : (t1 - q) * isoft; k = k * k * (3 - 2 * k);
+          const fall = 1.2 - al * 1e-4;
+          bm = k * (1 - hot * q * q) * I * (1 - pool + pool / (1 + u * u)) * (fall < 0.6 ? 0.6 : fall);
+        }
+      }
+      const ar = LIN[A[p]], ag = LIN[A[p + 1]], ab = LIN[A[p + 2]];
+      // the pool throws a little warm light back into the shadows around it; the far wall barely gets any
+      // and comes back off the lit table, so it models the turned-away sides rather than flattening them
+      const i = p >> 2, nx = NX[i], ny = NY[i], nz = NZ[i];
+      const d = nx * lx + ny * ly + nz * lz, di = ((d < -1 ? -1 : d > 1 ? 1 : d) + 1) * 511.5 | 0;
+      const fl = I / (1 + d2 * ifr) * (0.25 + 0.75 * S[p] * (1 / 255)) * (0.3 + BNC[di]) * F[p] * (1 / 255);
+      let r = ar * (AR + FR * fl), gg = ag * (AG + FG * fl), b = ab * (AB + FB * fl);
+      if (bm > 0.0015) {
+        const vis = bm * S[p] * (1 / 255);
+        const mt = M[p + 2] * (1 / 255);
+        const df = DIF[di] * vis * (1 - 0.7 * mt), bo = BNC[di] * bm;
+        r += ar * (df * LR + bo * BR); gg += ag * (df * LG + bo * BG); b += ab * (df * LB + bo * BB);
+        const sp = M[p];
+        if (sp > 0 && vis > 0.002) {
+          const e = nx * hx + ny * hy + nz * hz;
+          if (e > 0) {
+            const s = SPEC[(M[p + 1] >> 4) * 1024 + (e * 1023 | 0)] * sp * (1 / 255) * vis * 1.6;
+            r += s * LR * (1 - mt + mt * ar * 2.4); gg += s * LG * (1 - mt + mt * ag * 2.4); b += s * LB * (1 - mt + mt * ab * 2.4);
+          }
+        }
+        if (mt > 0) {
+          const ry = 2 * nz * ny, env = ENV[((ry < -1 ? -1 : ry > 1 ? 1 : ry) + 1) * 127.5 | 0] * bm * mt * 0.9;
+          r += ar * env * LR; gg += ag * env * LG; b += ab * env * LB;
+        }
+      }
+      const dv = BAYER[dr | (x & 3)];
+      if (gk > 0 && M[p + 2] > 0) {         // the raking sheen on gilding: a slanted band that travels across
+        const dd = (x - gx) + (y - gy) * 0.45, bnd = Math.exp(-dd * dd * igw);
+        if (bnd > 0.01) {
+          const zz = NZ[p >> 2], sh = gk * bnd * M[p + 2] * (1 / 255) * (0.3 + 0.7 * zz * zz * zz * zz) * (0.35 + bm);
+          r += ar * sh * LR; gg += ag * sh * LG; b += ab * sh * LB;
+        }
+      }
+      O[p] = TONE[r >= 8 ? 4095 : (Math.sqrt(r) * TQ) | 0] + dv; O[p + 1] = TONE[gg >= 8 ? 4095 : (Math.sqrt(gg) * TQ) | 0] + dv; O[p + 2] = TONE[b >= 8 ? 4095 : (Math.sqrt(b) * TQ) | 0] + dv;
+    }
+  }
+  st.vc.putImageData(st.out, 0, 0);
+}
+
+// ── the curtain: crimson velvet, two textures (hanging, gathered), drawn as deformed strips ──
+const CUR = { CW: 2200, CH: 1200, BODY: 1100, NS: 110, NV: 12 };
+function buildVelvet() {
+  const { CW, CH, BODY } = CUR, nV = valueNoise(83);
+  // folds: phase-modulated sines, so ridges come at irregular spacing without seams; they flare toward the hem
+  const hA = (x, y) => {
+    const xx = x * (1 - 0.12 * y / BODY) + 24 * Math.sin(y / 310 + x / 600);
+    return 27 * Math.sin(xx / 19 + 1.3 * Math.sin(xx / 97)) + 11 * Math.sin(xx / 41 + 2 + 0.6 * Math.sin(y / 400)) + 4 * Math.sin(xx / 11.5 + 0.8 * Math.sin(xx / 53)) + 9 * Math.sin(y / 260 + x / 900);
+  };
+  const hB = (x, y) => 0.7 * hA(x, y) + 34 * Math.pow(Math.abs(Math.sin(PI * (y + 70 * Math.cos(2 * PI * x / 733)) / 236)), 0.8);
+  const [lx, ly, lz] = unit(-0.62, -0.5, 0.6), [hx, hy, hz] = unit(lx, ly, lz + 1);
+  const outs = [];
+  for (const hf of [hA, hB]) {
+    const img = new ImageData(CW, CH), D = img.data;
+    for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) {
+      const p = (y * CW + x) * 4;
+      if (y < BODY) {
+        const yy = Math.min(y, BODY - 1);
+        const gx = (hf(x + 1, yy) - hf(x - 1, yy)) * 0.5, gy = (hf(x, yy + 1) - hf(x, yy - 1)) * 0.5;
+        let nx = -gx, ny = -gy, nz = 1;
+        const trim = x < 46 || y >= BODY - 26;
+        if (trim) {   // gold galloon braid along the leading edge and the hem
+          const u = x < 46 ? x : y - BODY + 26, v = x < 46 ? y : x;
+          const br = Math.sin((v * 0.9 + u * 1.5) * 0.45) * Math.sin((v * 0.9 - u * 1.5) * 0.45);
+          nx += Math.cos((v * 0.9 + u * 1.5) * 0.45) * 0.5; ny += br * 0.4;
+        }
+        const nl = 1 / Math.hypot(nx, ny, nz); nx *= nl; ny *= nl; nz *= nl;
+        const d = nx * lx + ny * ly + nz * lz, di = DIF[((cl(d, -1, 1) + 1) * 511.5) | 0], e = Math.max(0, nx * hx + ny * hy + nz * hz);
+        let R, G, B;
+        if (trim) {
+          const sp = Math.pow(e, 40);
+          R = 0.5 * (0.05 + di * 1.5) + sp * 2.2 + 0.08 * di; G = 0.3 * (0.05 + di * 1.5) + sp * 1.7; B = 0.08 * (0.05 + di * 1.5) + sp * 0.9;
+        } else {
+          const grain = 0.92 + 0.12 * hash2(x, y) + 0.08 * (nV(x / 1.6, y / 30) - 0.5);
+          const sheen = Math.pow(1 - nz, 1.8) * cl(d + 0.4), sp = Math.pow(e, 16);
+          // velvet: saturated dark core, a crimson-orange glow where the pile turns from the eye
+          R = grain * (0.006 + 0.3 * di * 1.5) + 0.5 * sheen * (0.2 + di) + 0.14 * sp;
+          G = grain * (0.0004 + 0.006 * di * 1.5) + 0.06 * sheen * (0.2 + di) + 0.06 * sp;
+          B = grain * (0.0012 + 0.014 * di * 1.5) + 0.045 * sheen * (0.2 + di) + 0.045 * sp;
+        }
+        D[p] = toByte(R * 1.15); D[p + 1] = toByte(G * 1.15); D[p + 2] = toByte(B * 1.15); D[p + 3] = 255;
+      } else {      // bullion fringe: twisted gold cords hanging below the braid
+        const ci = Math.floor(x / 11), cx = ci * 11 + 5.5 + Math.sin(y * 0.05 + ci) * 0.8, dx = (x - cx) / 4.8;
+        const lenC = 74 + 10 * hash2(ci, 3), yy = y - BODY;
+        if (Math.abs(dx) >= 1 || yy > lenC) continue;
+        const cov = cl((1 - Math.abs(dx)) * 4.8) * cl(lenC - yy + 0.5);
+        const tw = 0.45 + 0.55 * Math.max(0, Math.sin(yy * 0.55 + dx * 2.6 + ci * 1.7)) ** 1.5, sh = cl(0.6 - dx * 0.6) * tw;
+        D[p] = toByte(0.55 * sh + 0.03); D[p + 1] = toByte(0.36 * sh + 0.015); D[p + 2] = toByte(0.1 * sh); D[p + 3] = cov * 255;
+      }
+    }
+    const c = newCanvas(CW, CH); c.getContext('2d').putImageData(img, 0, 0); outs.push(c);
+  }
+  return outs;
+}
+
+// spring step response: overshoot, then settle
+function spring(tau, w = 3.3, z = 0.66) {
+  if (tau <= 0) return 0;
+  const wd = w * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-z * w * tau) * (Math.cos(wd * tau) + (z * w / wd) * Math.sin(wd * tau));
+}
+// the haul: a slow take-up of the rope (time eased in), then the swag rides up on a heavy, well-damped spring
+const liftCurve = tau => tau <= 0 ? 0 : spring(tau * tau / (tau + 0.3), 2.5, 0.72);
+function liftP(t, lag = 0) {
+  const ta = t - lag, [a0, a1] = TL.lift;
+  const antic = ta > a0 && ta < a1 ? -0.06 * Math.sin(PI * (ta - a0) / (a1 - a0)) ** 2 : 0;
+  return antic + liftCurve(ta - a1);
+}
+// where a point (u across, v down the body) of the curtain sits at time t
+function curtainPose(u, t) {
+  const p = liftP(t, 0.16 * u), pt = liftP(t, 0.28 + 0.12 * u);
+  const xc = -70 + u * (W + 140) + 5 * Math.sin(1.1 * t + u * 9);
+  const fu = (u * 3) % 1, sag = 50 * Math.sin(PI * fu);
+  const T = [mix(xc, mix(990, W + 70, u), pt), -40];
+  const B = [mix(xc + 7 * Math.sin(1.3 * t + u * 7), mix(1050, W + 60, u), p), mix(1052, mix(-22, 430, u) + sag, p)];
+  if (t > 2.55) { const e = Math.exp(-1.8 * (t - 2.55)) * (1 - Math.exp(-10 * (t - 2.55))); B[0] += 13 * Math.sin(5.4 * (t - 2.55) + u * 5) * e; B[1] += 6 * Math.sin(5.4 * (t - 2.55) + u * 5 + 1) * e; }
+  const len = Math.hypot(B[0] - T[0], B[1] - T[1]), gat = cl((CUR.BODY / len - 1.4) / 2);
+  return { T, B, C: [(T[0] + B[0]) / 2 - 30 * gat, (T[1] + B[1]) / 2], g: gat };
+}
+const quadPt = (P, s) => { const u = 1 - s; return [u * u * P.T[0] + 2 * u * s * P.C[0] + s * s * P.B[0], u * u * P.T[1] + 2 * u * s * P.C[1] + s * s * P.B[1]]; };
+// map the source rectangle (sx, sy, sw, sh) so its bottom-left lands on O, bottom-right on O + U and
+// top-left on O + V (anchored on the bottom edge, so neighbouring strips meet exactly along the hem)
+function blit(c, img, sx, sy, sw, sh, O, U, V, cam) {
+  const s = cam.s, ox = (O[0] - cam.fx) * s + cam.fx, oy = (O[1] - cam.fy) * s + cam.fy;
+  const a = U[0] * s / sw, b = U[1] * s / sw, cc = -V[0] * s / sh, d = -V[1] * s / sh;
+  c.setTransform(a, b, cc, d, ox - a * sx - cc * (sy + sh), oy - b * sx - d * (sy + sh));
+  c.drawImage(img, sx, sy - 1.2, sw + 1.2, sh + 1.2, sx, sy - 1.2, sw + 1.2, sh + 1.2);
+}
+// tassels hang from the festoon junctions; a damped pendulum driven by where the hem drags them
+const TASSELS = [{ u: 0.003, len: 120 }, { u: 1 / 3, len: 132 }, { u: 2 / 3, len: 126 }];
+function tasselAngle(T, t) {
+  const dt = 1 / 120, G = 2300;
+  let th = 0, om = 0;
+  const pos = tt => curtainPose(T.u, tt).B;
+  for (let tt = 0.8; tt < t; tt += dt) {
+    const a = pos(tt - dt), b = pos(tt), c = pos(tt + dt);
+    const axx = (a[0] - 2 * b[0] + c[0]) / (dt * dt), ayy = (a[1] - 2 * b[1] + c[1]) / (dt * dt);
+    const acc = (-axx * Math.cos(th) - (G - ayy) * Math.sin(th)) / T.len - 1.5 * om;
+    om += acc * dt; th += om * dt;
+  }
+  return th;
+}
+function drawTassel(c, P, th, cam) {
+  c.save();
+  c.setTransform(cam.s, 0, 0, cam.s, cam.fx * (1 - cam.s), cam.fy * (1 - cam.s));
+  c.translate(P[0], P[1]); c.rotate(-th);
+  const goldG = (x0, x1) => { const gr = c.createLinearGradient(x0, 0, x1, 0); gr.addColorStop(0, '#f6dd9a'); gr.addColorStop(0.35, '#c99a3e'); gr.addColorStop(0.75, '#6b4614'); gr.addColorStop(1, '#2a1a06'); return gr; };
+  c.strokeStyle = goldG(-3, 3); c.lineWidth = 5; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, 46); c.stroke();
+  c.strokeStyle = 'rgba(40,24,6,0.7)'; c.lineWidth = 1.2;
+  for (let y = 4; y < 46; y += 6) { c.beginPath(); c.moveTo(-2.5, y); c.lineTo(2.5, y + 3); c.stroke(); }
+  const head = c.createRadialGradient(-6, 48, 2, 0, 56, 19); head.addColorStop(0, '#fff2c4'); head.addColorStop(0.3, '#d9a94b'); head.addColorStop(0.8, '#5e3d10'); head.addColorStop(1, '#2a1904');
+  c.fillStyle = head; c.beginPath(); c.ellipse(0, 58, 16, 18, 0, 0, PI * 2); c.fill();
+  c.fillStyle = goldG(-15, 15); c.fillRect(-14, 74, 28, 9);
+  const skirt = new Path2D(); skirt.moveTo(-13, 82); skirt.lineTo(13, 82); skirt.quadraticCurveTo(26, 120, 27, 166); skirt.lineTo(-27, 166); skirt.quadraticCurveTo(-26, 120, -13, 82); skirt.closePath();
+  c.fillStyle = goldG(-27, 27); c.fill(skirt);
+  c.save(); c.clip(skirt); c.lineWidth = 1.6;
+  for (let i = -12; i <= 12; i++) { c.strokeStyle = i % 2 ? 'rgba(255,236,170,0.45)' : 'rgba(40,22,4,0.55)'; c.beginPath(); c.moveTo(i * 1.1, 82); c.lineTo(i * 2.25, 168); c.stroke(); }
+  c.restore();
+  c.restore();
+}
+function drawCurtain(c, t, cam) {
+  const { CW, BODY, CH, NS, NV } = CUR;
+  const poses = []; for (let i = 0; i <= NS; i++) poses.push(curtainPose(i / NS, t));
+  const sw = CW / NS, sh = BODY / NV;
+  for (let i = NS - 1; i >= 0; i--) {
+    const P0 = poses[i], P1 = poses[i + 1], gat = (P0.g + P1.g) / 2, sx = i * sw;
+    for (let j = 0; j < NV; j++) {
+      const v0 = j / NV, v1 = (j + 1) / NV, a = quadPt(P0, v0), b = quadPt(P0, v1), d = quadPt(P1, v1);
+      const U = [d[0] - b[0], d[1] - b[1]], V = [a[0] - b[0], a[1] - b[1]];
+      c.globalAlpha = 1; blit(c, VEL[0], sx, j * sh, sw, sh, b, U, V, cam);
+      if (gat > 0.01) { c.globalAlpha = gat; blit(c, VEL[1], sx, j * sh, sw, sh, b, U, V, cam); }
+    }
+    c.globalAlpha = 1;
+    const fl = CH - BODY - 1.2;
+    blit(c, VEL[0], sx, BODY, sw, fl, [P0.B[0], P0.B[1] + fl], [P1.B[0] - P0.B[0], P1.B[1] - P0.B[1]], [0, -fl], cam);
+  }
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  for (const T of TASSELS) drawTassel(c, curtainPose(T.u, t).B.map((v, k) => v + (k ? 16 : 0)), tasselAngle(T, t), cam);
+}
+
+// conic gradient matching beamProfile, centred on the beam's origin
+function beamGradient(c, L, rgb, scale) {
+  const ang = Math.atan2(L.ay, L.ax), qm = L.tw + L.soft, psi = Math.atan(qm), start = ang - psi - 0.02;
+  const gr = c.createConicGradient(start, L.ox, L.oy);
+  const N = 28;
+  gr.addColorStop(0, `rgba(${rgb},0)`);
+  for (let i = 0; i <= N; i++) {
+    const q = -qm + 2 * qm * i / N, pos = (ang + Math.atan(q) - start) / (2 * PI);
+    gr.addColorStop(cl(pos, 0, 1), `rgba(${rgb},${cl(beamProfile(Math.abs(q), L) * L.I * scale)})`);
+  }
+  gr.addColorStop(Math.min(1, (2 * psi + 0.05) / (2 * PI)), `rgba(${rgb},0)`);
+  return gr;
+}
+
+// ── silk: a long band of gold silk flung across the frame from the window side ──
+// The band lies on the counter-diagonal and is thrown toward the lower right, along the light. Its upper
+// end leads and the free lower end trails, so the band bends, swings round and whips after it; a twist
+// rolls down its length and long folds run along it. The mesh is rasterised per pixel (interpolated
+// normals, z-buffered) so the light can draw thin, hard ridges on the folds.
+const SK = { NR: 170, NQ: 64, HW: 270, L0: -1500, L1: 860 };
+// how far the band has travelled (0: off the upper left, ~1: off the lower right) u seconds after it began
+function silkDrive(u) {
+  if (u <= 0) return 0;
+  if (u < 0.38) return 0.15 * Math.sin(PI / 2 * u / 0.38);           // a corner pushes in out of the dark
+  if (u < 0.64) return 0.15 - 0.028 * sineIO((u - 0.38) / 0.26);       // and draws back (anticipation)
+  // the throw: a quick pick-up, a long even sweep across the frame, then it eases away
+  const k = cl((u - 0.64) / 1.9), a = 0.22, b = 0.62, V = 1 / ((a + 1 - b) / 2 + b - a);
+  const f = k < a ? V * k * k / (2 * a) : k < b ? V * (a / 2 + k - a) : V * (a / 2 + b - a + (k - b) - (k - b) ** 2 / (2 * (1 - b)));
+  return 0.122 + 0.94 * f;
+}
+const silkLag = r => 0.34 * Math.pow(cl((r + 1) / 1.6), 1.6);        // the free end follows late
+function silkMesh(t, La, Lb) {
+  const u0 = t - TL.silk[0];
+  if (u0 <= 0 || u0 >= TL.silk[1] - TL.silk[0]) return null;
+  const { NR, NQ, HW, L0, L1 } = SK, n = NR * NQ;
+  const X = new Float32Array(n), Y = new Float32Array(n), Z = new Float32Array(n), AO = new Float32Array(n), LT = new Float32Array(n);
+  const spine = [];
+  for (let i = 0; i < NR; i++) {
+    const l = mix(L0, L1, i / (NR - 1)), r = l / 1500, u = u0 - silkLag(r), D = silkDrive(u);
+    const ang = mix(0.78, 0.3, cl(D)), mx = Math.cos(ang), my = Math.sin(ang), bx = -my, by = mx;
+    // a wave runs down the band toward its loose end as it is thrown, so it swirls rather than wipes
+    const s = mix(-1450, 1550, D) + 150 * Math.sin(2.4 * r - 3.2 * u0 + 0.8) * ease((u0 - 0.5) / 0.6), free = cl((r - 0.05) / 0.5);
+    const tw = 1.25 * Math.sin(1.8 * r + 4.4 * u0 + 0.6) + 1.3 * free * free * Math.sin(8 * u0 - 4 * r);
+    const hw = HW * (1 - 0.12 * r * r), ct = Math.cos(tw), st = Math.sin(tw), side = ct < 0 ? -1 : 1, tipK = (i / (NR - 1)) ** 14;
+    const cx = 960 + bx * l + mx * s, cy = 540 + by * l + my * s;
+    spine.push([cx, cy, mx, my, bx, by]); ROWK[i] = cl((D - 0.3) / 0.4);
+    for (let j = 0; j < NQ; j++) {
+      const q = -1 + 2 * j / (NQ - 1), k = i * NQ + j, w = q * hw;
+      // long folds along the band, rolling as it flies, finer creases near the loose end
+      const rip = 40 * (0.64 - Math.abs(Math.sin(PI * (0.95 * q + 0.2 * r) + 1.3 * u0 + 0.25))) * (1 - 0.25 * q * q)
+        + 12 * Math.sin(PI * (4.7 * q - 0.7 * r) - 3.4 * u0 + 1.3) + (3 + 4 * free) * Math.sin(PI * (10.3 * q + 1.1 * r) + 5.2 * u0);
+      const off = w * ct - rip * st, hem = -(60 * q * q + 16 * Math.sin(4.2 * q + 7 * u0)) * tipK;
+      X[k] = cx + mx * off + bx * hem; Y[k] = cy + my * off + by * hem; Z[k] = w * st + rip * ct;
+      AO[k] = cl(0.5 + rip * side / 70);
+    }
+  }
+  // per-vertex normals from the grid, and how much of the shaft each vertex sits in
+  const NX = new Float32Array(n), NY = new Float32Array(n), NZ = new Float32Array(n);
+  for (let i = 0; i < NR; i++) for (let j = 0; j < NQ; j++) {
+    const k = i * NQ + j, a = Math.min(NR - 1, i + 1) * NQ + j, b = Math.max(0, i - 1) * NQ + j, c = i * NQ + Math.min(NQ - 1, j + 1), d = i * NQ + Math.max(0, j - 1);
+    const ux = X[a] - X[b], uy = Y[a] - Y[b], uz = Z[a] - Z[b], vx = X[c] - X[d], vy = Y[c] - Y[d], vz = Z[c] - Z[d];
+    const nx = vy * uz - vz * uy, ny = vz * ux - vx * uz, nz = vx * uy - vy * ux, il = 1 / (Math.hypot(nx, ny, nz) + 1e-9);
+    NX[k] = nx * il; NY[k] = ny * il; NZ[k] = nz * il;
+    LT[k] = 0.32 + 0.75 * mix(shaftAt(La, X[k], Y[k]), shaftAt(Lb, X[k], Y[k]), ROWK[i]);
+  }
+  const mid = silkDrive(u0 - silkLag(0));
+  return { X, Y, Z, NX, NY, NZ, AO, LT, NR, NQ, spine, k: cl(mid / 0.98) };
+}
+const ROWK = new Float32Array(SK.NR);
+let SILK, SILKC, SIMG, SZ, SZK, SNX, SNY, SNZ, SAO, SLT, SCV, SBK, FIXI, FIXC;
+function makeSilkBuffers() {
+  SILK = newCanvas(W, H); SILKC = SILK.getContext('2d'); SIMG = new ImageData(W, H);
+  SZ = new Float32Array(W * H).fill(-1e9);
+  SNX = new Float32Array(W * H); SNY = new Float32Array(W * H); SNZ = new Float32Array(W * H); SAO = new Float32Array(W * H); SLT = new Float32Array(W * H);
+  SCV = new Uint8Array(W * H); SBK = new Uint8Array(W * H); SZK = new Float32Array(W * H);
+  FIXI = new Int32Array(1 << 20); FIXC = new Uint8Array(3 << 20);
+}
+// Each pixel is tested at four rotated-grid sub-samples: their union over all triangles gives the coverage
+// (anti-aliased edges, and no cracks where triangles meet), and the nearest triangle touching any of them
+// gives the attributes, read at the pixel centre clamped into that triangle, plus its winding on screen
+// (which side of the cloth faces us).
+const SUBS = [-0.125, -0.375, 0.375, -0.125, 0.125, 0.375, -0.375, 0.125];
+function rasterSilk(S) {
+  const { X, Y, Z, NX, NY, NZ, AO, LT, NR, NQ } = S;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  for (let k = 0; k < X.length; k++) { if (X[k] < x0) x0 = X[k]; if (X[k] > x1) x1 = X[k]; if (Y[k] < y0) y0 = Y[k]; if (Y[k] > y1) y1 = Y[k]; }
+  const bx0 = Math.max(0, Math.floor(x0)), by0 = Math.max(0, Math.floor(y0)), bx1 = Math.min(W, Math.ceil(x1) + 1), by1 = Math.min(H, Math.ceil(y1) + 1);
+  if (bx1 <= bx0 || by1 <= by0) return null;
+  const tri = (a, b, c) => {
+    const xa = X[a], ya = Y[a], xb = X[b], yb = Y[b], xc = X[c], yc = Y[c];
+    const area = (xb - xa) * (yc - ya) - (xc - xa) * (yb - ya);
+    if (area > -1e-3 && area < 1e-3) return;
+    const sg = area > 0 ? 1 : -1, back = area > 0 ? 1 : 0;
+    // edge functions (×sign, so inside is ≥ 0) and their gradients; a pixel is skipped when no sub-sample can be inside
+    const g0x = -(yc - yb) * sg, g0y = (xc - xb) * sg, g1x = -(ya - yc) * sg, g1y = (xa - xc) * sg, g2x = -g0x - g1x, g2y = -g0y - g1y;
+    const r0 = -0.4 * Math.hypot(g0x, g0y), r1 = -0.4 * Math.hypot(g1x, g1y), r2 = -0.4 * Math.hypot(g2x, g2y), as = area * sg;
+    const ix0 = Math.max(bx0, Math.floor(Math.min(xa, xb, xc) - 0.5)), ix1 = Math.min(bx1 - 1, Math.ceil(Math.max(xa, xb, xc) + 0.5));
+    const iy0 = Math.max(by0, Math.floor(Math.min(ya, yb, yc) - 0.5)), iy1 = Math.min(by1 - 1, Math.ceil(Math.max(ya, yb, yc) + 0.5));
+    for (let y = iy0; y <= iy1; y++) {
+      const py = y + 0.5;
+      for (let x = ix0; x <= ix1; x++) {
+        const px = x + 0.5;
+        const e0 = ((xc - xb) * (py - yb) - (yc - yb) * (px - xb)) * sg; if (e0 < r0) continue;
+        const e1 = ((xa - xc) * (py - yc) - (ya - yc) * (px - xc)) * sg; if (e1 < r1) continue;
+        const e2 = as - e0 - e1; if (e2 < r2) continue;
+        let mask = 0;
+        for (let s = 0; s < 8; s += 2) {
+          const ox = SUBS[s], oy = SUBS[s + 1];
+          if (e0 + g0x * ox + g0y * oy >= 0 && e1 + g1x * ox + g1y * oy >= 0 && e2 + g2x * ox + g2y * oy >= 0) mask |= 1 << (s >> 1);
+        }
+        if (!mask) continue;
+        const p = y * W + x;
+        SCV[p] |= mask;
+        let w0 = e0 > 0 ? e0 : 0, w1 = e1 > 0 ? e1 : 0, w2 = e2 > 0 ? e2 : 0;
+        const ws = 1 / (w0 + w1 + w2 + 1e-12); w0 *= ws; w1 *= ws; w2 *= ws;
+        const z = w0 * Z[a] + w1 * Z[b] + w2 * Z[c];
+        if (z <= SZ[p]) continue;
+        SZ[p] = z; SBK[p] = back;
+        SNX[p] = w0 * NX[a] + w1 * NX[b] + w2 * NX[c]; SNY[p] = w0 * NY[a] + w1 * NY[b] + w2 * NY[c]; SNZ[p] = w0 * NZ[a] + w1 * NZ[b] + w2 * NZ[c];
+        SAO[p] = w0 * AO[a] + w1 * AO[b] + w2 * AO[c]; SLT[p] = w0 * LT[a] + w1 * LT[b] + w2 * LT[c];
+      }
+    }
+  };
+  for (let i = 0; i < NR - 1; i++) for (let j = 0; j < NQ - 1; j++) {
+    const k = i * NQ + j;
+    tri(k, k + NQ, k + NQ + 1); tri(k, k + NQ + 1, k + 1);
+  }
+  return [bx0, by0, bx1, by1];
+}
+// gilded silk: saturated gold, darker and redder on the back, hard highlights on the ridges, a sheen at grazing angles
+const SILK_F = [0.9, 0.46, 0.04], SILK_B = [0.55, 0.2, 0.022], SILK_S = [LC[0], LC[1] * 0.8, LC[2] * 0.45];
+const POP4 = Uint8Array.from({ length: 16 }, (_, m) => Math.min(255, 64 * ((m & 1) + (m >> 1 & 1) + (m >> 2 & 1) + (m >> 3 & 1))));
+function drawSilk(S, L) {
+  const box = rasterSilk(S); if (!box) return false;
+  const [bx0, by0, bx1, by1] = box, D = SIMG.data, { lx, ly, lz, hx, hy, hz } = L;
+  for (let y = by0; y < by1; y++) for (let x = bx0, p = y * W + bx0; x < bx1; x++, p++) {
+    const o = p * 4, cov = SCV[p];
+    if (!cov) { D[o + 3] = 0; continue; }
+    SCV[p] = 0; SZK[p] = SZ[p]; SZ[p] = -1e9;
+    // the back shows only where the triangle is wound backwards AND the surface has really turned away: a sharp fold
+    // crest leaves slivers that are back-wound but barely past edge-on, and those shade as the front they belong to
+    const back = SBK[p] && SNZ[p] < -0.12, sg0 = back ? -1 : 1;
+    SBK[p] = back ? 1 : 0;
+    let nx = SNX[p] * sg0, ny = SNY[p] * sg0, nz = SNZ[p] * sg0;
+    if (nz < 0) nz = 0;                                   // the seen side never faces away
+    const il = 1 / (Math.hypot(nx, ny, nz) + 1e-9); nx *= il; ny *= il; nz *= il;
+    const al = back ? SILK_B : SILK_F, lit = SLT[p], ao = 0.55 + 0.45 * SAO[p];
+    const d = nx * lx + ny * ly + nz * lz, df = DIF[((d < -1 ? -1 : d > 1 ? 1 : d) + 1) * 511.5 | 0] * lit;
+    const e = nx * hx + ny * hy + nz * hz, ei = e > 0 ? (e * 1023) | 0 : 0;
+    const sp = (2.8 * SPEC[10 * 1024 + ei] + 0.9 * SPEC[5 * 1024 + ei]) * lit * (back ? 0.45 : 1) * (0.4 + 0.6 * SAO[p]);
+    const sh = (1 - nz) * (1 - nz) * 0.35 * lit;
+    const kr = (0.05 + df * LC[0] + sh) * ao, kg = (0.05 + df * LC[1] + sh) * ao, kb = (0.05 + df * LC[2] + sh) * ao;
+    const r = al[0] * kr + sp * SILK_S[0], gg = al[1] * kg + sp * SILK_S[1], b = al[2] * kb + sp * SILK_S[2];
+    const dv = BAYER[((y & 3) << 2) | (x & 3)];
+    D[o] = TONE[r >= 8 ? 4095 : (Math.sqrt(r) * TQ) | 0] + dv; D[o + 1] = TONE[gg >= 8 ? 4095 : (Math.sqrt(gg) * TQ) | 0] + dv; D[o + 2] = TONE[b >= 8 ? 4095 : (Math.sqrt(b) * TQ) | 0] + dv; D[o + 3] = POP4[cov];
+  }
+  // Clean-up, read from the shaded layer and written after: where the front and back of a fold cross, the depth
+  // test can pick the far layer for single pixels along the crossing, so a pixel far off the middle of its four
+  // neighbours takes their colour; and pixels on a fold's occluding edge (a jump in depth, or front meeting back)
+  // are softened with their neighbours, which takes the stair-steps off those inner edges.
+  const lum = o => D[o] + D[o + 1] + D[o + 2];
+  for (let pass = 0; pass < 2; pass++) {             // twice: a crossing can leave two-pixel clusters
+  let nf = 0;
+  for (let y = by0 + 1; y < by1 - 1; y++) for (let x = bx0 + 1, p = y * W + x; x < bx1 - 1; x++, p++) {
+    const o = p * 4;
+    if (D[o + 3] < 255) continue;
+    const a = o - 4, b = o + 4, c = o - W * 4, d = o + W * 4;
+    if (D[a + 3] < 255 || D[b + 3] < 255 || D[c + 3] < 255 || D[d + 3] < 255 || nf >= FIXI.length) continue;
+    const la = lum(a), lb = lum(b), lc = lum(c), ld = lum(d), l0 = lum(o);
+    const hi = Math.max(la, lb, lc, ld), lo = Math.min(la, lb, lc, ld), med = (la + lb + lc + ld - hi - lo) * 0.5;
+    const k = nf * 3;
+    if (l0 < 0.6 * med || l0 > 1.6 * med + 30) {
+      // the two middle neighbours
+      const nb = [[la, a], [lb, b], [lc, c], [ld, d]].sort((u, v) => u[0] - v[0]), m1 = nb[1][1], m2 = nb[2][1];
+      FIXC[k] = (D[m1] + D[m2]) >> 1; FIXC[k + 1] = (D[m1 + 1] + D[m2 + 1]) >> 1; FIXC[k + 2] = (D[m1 + 2] + D[m2 + 2]) >> 1; FIXI[nf++] = o;
+    } else {
+      const z = SZK[p], bk = SBK[p];
+      if (Math.abs(z - SZK[p - 1]) > 12 || Math.abs(z - SZK[p + 1]) > 12 || Math.abs(z - SZK[p - W]) > 12 || Math.abs(z - SZK[p + W]) > 12 ||
+          bk !== SBK[p - 1] || bk !== SBK[p + 1] || bk !== SBK[p - W] || bk !== SBK[p + W]) {
+        for (let ch = 0; ch < 3; ch++) FIXC[k + ch] = (2 * D[o + ch] + D[a + ch] + D[b + ch] + D[c + ch] + D[d + ch]) / 6;
+        FIXI[nf++] = o;
+      }
+    }
+  }
+  for (let i = 0; i < nf; i++) { const o = FIXI[i], k = i * 3; D[o] = FIXC[k]; D[o + 1] = FIXC[k + 1]; D[o + 2] = FIXC[k + 2]; }
+  }
+  SILKC.clearRect(0, 0, W, H);
+  SILKC.putImageData(SIMG, 0, 0, bx0, by0, bx1 - bx0, by1 - by0);
+  return true;
+}
+// its shadow falls on the painted scene; the silk itself goes over the craquelure, softened by a hair
+function silkShadow(c) { c.save(); c.globalAlpha = 0.6; c.filter = 'brightness(0) blur(24px)'; c.drawImage(SILK, 44, 40); c.restore(); }
+function silkOver(c) { c.save(); c.filter = 'blur(0.55px)'; c.drawImage(SILK, 0, 0); c.restore(); }
+// everything behind the band's spine (the side it has already swept), extended past both ends
+function silkBehind(S) {
+  const e = S.spine, a = e[0], z = e[e.length - 1], p = new Path2D(), F = 4000;
+  p.moveTo(a[0] - a[4] * F - a[2] * F, a[1] - a[5] * F - a[3] * F);
+  p.lineTo(a[0] - a[4] * F, a[1] - a[5] * F);
+  for (const q of e) p.lineTo(q[0], q[1]);
+  p.lineTo(z[0] + z[4] * F, z[1] + z[5] * F);
+  p.lineTo(z[0] + z[4] * F - z[2] * F, z[1] + z[5] * F - z[3] * F);
+  p.closePath();
+  return p;
+}
+
+// ── dust: motes drift and swirl, seen only inside the shaft ──
+// Mostly fine specks, a quarter of them bigger and brighter, a few soft out-of-focus discs near the lens.
+const MOTES = (() => {
+  const r = rng(404), a = [];
+  for (let i = 0; i < 450; i++) {
+    const kind = r(), big = kind < 0.045, mid = !big && kind < 0.36;
+    a.push({ x: r() * 2300 - 190, y: r() * 1400 - 160, z: r(), s: big ? 9 + r() * 12 : mid ? 2.8 + r() * 2.2 : 1.5 + r() * 1.3, big, ph: r() * 6.28, f1: 0.2 + r() * 0.5, f2: 0.25 + r() * 0.6, ax: 8 + r() * 18, ay: 6 + r() * 14, vx: (r() - 0.3) * 16, vy: -5 - r() * 15, tw: 1 + r() * 3 });
+  }
+  return a;
+})();
+let SPR, BOKEH, AIR;
+function makeSprites() {
+  // a hard bright core inside a soft glow, so a speck still reads at a quarter of the size
+  SPR = newCanvas(64, 64); let x = SPR.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,248,230,0.65)'); gr.addColorStop(0.13, 'rgba(255,240,205,0.55)'); gr.addColorStop(0.26, 'rgba(255,226,172,0.3)');
+  gr.addColorStop(0.5, 'rgba(255,206,140,0.11)'); gr.addColorStop(1, 'rgba(255,200,130,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  BOKEH = newCanvas(64, 64); x = BOKEH.getContext('2d'); gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,225,180,0.35)'); gr.addColorStop(0.7, 'rgba(255,225,180,0.45)'); gr.addColorStop(0.85, 'rgba(255,220,170,0.25)'); gr.addColorStop(1, 'rgba(255,210,150,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  // dusty air: a soft cloud texture the shaft is seen through
+  const aw = W / 2 + 240, ah = H / 2 + 160, nA = valueNoise(131);
+  AIR = newCanvas(aw, ah); x = AIR.getContext('2d');
+  const img = x.createImageData(aw, ah);
+  for (let j = 0; j < ah; j++) for (let i = 0; i < aw; i++) {
+    const v = nA.fbm(i / 70, j / 70, 4), p = (j * aw + i) * 4;
+    img.data[p] = img.data[p + 1] = img.data[p + 2] = 255; img.data[p + 3] = 255 * cl(0.28 + 1.2 * (v - 0.3));
+  }
+  x.putImageData(img, 0, 0);
+}
+// dust in the light: La, Lb are the two shafts on screen (as the haze draws them), blended while the silk crosses
+function drawDust(c, t, La, Lb, kb, cam, silkK) {
+  const p = cl(liftP(t)), swirl = 1.4 * p, swirl2 = 1.5 * silkK;
+  c.globalCompositeOperation = 'lighter';
+  for (const m of MOTES) {
+    let x = m.x + m.vx * t + m.ax * Math.sin(m.f1 * t + m.ph), y = m.y + m.vy * t + m.ay * Math.sin(m.f2 * t + m.ph * 1.3);
+    x = ((x + 190) % 2300 + 2300) % 2300 - 190; y = ((y + 160) % 1400 + 1400) % 1400 - 160;
+    for (const [cx, cy, th, rad] of [[860, 560, swirl, 650], [760, 420, swirl2, 700]]) {
+      if (th <= 0) continue;
+      const dx = x - cx, dy = y - cy, a = th * Math.exp(-(dx * dx + dy * dy) / (rad * rad)), ca = Math.cos(a), sa = Math.sin(a);
+      x = cx + dx * ca - dy * sa; y = cy + dx * sa + dy * ca;
+    }
+    if (m.ph < 5.6 * silkK) continue;                   // the dust thins out once the title is up
+    const sm = 1 + (cam.s - 1) * (0.6 + 1.2 * m.z), sx = (x - cam.fx) * sm + cam.fx, sy = (y - cam.fy) * sm + cam.fy;
+    const sh = kb <= 0 ? shaftAt(La, sx, sy) : kb >= 1 ? shaftAt(Lb, sx, sy) : mix(shaftAt(La, sx, sy), shaftAt(Lb, sx, sy), kb);
+    if (sh < 0.18) continue;                            // nothing in the dark
+    const ox = sx - (kb < 0.5 ? La.ox : Lb.ox), oy = sy - (kb < 0.5 ? La.oy : Lb.oy), air = 0.45 + 0.55 * cl(1.4 - Math.hypot(ox, oy) / 2200);
+    // and none over the gilded plaque once it is up
+    const plaque = silkK > 0 && Math.abs(sx - TITLE.cx) < 790 && Math.abs(sy - TITLE.cy - 60) < 340 ? 1 - silkK : 1;
+    const b = sh * sh * air * plaque * (0.6 + 0.4 * Math.sin(m.tw * t + m.ph));
+    if (b < 0.01) continue;
+    const sz = m.s * (0.8 + 0.5 * m.z) * (m.big ? 2.2 : 3.4);
+    c.globalAlpha = cl(b * (m.big ? 0.45 : 1.8), 0, m.big ? 0.3 : 0.9);
+    c.drawImage(m.big ? BOKEH : SPR, sx - sz, sy - sz, sz * 2, sz * 2);
+  }
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+}
+
+// ── things that move inside the still life: running sand, smoke from the wick ──
+function drawSand(c, t, L) {
+  const vis = beamAt(L, HG.x - 30, 680), x0 = HG.x, neck = (HG.glass0 + HG.glass1) / 2;
+  const topLvl = mix(566, 628, t / LEN), heap = mix(800, 772, t / LEN), floor = HG.glass1 - 4;
+  const sandCol = k => { const gr = c.createLinearGradient(x0 - 60, 0, x0 + 60, 0); gr.addColorStop(0, css(0.62 * vis * 1.3 + 0.0006, 0.42 * vis * 1.3 + 0.0005, 0.2 * vis * 1.3 + 0.0004)); gr.addColorStop(1, css(0.62 * vis * 0.25 * k + 0.0004, 0.42 * vis * 0.25 * k + 0.0003, 0.2 * vis * 0.25 * k + 0.0003)); return gr; };
+  const inner = yy => Math.max(1.5, hgGlass(yy) - 6);
+  // the upper charge, its surface dimpled where it drains
+  c.beginPath(); c.moveTo(x0 - inner(topLvl), topLvl);
+  c.quadraticCurveTo(x0, topLvl + 16, x0 + inner(topLvl), topLvl);
+  for (let yy = topLvl; yy <= neck; yy += 4) c.lineTo(x0 + inner(yy), yy);
+  for (let yy = neck; yy >= topLvl; yy -= 4) c.lineTo(x0 - inner(yy), yy);
+  c.closePath(); c.fillStyle = sandCol(1); c.fill();
+  // the heap below
+  c.beginPath(); c.moveTo(x0 - inner(floor), floor);
+  for (let yy = floor; yy >= heap + 22; yy -= 4) c.lineTo(x0 - inner(yy), yy);
+  c.quadraticCurveTo(x0 - 20, heap + 4, x0, heap); c.quadraticCurveTo(x0 + 20, heap + 4, x0 + inner(heap + 22), heap + 22);
+  for (let yy = heap + 22; yy <= floor; yy += 4) c.lineTo(x0 + inner(yy), yy);
+  c.closePath(); c.fill();
+  // the falling thread
+  c.strokeStyle = css(0.9 * vis + 0.0006, 0.66 * vis + 0.0005, 0.36 * vis + 0.0004); c.lineWidth = 2.2;
+  c.beginPath(); c.moveTo(x0, neck); c.lineTo(x0 + 0.5 * Math.sin(t * 30), heap); c.stroke();
+  // glass sheen over the sand
+  c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
+  for (const [yy0, yy1] of [[HG.glass0 + 30, neck - 34], [neck + 34, HG.glass1 - 30]]) {
+    c.strokeStyle = `rgba(255,236,200,${cl(0.5 * vis)})`; c.lineWidth = 4;
+    c.beginPath(); for (let yy = yy0; yy <= yy1; yy += 4) c.lineTo(x0 - hgGlass(yy) * 0.62, yy); c.stroke();
+  }
+  c.globalCompositeOperation = 'source-over';
+}
+function drawSmoke(c, t, L) {
+  const x0 = CANDLE.x + 3, y0 = CANDLE.top - 23, fade = 1 - 0.35 * t / LEN;
+  c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
+  for (let s = 0; s < 3; s++) {
+    let px = x0, py = y0;
+    for (let i = 1; i <= 46; i++) {
+      const h = i * 7.5, hn = h / 345, amp = 2 + 40 * Math.pow(hn, 1.4);
+      const curl = 26 * ease((hn - 0.45) / 0.3) * Math.sin(h * 0.045 - t * 2.1 + s);
+      const x = x0 + amp * Math.sin(h * 0.021 - t * 1.25 + s * 0.8) + 0.45 * amp * Math.sin(h * 0.052 + t * 0.8 + s * 2.2) + curl;
+      const y = y0 - h - 5 * Math.sin(h * 0.03 + t + s);
+      const b = (0.07 + 0.95 * shaftAt(L, x, y)) * (1 - hn) ** 1.3 * fade * cl(liftP(t));
+      if (b > 0.006) { c.strokeStyle = `rgba(226,212,194,${cl(b * 1.1)})`; c.lineWidth = 2.2 + h * 0.05; c.beginPath(); c.moveTo(px, py); c.lineTo(x, y); c.stroke(); }
+      px = x; py = y;
+    }
+  }
+  c.globalCompositeOperation = 'source-over';
+}
+
+// ── the painted surface: canvas weave and craquelure, plus a vignette (static) ──
+function buildSurface() {
+  const c = newCanvas(W, H), x = c.getContext('2d'), img = x.createImageData(W, H), D = img.data, nC = valueNoise(97);
+  const layer = (cell, seed) => {
+    const r = rng(seed), gw = Math.ceil(W / cell) + 3, gh = Math.ceil(H / cell) + 3, sx = new Float32Array(gw * gh), sy = new Float32Array(gw * gh);
+    for (let i = 0; i < gw * gh; i++) { sx[i] = r(); sy[i] = r(); }
+    return { cell, gw, sx, sy };
+  };
+  const L1 = layer(24, 5), L2 = layer(9, 6);
+  const crack = (Ly, px, py) => {
+    const gx = px / Ly.cell, gy = py / Ly.cell, ix = Math.floor(gx), iy = Math.floor(gy);
+    let d1 = 1e9, d2 = 1e9;
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+      const cx = ix + i, cy = iy + j, k = (cy + 1) * Ly.gw + cx + 1;
+      const dx = cx + Ly.sx[k] - gx, dy = cy + Ly.sy[k] - gy, d = dx * dx + dy * dy;
+      if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+    }
+    return (Math.sqrt(d2) - Math.sqrt(d1)) * Ly.cell;
+  };
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) {
+    const wx = xx + 6 * (nC(xx / 40, y / 40) - 0.5), wy = y + 6 * (nC(xx / 40 + 30, y / 40) - 0.5);
+    const c1 = crack(L1, wx, wy), c2 = crack(L2, wx * 1.1, wy * 0.9);
+    const patch = nC(xx / 260 + 5, y / 260), cr = (0.075 * (1 - ease(c1 / 1.1)) + 0.03 * (1 - ease(c2 / 0.9))) * (0.4 + patch) - 0.018 * Math.exp(-(((c1 - 1.8) / 0.6) ** 2));
+    const weave = 0.016 * (Math.sin(xx * 1.43) * Math.sin(y * 1.43 + Math.sin(xx * 0.7)) + 1);
+    const v = 255 * (1 - cr - weave);
+    const p = (y * W + xx) * 4; D[p] = v; D[p + 1] = v * 0.985; D[p + 2] = v * 0.95; D[p + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  const vg = x.createRadialGradient(W * 0.46, H * 0.5, 300, W * 0.5, H * 0.5, 1150);
+  vg.addColorStop(0, 'rgba(255,255,255,1)'); vg.addColorStop(1, 'rgba(70,58,44,1)');
+  x.globalCompositeOperation = 'multiply'; x.fillStyle = vg; x.fillRect(0, 0, W, H);
+  return c;
+}
+
+// ── per-frame ──
+let STILL, TCARD, VEL, SURF, LAYER, LAYERC, DARK, DARKC, HAZE, HAZEC, BLOOM, BLOOMC, BLOOM2, BLOOM2C, TB, TBC, MASK, MASKC;
+function beamI(t) {
+  if (t < 0.3) return 0;
+  if (t < 0.36) return 0.42;
+  if (t < 0.43) return 0.04;
+  if (t < 0.5) return 0.62;
+  if (t < 0.56) return 0.2;
+  if (t < 0.86) return mix(0.2, 1.1, ease(ramp(t, 0.56, 0.86)));
+  return 1 + 0.1 * Math.exp(-(t - 0.86) * 6);
+}
+function lightStill(t) {
+  const k = easeIO(ramp(t, TL.turn[0], TL.turn[1]));
+  return makeLight([-900, -560], [mix(760, 1140, k), mix(730, 595, k)], mix(0.13, 0.108, k), 0.022, beamI(t), { pr: mix(390, 360, k), pool: 0.92, pc: [mix(760, 1150, k), mix(730, 690, k)] });
+}
+function lightTitle(t) {
+  const k = sineIO(ramp(t, TL.glint[0], TL.glint[1])), ks = ramp(t, TL.sheen[0], TL.sheen[1]);
+  return Object.assign(makeLight([-760, -640], [mix(840, 1080, k), TITLE.cy + 50], 0.22, 0.025, 1, { az: mix(-0.3, 0.32, k), pr: 660, pool: 0.85 }),
+    { gk: 2.4 * Math.sin(PI * ks) ** 1.2, gx: mix(160, 1780, easeIO(ks)), gy: TITLE.cy, gw: 105 });
+}
+const camStill = t => ({ s: 1.08 + 0.17 * easeIO(ramp(t, TL.push[0], TL.push[1])), fx: mix(860, 1010, easeIO(ramp(t, TL.turn[0] - 0.2, TL.turn[1] + 0.4))), fy: 700 });
+const camTitle = t => ({ s: 1 + 0.03 * easeIO(ramp(t, TL.silk[0] + 0.6, LEN)), fx: 960, fy: 520 });
+const camCurtain = t => { const c = camStill(t); return { s: 1 + (c.s - 1.08) * 1.5, fx: c.fx, fy: c.fy }; };
+const applyCam = (c, cam) => c.setTransform(cam.s, 0, 0, cam.s, cam.fx * (1 - cam.s), cam.fy * (1 - cam.s));
+
+// streaks fanning out of the window, each breathing at its own pace
+const RAYS = (() => { const r = rng(919); return Array.from({ length: 61 }, () => ({ a: r(), f: 0.4 + r() * 1.2, ph: r() * 6.28 })); })();
+function rayGradient(c, L, t) {
+  const ang = Math.atan2(L.ay, L.ax), span = Math.atan(L.tw + L.soft) + 0.03, start = ang - span, N = RAYS.length - 1;
+  const gr = c.createConicGradient(start, L.ox, L.oy);
+  for (let i = 0; i <= N; i++) {
+    const R = RAYS[i], a = 0.35 + 0.65 * R.a * (0.55 + 0.45 * Math.sin(R.f * t + R.ph));
+    gr.addColorStop(i / N * span / PI, `rgba(0,0,0,${a.toFixed(3)})`);
+  }
+  return gr;
+}
+function drawHaze(t, L, w) {   // the shaft itself, seen in the dusty air, brightest near the window
+  if (w <= 0) return;
+  const hw = W / 2, hh = H / 2, Lh = Object.assign({}, L, { ox: L.ox / 2, oy: L.oy / 2 });
+  HAZEC.globalCompositeOperation = 'source-over'; HAZEC.clearRect(0, 0, hw, hh);
+  HAZEC.fillStyle = beamGradient(HAZEC, Lh, '255,214,160', 0.24 * w); HAZEC.fillRect(0, 0, hw, hh);
+  HAZEC.globalCompositeOperation = 'destination-in';
+  HAZEC.fillStyle = rayGradient(HAZEC, Lh, t); HAZEC.fillRect(0, 0, hw, hh);
+  HAZEC.drawImage(AIR, -120 - t * 10, -80 - t * 6);
+  const rg = HAZEC.createRadialGradient(Lh.ox, Lh.oy, 200, Lh.ox, Lh.oy, 1500);
+  rg.addColorStop(0, 'rgba(0,0,0,1)'); rg.addColorStop(0.45, 'rgba(0,0,0,0.42)'); rg.addColorStop(1, 'rgba(0,0,0,0.07)');
+  HAZEC.fillStyle = rg; HAZEC.fillRect(0, 0, hw, hh);
+  g.globalCompositeOperation = 'lighter'; g.drawImage(HAZE, 0, 0, W, H); g.globalCompositeOperation = 'source-over';
+}
+function stillScene(t, Ls) {      // the still life, its curtain, and what moves in it
+  const cam = camStill(t);
+  relight(STILL, Ls);
+  applyCam(g, cam); g.filter = 'blur(0.6px)'; g.drawImage(STILL.view, 0, 0); g.filter = 'none';
+  drawSand(g, t, Ls); drawSmoke(g, t, Ls);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  // the curtain, lit through a mask of the same beam
+  const cc = camCurtain(t), Lsc = camLight(Ls, cam);
+  LAYERC.setTransform(1, 0, 0, 1, 0, 0); LAYERC.globalCompositeOperation = 'source-over'; LAYERC.clearRect(0, 0, W, H);
+  drawCurtain(LAYERC, t, cc);
+  LAYERC.setTransform(1, 0, 0, 1, 0, 0);
+  DARKC.globalCompositeOperation = 'source-over'; DARKC.fillStyle = 'rgba(0,0,0,0.99)'; DARKC.clearRect(0, 0, W, H); DARKC.fillRect(0, 0, W, H);
+  DARKC.globalCompositeOperation = 'destination-out';
+  DARKC.fillStyle = beamGradient(DARKC, Object.assign({}, Lsc, { tw: Lsc.tw * 2.2, soft: 0.16 }), '0,0,0', 0.1); DARKC.fillRect(0, 0, W, H);
+  DARKC.fillStyle = beamGradient(DARKC, Lsc, '0,0,0', 1); DARKC.fillRect(0, 0, W, H);
+  LAYERC.globalCompositeOperation = 'source-atop'; LAYERC.drawImage(DARK, 0, 0);
+  g.filter = 'blur(0.5px)'; g.drawImage(LAYER, 0, 0); g.filter = 'none';     // a hair soft, so the fringe can't shimmer
+}
+function titleScene(c, t, Lt) {
+  relight(TCARD, Lt);
+  applyCam(c, camTitle(t)); c.filter = 'blur(0.5px)'; c.drawImage(TCARD.view, 0, 0); c.filter = 'none'; c.setTransform(1, 0, 0, 1, 0, 0);
+}
+function render(t) {
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.filter = 'none';
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  const Ls = lightStill(t), Lt = lightTitle(t), cS = camStill(t), cT = camTitle(t), Lsc = camLight(Ls, cS), Ltc = camLight(Lt, cT);
+  const S = silkMesh(t, Lsc, Ltc), silkK = S ? S.k : t >= TL.silk[1] ? 1 : 0;
+  if (!S) { if (t < TL.silk[0]) stillScene(t, Ls); else titleScene(g, t, Lt); }
+  else {
+    // the still life ahead of the silk, the title card behind it, joined along its spine by a soft seam
+    stillScene(t, Ls);
+    TBC.setTransform(1, 0, 0, 1, 0, 0); TBC.globalCompositeOperation = 'source-over'; TBC.fillStyle = '#000'; TBC.fillRect(0, 0, W, H);
+    titleScene(TBC, t, Lt);
+    MASKC.setTransform(1, 0, 0, 1, 0, 0); MASKC.clearRect(0, 0, W / 4, H / 4);
+    MASKC.setTransform(0.25, 0, 0, 0.25, 0, 0); MASKC.filter = 'blur(8px)'; MASKC.fillStyle = '#fff'; MASKC.fill(silkBehind(S)); MASKC.filter = 'none';
+    TBC.globalCompositeOperation = 'destination-in'; TBC.drawImage(MASK, 0, 0, W, H); TBC.globalCompositeOperation = 'source-over';
+    g.drawImage(TB, 0, 0);
+  }
+  drawHaze(t, Lsc, 1 - silkK); drawHaze(t, Ltc, silkK);
+  const cD = { s: mix(cS.s, cT.s, silkK), fx: mix(cS.fx, cT.fx, silkK), fy: mix(cS.fy, cT.fy, silkK) };
+  drawDust(g, t, Lsc, Ltc, silkK, cD, silkK);
+  const silk = S && drawSilk(S, Lsc);
+  if (silk) silkShadow(g);
+  g.globalCompositeOperation = 'multiply'; g.drawImage(SURF, 0, 0);
+  g.globalCompositeOperation = 'source-over';
+  if (silk) silkOver(g);
+  // bloom: the brightest light spills a little
+  BLOOMC.globalCompositeOperation = 'source-over'; BLOOMC.filter = 'none'; BLOOMC.drawImage(cv, 0, 0, 240, 135);
+  BLOOMC.globalCompositeOperation = 'multiply'; BLOOMC.drawImage(BLOOM, 0, 0); BLOOMC.drawImage(BLOOM, 0, 0);
+  BLOOM2C.clearRect(0, 0, 240, 135); BLOOM2C.filter = 'blur(4px)'; BLOOM2C.drawImage(BLOOM, 0, 0);
+  g.globalCompositeOperation = 'screen'; g.globalAlpha = 0.55; g.drawImage(BLOOM2, 0, 0, W, H); g.globalAlpha = 1;
+  g.globalCompositeOperation = 'source-over';
+  // the light irises down onto the plaque (an ellipse, so the whole word stays lit), then everything goes dark
+  const ik = easeIO(ramp(t, TL.iris[0], TL.iris[1]));
+  if (ik > 0) {
+    const r = mix(1500, 640, ik), ig = g.createRadialGradient(0, 0, r * 0.55, 0, 0, r);
+    ig.addColorStop(0, 'rgba(0,0,0,0)'); ig.addColorStop(1, 'rgba(0,0,0,0.96)');
+    g.setTransform(2.2, 0, 0, 1, TITLE.cx, TITLE.cy + 50); g.fillStyle = ig; g.fillRect(-W, -H, 2 * W, 2 * H); g.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  const fo = sineIO(ramp(t, TL.out[0], TL.out[1]));
+  if (fo > 0) { g.fillStyle = `rgba(0,0,0,${fo})`; g.fillRect(0, 0, W, H); }
+}
+
+window.draw = function ({ t }) { render(t); const url = cv.toDataURL('image/jpeg', 0.92); return url.slice(url.indexOf(',') + 1); };
+// sound cues, read off the same motion the frames use
+window.events = function () {
+  const r3 = v => +v.toFixed(3);
+  const ev = [{ k: 'flick', t: 0.3, v: 0.42 }, { k: 'flick', t: 0.44, v: 0.62 }, { k: 'beam', t: 0.56, d: 0.3 }];
+  // the dip of anticipation, then the haul; curve: how high the curtain is, every 1/100 s from t
+  const curve = []; for (let x = TL.lift[0]; x < TL.lift[1] + 2.6; x += 0.01) curve.push(r3(liftP(x)));
+  ev.push({ k: 'lift', t: TL.lift[0], d: TL.lift[1] - TL.lift[0], curve });
+  let best = 0, tp = 0; for (let x = TL.lift[1]; x < TL.lift[1] + 3; x += 0.01) { const v = liftCurve(x - TL.lift[1]); if (v > best) { best = v; tp = x; } }
+  let ta = TL.lift[1]; while (liftCurve(ta - TL.lift[1]) < 1) ta += 0.005;
+  let tr = TL.lift[1]; while (liftP(tr) < 0.7) tr += 0.005;
+  ev.push({ k: 'reveal', t: r3(tr) });                                        // the hem has cleared the still life
+  ev.push({ k: 'arrive', t: r3(ta) });                                        // the swag reaches its height
+  ev.push({ k: 'settle', t: r3(tp) });                                        // and the top of its overshoot
+  ev.push({ k: 'turn', t: TL.turn[0], d: TL.turn[1] - TL.turn[0] });
+  // the silk: where its on-screen part is (x, y in 0..1) and how fast it moves, every 1/30 s
+  const ctx = newCanvas(4, 4).getContext('2d'), path = [];
+  let seen = null, title = null, prev = null;
+  for (let n = Math.ceil(TL.silk[0] * 30); n / 30 < TL.silk[1]; n++) {
+    const t = n / 30, S = silkMesh(t, lightStill(t), lightTitle(t));
+    if (!S) continue;
+    let sx = 0, sy = 0, c = 0;
+    for (let k = 0; k < S.X.length; k += 7) if (S.X[k] >= 0 && S.X[k] < W && S.Y[k] >= 0 && S.Y[k] < H) { sx += S.X[k]; sy += S.Y[k]; c++; }
+    if (title === null && ctx.isPointInPath(silkBehind(S), TITLE.cx, TITLE.cy)) title = t;
+    if (!c) { prev = null; continue; }
+    if (seen === null) seen = t;
+    const x = sx / c, y = sy / c, v = prev ? Math.hypot(x - prev[0], y - prev[1]) * 30 : 0;
+    path.push([r3(t), r3(x / W), r3(y / H), Math.round(v), c]); prev = [x, y];
+  }
+  ev.push({ k: 'silk', t: r3(seen), throw: r3(TL.silk[0] + 0.64 + silkLag(0)), path });
+  ev.push({ k: 'title', t: r3(title) });
+  ev.push({ k: 'glint', t: TL.glint[0], d: TL.glint[1] - TL.glint[0] });
+  ev.push({ k: 'cadence', t: TL.iris[0] });
+  ev.push({ k: 'out', t: TL.out[0], d: TL.out[1] - TL.out[0] });
+  return ev;
+};
+window.ready = (async () => {
+  await Promise.all([document.fonts.load('400 218px "IM Fell English SC"'), document.fonts.load('italic 400 50px "IM Fell English"')]);
+  await document.fonts.ready;
+  makeSprites();
+  STILL = buildStillLife(); TCARD = buildTitle(); VEL = buildVelvet(); SURF = buildSurface();
+  LAYER = newCanvas(W, H); LAYERC = LAYER.getContext('2d');
+  DARK = newCanvas(W, H); DARKC = DARK.getContext('2d');
+  HAZE = newCanvas(W / 2, H / 2); HAZEC = HAZE.getContext('2d');
+  TB = newCanvas(W, H); TBC = TB.getContext('2d'); MASK = newCanvas(W / 4, H / 4); MASKC = MASK.getContext('2d');
+  makeSilkBuffers();
+  BLOOM = newCanvas(240, 135); BLOOMC = BLOOM.getContext('2d');
+  BLOOM2 = newCanvas(240, 135); BLOOM2C = BLOOM2.getContext('2d');
+})();
+</script>
+</body></html>
