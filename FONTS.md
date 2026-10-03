@@ -27,6 +27,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Bangers](https://fonts.google.com/specimen/Bangers) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [comic-book](styles/comic-book), [digital-comic](styles/digital-comic), [storytime](styles/storytime) |
 | [Barlow](https://fonts.google.com/specimen/Barlow) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [split-flap](styles/split-flap) |
 | [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s), [blueprint](styles/blueprint), [split-flap](styles/split-flap) |
+| [Bodoni Moda](https://fonts.google.com/specimen/Bodoni+Moda) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [neoclassicism](styles/neoclassicism) |
 | [Bowlby One SC](https://fonts.google.com/specimen/Bowlby+One+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [mid-century](styles/mid-century) |
 | [Bricolage Grotesque](https://fonts.google.com/specimen/Bricolage+Grotesque) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [kinetic-typography](styles/kinetic-typography) |
 | [Bungee](https://fonts.google.com/specimen/Bungee) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [papel-picado](styles/papel-picado) |
@@ -34,7 +35,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Caveat Brush](https://fonts.google.com/specimen/Caveat+Brush) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [comic-strip](styles/comic-strip), [stick-action](styles/stick-action), [sunday-strip](styles/sunday-strip) |
 | [Chakra Petch](https://fonts.google.com/specimen/Chakra+Petch) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [reel-chrome](styles/reel-chrome), [sci-fi-interface](styles/sci-fi-interface) |
 | [Chewy](https://fonts.google.com/specimen/Chewy) | [Apache 2.0](licenses/Apache-2.0.txt) | [vhs-camcorder](styles/vhs-camcorder) |
-| [Cinzel](https://fonts.google.com/specimen/Cinzel) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [greek-pottery](styles/greek-pottery), [renaissance](styles/renaissance), [roman-mosaic](styles/roman-mosaic), [stained-glass](styles/stained-glass), [viking-runes](styles/viking-runes) |
+| [Cinzel](https://fonts.google.com/specimen/Cinzel) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [greek-pottery](styles/greek-pottery), [neoclassicism](styles/neoclassicism), [renaissance](styles/renaissance), [roman-mosaic](styles/roman-mosaic), [stained-glass](styles/stained-glass), [viking-runes](styles/viking-runes) |
 | [Cinzel Decorative](https://fonts.google.com/specimen/Cinzel+Decorative) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-nouveau](styles/art-nouveau) |
 | [Comic Neue](https://fonts.google.com/specimen/Comic+Neue) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [digital-comic](styles/digital-comic), [golden-age-comic](styles/golden-age-comic), [manga](styles/manga), [office-strip](styles/office-strip), [paint-doodle](styles/paint-doodle), [round-head-dark](styles/round-head-dark) |
 | [Cormorant Garamond](https://fonts.google.com/specimen/Cormorant+Garamond) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [dark-documentary](styles/dark-documentary), [ink-wash](styles/ink-wash), [renaissance](styles/renaissance), [single-line](styles/single-line), [stained-glass](styles/stained-glass), [symmetric-pastel](styles/symmetric-pastel) |
@@ -135,6 +136,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Bangers**: Copyright 2010 The Bangers Project Authors (https://github.com/googlefonts/bangers)
 - **Barlow**: Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
 - **Barlow Condensed**: Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
+- **Bodoni Moda**: Copyright 2020 The Bodoni Moda Project Authors (https://github.com/indestructible-type/Bodoni)
 - **Bowlby One SC**: Copyright (c) 2011, vernon adams (vern@newtypography.co.uk), with Reserved Font Names "Bowlby"
 - **Bricolage Grotesque**: Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage)
 - **Bungee**: Copyright 2023 The Bungee Project Authors (https://github.com/djrrb/Bungee)
