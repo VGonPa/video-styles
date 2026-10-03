@@ -110,8 +110,9 @@ that passes ±1 gives NaN and a silent track).>
 - **New subject:** <what to keep, what to rewrite, common traps>
 - **Length:** <how it stretches past 10 s: repeatable beats, what gets tiresome, rendering cost, and what in
   audio.py must be re-timed>
-- **Shorter:** <how it compresses to 3–6 s: the minimum time per beat, which beats to keep and drop, what a title
-  card costs>
+- **Shorter:** <how it compresses to 3–6 s: cut whole beats rather than compressing each; which to keep, which to
+  drop first, the shortest opening that still shows the signature, what a title card costs, and any helper that
+  must be removed with a dropped scene; a tested plan for 4 s if you can>
 - **Other formats:** <9:16 and 1:1: what recomposes easily and what does not; rendered values for the subject
   staying on screen to the end, not only for the demo's end card>
 

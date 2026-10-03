@@ -44,7 +44,10 @@ The output file is named after the project folder (`SLUG=$(basename "$PWD")` in 
 - **Frames depend only on `t`.** Pages render frames out of order, in parallel, and the review scripts render
   isolated stills, so a frame cannot rely on the frames before it. Use the style's seeded generator
   (`rng(seed)` or similar), never unseeded `Math.random()`, `Date`, `performance.now()` or state carried from
-  frame to frame. A simulation that depends on its history must pre-simulate inside `window.ready` and look the
+  frame to frame. That includes the canvas context itself: line dash, cap and join, alpha, composite mode,
+  filter, transform and clip persist from one `draw()` call to the next, so wrap every drawer you add in
+  `save()`/`restore()` (a leaking drawer passes a contact sheet but fails the determinism test).
+  A simulation that depends on its history must pre-simulate inside `window.ready` and look the
   result up by `t`. Ten catalog styles still set `"schedule": "contiguous"`: a leftover, since their frames pass
   the stills test and their contact sheets are valid. Do not add it to new code; stills cannot honour it.
 - **Nothing loads from the network** at render time: fonts, libraries and images are local.
@@ -60,7 +63,8 @@ A clip's length is set in three places; change them together:
 2. audio.py: `SR, DUR = 48000, 10.0` (the default varies, 9.5–10) sizes the sound buffer. Many audio.py files
    also write their music and bed at fixed times for the demo: a chord or melody list, `if te > 8.9: break` in
    clay, `T_END` in pixel-art, `tune(7.55, 9.6, …)` in absurd-webcomic. Re-time these from your new timeline or
-   cue times, or loop them to `DUR`; otherwise the score stops early or plays its ending mid-film. In
+   cue times, or loop them to `DUR`, including attack and release times sized for a 10 s film (a 1.8 s attack
+   swallows half of a 4 s one); otherwise the score stops early or plays its ending mid-film. In
    oscilloscope the sound length follows the signal, so only the timeline and build.sh matter.
 3. build.sh: `DUR=${DUR:-10}` (same default as the style), or run `DUR=20 ./build.sh`.
 

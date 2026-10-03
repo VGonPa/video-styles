@@ -15,7 +15,8 @@ time), fix them, render again. Stop when a fresh look finds nothing worth fixing
 - One focus at a time and a deliberate composition; the eye knows where to go in every frame.
 - Text is readable at full size: nothing clipped, overlapping, too small or too close to the edge. For 9:16
   social formats keep key text out of the top ~15%, the bottom ~25% and the right ~12%, where Reels, Shorts
-  and TikTok put captions and buttons.
+  and TikTok put captions and buttons, and set anything the viewer must read at 20 px or more (the 1080 px
+  frame is about 6–7 cm wide on a phone).
 - Motion has intent: anticipation, overshoot and stagger where the style calls for them, and none where the
   recipe rules them out.
 - At least one scene change or transformation.

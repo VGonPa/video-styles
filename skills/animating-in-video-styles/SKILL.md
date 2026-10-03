@@ -65,8 +65,10 @@ Write a beat sheet: time ranges, what is on screen, what moves, what sounds. Put
 first 3 seconds, keep one focus at a time, include at least one transformation or scene change, and end on a
 settle, fade or held final pose. Borrow the recipe's film grammar: how its scenes open, hold and hand over.
 Keep what the recipe calls the style and replace the demo's plot. Most demos run 10 s; for a shorter film
-(under about 6 s) use one subject and one or two events, and let a change of state (lights coming on,
-nightfall, an arrival) be the transformation; the recipe's "Shorter" note says what the style can drop.
+(under about 6 s) cut whole scenes rather than compressing every beat: keep the signature opening (about
+1–1.5 s), one or two events with a transformation (a change of state such as lights coming on, nightfall or
+an arrival counts), a held final state of at least 0.8 s and a fade of at least 0.25 s. The recipe's "Shorter"
+note says which scenes go first.
 
 ### 6. Adapt the code
 Follow the recipe's reuse map: keep the kit (textures, palette, primitives, finish, instruments), replace the
