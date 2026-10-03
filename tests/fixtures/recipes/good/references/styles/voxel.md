@@ -104,6 +104,7 @@ the title "BLOCK BY BLOCK" · `styles/voxel/`
   island fill the height or raise the wide-shot `CAM` radii about 3×. The 680 px hotbar fits, but at `H - 150`
   it sits in the social caption zone: move it to about `H * 0.72`, stack the counter under the card, and keep
   the title to 8 characters a line. 1:1: same HUD, wide-shot radii about 1.8×.
+- In 9:16, `camera.aspect` follows `W / H`; call `camera.updateProjectionMatrix()` if you change it later.
 
 ## Motion
 - Easing: `backOut(x, s)` for every pop (overshoot 2.6 for blocks, 2.4 for title letters, 1.8 for cards),
@@ -159,6 +160,7 @@ the title "BLOCK BY BLOCK" · `styles/voxel/`
 - Music goes through a small room reverb; the mix is soft-limited and fades out over the last 0.5 s.
 - A new scene emits `card` per step, `place` with `m` for every block, `hit` and `break` for removal, `glow`
   when lights come on, `pull` for the reveal, `letter` per title letter, `sub` and `end`.
+- The piano theme is a fixed timetable in audio.py (`bars`, `mel`), not cued: re-time it for a new length.
 
 ## Reuse map
 | Piece | Where | Call / key params | Reuse |

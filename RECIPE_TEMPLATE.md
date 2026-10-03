@@ -1,6 +1,6 @@
 # Style recipe template
 
-Every style has a recipe at `skills/animating-in-video-styles/references/styles/<slug>.md`, the file the agent
+Each style's recipe lives at `skills/animating-in-video-styles/references/styles/<slug>.md`, the file the agent
 skill reads before it adapts the style. The reader is an agent that has never seen the style: it has the
 recipe, the original's contact sheet and the reference code, and must make a film on a new subject, at a new
 length and possibly in 9:16, that a viewer would recognise as this style.
@@ -14,18 +14,16 @@ length and possibly in 9:16, that a viewer would recognise as this style.
 - **Derive every fact from the current code** (`styles/<slug>/anim.html` and the scripts it loads, `audio.py`,
   `render.json`, `fonts.css`). The style's original brief or PR description, when you have them, explain the
   intent; where they disagree with the code, the code wins.
-- **Name what the reader can find:** functions, constants, files (paths relative to the style folder, such as
-  `js/lib.js` or `vendor/three.min.js`), with their parameters. Never line numbers. `check_catalog.py` verifies
-  that every file and identifier in backticks in the Palette's "In code" column, the Film grammar's "In code"
-  column, the Reuse map and the prose sections (all but Boundaries and Technical notes) exists in the style's code (font names
-  included), that in `path` → `name` the file defines that name, that every call in backticks anywhere
-  (`drawTitle()`) exists, that every palette colour occurs in the code, and that every style named in
-  Boundaries is in the catalog. In Sound, a lower-case name in backticks must be a cue kind or field that
-  audio.py reads, or a name audio.py defines that the film does not emit; write functions as `name()`, and
-  leave out cues that anim.html emits but audio.py ignores (they are silent). Backticks mean "this is in the
-  style's code" (or its vendored library): write positional fields and anything outside it in plain words,
-  write `()` only after functions that exist, and describe a function you suggest the reader create in plain
-  words, without backticks (a drawLogo function).
+- **Name what the reader can find:** functions with their parameters, constants, fonts and files (paths relative
+  to the style folder, such as `js/lib.js` or `vendor/three.min.js`); never line numbers. Backticks mean "this is
+  in the style's code or its vendored library", and `()` marks a function that exists. Write everything else in
+  plain words: a value without a name in the code (the third value of an array row), or a function you suggest
+  the reader create (a drawLogo function). In Sound, backtick only cue kinds and fields audio.py reads and names
+  audio.py itself defines; leave out cues that anim.html emits but audio.py ignores (they are silent).
+- **`check_catalog.py` catches slips, not wrong facts.** It fails a recipe when a backticked file or name
+  (outside Boundaries and Technical notes) is not in the code, when in `path` → `name` the file does not define
+  the name, when a palette colour does not occur in the code, or when Boundaries names a style the catalog
+  lacks. It cannot tell whether easing, timing or sound facts are right; the reviewer checks those.
 - **Write each colour as the code writes it:** `#rrggbb`, `0xrrggbb` or r,g,b numbers. When the code computes it
   (a GLSL `vec3(…)`, an `hsl()` template, a blend function), put that expression in backticks in the Colour
   column, exactly as written in the code, instead of a hex you worked out.
@@ -88,8 +86,9 @@ never does.>
 
 ## Sound
 <What audio.py synthesizes, which cue kinds trigger each sound and the fields and ranges they carry (d, v, f,
-n…), the bed, the mix. Which cues a new scene should emit. Which music and bed parts audio.py writes at fixed
-times rather than from cues, and where.>
+n…), the bed, the mix. Which cues a new scene should emit, and which ones audio.py looks up by name and cannot
+run without (often the cue it times the music from). Which music and bed parts audio.py writes at fixed times
+rather than from cues, and where.>
 
 ## Reuse map
 | Piece | Where | Call / key params | Reuse |
@@ -124,7 +123,7 @@ Someone other than the author reviews every recipe. Check:
 3. The Signature items are visible in the original's first 3 seconds (`_reference/original-sheet.jpg` and
    stills), and nothing visible there that defines the look is missing.
 4. The Film grammar table matches the code's timeline; the Sound cues match what audio.py reads, and the recipe
-   says which sounds are timed for the demo.
+   says which sounds are timed for the demo and which cues audio.py cannot run without.
 5. A cold reader could draw an object the demo never had, in this style, from Shapes, Palette and Texture
    alone, and could recompose it for 9:16 from Composition and Adapting.
 6. It is concise, explains the why, names no line numbers and repeats nothing the catalog already holds.

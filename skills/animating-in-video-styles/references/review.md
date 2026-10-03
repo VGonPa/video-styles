@@ -3,9 +3,8 @@
 Judge the frames, not the code. After every render, open `_review/sheet.jpg` and both key frames at full size,
 next to the original's full-resolution stills in `_reference/original/` (rendered before you edited; see SKILL.md
 step 4). The GIF-based `_reference/original-sheet.jpg` is 480 px wide and dithered: use it for overall feel, not
-for texture, line weight or exact colour. If you cannot view images, ask the user to compare
-them and tell you what they see; do not skip the review. Write down concrete defects (what, where, at what
-time), fix them, render again. Do at least two passes; stop when a fresh look finds nothing worth fixing.
+for texture, line weight or exact colour. Write down concrete defects (what, where, at what
+time), fix them, render again. Stop when a fresh look finds nothing worth fixing.
 
 ## Does it read as the style?
 - The recipe's **Signature** items are on screen within the first 3 seconds.
@@ -27,11 +26,7 @@ time), fix them, render again. Do at least two passes; stop when a fresh look fi
 - The brief lands: the film explains, sells or tells what the user asked for.
 
 ## Content rules
-- A style "inspired by" a creator borrows the visual language and tone only: never their characters, mascots,
-  logos, lettering fonts or signature jokes.
-- Cultural styles respect the tradition's visual grammar: no sacred or religious iconography as decoration,
-  no invented script pretending to be a real language.
-- Real brands, logos, products and people appear only when the user owns or supplies them.
+Check the frames against the Guardrails in SKILL.md.
 
 ## Technical checks
 - The duration ffprobe prints at the end of build.sh matches the plan (see "Duration: three places" in

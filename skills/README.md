@@ -29,7 +29,7 @@ or copy `skills/animating-in-video-styles/` into your agent's skills directory (
 
 `check_catalog.py` validates the skill's frontmatter (spec keys only), its file references, that the generated
 catalog is current, the links under `.claude/skills/` and `.agents/skills/`, and every recipe: title, headings,
-and that the identifiers and colours it cites exist in the style's code. `tests/test_skill.py` covers the search
+tables, and that the files, names, colours, cue names and style slugs it cites exist. `tests/test_skill.py` covers the search
 and the recipe checks. While recipes are being written, `RECIPES_REQUIRED = False` in check_catalog.py reports a
 missing recipe without failing; set it to `True` once every style has one.
 

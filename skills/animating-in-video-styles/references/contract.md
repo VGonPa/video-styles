@@ -19,7 +19,7 @@ tooling (render.mjs, events.mjs, build.sh) works unchanged as long as your anim.
 | File | Role | Edit? |
 |---|---|---|
 | `anim.html` and the `*.js` files it loads | Draw every frame on the style's canvas | Yes: this is the film |
-| `audio.py` | Synthesizes the soundtrack from `events.json` with NumPy | Yes: cue handling and duration |
+| `audio.py` | Synthesizes the soundtrack from `events.json` with NumPy | Yes: cue handling, duration and music timing |
 | `build.sh` | frames → `events.json` → `audio.wav` → `<folder>.mp4` → `preview.gif` | Only `DUR` |
 | `render.mjs`, `events.mjs` | Shared renderer and cue exporter (headless Chromium via Playwright) | No |
 | `common.js` | In blueprint, chalkboard, whiteboard and single-line: the catalog's shared drawing kit (`W`, `H`, easing, `rng`, `mk`, `loadFont`, paths). In anime-80s it is that style's own code | Only `W`/`H` for another size; anime-80s: freely |
@@ -56,10 +56,10 @@ A clip's length is set in three places; change them together:
 1. The timeline in anim.html or the scripts it loads: a `DUR` constant, a table of cue times and the closing
    fade (in kawaii the timeline is in kawaii.js; in anime-80s `DUR` is in common.js).
 2. audio.py: `SR, DUR = 48000, 10.0` (the default varies, 9.5–10) sizes the sound buffer. Many audio.py files
-   also write their music and bed at fixed times for the demo (a chord or melody list, `if te > 8.9: break`,
-   `T_END = 6.7`, `tune(7.55, 9.6)`): re-time these from your new timeline or cue times, or loop them to `DUR`,
-   or the score stops early or plays its ending mid-film. In oscilloscope the sound length follows the signal,
-   so only the timeline and build.sh matter.
+   also write their music and bed at fixed times for the demo: a chord or melody list, `if te > 8.9: break` in
+   clay, `T_END` in pixel-art, `tune(7.55, 9.6, …)` in absurd-webcomic. Re-time these from your new timeline or
+   cue times, or loop them to `DUR`; otherwise the score stops early or plays its ending mid-film. In
+   oscilloscope the sound length follows the signal, so only the timeline and build.sh matter.
 3. build.sh: `DUR=${DUR:-10}` (same default as the style), or run `DUR=20 ./build.sh`.
 
 build.sh muxes with ffmpeg `-shortest`, so if audio.py still makes 10 s of sound, a 20 s film is silently cut
@@ -85,7 +85,7 @@ Draw a user's logo, product shot or illustration from a **data: URI**, never fro
 anim.html as a file:// page, where an image loaded from a path counts as cross-origin: it taints the canvas
 and `toDataURL()` throws "Tainted canvases may not be exported", so the render fails.
 
-1. `python3 scripts/embed_image.py logo.png LOGO >> <project>/assets.js` (PNG, JPEG, WebP, GIF or SVG).
+1. `python3 <skill>/scripts/embed_image.py logo.png LOGO >> <project-dir>/assets.js` (PNG, JPEG, WebP, GIF or SVG).
 2. Load it before the style's script: `<script src="assets.js"></script>`.
 3. Decode it in `window.ready`: `const logo = new Image(); logo.src = LOGO; await logo.decode();` and draw it
    with `ctx.drawImage` in your scenes.
@@ -98,6 +98,9 @@ untouched, such as a logo.
 events.mjs opens anim.html and saves `window.events()` to `events.json`; audio.py reads it and synthesizes
 every sound with NumPy, without samples. To re-score a film, emit cues from your new scenes with the names and
 fields audio.py already handles, extend audio.py only for sounds the style lacks, and keep its `DUR` in step.
+About one style in six looks up a named cue and times its music from it
+(`next(e for e in ev if e['k'] == 'end')`, `E['snap']`): keep emitting that cue, or audio.py stops with
+StopIteration or KeyError.
 To add a user's voiceover or music, load the WAV in audio.py (the standard `wave` module plus NumPy), resample
 to 48 kHz stereo if needed and mix it into the buffer, keeping `DUR` long enough for it. A silent stereo track
 is acceptable when sound would hurt.

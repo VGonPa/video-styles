@@ -306,11 +306,12 @@ def check_recipe(s, problems, notes):
             problems.append(f"recipe reuse map row '{row[0]}': put where it lives in backticks")
         cited_names(row[1], folder, names, problems, "reuse map")
         cited_names(row[2], folder, names, problems, "reuse map")
+        cited_names(row[3], folder, names, problems, "reuse map")
         names_in_named_file(row[1], folder, problems, "reuse map")
     # Names in backticks in the prose sections are facts the reader acts on (Technical notes stays out: it
     # names things a style lacks, such as "no `render.json`").
-    for heading in ("Signature", "Typography and copy", "Texture and finish", "Shapes, line and figures",
-                    "Composition and camera", "Motion", "Sound", "Adapting"):
+    for heading in ("Signature", "Palette", "Typography and copy", "Texture and finish", "Shapes, line and figures",
+                    "Composition and camera", "Motion", "Film grammar", "Sound", "Adapting"):
         prose = "\n".join(l for l in section(text, heading).splitlines() if not l.lstrip().startswith("|"))
         cited_names(prose, folder, names, problems, heading.split(",")[0].split()[0].lower())
     check_sound(s["slug"], text, problems)

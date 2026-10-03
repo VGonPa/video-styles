@@ -101,7 +101,7 @@ class RecipeCheckTests(unittest.TestCase):
     def test_invented_facts_in_a_correct_recipe_fail(self):
         problems = self.check(FIXTURES / "wrong", "sunday-strip")
         for expected in ("'paper': give the colour value", "`Bangers`", "`whoosh` is not a cue kind",
-                         "`brush` is not defined in js/fantasy.js", "`easeOutElastic`"):
+                         "`brush` is not defined in js/fantasy.js", "`easeOutElastic`", "`SHADOW`"):
             self.assertTrue(any(expected in p for p in problems), (expected, problems))
 
     def test_glsl_definitions_count(self):
