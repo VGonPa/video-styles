@@ -1,6 +1,6 @@
 #!/bin/bash
 # liquid-glass: draw frames → events → synth audio → mp4 (H.264 30fps, full-range yuv420p like the other styles, crf18 + AAC 48k stereo) → delete frames → preview.gif
-# Needs Node + Playwright (global @playwright/test, or PLAYWRIGHT_DIR=<playwright-core dir>), chromium headless shell (WebGL2 via SwiftShader is enough), ffmpeg, python3 + numpy.
+# Needs Node + Playwright (global @playwright/test, or PLAYWRIGHT_DIR=<playwright-core dir>), chromium headless shell (WebGL2; render.json asks for ANGLE on Metal), ffmpeg, python3 + numpy.
 set -e; cd "$(dirname "$0")"; SLUG=$(basename "$PWD"); DUR=${DUR:-10}; WORKERS=${WORKERS:-2}
 FR=$(mktemp -d "${TMPDIR:-/tmp}/${SLUG}_frames.XXXX")
 trap 'rm -rf "$FR"' EXIT
