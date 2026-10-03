@@ -65,6 +65,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Kalam](https://fonts.google.com/specimen/Kalam) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [office-strip](styles/office-strip), [whiteboard](styles/whiteboard) |
 | KaTeX_Main | MIT ([KaTeX fonts](https://github.com/KaTeX/katex-fonts/blob/master/LICENSE)) | [3blue1brown](styles/3blue1brown) |
 | KaTeX_Math | MIT ([KaTeX fonts](https://github.com/KaTeX/katex-fonts/blob/master/LICENSE)) | [3blue1brown](styles/3blue1brown) |
+| [Lato](https://fonts.google.com/specimen/Lato) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [flat-design](styles/flat-design) |
 | [Libre Baskerville](https://fonts.google.com/specimen/Libre+Baskerville) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [single-panel-absurd](styles/single-panel-absurd) |
 | [Libre Franklin](https://fonts.google.com/specimen/Libre+Franklin) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [data-visualization](styles/data-visualization) |
 | [Lilita One](https://fonts.google.com/specimen/Lilita+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [cel-shaded-3d](styles/cel-shaded-3d), [clear-line](styles/clear-line) |
@@ -170,6 +171,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Josefin Sans**: Copyright 2010 The Josefin Sans Project Authors (https://github.com/ThomasJockin/JosefinSansFont-master), with Reserved Font Name "Josefin Sans".
 - **Jost**: Copyright 2020 The Jost Project Authors (https://github.com/indestructible-type/Jost)
 - **Kalam**: Copyright (c) 2014 Indian Type Foundry (info@indiantypefoundry.com)
+- **Lato**: Copyright (c) 2011-2015 by tyPoland Lukasz Dziedzic (http://www.typoland.com/) with Reserved Font Name "Lato". Licensed under the SIL Open Font License, Version 1.1 (http://scripts.sil.org/OFL).
 - **Libre Baskerville**: Copyright 2012 The Libre Baskerville Project Authors (https://github.com/impallari/Libre-Baskerville)
 - **Libre Franklin**: Copyright 2020 The Libre Franklin Project Authors (https://github.com/googlefonts/Libre-Franklin)
 - **Lilita One**: Copyright (c) 2011 Juan Montoreano (juan@remolacha.biz), with Reserved Font Names "Lilita One"
