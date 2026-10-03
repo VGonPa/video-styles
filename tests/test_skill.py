@@ -86,7 +86,7 @@ class RecipeCheckTests(unittest.TestCase):
         # (kawaii, anime-80s), placeholders, font strings and directories.
         for slug in ("cave-painting", "low-poly", "kawaii", "anime-80s", "sunday-strip", "cosmic-epic",
                      "bayeux-tapestry", "neon-sign", "oscilloscope", "nes-8bit", "persian-miniature",
-                     "absurd-webcomic"):
+                     "absurd-webcomic", "voxel"):
             with self.subTest(slug=slug):
                 self.assertEqual(self.check(FIXTURES / "good", slug), [])
 
@@ -103,6 +103,11 @@ class RecipeCheckTests(unittest.TestCase):
         for expected in ("'paper': give the colour value", "`Bangers`", "`whoosh` is not a cue kind",
                          "`brush` is not defined in js/fantasy.js", "`easeOutElastic`"):
             self.assertTrue(any(expected in p for p in problems), (expected, problems))
+
+    def test_glsl_definitions_count(self):
+        self.assertTrue(check_catalog.defines("nebula", "vec3 nebula(vec3 d){"))
+        self.assertTrue(check_catalog.defines("uScol", "uniform vec3 uSd, uScol;"))
+        self.assertFalse(check_catalog.defines("ghost", "vec3 nebula(vec3 d){"))
 
     def test_template_and_checker_agree_on_headings(self):
         template = (manifest.ROOT / "RECIPE_TEMPLATE.md").read_text()

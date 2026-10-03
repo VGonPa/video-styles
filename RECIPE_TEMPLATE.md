@@ -17,14 +17,15 @@ length and possibly in 9:16, that a viewer would recognise as this style.
 - **Name what the reader can find:** functions, constants, files (paths relative to the style folder, such as
   `js/lib.js` or `vendor/three.min.js`), with their parameters. Never line numbers. `check_catalog.py` verifies
   that every file and identifier in backticks in the Palette's "In code" column, the Film grammar's "In code"
-  column, the Reuse map and the prose sections (all but Technical notes) exists in the style's code (font names
+  column, the Reuse map and the prose sections (all but Boundaries and Technical notes) exists in the style's code (font names
   included), that in `path` → `name` the file defines that name, that every call in backticks anywhere
   (`drawTitle()`) exists, that every palette colour occurs in the code, and that every style named in
   Boundaries is in the catalog. In Sound, a lower-case name in backticks must be a cue kind or field that
-  audio.py reads: write synth functions as `name()`, and leave out cues that anim.html emits but audio.py
-  ignores (they are silent). Backticks mean "this is in the style's code": write positional fields and
-  anything outside it in plain words, write `()` only after functions that exist, and name a function you
-  suggest the reader write without parentheses.
+  audio.py reads, or a name audio.py defines that the film does not emit; write functions as `name()`, and
+  leave out cues that anim.html emits but audio.py ignores (they are silent). Backticks mean "this is in the
+  style's code" (or its vendored library): write positional fields and anything outside it in plain words,
+  write `()` only after functions that exist, and describe a function you suggest the reader create in plain
+  words, without backticks (a drawLogo function).
 - **Write each colour as the code writes it:** `#rrggbb`, `0xrrggbb` or r,g,b numbers. When the code computes it
   (a GLSL `vec3(…)`, an `hsl()` template, a blend function), put that expression in backticks in the Colour
   column, exactly as written in the code, instead of a hex you worked out.
@@ -87,7 +88,8 @@ never does.>
 
 ## Sound
 <What audio.py synthesizes, which cue kinds trigger each sound and the fields and ranges they carry (d, v, f,
-n…), the bed, the mix. Which cues a new scene should emit.>
+n…), the bed, the mix. Which cues a new scene should emit. Which music and bed parts audio.py writes at fixed
+times rather than from cues, and where.>
 
 ## Reuse map
 | Piece | Where | Call / key params | Reuse |
@@ -98,7 +100,8 @@ n…), the bed, the mix. Which cues a new scene should emit.>
 
 ## Adapting
 - **New subject:** <what to keep, what to rewrite, common traps>
-- **Length:** <how it stretches past 10 s: repeatable beats, what gets tiresome, rendering cost>
+- **Length:** <how it stretches past 10 s: repeatable beats, what gets tiresome, rendering cost, and what in
+  audio.py must be re-timed>
 - **Other formats:** <9:16 and 1:1: what recomposes easily and what does not>
 
 ## Boundaries
@@ -120,7 +123,8 @@ Someone other than the author reviews every recipe. Check:
 2. Every identifier, file and font named exists (grep the code and `fonts/`); every colour matches the code.
 3. The Signature items are visible in the original's first 3 seconds (`_reference/original-sheet.jpg` and
    stills), and nothing visible there that defines the look is missing.
-4. The Film grammar table matches the code's timeline; the Sound cues match what audio.py reads.
+4. The Film grammar table matches the code's timeline; the Sound cues match what audio.py reads, and the recipe
+   says which sounds are timed for the demo.
 5. A cold reader could draw an object the demo never had, in this style, from Shapes, Palette and Texture
    alone, and could recompose it for 9:16 from Composition and Adapting.
 6. It is concise, explains the why, names no line numbers and repeats nothing the catalog already holds.

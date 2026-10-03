@@ -72,6 +72,7 @@ melancholic.
 | bloom + grade | `DOWN`, `UP`, `COMP` | `uBloomK`, `uExpo`, `uFade` | as is |
 | titles | `title()` | `title(runs, x, y, size, track, alpha, weight, glow)` | as is |
 | timeline | `T_SWELL`, `T_COLL`, `TB`, `CAPS`, `counter(t)` | | replace |
+| nebula and planet | `anim.html` → `nebula()`, `temp()` | `nebula(d)`, `temp(k)`; `anim.html` → `uScol` | as is |
 
 ## Adapting
 - **New subject:** keep the bloom, grain and title system; write new bodies in `SCENE`.

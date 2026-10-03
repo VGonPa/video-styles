@@ -36,6 +36,8 @@ time), fix them, render again. Do at least two passes; stop when a fresh look fi
 ## Technical checks
 - The duration ffprobe prints at the end of build.sh matches the plan (see "Duration: three places" in
   contract.md), at 30 fps, with an audio stream.
+- The score covers the whole film: no music that stops early or plays at the original's times. Listen to the
+  MP4; if you cannot, check every time written as a number in audio.py against your timeline.
 - Determinism: draw one moment alone and again after other frames, then compare, inside the project folder:
   `node render.mjs _review/det-a 30 0 10 1 4.2`, `node render.mjs _review/det-b 30 0 10 1 0.5,2,4.2`,
   `cmp _review/det-a/t_4.20.jpg _review/det-b/t_4.20.jpg`. The files must be identical (render.mjs draws the

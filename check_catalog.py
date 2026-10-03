@@ -244,20 +244,26 @@ def names_in_named_file(cell, folder, problems, where):
 
 def check_sound(slug, text, problems):
     """Cue kinds and fields named in Sound must be strings that audio.py (or render.json) reads: a cue that only
-    anim.html mentions is silent in the film."""
+    anim.html mentions is silent in the film. audio.py's own variables and functions (`bars`, `wet`) are fine
+    unless the film also emits that name as a cue."""
     folder = ROOT / "styles" / slug
-    reads = "\n".join(p.read_text() for p in (folder / "audio.py", folder / "render.json") if p.is_file())
+    audio = (folder / "audio.py").read_text() if (folder / "audio.py").is_file() else ""
+    reads = audio + "\n" + ((folder / "render.json").read_text() if (folder / "render.json").is_file() else "")
+    film = "\n".join(f.read_text(errors="ignore") for f in manifest.style_sources(slug) if f.suffix != ".py")
     for token in re.findall(r"`([^`]+)`", section(text, "Sound")):
         if not re.fullmatch(r"[a-z_][a-z0-9_]+", token):
             continue        # calls, files, expressions, constants and one-letter fields
         if re.search(rf"^\s*(?:import|from)\b.*\b{token}\b", reads, re.M):
             continue        # a module audio.py imports (`wave`)
-        if not re.search(rf"['\"]{token}['\"]", reads):
-            problems.append(f"recipe sound: `{token}` is not a cue kind or field audio.py reads; "
-                            "write synth functions as `name()`")
+        if re.search(rf"['\"]{token}['\"]", reads):
+            continue        # a cue kind or field audio.py reads
+        if defines(token, audio) and not re.search(rf"['\"`]{token}['\"`]", film):
+            continue        # audio.py's own variable or function, not a cue the film emits
+        problems.append(f"recipe sound: `{token}` is not a cue kind or field audio.py reads; "
+                        "write functions as `name()`")
 
 
-def check_palette(text, folder, code, problems):
+def check_palette(text, folder, code, names, problems):
     flat = re.sub(r"\s+", "", code)
     for row in recipe_table(text, "Palette", problems):
         role, cell = row[0], row[1]
@@ -273,7 +279,7 @@ def check_palette(text, folder, code, problems):
                 problems.append(f"recipe palette row '{role}': give the colour value or the expression that computes it")
             elif not any(expression_in_code(lit, code) for lit in expressions):
                 problems.append(f"recipe palette row '{role}': {expressions[0]} not found in the code")
-        cited_names(row[2], folder, code, problems, "palette")
+        cited_names(row[2], folder, names, problems, "palette")
 
 
 def check_recipe(s, problems, notes):
@@ -290,21 +296,23 @@ def check_recipe(s, problems, notes):
         return
     # Derived from the code: cited files, identifiers and colours must exist in the style's code.
     folder, code = ROOT / "styles" / s["slug"], style_code(s["slug"])
-    check_palette(text, folder, code, problems)
+    # Identifiers may also be library API the reader finds in vendor/ (three.js); colours must be the style's own.
+    names = code + "\n" + "\n".join(f.read_text(errors="ignore") for f in sorted((folder / "vendor").glob("*.js")))
+    check_palette(text, folder, code, names, problems)
     for row in recipe_table(text, "Film grammar", problems):
-        cited_names(row[2], folder, code, problems, "film grammar")
+        cited_names(row[2], folder, names, problems, "film grammar")
     for row in recipe_table(text, "Reuse map", problems):
         if "`" not in row[1]:
             problems.append(f"recipe reuse map row '{row[0]}': put where it lives in backticks")
-        cited_names(row[1], folder, code, problems, "reuse map")
-        cited_names(row[2], folder, code, problems, "reuse map")
+        cited_names(row[1], folder, names, problems, "reuse map")
+        cited_names(row[2], folder, names, problems, "reuse map")
         names_in_named_file(row[1], folder, problems, "reuse map")
     # Names in backticks in the prose sections are facts the reader acts on (Technical notes stays out: it
     # names things a style lacks, such as "no `render.json`").
     for heading in ("Signature", "Typography and copy", "Texture and finish", "Shapes, line and figures",
                     "Composition and camera", "Motion", "Sound", "Adapting"):
         prose = "\n".join(l for l in section(text, heading).splitlines() if not l.lstrip().startswith("|"))
-        cited_names(prose, folder, code, problems, heading.split(",")[0].split()[0].lower())
+        cited_names(prose, folder, names, problems, heading.split(",")[0].split()[0].lower())
     check_sound(s["slug"], text, problems)
     # "Poor fit: use `x`" sends the reader to another style, which must exist.
     for token in re.findall(r"`([^`]+)`", section(text, "Boundaries")):
@@ -316,8 +324,9 @@ def check_recipe(s, problems, notes):
         span = GLOBAL_MEMBER.sub(" ", re.sub(r"'[^']*'|\"[^\"]*\"", " ", span))
         for call in re.findall(r"([A-Za-z_$][\w$]*)\s*\(", span):
             if call not in CALL_OK and call not in PY_BUILTINS \
-                    and not re.search(rf"(?<![\w$]){re.escape(call)}(?![\w$])", code):
+                    and not re.search(rf"(?<![\w$]){re.escape(call)}(?![\w$])", names):
                 problems.append(f"recipe cites `{call}()`, not found in the code")
+    problems[:] = list(dict.fromkeys(problems))    # one report per wrong name
 
 
 def check_skill():

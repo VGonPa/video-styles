@@ -74,7 +74,8 @@ notes. Embed the user's images as data URIs (`<skill>/scripts/embed_image.py`); 
 
 ### 7. Score it
 Emit cues from the new scenes with the cue kinds and fields audio.py already handles; extend audio.py only
-for sounds the style lacks, in the same synthesized character.
+for sounds the style lacks, in the same synthesized character. Re-time any music or bed that audio.py writes
+at fixed times for the original (see "Duration" in contract.md), or it stops early in a longer film.
 
 ### 8. Look, critique, fix
 Run `bash <skill>/scripts/contact_sheet.sh <project-dir> <seconds>` and look at `_review/sheet.jpg` and the
