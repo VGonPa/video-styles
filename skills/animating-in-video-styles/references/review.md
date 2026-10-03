@@ -12,7 +12,8 @@ time), fix them, render again. Stop when a fresh look finds nothing worth fixing
 - Side by side with the original sheet, a viewer would call it the same style, even though the subject differs.
 
 ## Is it a good film?
-- One focus at a time and a deliberate composition; the eye knows where to go in every frame.
+- One focus at a time and a deliberate composition; the eye knows where to go in every frame, and no flat or
+  empty area larger than about a fifth of the frame is left unless it is kept for text.
 - Text is readable at full size: nothing clipped, overlapping, too small or too close to the edge. For 9:16
   social formats keep key text out of the top ~15%, the bottom ~25% and the right ~12%, where Reels, Shorts
   and TikTok put captions and buttons, and set anything the viewer must read at 20 px or more (the 1080 px
@@ -21,7 +22,7 @@ time), fix them, render again. Stop when a fresh look finds nothing worth fixing
   recipe rules them out.
 - At least one scene change or transformation.
 - A beginning and an ending: open on purpose; close on a settle, fade or final pose, holding the final state
-  for at least 0.8 s. Never a hard cut on the last frame.
+  (nothing still sweeping, glinting or arriving) for at least 0.8 s. Never a hard cut on the last frame.
 - People read clearly: a head with a readable profile, neck and shoulders, torso, jointed limbs and hands,
   even as a silhouette. If a figure cannot be drawn well, tell the story with objects or animals.
 - The brief lands: the film explains, sells or tells what the user asked for.

@@ -112,6 +112,14 @@ def licenses(root, slug, dest):
             "Links are relative to the catalog repository.\n\n" + "\n".join(header + rows) + "\n", encoding="utf-8")
 
 
+def commit_of(root):
+    """The commit a clone is at, or None (tarballs and copies without git have none)."""
+    if not shutil.which("git") or not (root / ".git").exists():
+        return None
+    out = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
+    return out.stdout.strip() or None
+
+
 def reference(style, dest):
     ref = dest / "_reference"
     ref.mkdir(exist_ok=True)
@@ -172,6 +180,11 @@ def main():
             origin = f"github.com/{cat['repository']}@{ref}"
         shutil.copytree(root / "styles" / args.slug, dest, ignore=shutil.ignore_patterns(*SKIP), dirs_exist_ok=True)
         licenses(root, args.slug, dest)
+        commit = commit_of(root)
+    # Record where the code came from, so a recipe and the code it describes can be matched later.
+    (dest / "_reference").mkdir(exist_ok=True)
+    (dest / "_reference" / "SOURCE.txt").write_text(
+        f"{args.slug} from {origin}" + (f" at commit {commit}" if commit else "") + "\n", encoding="utf-8")
 
     build = dest / "build.sh"
     if build.exists():

@@ -52,7 +52,8 @@ timeline, and the cue kinds audio.py handles.
 2. `python3 <skill>/scripts/fetch_style.py <slug> <project-dir>` copies the style's film into a new folder,
    named with letters, digits and dashes (the output file takes that name). Inside a clone of the catalog, use
    `projects/<name>` (git-ignored), not a folder under `styles/`. No network, as in some sandboxes? Ask for
-   network access, or pass `--repo <path to a clone>`.
+   network access, or pass `--repo <path to a clone>`. `--ref <tag>` downloads a given version;
+   `_reference/SOURCE.txt` records where the code came from.
 3. Before editing, render the original at full resolution: `KEYS=<times> bash <skill>/scripts/contact_sheet.sh
    <project-dir> 10 16 _reference/original`, with `KEYS` set to the moments the recipe's Film grammar names (the
    default stills can miss a punchline or a reveal). This render, not the catalog's preview GIF, is the reference. Look at `_reference/original/` (sheet and two key frames) now, so you know what
@@ -69,7 +70,8 @@ Keep what the recipe calls the style and replace the demo's plot. Most demos run
 to the demo), keep the scenes and shorten holds and copy within the recipe's minimums. Under about 6 s, cut
 whole scenes rather than compressing every beat: keep the signature opening (about
 1–1.5 s), one or two events with a transformation (a change of state such as lights coming on, nightfall or
-an arrival counts), a held final state of at least 0.8 s and a fade of at least 0.25 s. The recipe's "Shorter"
+an arrival counts), a held final state of at least 0.8 s (counted from when nothing is still sweeping, glinting or arriving) and a
+fade of at least 0.25 s. The recipe's "Shorter"
 note says which scenes go first.
 
 ### 6. Adapt the code
@@ -91,8 +93,9 @@ is silently dropped, so check every kind you emit against audio.py.
 ### 8. Look, critique, fix
 Run `bash <skill>/scripts/contact_sheet.sh <project-dir> <seconds>` and look at `_review/sheet.jpg` and the
 key frames next to the original's in `_reference/original/`; add `KEYS=<t1>,<t2>` for full-size stills
-of the beats the film exists for (the punchline, the reveal) and the held final state (e.g. `KEYS=2.9,3.6` in a
-4 s film). Critique against the recipe's signature and
+of the beats the film exists for (the punchline, the reveal), each transition at its peak (a flash, wipe or
+iris) and the held final state (e.g. `KEYS=1.4,2.9,3.6` in a 4 s film); `_review/keys.txt` maps each key file to
+its time. Critique against the recipe's signature and
 `<skill>/references/review.md`, fix, and render again. Do at least two passes: first renders almost always have
 clipped text, crowded frames or a weak ending. If you cannot view images, ask the user to compare the sheets
 and describe what they see; do not skip the review.

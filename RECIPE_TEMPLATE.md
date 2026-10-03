@@ -15,8 +15,10 @@ length and possibly in 9:16, that a viewer would recognise as this style.
   your 9:16 values and render stills of every shot, each at the moment its characters and props reach their
   widest position, plus the end card; then go through every Signature item in every shot of every format and
   confirm each is visible and whole (a sun hidden behind a city or a cropped crown fails), check that nothing
-  defining the look leaves the frame, nothing is left unpainted, and key text stays out of the bands in
-  review.md. Give only values you rendered; if you could not test one, say so. Untested format advice was the
+  defining the look leaves the frame, nothing is left unpainted, no flat or empty band larger than about a fifth
+  of the frame remains (even if painted in one tone) unless it is kept for text, and key text stays out of the bands in
+  review.md. Re-render once with a stand-in subject of another silhouette (taller, or not a vehicle) and say
+  which values depend on the demo subject's shape. Give only values you rendered; if you could not test one, say so. Untested format advice was the
   most common serious error in the pilot recipes.
 - **Derive every fact from the current code** (`styles/<slug>/anim.html` and the scripts it loads, `audio.py`,
   `render.json`, `fonts.css`). The style's original brief or PR description, when you have them, explain the
@@ -116,7 +118,8 @@ that passes ±1 gives NaN and a silent track).>
   audio.py must be re-timed>
 - **Shorter:** <how it compresses below the demo's length: between about 6 s and the demo, which holds and how
   much copy shorten within the style's minimums; for 3–6 s, cut whole beats rather than compressing each; which to keep, which to
-  drop first, the shortest opening that still shows the signature, what a title card costs, and any helper that
+  drop first, the shortest opening that still shows the signature (counted after the fade-in, whose length you give), what a
+  title card costs (its final hold counted from the moment everything on it has settled), and any helper that
   must be removed with a dropped scene; a tested plan for 4 s if you can>
 - **Other formats:** <9:16 and 1:1: what recomposes easily and what does not; rendered values for the subject
   staying on screen to the end, not only for the demo's end card>

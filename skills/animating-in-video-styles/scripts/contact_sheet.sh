@@ -4,7 +4,8 @@
 #   scripts/contact_sheet.sh <project-dir> [duration=10] [count=16] [out=_review]
 #
 # Writes <project-dir>/<out>/sheet.jpg (4 columns), key-1.jpg (at 1/3 of the clip) and key-2.jpg (at 2/3).
-# KEYS="3.75,3.9" adds full-size stills at those times as key-3.jpg, key-4.jpg… (e.g. the held final pose).
+# KEYS="3.75,3.9" adds full-size stills at those times as key-3.jpg, key-4.jpg… (e.g. the held final pose);
+# <out>/keys.txt lists every key file with its time.
 # Run it once with out=_reference/original before editing, to keep full-resolution stills of the original.
 # WORKERS=1 renders with one browser page (default 2). Needs what build.sh needs for frames (Node +
 # Playwright) plus ffmpeg and python3.
@@ -19,10 +20,11 @@ mkdir -p "$OUT"
 TIMES=$(python3 -c "d, n = float('$DUR'), int('$N'); print(','.join(f'{(i + .5) * d / n:.2f}' for i in range(n)))")
 KEYT=$(python3 -c "d = float('$DUR'); extra = [float(x) for x in '${KEYS:-}'.split(',') if x.strip()]; print(','.join(f'{x:.2f}' for x in [d / 3, 2 * d / 3, *extra]))")
 node render.mjs "$TMP" 30 0 "$DUR" "${WORKERS:-2}" "$TIMES,$KEYT"
+: > "$OUT/keys.txt"
 k=0
 IFS=, read -ra KLIST <<< "$KEYT"
 for t in "${KLIST[@]}"; do
-  k=$((k + 1)); cp "$TMP/t_$t.jpg" "$OUT/key-$k.jpg"
+  k=$((k + 1)); cp "$TMP/t_$t.jpg" "$OUT/key-$k.jpg"; echo "key-$k.jpg $t s" >> "$OUT/keys.txt"
 done
 i=0
 IFS=, read -ra LIST <<< "$TIMES"
