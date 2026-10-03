@@ -35,10 +35,11 @@ Check the frames against the Guardrails in SKILL.md.
   demo's range can push a pan past ±1 and silence the whole track.
 - The score covers the whole film: no music that stops early or plays at the original's times. Listen to the
   MP4; if you cannot, check every time written as a number in audio.py against your timeline.
-- Determinism: draw one moment alone and again after other frames, then compare, inside the project folder:
+- Determinism: draw one moment alone and again after other frames, then compare, inside the project folder
+  (examples for a 10 s film; pick a time T inside yours, past a few earlier ones):
   `node render.mjs _review/det-a 30 0 10 1 4.2`, `node render.mjs _review/det-b 30 0 10 1 0.5,2,4.2`,
   `cmp _review/det-a/t_4.20.jpg _review/det-b/t_4.20.jpg`. The files must be identical (render.mjs draws the
-  times in order, so run b reaches 4.2 after other frames). A difference means an unseeded random number, a
+  times in order, so run b reaches T after other frames). A difference means an unseeded random number, a
   clock or state carried between frames crept in. WebGL styles can differ by GPU rounding alone: compare with
   `ffmpeg -i <a> -i <b> -lavfi psnr -f null - 2>&1 | grep average`, where above about 60 dB is rounding and a
   real leak shows as visibly different content. Run the test once on the untouched project for a baseline.

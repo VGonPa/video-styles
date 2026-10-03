@@ -64,6 +64,9 @@ anim.html contract, where duration and size live, how to use the user's images, 
 Write a beat sheet: time ranges, what is on screen, what moves, what sounds. Put the style's signature in the
 first 3 seconds, keep one focus at a time, include at least one transformation or scene change, and end on a
 settle, fade or held final pose. Borrow the recipe's film grammar: how its scenes open, hold and hand over.
+Keep what the recipe calls the style and replace the demo's plot. Most demos run 10 s; for a shorter film
+(under about 6 s) use one subject and one or two events, and let a change of state (lights coming on,
+nightfall, an arrival) be the transformation; the recipe's "Shorter" note says what the style can drop.
 
 ### 6. Adapt the code
 Follow the recipe's reuse map: keep the kit (textures, palette, primitives, finish, instruments), replace the
@@ -76,12 +79,15 @@ notes. Embed the user's images as data URIs (`<skill>/scripts/embed_image.py`); 
 Emit cues from the new scenes with the cue kinds and fields audio.py already handles; extend audio.py only
 for sounds the style lacks, in the same synthesized character. Re-time any music or bed that audio.py writes
 at fixed times for the original (see "Duration" in contract.md), or it stops early or ends at the wrong time.
-Then run `node events.mjs && python3 audio.py` in the project folder: it takes seconds and shows a missing cue
-at once, while build.sh reaches audio.py only after rendering every frame, and deletes them when it fails.
+Then run `node events.mjs && python3 audio.py` in the project folder: it takes seconds and catches a crash (a
+missing field, a cue looked up by name) or a `nan` peak, while build.sh reaches audio.py only after rendering
+every frame, and deletes them when it fails. It does not catch a cue kind audio.py has no handler for: that cue
+is silently dropped, so check every kind you emit against audio.py.
 
 ### 8. Look, critique, fix
 Run `bash <skill>/scripts/contact_sheet.sh <project-dir> <seconds>` and look at `_review/sheet.jpg` and the
-two key frames next to the original's in `_reference/original/`. Critique against the recipe's signature and
+key frames next to the original's in `_reference/original/`; add `KEYS=<t>` for a full-size still of the
+held final state (e.g. `KEYS=3.6` in a 4 s film). Critique against the recipe's signature and
 `<skill>/references/review.md`, fix, and render again. Do at least two passes: first renders almost always have
 clipped text, crowded frames or a weak ending. If you cannot view images, ask the user to compare the sheets
 and describe what they see; do not skip the review.

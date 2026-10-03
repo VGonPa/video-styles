@@ -12,7 +12,8 @@ length and possibly in 9:16, that a viewer would recognise as this style.
   `bash skills/animating-in-video-styles/scripts/contact_sheet.sh /tmp/<slug>-ref` and stills at 0.5, 1.5 and
   2.5 s (`node render.mjs stills 30 0 10 1 0.5,1.5,2.5` in that folder). Check the Signature against them.
 - **Render the formats you advise on.** In a scratch copy, set the canvas and `W`/`H` to 1080 × 1920, apply
-  your 9:16 values and render stills of the opening, a middle beat and the end card; check that nothing
+  your 9:16 values and render stills of every shot, each at the moment its characters and props reach their
+  widest position, plus the end card; check that nothing
   defining the look leaves the frame, nothing is left unpainted, and key text stays out of the bands in
   review.md. Give only values you rendered; if you could not test one, say so. Untested format advice was the
   most common serious error in the pilot recipes.
@@ -104,10 +105,15 @@ that passes ±1 gives NaN and a silent track).>
 | <the demo subject> | `<scene functions>`, `<timeline>` | | replace |
 
 ## Adapting
+- **Style vs demo plot:** <what is always the style (kit, grade, finish, signature moves) and which demo events
+  are plot a new film replaces; what can count as the transformation in a new story>
 - **New subject:** <what to keep, what to rewrite, common traps>
 - **Length:** <how it stretches past 10 s: repeatable beats, what gets tiresome, rendering cost, and what in
   audio.py must be re-timed>
-- **Other formats:** <9:16 and 1:1: what recomposes easily and what does not>
+- **Shorter:** <how it compresses to 3–6 s: the minimum time per beat, which beats to keep and drop, what a title
+  card costs>
+- **Other formats:** <9:16 and 1:1: what recomposes easily and what does not; rendered values for the subject
+  staying on screen to the end, not only for the demo's end card>
 
 ## Boundaries
 - **Distinct from:** <neighbouring styles by slug, and the difference>

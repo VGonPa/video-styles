@@ -35,7 +35,7 @@ if (!pw) {
 }
 pw.chromium.launch().then(b => b.close()).then(
   () => console.log('ok       Playwright + Chromium'),
-  e => { console.log('MISSING  Chromium for Playwright — npx playwright install chromium (Linux: also npx playwright install-deps)\n         ' + e.message.split('\n')[0]); process.exit(1); });
+  e => { console.log('FAILED   Chromium did not launch: either it is not installed (npx playwright install chromium; Linux: also\n         npx playwright install-deps) or a sandbox blocked it (common for coding agents: ask for permission to run\n         it outside the sandbox). Error: ' + e.message.split('\n')[0]); process.exit(1); });
 JS
 fi
 case "$(uname -s)" in
