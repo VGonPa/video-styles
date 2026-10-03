@@ -204,7 +204,7 @@ Art traditions from cultures and eras around the world.
 - `islamic-geometric` **Geometric Tilework** — Compass-drawn stars, glazed in cobalt. Best for elegant titles and explainers about pattern, symmetry and craft · titles, explainer · *no recipe yet*
 - `greek-pottery` **Greek Black-Figure** — Turning amphora, incised black silhouettes. Best for ancient history, origin stories, and myths told in profile · story, explainer · *no recipe yet*
 - `illuminated-manuscript` **Illuminated Manuscript** — Gilded initials, blackletter, mischievous marginalia. Best for medieval titles, recipes, chronicles, and storybook openings · titles, story · *no recipe yet*
-- `madhubani` **Madhubani** — Double lines, turmeric, fish and peacocks. Best for folk tales, festive greetings, and nature stories · story, social · *no recipe yet*
+- `madhubani` **Madhubani** — Double lines, turmeric, fish and peacocks. Best for folk tales, festive greetings, and nature stories · story, social
 - `bayeux-tapestry` **Medieval Tapestry** — Couched wool on linen, stitched captions. Best for journeys, chronicles, and step-by-step stories told in sequence · story, explainer · Inspired by the Bayeux Tapestry · *no recipe yet*
 - `viking-runes` **Norse Runestone** — Chiselled granite, ochre serpent, torchlight. Best for epic titles, legacy stories and things built to last · titles, story · *no recipe yet*
 - `papel-picado` **Papel Picado** — Cut tissue, string lights, fiesta dusk. Best for festive titles, event invites, and celebratory social posts · titles, social · *no recipe yet*
