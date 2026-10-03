@@ -1,0 +1,1323 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── post-impressionism · from sun to stars over a wheat field ──────────────────────────────────
+// Bare primed linen with its weave in plain view → a Prussian-blue brush lays the outlines down on a
+// drum beat (the hills, a fan of furrows, a winding path, two haystacks, the sun as one swoosh, guide
+// arcs for a turning sky) → the colour goes in coarse to fine, every stroke thick and directional: the
+// sun in concentric dabs, rings of white, lemon and orange round it against a violet seam, a sky of
+// wobbling, spiralling bands, the field combed along its furrows with violet in the troughs, poppies in
+// the green wheat → the outlines are struck again over the colour → the picture breathes: the bands
+// turn against each other, rings of light pulse out of the sun, a gust runs through the wheat → the sun
+// sinks behind the hills in an afterglow and the night repaints the sky band by band, stars igniting in
+// rings of yellow and orange against the violet-blue while the haystacks keep burning orange on a blue
+// field → the movement's name is painted into the night letter by letter → fade.
+// Every stroke is a sprite cut from one atlas of pre-lit brush marks (a loaded head, bristle grooves, a
+// ridge of pushed paint, a dry-brush tail and a cast shadow), bowed either way, one per pigment and
+// shape. Stroke lists, contours, the weave and the title masks are built once in `ready`; a frame only
+// places sprites. The painted world advances on a 15 fps cadence, like painted frame-by-frame animation
+// (10 and 7.5 fps while the finished picture only breathes); the outline beats and the fades run at the full rate.
+const W = 1920, H = 1080, DUR = 10, TAU = Math.PI * 2;
+const CADENCE = 15, LAND_T = 0.2;        // painted-world frame rate; how long one stroke takes to land
+const cv = document.getElementById('c');
+let ctx = cv.getContext('2d');   // swapped briefly for an offscreen layer while a cache is painted
+
+// ── numbers ──
+const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
+const lerp = (a, b, k) => a + (b - a) * k;
+const span = (t, a, b) => clamp01((t - a) / (b - a));
+const sstep = k => { k = clamp01(k); return k * k * (3 - 2 * k); };
+const inOut = k => { k = clamp01(k); return k < 0.5 ? 4 * k * k * k : 1 - 4 * (1 - k) ** 3; };
+const easeOut = k => 1 - (1 - clamp01(k)) ** 3;
+const overshoot = k => { const d = clamp01(k) - 1; return 1 + d * d * (2.6 * d + 1.6); };   // 0 → ~1.09 → 1
+const bump = (x, c, w) => Math.exp(-(((x - c) / w) ** 2));
+const wrap01 = a => (((a % TAU) + TAU) % TAU) / TAU;
+// while the finished picture only breathes (no stroke is landing) it moves on a slower step
+const BREATH = [[3.4, 5.4, 10], [8.45, 10, 7.5]];
+const quant = t => {
+  const w = BREATH.find(([a, b]) => t >= a && t < b), c = w ? w[2] : CADENCE;
+  return Math.floor(t * c + 1e-6) / c;
+};
+const canvasOf = (w, h) => { const c = document.createElement('canvas'); c.width = Math.ceil(w); c.height = Math.ceil(h); return c; };
+const wpick = (r, opts) => {
+  let tot = 0; for (const o of opts) tot += o[1];
+  let v = r() * tot; for (const o of opts) { v -= o[1]; if (v <= 0) return o[0]; }
+  return opts[opts.length - 1][0];
+};
+function rng(seed) {   // splitmix-style generator: every random choice in the film comes from one of these
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x9E3779B9) >>> 0;
+    let z = Math.imul(s ^ (s >>> 16), 0x21F0AAAD);
+    z = Math.imul(z ^ (z >>> 15), 0x735A2D97);
+    return ((z ^ (z >>> 15)) >>> 0) / 4294967296;
+  };
+}
+const gauss = r => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(TAU * r());
+const logn = (r, med, sig, lo, hi) => Math.min(hi, Math.max(lo, med * Math.exp(sig * gauss(r))));   // brush sizes: mostly medium, a few long
+function hash3(i, j, k) {
+  let h = (Math.imul(i, 0x27D4EB2F) ^ Math.imul(j, 0x165667B1) ^ Math.imul(k, 0x61C88647)) | 0;
+  h = Math.imul(h ^ (h >>> 15), 0x2C1B3C6D);
+  h = Math.imul(h ^ (h >>> 12), 0x297A2D39);
+  return ((h ^ (h >>> 15)) >>> 0) / 4294967296;
+}
+function noise(x, y, k = 0) {   // smooth value noise in [0, 1]
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const a = hash3(ix, iy, k), b = hash3(ix + 1, iy, k), c = hash3(ix, iy + 1, k), d = hash3(ix + 1, iy + 1, k);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+
+// ── pigments: [body, the second colour some bristles carry] ──
+const PAL = {
+  prussian: ['#1c3566', '#2a4579'],
+  sunCore: ['#fff3c0', '#ffffff'], sunChrome: ['#f7c31a', '#ffe36e'], sunDeep: ['#ef9f14', '#f9d03c'], sunOrange: ['#ea841e', '#f7bf38'],
+  haloWhite: ['#fff2b8', '#ffffff'], haloLemon: ['#f3de3a', '#fff3a8'], haloOrange: ['#ee8a22', '#f8b847'],
+  haloViolet: ['#4b3a9e', '#6f5cc4'], haloUltra: ['#2f3f9e', '#5466c4'],
+  dLemon: ['#d6ea94', '#f6f8cc'], dTurq: ['#4cc0bb', '#a2e3d5'], dCerul: ['#3393d4', '#8ccbef'], dCobalt: ['#2052b3', '#4f87da'],
+  dViridian: ['#29947a', '#6fc5a2'], dPale: ['#b2e0eb', '#ffffff'], dDeep: ['#1c3c94', '#3b6dca'],
+  hLilac: ['#9886c7', '#c6b8e2'], hViolet: ['#6755a5', '#9a86cf'], hUltra: ['#3646a2', '#6b76c9'], hDeep: ['#28307e', '#4a4fa2'],
+  fOchre: ['#d6a03e', '#f1ca6c'], fChrome: ['#f0ba28', '#fbe17c'], fOrange: ['#e3842a', '#f3b655'], fGold: ['#e8b847', '#fff0a2'],
+  fViolet: ['#694d9d', '#8d76c0'], fBlue: ['#3a4ca1', '#6d80cb'],
+  wGreen: ['#79a436', '#c4d75c'], wViridian: ['#2a855a', '#6db47b'], wEmerald: ['#4a9641', '#a8ca5c'],
+  poppy: ['#e3301c', '#ff6c3c'], poppyDeep: ['#b01e18', '#e4361f'],
+  pCream: ['#efdcab', '#fff6da'], pPink: ['#e4b69d', '#f7dac2'], pLilac: ['#b6a0cd', '#e1d4eb'],
+  hsGold: ['#efa538', '#fcd46c'], hsOrange: ['#dd7820', '#f5a842'], hsRim: ['#c26616', '#e99c3c'], hsBlue: ['#374b9c', '#6c70c0'], hsViolet: ['#5a4393', '#8a70c0'],
+  nUltra: ['#212f8c', '#3b4db9'], nPrussian: ['#132858', '#25447c'], nViolet: ['#392875', '#5a44a2'], nCobalt: ['#2d5cbb', '#6e97e2'],
+  nCrest: ['#8aafe8', '#dce8ff'], nDeep: ['#0f1b47', '#1f3070'], nUnder: ['#16255f', '#22347b'],
+  sWhite: ['#fffbe2', '#ffffff'], sLemon: ['#f7eb58', '#fffbe0'], sYellow: ['#f5c834', '#f8ec5a'], sOrange: ['#ee8c28', '#f6c936'],
+  nfBlue: ['#3c4394', '#5f60b6'], nfIndigo: ['#212a6a', '#363f90'], nfViolet: ['#493b8a', '#6c58ae'], nfGold: ['#c99539', '#ebc262'],
+  nhDeep: ['#1a205d', '#2c3482'], nhViolet: ['#33286b', '#4c3e8e'], nPath: ['#7c83c0', '#a7afe2'], nhsBlue: ['#1d2a6d', '#34418f'],
+  nPoppy: ['#8a2a3a', '#a5404c'], nGreen: ['#1f4d55', '#23406a'], nGreen2: ['#23406a', '#2c5868'],
+  gust: ['#f6e49a', '#fff6d0'],
+  tChrome: ['#f5c11a', '#ffe47c'], tOrange: ['#ef871c', '#f8b142'], tLemon: ['#f8e558', '#fffbd2'],
+  tHaloO: ['#f29a2e', '#f7b34a'], tHaloY: ['#f7c843', '#fbe28a'],
+};
+const rgbOf = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+
+// ── the stroke atlas: one row per pigment, 16 brush shapes, pre-lit, in 3 sizes ──
+// shapes 0–5 are drags bowing one way, 6–11 the same drags bowing the other way, 12–13 round dabs, 14–15 washes
+const SW = 128, SH = 52, MID = 26, HALF = 15, NSHAPE = 16, BX0 = 5, BX1 = 123;
+const KX = SW / (BX1 - BX0), KY = SH / (2 * HALF);   // sprite cell over the paint body it holds
+const DRAGS = 6, DAB = 12, WASH = 14;
+const KEYS = Object.keys(PAL), KIDX = Object.fromEntries(KEYS.map((k, i) => [k, i]));
+const pig = key => {
+  if (!(key in KIDX)) throw new Error('no pigment ' + key);
+  return KIDX[key];
+};
+const LX = -0.55, LY = -0.83;            // the studio light, from the upper left
+const SHADOW_RGB = [24, 20, 36];
+let ATLAS;
+
+// coverage, relief, two-colour streaks and bristle tone of one brush mark. kind: 0 loaded drag that tapers,
+// 1 dry drag whose bristles run out, 2 drag lifted off square with a ridge where the paint piles, 3 round dab,
+// 4 thin broad wash for the underpainting. bow: which way the drag curves (its middle pushed to -y or +y)
+function shapeField(seed, kind, bow) {
+  const r = rng(seed), n = SW * SH;
+  const a = new Float32Array(n), h = new Float32Array(n), mix = new Float32Array(n), tone = new Float32Array(n), dryness = new Float32Array(n);
+  const dab = kind === 3, wash = kind === 4;
+  const head = 0.12 + 0.08 * r(), taper = kind === 2 ? 0.94 : 0.5 + 0.15 * r();
+  const bendPx = dab || wash ? 0 : bow * (4.5 + 1.8 * r());
+  const nb = (dab ? 9 : wash ? 20 : 11) + Math.floor(r() * 6), blob = 0.3 + 0.3 * r();
+  const dry = kind === 1 ? 0.55 + 0.25 * r() : kind === 0 ? 0.2 + 0.2 * r() : wash ? 0.5 : 0.1;
+  const side = r() < 0.5;   // some brushes carry the second colour along one side
+  const ns = 1 + Math.floor(r() * 9999);
+  const bTone = [], bLoad = [], bMix = [];
+  for (let b = 0; b < nb; b++) {
+    bTone.push((r() - 0.5) * (wash ? 0.08 : 0.16)); bLoad.push(0.7 + 0.6 * r());
+    bMix.push(wash ? 0 : side && b < nb * 0.35 ? 0.55 + 0.45 * r() : r() < 0.22 ? 0.4 + 0.5 * r() : 0);
+  }
+  for (let py = 0; py < SH; py++) for (let px = 0; px < SW; px++) {
+    const i = py * SW + px, u = (px + 0.5 - BX0) / (BX1 - BX0);
+    if (u <= 0 || u >= 1) continue;
+    let hw;
+    if (dab) hw = HALF * Math.pow(1 - (2 * u - 1) ** 2, 0.6) * (1 + 0.1 * Math.sin(u * 7 + ns));
+    else {
+      hw = HALF * (wash ? 1 - 0.1 * u : 1.04 - 0.36 * u);
+      if (u < head) hw *= Math.pow(1 - (1 - u / head) ** 2, 0.5) * (1 + 0.1 * Math.sin(Math.PI * u / head));
+      if (u > taper) hw *= kind === 2 ? Math.sqrt(1 - ((u - taper) / (1 - taper)) ** 2) : Math.pow((1 - u) / (1 - taper), 0.85);
+    }
+    const yc = MID - bendPx * (1 - 4 * (u - 0.5) ** 2);
+    const vr = py + 0.5 - yc, edge = noise(u * (wash ? 6 : 11), vr < 0 ? 1.5 : 7.5, ns) - 0.5;
+    const hwE = Math.max(0.01, hw * (1 + (wash ? 0.34 : 0.24) * edge)), vn = vr / hwE, av = Math.abs(vn);
+    if (av >= 1.05) continue;
+    const edgeA = clamp01((1 - av) * hwE / (wash ? 5 : 1.1) + 0.05);
+    const bc = (vn + 1) * 0.5 * nb, b = Math.min(nb - 1, Math.max(0, Math.floor(bc))), fb = bc - Math.floor(bc);
+    // dry brush: bristles run out of paint toward the tail (a wash is scrubbed thin at both ends)
+    const dk = dab ? 0 : wash ? Math.max(clamp01((u - 0.62) / 0.38), clamp01((0.16 - u) / 0.16)) : clamp01((u - taper + 0.3) / (1.05 - taper + 0.3));
+    const th = dk * dry * 1.4 + 0.03, nz = noise(b * 2.3 + 0.5, u * (10 + 6 * dry), ns + 1);
+    let cov = sstep((nz - th + 0.05) / 0.1);
+    if (wash) cov *= 0.72 + 0.28 * noise(b * 1.9, u * 5, ns + 5);           // streaky, thin paint
+    if (noise(px * 0.45, py * 0.6, ns + 2) < 0.02 + 0.04 * u) cov *= 0.5;   // the brush skipping over the canvas tooth
+    a[i] = edgeA * cov * (wash ? 0.95 : 1);
+    dryness[i] = dk;
+    const body = 0.45 * clamp01((1 - av) * 3.2);
+    const lip = 0.26 * Math.exp(-(((av - 0.8) / 0.13) ** 2));
+    const groove = 0.3 * (0.5 - 0.5 * Math.cos(TAU * fb)) * bLoad[b];
+    const load = dab ? 0.4 * (1 - vn * vn) : blob * Math.exp(-(((u - head * 0.8) / 0.09) ** 2)) * (1 - vn * vn);
+    const pile = kind === 2 ? 0.45 * Math.exp(-(((u - 0.93) / 0.035) ** 2)) * (1 - vn * vn) : 0;
+    h[i] = wash ? (0.25 * body + 0.12 * groove) * cov
+      : (body + lip + groove + load + pile) * (dab ? 1 : 1.05 - 0.45 * u) * (0.4 + 0.6 * cov) * (1 - 0.55 * dk);   // dry bristles carry little relief
+    mix[i] = bMix[b] * (0.55 + 0.45 * noise(b * 1.7, u * 4, ns + 3));
+    tone[i] = bTone[b] + 0.06 * (noise(px * 0.2, py * 0.7, ns + 4) - 0.5);
+  }
+  return { a, h, mix, tone, dryness };
+}
+const shapeSpec = i => (i < 12 ? { seed: 4100 + 131 * (i % 6), kind: [0, 1, 2, 0, 1, 0][i % 6], bow: i < 6 ? 1 : -1 }
+  : i < 14 ? { seed: 5100 + i, kind: 3, bow: 0 } : { seed: 5200 + i, kind: 4, bow: 0 });
+
+function buildAtlas() {
+  const base = canvasOf(NSHAPE * SW, KEYS.length * SH), bg = base.getContext('2d');
+  const img = bg.createImageData(base.width, base.height), D = img.data, BW = base.width;
+  const ll = Math.hypot(-0.35, -0.8, 0.55), L = [-0.35 / ll, -0.8 / ll, 0.55 / ll];
+  const hl = Math.hypot(L[0], L[1], L[2] + 1), Hv = [L[0] / hl, L[1] / hl, (L[2] + 1) / hl];
+  const cols = KEYS.map(k => PAL[k].map(rgbOf)), n = SW * SH;
+  for (let s = 0; s < NSHAPE; s++) {
+    const sp = shapeSpec(s), f = shapeField(sp.seed, sp.kind, sp.bow);
+    const shade = new Float32Array(n), gloss = new Float32Array(n), shad = new Float32Array(n);
+    for (let y = 1; y < SH - 1; y++) for (let x = 1; x < SW - 1; x++) {
+      const i = y * SW + x;
+      const gx = (f.h[i + 1] - f.h[i - 1]) * 1.25, gy = (f.h[i + SW] - f.h[i - SW]) * 1.25;
+      const nl = Math.hypot(gx, gy, 1), nx = -gx / nl, ny = -gy / nl, nz = 1 / nl;
+      const dif = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+      shade[i] = (1 + 0.8 * (dif - L[2])) * (0.86 + 0.14 * Math.min(1, f.h[i] * 1.5));
+      gloss[i] = Math.pow(Math.max(0, nx * Hv[0] + ny * Hv[1] + nz * Hv[2]), 26) * 0.36 * Math.min(1, f.h[i] * 2);
+      if (y >= 3 && x >= 2) {   // paint up and to the left casts a soft shadow here; dry bristles barely cast one
+        let sa = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) sa += f.a[(y - 2 + dy) * SW + x - 1 + dx];
+        shad[i] = 0.3 * (sa / 9) * (1 - 0.7 * f.dryness[(y - 2) * SW + x - 1]);
+      }
+    }
+    for (let c = 0; c < KEYS.length; c++) {
+      const [A, B] = cols[c], ox = s * SW, oy = c * SH;
+      for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
+        const i = y * SW + x, pa = f.a[i], sa = shad[i] * (1 - pa), oa = pa + sa;
+        if (oa < 0.004) continue;
+        const m = f.mix[i], k = (1 + f.tone[i]) * shade[i], gl = gloss[i] * 255, o = ((oy + y) * BW + ox + x) * 4;
+        for (let ch = 0; ch < 3; ch++) {
+          const pc = Math.min(255, (A[ch] + (B[ch] - A[ch]) * m) * k + gl);
+          D[o + ch] = (pc * pa + SHADOW_RGB[ch] * sa) / oa;
+        }
+        D[o + 3] = oa * 255;
+      }
+    }
+  }
+  bg.putImageData(img, 0, 0);
+  const half = src => {
+    const c = canvasOf(src.width / 2, src.height / 2), g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, c.width, c.height); return c;
+  };
+  const l1 = half(base);
+  ATLAS = [base, l1, half(l1)];
+}
+
+// One brush mark of pigment p, shape v, centred on (x, y) in picture space, running head → tail along `ang`.
+// A drag (v < 6) bows toward `side` (+1: away from the +y side of its unflipped frame, i.e. away from a
+// curvature centre lying there). `grow` < 1 while it lands: the brush drags the mark out from its head, a
+// little past full length, wider at first contact.
+const CAM = { z: 1, ox: 0, oy: 0 };
+function stamp(g, p, v, x, y, ang, len, wid, grow = 1, side = 1) {
+  if (grow <= 0) return;
+  const z = CAM.z, rl = len * KX, rw = wid * KY, sl = rl * z;
+  const lvl = sl > 92 ? 0 : sl > 46 ? 1 : 2, sc = 1 / (1 << lvl), A = ATLAS[lvl];
+  const c = Math.cos(ang), s = Math.sin(ang), f = s * LX - c * LY >= 0 ? 1 : -1;   // keep each mark's lit ridge toward the light
+  const shape = v < DRAGS ? v + (side * f > 0 ? 0 : DRAGS) : v;
+  g.setTransform(z * c, z * s, -z * s * f, z * c * f, z * x + CAM.ox, z * y + CAM.oy);
+  const sx = shape * SW * sc, sy = p * SH * sc;
+  if (grow >= 1) { g.drawImage(A, sx, sy, SW * sc, SH * sc, -rl / 2, -rw / 2, rl, rw); return; }
+  const k = overshoot(grow), kc = Math.min(1, k), sq = 1 + 0.3 * (1 - grow);
+  g.drawImage(A, sx, sy, SW * sc * kc, SH * sc, -rl / 2, -rw * sq / 2, rl * k, rw * sq);
+}
+const growOf = (tau, born) => (tau - born) / LAND_T + 0.34;
+const washAlpha = (tau, born) => 0.45 + 0.55 * span(tau - born, 0, 0.45);   // a wash goes on thin, then thickens
+// which way a mark at (x, y) heading `ang` should bow so that it curves round the centre (cx, cy)
+const bowAway = (x, y, ang, cx, cy) => ((cx - x) * -Math.sin(ang) + (cy - y) * Math.cos(ang) >= 0 ? 1 : -1);
+
+// ── the picture's geometry ──
+const DC = { x: 1180, y: 470 }, SUN_R = 95;          // the day swirl turns round the sun
+const NC = { x: 1198, y: 446 };                        // the night swirl: just above where the sun goes down
+const VP = { x: 990, y: 598 }, BEND = 120, DEPTH = 482, FIELD_Y = 610;
+const ridgeFar = x => 580 - 34 * bump(x, 380, 300) - 26 * bump(x, 820, 220) - 20 * bump(x, 1600, 280) - 30 * bump(x, 1960, 220) + 4 * Math.sin(x * 0.021 + 0.5);
+const ridgeNear = x => 601 - 16 * bump(x, 140, 260) - 12 * bump(x, 1020, 300) - 15 * bump(x, 1760, 240) + 2.5 * Math.sin(x * 0.033 + 1.1);
+const SKY_FLOOR = x => ridgeFar(x) + 14;              // the sky is clipped a little below the far ridge
+// the furrows fan out from the vanishing point, bending to the right as they near us and rolling with the
+// ground: a sideways sway shared by every furrow (and the path), strongest mid-field
+const ROLL = 95;
+const sway = g => BEND * g * g + ROLL * g * Math.sin(2.6 * g + 0.4);
+const swayD = g => 2 * BEND * g + ROLL * (Math.sin(2.6 * g + 0.4) + 2.6 * g * Math.cos(2.6 * g + 0.4));   // d sway / dg
+const furrowX = (s, y) => VP.x + s * (y - VP.y) + sway((y - VP.y) / DEPTH);
+const furrowS = (x, y) => { const d = Math.max(2, y - VP.y); return (x - VP.x - sway(d / DEPTH)) / d; };
+const furrowAng = (x, y) => { const d = Math.max(2, y - VP.y); return Math.atan2(1, furrowS(x, y) + swayD(d / DEPTH) / DEPTH); };
+const FURROW = 0.16;                                    // furrow period in furrow units
+const pathS = y => { const g = clamp01((y - VP.y) / DEPTH); return 0.04 - 0.42 * g + 0.25 * Math.sin(g * 4.2 + 0.6) * g; };
+const PATH_HALF = 0.2;
+const STACKS = [   // the far, smaller stack first; both crowns sit well below the hills
+  { cx: 1462, by: 718, half: 84, h: 93, lit: -1 },
+  { cx: 520, by: 795, half: 128, h: 155, lit: 1 },
+];
+const DOME_P = 1.8;
+// half-width of a stack at height fraction q: a rounded dome whose base flares a little
+const domeHalf = (k, q) => k.half * Math.sqrt(Math.max(0, 1 - Math.pow(Math.max(0, q), DOME_P))) * (1 + 0.07 * Math.max(0, 1 - Math.max(0, q) / 0.2) ** 2);
+const inDome = (k, x, y) => { const q = (k.by - y) / k.h; return q >= -0.03 && q <= 1 && Math.abs(x - k.cx) <= domeHalf(k, q); };
+const shadowOf = k => ({ cx: k.cx - k.lit * k.half * 0.9, cy: k.by - 2, rx: k.half * 1.08, ry: k.h * 0.14 });
+const greenZone = (x, y) => y > 872 + 30 * noise(x * 0.01, 3, 5) && (x < 560 + 90 * noise(y * 0.012, 1, 6) || x > 1250 - 90 * noise(y * 0.012, 2, 6));
+
+// ── timeline ──
+const BEAT0 = 0.15, BEAT = 0.1, REASSERT0 = 2.55;      // outline beats; outlines struck again over the colour
+const PULSES = [3.25, 4.05, 4.85];                       // rings of light out of the sun
+const GUST = [3.3, 4.95];
+const SINK = [5.4, 7.0];
+const NIGHT0 = 5.45, NIGHT_SPREAD = 0.9, NIGHT_SWEEP = 0.36;
+const TT0 = 7.12, TSTEP = 0.052;                         // title letters
+const CLOSE = 9.35;
+const spinClock = tau => (tau < 3.0 ? 0 : tau < 3.8 ? (tau - 3) ** 2 / 1.6 : tau - 3.4);   // the sky starts turning gently
+const nightClock = tau => Math.max(0, tau - NIGHT0);
+const sunDy = tau => 330 * sstep(span(tau, SINK[0], SINK[1]));
+const haloSwell = tau => { let s = 0; for (const p of PULSES) s += Math.exp(-(((tau - p - 0.08) / 0.14) ** 2)); return s; };
+const CAM_Z = 1.06;
+function setCamera(tau) {   // a slow push toward the sun
+  const z = 1 + (CAM_Z - 1) * inOut(span(tau, 3.45, 4.45));
+  CAM.z = z; CAM.ox = DC.x * (1 - z); CAM.oy = DC.y * (1 - z);
+}
+const toWorld = (sx, sy) => [DC.x + (sx - DC.x) / CAM_Z, DC.y + (sy - DC.y) / CAM_Z];   // a point of the final, pushed-in frame
+
+// ── the swirl's bands ──
+// Each band is a closed curve round its own slightly off-centre middle: it wobbles (3 and 7 lobes) and,
+// further out, opens into a spiral whose seam sits low, behind the land. A band turns rigidly.
+const BANDS = [], NBANDS = [];
+function makeBand(c, k, r0, bw, omega, wobble, pitch, ph7, offset = true) {
+  const off = offset ? 18 * Math.min(1, 0.25 + k / 3) : 0, oa = 0.45 * k + 0.6;
+  return { cx: c.x + off * Math.cos(oa), cy: c.y + off * 0.8 * Math.sin(oa), r0, bw, omega, dir: omega >= 0 ? 1 : -1,
+    a3: wobble, a7: wobble * 0.45, p3: 0.7 + 0.38 * k, p7: ph7 + 0.55 * k, pitch };
+}
+const bandR = (b, th) => b.r0 + b.pitch * wrap01(th - Math.PI / 2) + b.a3 * Math.sin(3 * th + b.p3) + b.a7 * Math.sin(7 * th + b.p7);
+const bandDR = (b, th) => b.pitch / TAU + 3 * b.a3 * Math.cos(3 * th + b.p3) + 7 * b.a7 * Math.cos(7 * th + b.p7);
+// a mark on band b at band angle th, lo px out from its inner edge: offset from the band's middle and the
+// curve's tangent there (pointing the way th grows)
+// a band that `follow`s another starts on a plain circle and ends on that band's inner curve, closing the gap
+// between the round halo and the swirl
+function bandPoint(b, th, lo) {
+  const f = lo / b.bw, rho = b.follow ? b.r0 + f * (bandR(b.follow, th) - b.r0) : bandR(b, th) + lo;
+  const dr = b.follow ? f * bandDR(b.follow, th) : bandDR(b, th), c = Math.cos(th), s = Math.sin(th);
+  return { dx: rho * c, dy: rho * s, tan: Math.atan2(dr * s + rho * c, dr * c - rho * s), rho };
+}
+const onSky = (x, y, m = 80) => x > -m && x < W + m && y > -m && y < 650;
+function everVisible(b, dx, dy, turn) {   // is a mark ever on screen while its band turns by up to `turn`?
+  for (let i = 0; i <= 6; i++) {
+    const a = turn * i / 6, c = Math.cos(a), s = Math.sin(a);
+    if (onSky(b.cx + dx * c - dy * s, b.cy + dx * s + dy * c)) return true;
+  }
+  return false;
+}
+const DAY_R0 = 222, DAY_BW = 66, NBW = 72, NK = 18;
+const nightDir = k => (k % 2 ? -1 : 1);
+const arrivalKT = (k, th) => NIGHT0 + (NK - 1 - Math.min(k, NK - 1)) / (NK - 1) * NIGHT_SPREAD + wrap01(nightDir(k) * (th + Math.PI / 2)) * NIGHT_SWEEP;
+const nightArrival = (x, y) => arrivalKT(Math.floor(Math.hypot(x - NC.x, y - NC.y) / NBW), Math.atan2(y - NC.y, x - NC.x));
+function makeBands(r) {
+  for (let k = 0; DAY_R0 + k * DAY_BW < 1360; k++) {
+    const r0 = DAY_R0 + k * DAY_BW;
+    BANDS.push(makeBand(DC, k, r0, DAY_BW, (k % 2 ? -1 : 1) * (15 + 7 * ((k * 7) % 3)) / (r0 + DAY_BW / 2), 10 + 8 * clamp01(r0 / 700), DAY_BW * 0.5, 1.3));
+  }
+  const b1 = BANDS[1];   // the first band hugs the halo and turns with the band outside it
+  Object.assign(BANDS[0], { r0: 210, cx: b1.cx, cy: b1.cy, omega: b1.omega, dir: b1.dir, follow: b1 });
+  for (let k = 0; k <= NK; k++) {
+    const r0 = k * NBW;
+    NBANDS.push(makeBand(NC, k, r0, NBW, k === 0 ? 0.26 : nightDir(k) * (14 + 5 * (k % 3)) / (r0 + NBW / 2),
+      k < 2 ? 3 : 9 + 8 * clamp01(r0 / 650), k >= 3 ? NBW * 0.5 : 0, 2.1, k > 0));
+  }
+}
+// rotation of every band at tau, once per frame
+const turnOf = (bands, clock) => bands.map(b => { const a = b.omega * clock; return [a, Math.cos(a), Math.sin(a)]; });
+
+// ── stroke lists ──
+const DAY = [], SUN = [], AFTER = [], NIGHT = [], LAND = [], STARS = [], TFILL = [], HALO = [];
+let CONTOURS = [], WEAVE, RELIEF, MASK, MASKG, GLOW, TT, TTG, TITLE_ART;
+
+// marks laid along a lane of a band, end to end; gapK < 1 overlaps them, > 1 leaves canvas between
+function lane(r, b, bi, lo, o, list) {
+  const turn = b.omega * o.spin;
+  let th = r() * TAU;
+  const end = th + TAU, rho0 = b.follow ? b.r0 + lo * 1.4 : b.r0 + lo + b.pitch / 2;
+  while (th < end) {
+    const len = o.len(), step = len * o.gapK / Math.max(20, rho0), thc = th + step / 2;
+    th += step * (0.85 + 0.3 * r());
+    if (o.skip && r() < o.skip) continue;
+    const pt = bandPoint(b, thc, lo + (o.jit ?? 5) * (r() - 0.5) * 2);
+    if (!everVisible(b, pt.dx, pt.dy, turn)) continue;
+    const ang = pt.tan + (b.dir > 0 ? Math.PI : 0) + (o.off ?? 0.08) + (r() - 0.5) * (o.angJit ?? 0.2);
+    const key = o.key(pt, thc), v = o.v ?? (r() * DRAGS) | 0;
+    list.push(Object.assign({ b: bi, dx: pt.dx, dy: pt.dy, rho: pt.rho, th: thc, a0: ang, side: bowAway(pt.dx, pt.dy, ang, 0, 0),
+      len, wid: o.wid(len), p: pig(key), v, born: o.born(thc, pt) }, o.extra ? o.extra(key, pt, thc) : {}));
+  }
+}
+const skyLen = (r, med = 55) => () => logn(r, med, 0.38, 25, 120);
+const skyWid = (r, med = 17) => len => Math.min(28, Math.max(10, logn(r, med, 0.22, 10, 28) * Math.pow(len / 55, 0.25)));
+
+function buildSun(r) {
+  const DUSK = { sunCore: 'sunChrome', sunChrome: 'sunDeep', sunDeep: 'sunOrange', sunOrange: 'hsRim', haloWhite: 'haloLemon', haloLemon: 'haloOrange',
+    haloOrange: 'poppy', haloViolet: 'nViolet', haloUltra: 'nUltra' };
+  const put = (rad, th, len, wid, key, v, born, ring, spin, halo) => {
+    const ang = th + Math.PI / 2 + (r() - 0.5) * (v >= WASH ? 0.25 : 0.5);
+    SUN.push({ r: rad, th, da: ang - th, len: len * (v >= WASH ? 1 : 0.75 + 0.5 * r()), wid, p: pig(key), pd: pig(DUSK[key]), v, side: 1,
+      born, dusk: 5.5 + ring * 0.04 + r() * 0.05, spin, halo });
+  };
+  const wv = () => WASH + ((r() * 2) | 0);
+  // underpainting: thin chrome over the disc, then white, lemon, orange and the violet seam where the halo goes
+  put(0, r() * TAU, 92, 84, 'sunChrome', wv(), 0.7, 0, 0.05, false);
+  [[40, 6, 62, 46, 'sunChrome'], [74, 10, 60, 36, 'sunDeep']].forEach(([rad, n, len, wid, key]) => {
+    for (let j = 0; j < n; j++) put(rad, j * TAU / n + r() * 0.3, len, wid, key, wv(), 0.7 + j / n * 0.05, 1, 0.05, false);
+  });
+  [[113, 12, 'haloWhite', 30], [139, 14, 'haloLemon', 30], [166, 16, 'haloOrange', 30], [200, 18, 'haloViolet', 42]].forEach(([rad, n, key, wid], li) => {
+    for (let j = 0; j < n; j++) put(rad, j * TAU / n + r() * 0.2, TAU * rad / n * 1.35, wid, key, wv(), 0.98 + li * 0.07 + j / n * 0.1, 7 + li * 2, (li % 2 ? -1 : 1) * 0.07, true);
+  });
+  // the disc: concentric rings of dabs, white-hot in the middle, deep chrome at the rim
+  const disc = [[0, 1, 'sunCore'], [15, 5, 'sunCore'], [30, 9, 'sunChrome'], [45, 13, 'sunChrome'], [60, 17, 'sunDeep'], [75, 21, 'sunChrome'], [89, 25, 'sunOrange']];
+  disc.forEach(([rad, n, key], ring) => {
+    for (let j = 0; j < n; j++) {
+      put(rad + (r() - 0.5) * 7, (j + 0.4 * r()) * TAU / n + ring * 0.7, rad ? Math.min(36, TAU * rad / n * 1.55) : 34, rad ? logn(r, 15, 0.15, 11, 20) : 30, key,
+        rad ? (r() * DRAGS) | 0 : DAB, 0.72 + ring * 0.055 + j / n * 0.06, ring, (ring % 2 ? -1 : 1) * 0.12, false);
+    }
+  });
+  // the halo: rings of pure colour, white-yellow, lemon, orange, then a solid violet and ultramarine band against the blue
+  const halo = [[107, 'haloWhite', 16], [119, 'haloWhite', 16], [133, 'haloLemon', 16], [145, 'haloLemon', 16], [159, 'haloOrange', 16], [172, 'haloOrange', 16],
+    [189, 'haloViolet', 18], [204, 'haloUltra', 18], [216, 'haloViolet', 13]];
+  halo.forEach(([rad, key, wid], li) => {
+    const n = Math.round(TAU * rad / 27), th0 = r() * TAU;
+    for (let j = 0; j < n; j++) put(rad + (r() - 0.5) * 6, th0 + (j + 0.35 * r()) * TAU / n, TAU * rad / n * 1.45, logn(r, wid, 0.15, 10, 22),
+      key === 'haloUltra' && r() < 0.3 ? 'haloViolet' : key, (r() * DRAGS) | 0, 1.02 + li * 0.065 + j / n * 0.1, 7 + li, (li % 2 ? -1 : 1) * 0.07, true);
+  });
+}
+
+function buildDaySky(r) {
+  const BKEYS = [['dLemon', 'dPale'], ['dTurq', 'dLemon'], ['dPale', 'dCerul'], ['dCobalt', 'dDeep'], ['dTurq', 'dViridian'], ['dCerul', 'dPale'],
+    ['dPale', 'dTurq'], ['dCobalt', 'dCerul'], ['dViridian', 'dTurq'], ['dCerul', 'dCobalt'], ['dPale', 'dCerul'], ['dDeep', 'dCobalt'],
+    ['dTurq', 'dCerul'], ['dCerul', 'dPale'], ['dCobalt', 'dDeep'], ['dViridian', 'dCerul'], ['dCerul', 'dCobalt'], ['dDeep', 'dCobalt']];
+  const LIGHT = new Set(['dLemon', 'dPale', 'dTurq']);
+  const washes = [], strokes = [], fine = [], spin = DUR - 3.4;
+  const sweepBorn = (b, start, sweep) => th => start + wrap01(b.dir * (th + Math.PI / 2)) * sweep + r() * 0.04;
+  const extra = bi => key => ({ pN: pig('nUnder'), pS: pig(bi % 2 ? 'haloLemon' : 'haloWhite'), sw: 0 });
+  BANDS.forEach((b, k) => {
+    const r0 = b.r0, [main, alt] = BKEYS[k % BKEYS.length], next = BKEYS[(k + 1) % BKEYS.length][0], start = 1.15 + k * 0.075;
+    // coarse: a thin wash of the band's colour; the outermost bands are left with bare canvas showing
+    for (const lo of b.follow ? [0.25 * DAY_BW, 0.75 * DAY_BW] : [DAY_BW / 2]) {
+      lane(r, b, k, lo, { spin, len: () => 140, wid: () => 64, gapK: 0.6, v: undefined, key: () => main, born: sweepBorn(b, start - 0.1, 0.55),
+        skip: clamp01((r0 - 640) / 520) * 0.9, extra: extra(k), jit: 3 }, washes);
+    }
+    for (const s of washes) if (s.b === k && s.v < WASH) s.v = WASH + ((r() * 2) | 0);
+    const outer = clamp01((r0 - 500) / 700), nl = b.follow ? 5 : 4;
+    for (let l = 0; l < nl; l++) {
+      lane(r, b, k, -4 + (l + 0.5) * (DAY_BW + 8) / nl, { spin, len: skyLen(r), wid: skyWid(r, 17 - 2 * outer), gapK: 0.68 + 0.42 * outer, key: () => wpick(r, [[main, 64], [alt, 26], [next, 10]]),
+        born: sweepBorn(b, start, 0.55), extra: extra(k), jit: 6 }, strokes);
+    }
+    // fine: thinner crests along the band edges
+    const crest = LIGHT.has(main) ? 'dPale' : main === 'dDeep' || main === 'dCobalt' ? 'dCerul' : 'dPale';
+    lane(r, b, k, DAY_BW * (k % 2 ? 0.1 : 0.9), { spin, len: skyLen(r, 46), wid: skyWid(r, 11), gapK: 1.5, key: () => (r() < 0.75 ? crest : 'haloWhite'),
+      born: sweepBorn(b, 2.3 + k * 0.042, 0.3), extra: extra(k) }, fine);
+  });
+  // the sky behind the sun, only seen as it sets: dusk colours by height, deep orange low down, violet higher up
+  const inner = BANDS.length;
+  BANDS.push(makeBand(DC, 0, 0, 120, 0.08, 3, 0, 0, false), makeBand(DC, 1, 110, 112, -0.06, 4, 0, 1, false));
+  const dusk = pt => {   // warm near the horizon, violet higher up, blending out into the lemon of the first band
+    const y = DC.y + pt.dy;
+    if (r() < clamp01((pt.rho - 125) / 80)) return wpick(r, [['dLemon', 3], ['dPale', 1], ['haloWhite', 1]]);
+    return y > 520 ? wpick(r, [['poppy', 3], ['hsOrange', 3], ['sunOrange', 2]]) : y > 395 ? wpick(r, [['haloOrange', 3], ['sunDeep', 2], ['haloLemon', 1]])
+      : wpick(r, [['hViolet', 3], ['haloViolet', 2], ['dCobalt', 1]]);
+  };
+  const under = [];
+  [[0, 40, 90], [0, 92, 100], [1, 40, 110], [1, 88, 120]].forEach(([j, lo, len]) =>
+    lane(r, BANDS[inner + j], inner + j, lo, { spin, len: () => len, wid: () => 74, gapK: 0.55, v: WASH, key: dusk, born: () => 1.9, extra: extra(inner + j), jit: 4 }, under));
+  [[0, 18], [0, 44], [0, 70], [0, 96], [1, 16], [1, 42], [1, 68], [1, 94], [1, 114]].forEach(([j, lo]) =>
+    lane(r, BANDS[inner + j], inner + j, lo, { spin, len: skyLen(r, 46), wid: skyWid(r, 18), gapK: 0.7, key: dusk, born: () => 1.95, extra: extra(inner + j), angJit: 0.5 }, under));
+  under.forEach((s, i) => { s.flatAt = 5.5 + 0.25 * hash3(i, 1, 608); });   // laid flat into sunset layers as the halo goes
+  DAY.push(...under, ...washes, ...strokes, ...fine);
+  // under the night each day stroke is repainted dark as the night's own strokes land over it
+  for (const s of DAY) {
+    const b = BANDS[s.b], a = b.omega * spinClock(6.3), c = Math.cos(a), sn = Math.sin(a);
+    s.sw = nightArrival(b.cx + s.dx * c - s.dy * sn, b.cy + s.dx * sn + s.dy * c) - 0.1;
+  }
+}
+
+// the afterglow: vermilion and orange laid along the ridge as the sun goes down, then cooled to violet
+function buildAfterglow(r) {
+  for (let x = 760; x < 1640; x += 18 + 8 * r()) {
+    const near = 1 - Math.abs(x - DC.x) / 460;
+    if (near <= 0) continue;
+    for (let y = ridgeFar(x) + 6; y > ridgeFar(x) - 46; y -= 8 + 3 * r()) {
+      if (r() > Math.pow(near, 0.7)) continue;
+      const hh = (ridgeFar(x) + 6 - y) / 52, xx = x + (r() - 0.5) * 10;
+      const key = hh < 0.35 ? wpick(r, [['poppy', 3], ['poppyDeep', 1], ['hsOrange', 1]]) : hh < 0.7 ? wpick(r, [['hsOrange', 2], ['sunOrange', 2], ['poppy', 1]]) : wpick(r, [['haloOrange', 2], ['sunDeep', 1]]);
+      const ang = Math.atan((ridgeFar(xx + 10) - ridgeFar(xx - 10)) / 20) + (r() - 0.5) * 0.16 + (r() < 0.5 ? Math.PI : 0);
+      AFTER.push({ x: xx, y, ang, len: logn(r, 50, 0.3, 26, 90), wid: logn(r, 14, 0.15, 10, 19), p: pig(key), pN: pig(r() < 0.6 ? 'nViolet' : 'hViolet'),
+        v: (r() * DRAGS) | 0, side: r() < 0.5 ? 1 : -1, born: 5.72 + 0.32 * (1 - near) + 0.08 * r(), sw: 6.42 + 0.3 * (1 - near) + 0.1 * r() });
+    }
+  }
+}
+
+function buildNightSky(r) {
+  const NKEYS = [['nCobalt', 'nCrest'], ['nUltra', 'nCobalt'], ['nCobalt', 'nUltra'], ['nPrussian', 'nUltra'], ['nViolet', 'nUltra'], ['nUltra', 'nPrussian'],
+    ['nCobalt', 'nUltra'], ['nDeep', 'nPrussian'], ['nViolet', 'nDeep'], ['nUltra', 'nCobalt'], ['nPrussian', 'nDeep'], ['nCobalt', 'nUltra'],
+    ['nDeep', 'nViolet'], ['nViolet', 'nUltra'], ['nUltra', 'nPrussian'], ['nPrussian', 'nViolet'], ['nDeep', 'nUltra'], ['nViolet', 'nDeep']];
+  const WKEY = { nCobalt: 'nUltra', nUltra: 'nUltra', nPrussian: 'nPrussian', nViolet: 'nViolet', nDeep: 'nDeep' };
+  const washes = [], strokes = [], fine = [], spin = DUR - NIGHT0;
+  NBANDS.forEach((b, k) => {
+    const [main, alt] = NKEYS[k % NKEYS.length];
+    if (k === 0) {
+      // the eye of the night swirl: a dark bed, then two pale arms wound into it
+      const put = (list, rho, th, ang, len, wid, key, born, v) => list.push({ b: 0, dx: rho * Math.cos(th), dy: rho * Math.sin(th), rho, th, a0: ang,
+        side: bowAway(rho * Math.cos(th), rho * Math.sin(th), ang, 0, 0), len, wid, p: pig(key), v: v ?? (r() * DRAGS) | 0, born });
+      for (let i = 0; i < 7; i++) { const th = i * TAU / 7; put(washes, 30, th, th + Math.PI / 2, 70, 56, 'nUltra', 6.42 + 0.03 * i, WASH + (i % 2)); }
+      for (let i = 0; i < 22; i++) { const rho = 10 + 58 * Math.sqrt(r()), th = r() * TAU; put(strokes, rho, th, th + Math.PI / 2 + (r() - 0.5) * 0.4, logn(r, 34, 0.25, 22, 50), 20, wpick(r, [['nUltra', 3], ['nCobalt', 2]]), 6.45 + 0.2 * r()); }
+      const TURN = 1.7 * TAU, R1 = 104;
+      for (let arm = 0; arm < 2; arm++) for (let lanes = 0; lanes < 2; lanes++) for (let a = 0.02 + 0.03 * r(); a < 1; ) {
+        const rho = 10 + R1 * a + lanes * 9 - 4, th = arm * Math.PI + a * TURN + lanes * 0.12;
+        const dr = R1 / TURN, tan = Math.atan2(dr * Math.sin(th) + rho * Math.cos(th), dr * Math.cos(th) - rho * Math.sin(th));
+        const len = Math.min(logn(r, 30 + 34 * a, 0.2, 22, 70), 14 + rho * 1.1);   // short marks at the heart, where the curve is tight
+        const key = a < 0.18 ? (r() < 0.7 ? 'nCrest' : 'nCobalt') : a < 0.5 ? wpick(r, [['nCobalt', 3], ['nCrest', 1]]) : wpick(r, [['nCobalt', 2], ['nUltra', 1]]);
+        put(fine, rho, th, tan + Math.PI + (r() - 0.5) * 0.12, len, 11 + 6 * a + 2 * r(), key, 6.85 - 0.3 * a + 0.03 * r());
+        a += len * 0.62 / Math.max(25, rho * TURN);
+      }
+      return;
+    }
+    const born = (d = 0) => th => arrivalKT(k, th) + d + r() * 0.04;
+    // a dark wash first, so the gaps between the night's strokes stay night; it fills in just behind the strokes
+    lane(r, b, k, NBW / 2, { spin, len: () => 150, wid: () => 74, gapK: 0.58, key: () => WKEY[main], born: born(0.1), jit: 3 }, washes);
+    for (const s of washes) if (s.b === k && s.v < WASH) s.v = WASH + ((r() * 2) | 0);
+    for (let l = 0; l < 4; l++) {
+      lane(r, b, k, -4 + (l + 0.5) * (NBW + 8) / 4, { spin, len: skyLen(r, 60), wid: skyWid(r, 19), gapK: 0.7, key: () => wpick(r, [[main, 66], [alt, 34]]), born: born(), jit: 6 }, strokes);
+    }
+    // lighter cobalt crests riding the band edges
+    lane(r, b, k, NBW * (k % 2 ? 0.12 : 0.88), { spin, len: skyLen(r, 46), wid: skyWid(r, 11), gapK: 1.6, skip: 0.25,
+      key: () => (k < 7 ? wpick(r, [['nCrest', 2], ['nCobalt', 3]]) : 'nCobalt'), born: born(0.16) }, fine);
+  });
+  NIGHT.push(...washes, ...strokes, ...fine);
+}
+
+function buildStars(r) {
+  // placed in the final, pushed-in frame, clear of the title and its dates and well inside the edges:
+  // one hero star near the swirl's eye, three medium, five small
+  const SPOTS = [[1525, 455, 90, 3], [340, 445, 62, 3], [840, 492, 52, 2], [1690, 122, 50, 2],
+    [232, 116, 36, 2], [640, 114, 30, 1], [1092, 112, 32, 1], [1350, 124, 34, 2], [592, 506, 32, 1]];
+  const RINGS = { 3: [[1.45, 'sLemon', 0.78, 0.93], [2.2, 'sYellow', 0.68, 0.85], [2.95, 'sOrange', 0.6, 0.65]], 2: [[1.45, 'sLemon', 0.8, 0.92], [2.2, 'sOrange', 0.66, 0.66]], 1: [[1.5, 'sYellow', 0.8, 0.7]] };
+  const list = SPOTS.map(([sx, sy, out, rings]) => {
+    const [x, y] = toWorld(sx, sy), spec = RINGS[rings], last = spec[spec.length - 1];
+    return { x, y, out: out / CAM_Z, R: out / CAM_Z / (last[0] + last[2] * 0.5), spec, at: nightArrival(x, y) + 0.22, dabs: [], ph: r() * TAU };
+  });
+  list.sort((a, b) => a.at - b.at);
+  for (let i = 1; i < list.length; i++) list[i].at = Math.max(list[i].at, list[i - 1].at + 0.14);
+  for (const st of list) {
+    const R = st.R, dab = (ring, d, th, len, wid, key, born, radial, v) => st.dabs.push({ ring, d, th, len, wid, p: pig(key), born, radial,
+      v: v ?? (r() * DRAGS) | 0, side: radial ? (r() < 0.5 ? 1 : -1) : 1 });
+    // the rings first, outermost first, so the white-hot core sits on top; each ring is wound as a short spiral
+    for (let j = st.spec.length - 1; j >= 0; j--) {
+      const [k, key, w, cover] = st.spec[j], n = Math.max(6, Math.round((8 + 3 * j) * Math.sqrt(R / 18))), th0 = r() * TAU, gap = r();
+      for (let i = 0; i < n; i++) {
+        const f = i / n;
+        if (wrap01((f - gap) * TAU) < 1 - cover || r() < 0.06) continue;   // leave part of the ring open
+        dab(j, R * k * (0.88 + 0.24 * f), th0 + (i + 0.3 * r()) * TAU / n, TAU * R * k / n * 1.45 * (0.65 + 0.7 * r()), R * w * (0.8 + 0.4 * r()),
+          r() < 0.8 ? key : j === st.spec.length - 1 ? 'sYellow' : 'sLemon', 0.06 + 0.08 * j + 0.05 * f, false);
+      }
+    }
+    const nr = 7 + ((r() * 3) | 0);
+    for (let i = 0; i < nr; i++) dab(-1, R * 0.55, (i + 0.3 * r()) * TAU / nr, R * 1.25, R * 0.82, r() < 0.55 ? 'sWhite' : 'sLemon', 0.012 * i, true);
+    dab(-1, 0, r() * TAU, R * 1.45, R * 1.3, 'sWhite', 0.03, false, DAB + ((r() * 2) | 0));
+    STARS.push(st);
+  }
+}
+
+function buildLand(r) {
+  const SP = { x: 1180, y: 600 };
+  const nightAt = (x, y) => {   // night reaches the land from the edges and foreground toward the sunset
+    const d = clamp01(Math.hypot((x - SP.x) / 1.2, (y - SP.y) * 1.6) / 1250);
+    return 5.65 + 1.3 * (1 - d) + r() * 0.12;
+  };
+  const push = (o, dayKey, nightKey) => {
+    LAND.push(Object.assign({ gk: 0, pivot: 0, z: o.y, v: (r() * DRAGS) | 0, side: r() < 0.5 ? 1 : -1 }, o, { p: pig(dayKey), pN: pig(nightKey), sw: o.sw ?? nightAt(o.x, o.y) }));
+  };
+  const wv = () => WASH + ((r() * 2) | 0);
+  // hills: strokes follow the ridge; the far range is lighter and catches orange glints near the sun
+  const range = (top, bottom, far, t0, z0) => {
+    for (let x = -40; x < W + 40; x += 17 + 6 * r()) {
+      const yTop = top(x), yBot = bottom(x);
+      for (let y = yTop + 3; y < yBot + 6; y += 6 + r()) {
+        const depth = clamp01((y - yTop) / Math.max(8, yBot - yTop));
+        const xx = x + (r() - 0.5) * 8, yy = y + (r() - 0.5) * 3;
+        const ang = Math.atan((top(xx + 6) - top(xx - 6)) / 12) * (1 - 0.6 * depth) + (r() - 0.5) * 0.2 + (r() < 0.5 ? Math.PI : 0);
+        const glint = far && Math.abs(xx - DC.x) < 330 && depth < 0.45 && r() < 0.28;
+        const key = glint ? wpick(r, [['hsGold', 1], ['fOrange', 1]]) : far ? wpick(r, [['hLilac', 4], ['hViolet', 5]]) : wpick(r, [['hUltra', 45], ['hDeep', 30], ['hViolet', 25]]);
+        push({ x: xx, y: yy, ang, len: logn(r, 32, 0.3, 18, 60), wid: 9 + 4 * r(), born: t0 + 0.5 * (far ? xx / W : 1 - xx / W) + 0.06 * r(), z: z0 + yy * 1e-3 },
+          key, far ? 'nhViolet' : 'nhDeep');
+      }
+    }
+  };
+  const rangeWash = (top, bottom, keys, nightKey, t0, z0) => {
+    for (let x = -60; x < W + 60; x += 70 + 20 * r()) {
+      const yTop = top(x), yBot = bottom(x), yy = (yTop + yBot) / 2 + 4;
+      push({ x, y: yy, ang: Math.atan((top(x + 20) - top(x - 20)) / 40), len: 120, wid: Math.max(26, yBot - yTop + 12), v: wv(), born: t0 + 0.4 * x / W, z: z0 }, wpick(r, keys), nightKey);
+    }
+  };
+  rangeWash(ridgeFar, ridgeNear, [['hViolet', 2], ['hLilac', 1]], 'nhViolet', 1.45, -2500);
+  rangeWash(ridgeNear, () => FIELD_Y + 6, [['hUltra', 2], ['hDeep', 1]], 'nhDeep', 1.6, -1500);
+  range(ridgeFar, ridgeNear, true, 1.5, -2000);
+  range(ridgeNear, () => FIELD_Y + 6, false, 1.65, -1000);
+  // the field's coarse underpainting, combed along the furrows; the edges stay bare
+  for (let y = FIELD_Y + 2; y < H + 40; ) {
+    const g = clamp01((y - VP.y) / DEPTH), len = 70 + 120 * g, wid = 16 + 44 * g;
+    for (let x = -60 + r() * 40; x < W + 60; x += len * (0.55 + 0.2 * r())) {
+      const yy = y + (r() - 0.5) * wid * 0.3, edge = Math.min(x, W - x) / W;
+      if (r() < 0.7 * (1 - sstep(edge / 0.06))) continue;
+      if (STACKS.some(k => inDome(k, x, yy))) continue;
+      const s = furrowS(x, yy), ps = pathS(yy), inPath = Math.abs(s - ps) < PATH_HALF * 0.8 && yy > 630;
+      const shade = STACKS.some(k => { const c = shadowOf(k), ex = (x - c.cx) / c.rx, ey = (yy - c.cy) / c.ry; return ex * ex + ey * ey < 1; });
+      const green = greenZone(x, yy);
+      const fa = furrowAng(x, yy);
+      const ang = inPath ? Math.atan2(4, furrowX(pathS(yy + 4), yy + 4) - furrowX(ps, yy)) : lerp(fa > Math.PI / 2 ? Math.PI : 0, fa, sstep(span(g, 0.12, 0.3)));
+      const [dk, nk] = inPath ? [wpick(r, [['pCream', 2], ['pPink', 1]]), 'nPath'] : shade ? ['fBlue', 'nfIndigo'] : green ? [wpick(r, [['wViridian', 1], ['wGreen', 1]]), 'nGreen']
+        : [wpick(r, [['fOchre', 45], ['fChrome', 30], ['fOrange', 25]]), 'nfBlue'];
+      push({ x, y: yy, ang, len: inPath ? len * 0.5 : len, wid: inPath ? wid * 0.7 : wid, v: wv(), born: 1.8 + 0.6 * g + 0.08 * r(), z: -500 + yy * 1e-3 }, dk, nk);
+    }
+    y += wid * 0.55;
+  }
+
+  // the field: rows from the horizon to the bottom edge, combed along the furrows
+  let y = FIELD_Y - 4;
+  while (y < H + 30) {
+    const g = clamp01((y - VP.y) / DEPTH), far = g < 0.22;
+    const len = far ? 26 + 30 * g : 18 + 72 * g, wid = far ? 6 + 8 * g : 5 + 13 * g;
+    const stepY = far ? wid * 0.7 : len * 0.48, stepX = far ? len * 0.66 : wid * 0.92;
+    for (let x = -50 + r() * stepX; x < W + 50; x += stepX * (0.75 + 0.5 * r())) {
+      const yy = y + (r() - 0.5) * stepY, edge = Math.min(x, W - x) / W;
+      if (r() < 0.4 * (1 - sstep(edge / 0.07))) continue;   // bare canvas left at the field's edges
+      fieldStroke(r, x, yy, len * Math.exp(0.3 * gauss(r)), wid * Math.exp(0.18 * gauss(r)), push);
+    }
+    y += stepY;
+  }
+  // the haystacks: straw laid down the dome's curving meridians, warm on the side facing the sun, blue on the far side
+  STACKS.forEach(k => {
+    const big = k.half > 100, cell = big ? 10 : 7.5;
+    const dHalf = q => (domeHalf(k, Math.min(1, q + 0.01)) - domeHalf(k, Math.max(0, q - 0.01))) / 0.02;
+    const meridian = (m, q) => Math.atan2(k.h, -m * dHalf(q));   // pointing down the dome, as the straw falls
+    const tone = (m, q) => m * k.lit + (q > 0.72 ? 0.3 : 0);
+    for (let i = 0; i < 9; i++) {   // the underpainting, kept inside the dome
+      const m = (i % 3 - 1) * 0.55, q = 0.16 + 0.24 * Math.floor(i / 3), x = k.cx + m * domeHalf(k, q), yy = k.by - q * k.h;
+      push({ x, y: yy, ang: meridian(m, q), len: Math.max(20, Math.min(k.h * 0.5, 2 * k.h * (0.97 - q))), wid: k.half * 0.6, v: wv(), born: 2.3 + 0.05 * i, sw: 6.5, z: k.by - 1.5 },
+        tone(m, q) > -0.4 ? 'hsOrange' : 'hsRim', 'hsRim');
+    }
+    for (let q = 0.03; q < 0.98; q += (big ? 0.072 : 0.085) * (0.85 + 0.3 * r())) {
+      const hq = domeHalf(k, q);
+      if (hq < 3) continue;
+      const dm = cell / hq;
+      for (let m = -1 + dm * r() * 0.5; m <= 1; m += dm * (0.8 + 0.4 * r())) {
+        const qq = q + (r() - 0.5) * 0.03, x = k.cx + m * domeHalf(k, qq), yy = k.by - qq * k.h;
+        const rim = qq < 0.1, lf = tone(m, qq) + 0.12 * (noise(m * 3, qq * 4, 77) - 0.5);
+        const ang = rim ? (r() - 0.5) * 0.2 + (r() < 0.5 ? Math.PI : 0) : meridian(m, qq) + (r() - 0.5) * 0.18;
+        const gp = (lf + 0.55) / 0.27;   // 0 at the blue edge of the shadow, 1 where the orange takes over
+        let key = lf > 0.3 ? wpick(r, [['hsGold', 5], ['fChrome', 2], ['hsOrange', 3]])
+          : gp >= 1 ? wpick(r, [['hsOrange', 6], ['hsRim', 3], ['hsGold', 1]])
+          : gp > 0 ? (r() < gp ? (r() < 0.6 ? 'hsRim' : 'hsOrange') : (r() < 0.65 ? 'hsViolet' : 'hsBlue'))
+          : wpick(r, [['hsBlue', 6], ['hsViolet', 3]]);
+        if (rim) key = gp > 0.5 ? 'hsRim' : 'hsBlue';
+        const warm = key !== 'hsBlue' && key !== 'hsViolet';
+        const len = Math.max(10, Math.min(logn(r, big ? 28 : 20, 0.25, 12, big ? 44 : 30), 2 * k.h * (0.99 - qq) / (Math.abs(Math.sin(ang)) + 0.15)));
+        push({ x, y: yy, ang, len, wid: big ? 9 + 3 * r() : 7 + 2 * r(), side: Math.abs(m) < 0.1 ? (r() < 0.5 ? 1 : -1) : bowAway(x, yy, ang, k.cx, yy),
+          born: 2.38 + 0.4 * (1 - qq) + 0.08 * r(), sw: 6.5 + 0.35 * r(), z: k.by - 1 + r() * 0.5 },
+          key, warm ? (lf > 0.3 ? wpick(r, [['hsOrange', 3], ['hsGold', 1]]) : 'hsRim') : 'nhsBlue');
+      }
+    }
+  });
+  // poppies: vermilion dabs among the green wheat
+  for (let i = 0, tries = 0; i < 80 && tries < 4000; tries++) {
+    const x = r() * W, yy = 880 + r() * 215;
+    if (!greenZone(x, yy)) continue;
+    i++;
+    const g = clamp01((yy - VP.y) / DEPTH), sz = 0.55 + 0.6 * g, nd = 1 + ((r() * 3) | 0), born = 2.75 + 0.35 * r();
+    for (let j = 0; j < nd; j++) {
+      push({ x: x + (r() - 0.5) * 14 * sz, y: yy + (r() - 0.5) * 9 * sz, ang: r() * TAU, len: (13 + 7 * r()) * sz, wid: (11 + 6 * r()) * sz,
+        v: DAB + ((r() * 2) | 0), born: born + 0.03 * j, gk: 0.6, z: yy + 0.6 }, r() < 0.7 ? 'poppy' : 'poppyDeep', 'nPoppy');
+    }
+  }
+  LAND.sort((a, b) => a.z - b.z);
+}
+
+function fieldStroke(r, x, y, len, wid, push) {
+  for (const k of STACKS) if (inDome(k, x, y + wid * 0.3)) return;
+  const g = clamp01((y - VP.y) / DEPTH), s = furrowS(x, y), far = g < 0.22;
+  const born = 1.85 + 0.85 * g + 0.15 * r() + 0.08 * Math.abs(x - 960) / 960;
+  const fa = furrowAng(x, y);
+  let ang = lerp((fa > Math.PI / 2 ? Math.PI : 0) + (r() - 0.5) * 0.16, fa + (r() - 0.5) * 0.3, sstep(span(g, 0.12, 0.3))) + (r() < 0.5 ? Math.PI : 0);
+  // the winding path
+  const ps = pathS(y), dp = Math.abs(s - ps) / PATH_HALF;
+  if (y > 626 && dp < 1 + 0.12 * (noise(y * 0.05, 4, 9) - 0.5)) {
+    const dy = 4, pa = Math.atan2(dy, furrowX(pathS(y + dy), y + dy) - furrowX(ps, y));
+    const key = dp < 0.6 ? wpick(r, [['pCream', 45], ['pPink', 35], ['pLilac', 20]]) : wpick(r, [['pLilac', 5], ['fViolet', 3], ['pPink', 2]]);
+    push({ x, y, ang: pa + (r() - 0.5) * 0.3, len, wid, born: 2.2 + 0.55 * (1 - g) + 0.08 * r() }, key, dp < 0.6 ? 'nPath' : 'nfViolet');
+    return;
+  }
+  // cast shadows of the haystacks
+  for (const k of STACKS) {
+    const c = shadowOf(k), ex = (x - c.cx) / c.rx, ey = (y - c.cy) / c.ry;
+    if (ex * ex + ey * ey < 1) {
+      push({ x, y, ang: (r() - 0.5) * 0.3, len: len * 1.1, wid, born: 2.6 + 0.1 * r() }, wpick(r, [['hsBlue', 4], ['fBlue', 3], ['fViolet', 3]]), 'nfIndigo');
+      return;
+    }
+  }
+  // green wheat blades in the foreground: they rise from their heads and bend from there
+  if (greenZone(x, y)) {
+    const ripe = r() < 0.2;
+    push({ x, y, ang: -Math.PI / 2 + (r() - 0.5) * 0.5 + 0.25 * (noise(x * 0.01, y * 0.01, 8) - 0.5), len: len * 1.1, wid: wid * 0.75,
+      born: 2.45 + 0.4 * r(), gk: 1, pivot: 1 }, ripe ? wpick(r, [['fChrome', 1], ['fGold', 1]]) : wpick(r, [['wGreen', 40], ['wEmerald', 30], ['wViridian', 30]]),
+      ripe ? 'nfGold' : wpick(r, [['nGreen', 3], ['nGreen2', 2]]));
+    return;
+  }
+  // furrow troughs take the complementary violet and blue; the crests are yellows and oranges
+  const ph = s / FURROW, fr = ph - Math.floor(ph), trough = !far && Math.abs(fr - 0.5) < 0.13;
+  if (trough) {
+    push({ x, y, ang, len, wid, born: born + 0.12, gk: g < 0.3 ? 0 : g }, r() < 0.55 ? 'fViolet' : 'fBlue', 'nfIndigo');
+    return;
+  }
+  const lit = Math.abs(x - DC.x) < 380 && g < 0.45;
+  const key = far && r() < 0.12 ? 'hLilac'
+    : lit ? wpick(r, [['fGold', 35], ['fChrome', 35], ['fOrange', 15], ['fOchre', 15]])
+    : wpick(r, [['fChrome', 34], ['fOchre', 26], ['fGold', 24], ['fOrange', 16]]);
+  const nk = key === 'hLilac' ? 'nhViolet' : wpick(r, [['nfBlue', 55], ['nfViolet', 27], ['nfGold', 18]]);
+  push({ x, y, ang, len, wid, born, gk: g < 0.3 ? 0 : g }, key, nk);   // the gust stirs the nearer wheat
+}
+
+// ── outlines: Prussian-blue brush contours with pressure, bristle strands and dry-brush breaks ──
+function resample(pts, step) {
+  const xs = [pts[0][0]], ys = [pts[0][1]];
+  let carry = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = pts[i - 1], [bx, by] = pts[i], seg = Math.hypot(bx - ax, by - ay);
+    let d = step - carry;
+    while (d <= seg) { xs.push(ax + (bx - ax) * d / seg); ys.push(ay + (by - ay) * d / seg); d += step; }
+    carry = seg - (d - step);
+  }
+  return { xs, ys };
+}
+function contourDefs() {
+  const run = (f, a, b, step) => { const p = []; for (let v = a; step > 0 ? v <= b : v >= b; v += step) p.push(f(v)); return p; };
+  const defs = [];
+  defs.push({ pts: run(x => [x, ridgeFar(x) + 1], -30, W + 30, 12), w: 17, dur: 0.34, group: 'land' });
+  defs.push({ pts: run(x => [x, ridgeNear(x) + 1], W + 30, -30, -12), w: 14, dur: 0.3, group: 'land' });
+  // four furrows, brushed from the near edge up into the field; each lifts off at its own depth, well short of the horizon
+  for (const [s, top] of [[-1.55, 660], [-1.05, 712], [0.55, 640], [1.15, 690]]) defs.push({ pts: run(y => [furrowX(s, y), y], H + 40, top, -6), w: 20, wf: k => 1.15 - 0.8 * k, dur: 0.2, group: 'land' });
+  for (const side of [-1, 1]) defs.push({ pts: run(y => [furrowX(pathS(y) + side * PATH_HALF, y), y], H + 40, 630, -6), w: 17, wf: k => 1 - 0.65 * k, dur: 0.22, group: 'land' });
+  for (const k of [STACKS[1], STACKS[0]]) {
+    const up = run(a => [k.cx - domeHalf(k, Math.sin(a)), k.by - k.h * Math.sin(a)], 0, Math.PI / 2, 0.02);
+    const down = up.slice().reverse().map(([x, y]) => [2 * k.cx - x, y]);
+    defs.push({ pts: up.concat(down), w: k.half > 100 ? 16 : 13, dur: 0.22, group: 'land' });
+  }
+  defs.push({ pts: run(a => [DC.x + (97 + 3 * Math.sin(3 * a) + 5 * (a - 3.6) / TAU) * Math.cos(a), DC.y + (97 + 3 * Math.sin(3 * a) + 5 * (a - 3.6) / TAU) * Math.sin(a)], 3.6, 3.6 + 1.1 * TAU, 0.05), w: 20, dur: 0.26, group: 'sun' });
+  for (const band of [1, 4, 7]) {   // guide arcs on the outer edge of three bands, following their wobble
+    const b = BANDS[band];
+    defs.push({ pts: run(a => { const p = bandPoint(b, a, DAY_BW); return [b.cx + p.dx, b.cy + p.dy]; }, -Math.PI - 0.12, -0.1, 0.02), w: 15, dur: 0.28, group: 'sky', band });
+  }
+  return defs;
+}
+function paintContour(K, seed) {
+  const r = rng(seed), c = canvasOf(K.bw, K.bh), g = c.getContext('2d');
+  g.lineCap = 'butt'; g.lineJoin = 'round';
+  const n = K.n, body = K.body, xs = K.xs.map(v => v - K.ox), ys = K.ys.map(v => v - K.oy);
+  const nx = new Float32Array(n), ny = new Float32Array(n), w = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1), tx = xs[b] - xs[a], ty = ys[b] - ys[a], tl = Math.hypot(tx, ty) || 1;
+    nx[i] = -ty / tl; ny[i] = tx / tl;
+    let p;
+    if (i < body) {   // pressure: swelling through the middle, loaded where the brush lands
+      const s = i / (body - 1);
+      p = (0.45 + 0.55 * Math.pow(Math.sin(Math.PI * s), 0.7)) * (1 + 0.4 * (noise(s * 6, 0.5, seed) - 0.5));
+      if (s < 0.04) p *= 1 + 0.5 * (1 - s / 0.04);
+      p *= K.wf ? K.wf(s) : 1;
+    } else {          // the flick past the end point
+      const f = (i - body + 1) / (n - body);
+      p = (0.45 * (1 - f) ** 1.3 + 0.05) * (K.wf ? K.wf(1) : 1);
+    }
+    w[i] = K.w * Math.max(0.12, p);
+  }
+  // two or three stretches where the bristles split and the paint runs thin
+  const breaks = [];
+  for (let q = 0, nb = 2 + (r() < 0.5 ? 1 : 0); q < nb; q++) {
+    const at = Math.floor(body * (0.15 + 0.7 * r())), len = Math.round((15 + 15 * r()) / 3);
+    breaks.push([at, at + len]);
+  }
+  const breakK = i => { for (const [a, b] of breaks) if (i >= a && i <= b) return Math.sin(Math.PI * (i - a) / (b - a)); return 0; };
+  const NB = 15, TONES = ['#13234a', '#1c3566', '#1c3566', '#22305e', '#1a3160', '#2a4579', '#1c3566', '#172b55', '#22305e', '#30508e'];
+  const strands = [];
+  for (let j = 0; j < NB; j++) {
+    const ofs = (j / (NB - 1) - 0.5) * 0.92, edge = Math.abs(ofs) * 2;
+    strands.push({ ofs, edge, col: TONES[(r() * TONES.length) | 0], wk: 0.75 + 0.6 * r(), s0: Math.floor(r() * r() * 5 * (0.3 + edge)),
+      s1: Math.floor(r() * r() * 9 * (0.3 + edge)), ph: r() * 50, keep: r(), jit: Math.round((r() - 0.5) * 8) });
+  }
+  const draw = (st, dx, dy, style, alpha) => {
+    g.strokeStyle = style; g.globalAlpha = alpha;
+    let open = false, key = -1;
+    for (let i = st.s0; i < n - 1 - st.s1; i++) {
+      const sb = i / body, bk = breakK(i + st.jit);
+      const dry = (sb > 0.8 && noise(st.ph, i / 7, seed + 9) < 0.75 * span(sb, 0.8, 1.05) + 0.2 * st.edge * span(sb, 0.8, 1))
+        || (bk > 0.1 && st.keep < 0.72 * bk)                              // split bristles: most leave the canvas here
+        || (i >= body && st.edge > 0.45)
+        || (st.edge > 0.8 && noise(st.ph, i / 11, seed + 3) < 0.22);      // ragged outer bristles
+      if (dry) { if (open) { g.stroke(); open = false; } continue; }
+      const wob = 0.07 * (noise(st.ph, i / 13, seed + 5) - 0.5);
+      const o1 = (st.ofs + wob) * w[i], o2 = (st.ofs + wob) * w[i + 1];
+      const lw = Math.max(0.7, Math.round(w[i] / NB * 1.9 * st.wk * 4) / 4);
+      if (!open || lw !== key) {
+        if (open) g.stroke();
+        g.lineWidth = lw; key = lw; g.beginPath(); g.moveTo(xs[i] + nx[i] * o1 + dx, ys[i] + ny[i] * o1 + dy); open = true;
+      }
+      g.lineTo(xs[i + 1] + nx[i + 1] * o2 + dx, ys[i + 1] + ny[i + 1] * o2 + dy);
+    }
+    if (open) g.stroke();
+    g.globalAlpha = 1;
+  };
+  for (const st of strands) draw(st, 1.4, 2.4, 'rgb(10,12,28)', 0.2);   // the ridge's cast shadow
+  for (const st of strands) draw(st, 0, 0, st.col, 1);
+  // a few lighter bristle lines where the paint ridges catch the light
+  for (const st of strands) if (st.keep > 0.82 && st.edge < 0.7) draw(Object.assign({}, st, { wk: 0.45, ofs: st.ofs + 0.02 }), 0, 0, '#3f62a8', 0.55);
+  // the loaded blob where the brush first touched
+  const keep = { z: CAM.z, ox: CAM.ox, oy: CAM.oy };
+  CAM.z = 1; CAM.ox = 0; CAM.oy = 0;
+  const a0 = Math.atan2(ys[3] - ys[0], xs[3] - xs[0]);
+  stamp(g, pig('prussian'), DAB, xs[1] + Math.cos(a0) * K.w * 0.5, ys[1] + Math.sin(a0) * K.w * 0.5, a0, K.w * 1.9 * (K.wf ? K.wf(0) : 1) + 6, K.w * 1.25 * (K.wf ? Math.max(0.5, K.wf(0)) : 1), 1);
+  Object.assign(CAM, keep);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  return c;
+}
+function buildContours(r) {
+  CONTOURS = contourDefs();
+  const sun = CONTOURS.findIndex(K => K.group === 'sun');
+  CONTOURS.splice(4, 0, CONTOURS.splice(sun, 1)[0]);
+  CONTOURS.forEach((K, i) => {
+    const P = resample(K.pts, 3), n = P.xs.length;
+    // overshoot: the brush flicks a little past the end point
+    const ex = P.xs[n - 1] - P.xs[n - 3], ey = P.ys[n - 1] - P.ys[n - 3], el = Math.hypot(ex, ey) || 1, fl = 6 + 6 * r();
+    for (let d = 3; d <= fl; d += 3) { P.xs.push(P.xs[n - 1] + ex / el * d); P.ys.push(P.ys[n - 1] + ey / el * d); }
+    K.xs = P.xs; K.ys = P.ys; K.n = P.xs.length; K.body = n;
+    const m = K.w * 2.2 + 16;
+    K.ox = Math.floor(Math.min(...K.xs) - m); K.oy = Math.floor(Math.min(...K.ys) - m);
+    K.bw = Math.ceil(Math.max(...K.xs) + m) - K.ox; K.bh = Math.ceil(Math.max(...K.ys) + m) - K.oy;
+    K.cx = K.xs.reduce((a, b) => a + b, 0) / K.n;
+    K.t0 = BEAT0 + i * BEAT; K.t1 = REASSERT0 + i / CADENCE;
+    K.under = paintContour(K, 300 + i);
+    K.over = paintContour(K, 700 + i);
+  });
+  MASK = canvasOf(2300, 1400); MASKG = MASK.getContext('2d');
+}
+// where a contour group sits at time tau, as a transform on top of the camera
+function groupTransform(g, K, tau) {
+  g.setTransform(CAM.z, 0, 0, CAM.z, CAM.ox, CAM.oy);
+  if (K.group === 'sun') g.translate(0, sunDy(tau));
+  else if (K.group === 'sky') { const b = BANDS[K.band]; g.translate(b.cx, b.cy); g.rotate(b.omega * spinClock(tau)); g.translate(-b.cx, -b.cy); }
+}
+function showContour(K, img, prog, tau) {
+  if (prog <= 0) return;
+  if (prog >= 1) { groupTransform(ctx, K, tau); ctx.drawImage(img, K.ox, K.oy); return; }
+  const m = MASKG, last = Math.max(1, Math.floor(prog * (K.n - 1)));
+  m.setTransform(1, 0, 0, 1, 0, 0); m.globalCompositeOperation = 'source-over';
+  m.clearRect(0, 0, K.bw + 2, K.bh + 2);
+  m.lineWidth = K.w * 3.4; m.lineCap = 'round'; m.lineJoin = 'round'; m.strokeStyle = '#000';
+  m.beginPath(); m.moveTo(K.xs[0] - K.ox, K.ys[0] - K.oy);
+  for (let i = 1; i <= last; i++) m.lineTo(K.xs[i] - K.ox, K.ys[i] - K.oy);
+  m.stroke();
+  m.globalCompositeOperation = 'source-in'; m.drawImage(img, 0, 0);
+  groupTransform(ctx, K, tau);
+  ctx.drawImage(MASK, 0, 0, K.bw, K.bh, K.ox, K.oy, K.bw, K.bh);
+}
+const underProg = (K, t) => 1 - (1 - span(t, K.t0, K.t0 + K.dur)) ** 2;
+const overProg = (K, t) => 1 - (1 - span(t, K.t1, K.t1 + 0.16)) ** 2;
+
+// ── the canvas: primed linen, plain weave with slubs ──
+function buildWeave() {
+  const n = W * H, hgt = new Float32Array(n), top = new Uint8Array(n);
+  const P = 5.3, Q = 4.9;
+  const thick = (i, along, k) => 0.62 + 0.22 * hash3(i, k, 7) + 0.5 * Math.max(0, noise(i * 0.61, along / 33, k) - 0.66);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const wx = x + 1.6 * (noise(x * 0.004, y * 0.02, 21) - 0.5), wy = y + 1.6 * (noise(x * 0.02, y * 0.004, 22) - 0.5);
+    const u = wx / P, v = wy / Q, i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j;
+    const pw = Math.max(0, 1 - Math.abs(fu - 0.5) * 2 / thick(i, y, 1));
+    const pf = Math.max(0, 1 - Math.abs(fv - 0.5) * 2 / thick(j, x, 2));
+    const over = ((i + j) & 1) === 0;   // plain weave: warp over weft on alternate crossings
+    const hw = Math.sqrt(pw) * (over ? 0.78 + 0.22 * Math.sin(Math.PI * fv) : 0.5);
+    const hf = Math.sqrt(pf) * (over ? 0.5 : 0.78 + 0.22 * Math.sin(Math.PI * fu));
+    const k = y * W + x;
+    hgt[k] = Math.max(hw, hf); top[k] = hw < 0.05 && hf < 0.05 ? 0 : hw >= hf ? 1 : 2;
+  }
+  WEAVE = canvasOf(W, H); RELIEF = canvasOf(W, H);
+  const wg = WEAVE.getContext('2d'), rg = RELIEF.getContext('2d');
+  const a = wg.createImageData(W, H), b = rg.createImageData(W, H), A = a.data, B = b.data;
+  const LINEN = [237, 227, 204];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const k = y * W + x, h = hgt[k];
+    const hx = hgt[x < W - 1 ? k + 1 : k] - hgt[x > 0 ? k - 1 : k], hy = hgt[y < H - 1 ? k + W : k] - hgt[y > 0 ? k - W : k];
+    const lit = -(hx * LX + hy * LY);
+    const mott = noise(x * 0.006, y * 0.006, 31) - 0.5 + 0.5 * (noise(x * 0.03, y * 0.03, 32) - 0.5);
+    const fib = top[k] === 1 ? noise(x * 0.8, y * 0.07, 33) : noise(x * 0.07, y * 0.8, 34);
+    let br = 0.84 + 0.18 * h + 0.2 * lit + 0.05 * (fib - 0.5) + 0.05 * mott;
+    if (top[k] === 0) br *= 0.8;
+    const o = k * 4;
+    A[o] = Math.min(255, LINEN[0] * br); A[o + 1] = Math.min(255, LINEN[1] * br); A[o + 2] = Math.min(255, LINEN[2] * br * 0.99); A[o + 3] = 255;
+    const rv = Math.max(0, Math.min(255, 128 + 160 * (0.22 * lit + 0.12 * (h - 0.55)) + 10 * (fib - 0.5)));
+    B[o] = B[o + 1] = B[o + 2] = rv; B[o + 3] = 255;
+  }
+  wg.putImageData(a, 0, 0); rg.putImageData(b, 0, 0);
+  // a star's warm bloom, laid under its dabs
+  GLOW = canvasOf(128, 128);
+  const gg = GLOW.getContext('2d'), gr = gg.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,230,130,0.9)'); gr.addColorStop(0.3, 'rgba(252,196,80,0.55)'); gr.addColorStop(0.62, 'rgba(244,150,50,0.2)'); gr.addColorStop(1, 'rgba(240,140,40,0)');
+  gg.fillStyle = gr; gg.fillRect(0, 0, 128, 128);
+}
+
+// ── the title, painted into the night ──
+const TITLE = 'Post-Impressionism', SUBTITLE = '1886 – 1905';
+const TB = { x: 0, y: 80, w: W, h: 340 };
+function chamfer(inside, w, h) {   // distance from each inside pixel to the nearest outside one (3-4 chamfer, in px)
+  const d = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) d[i] = inside[i] ? 1e9 : 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x;
+    if (!d[i]) continue;
+    let v = d[i];
+    if (x > 0) v = Math.min(v, d[i - 1] + 3);
+    if (y > 0) { v = Math.min(v, d[i - w] + 3); if (x > 0) v = Math.min(v, d[i - w - 1] + 4); if (x < w - 1) v = Math.min(v, d[i - w + 1] + 4); }
+    d[i] = v;
+  }
+  for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) {
+    const i = y * w + x;
+    if (!d[i]) continue;
+    let v = d[i];
+    if (x < w - 1) v = Math.min(v, d[i + 1] + 3);
+    if (y < h - 1) { v = Math.min(v, d[i + w] + 3); if (x < w - 1) v = Math.min(v, d[i + w + 1] + 4); if (x > 0) v = Math.min(v, d[i + w - 1] + 4); }
+    d[i] = v;
+  }
+  for (let i = 0; i < w * h; i++) d[i] /= 3;
+  return d;
+}
+function boxBlur(src, w, h, rad) {   // two passes of a separable box blur
+  let a = src, b = new Float32Array(w * h);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < h; y++) {
+      let acc = 0;
+      for (let x = -rad; x <= rad; x++) acc += a[y * w + Math.min(w - 1, Math.max(0, x))];
+      for (let x = 0; x < w; x++) {
+        b[y * w + x] = acc / (2 * rad + 1);
+        acc += a[y * w + Math.min(w - 1, x + rad + 1)] - a[y * w + Math.max(0, x - rad)];
+      }
+    }
+    const c = new Float32Array(w * h);
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let y = -rad; y <= rad; y++) acc += b[Math.min(h - 1, Math.max(0, y)) * w + x];
+      for (let y = 0; y < h; y++) {
+        c[y * w + x] = acc / (2 * rad + 1);
+        acc += b[Math.min(h - 1, y + rad + 1) * w + x] - b[Math.max(0, y - rad) * w + x];
+      }
+    }
+    a = c;
+  }
+  return a;
+}
+function buildTitle() {
+  const probe = canvasOf(8, 8).getContext('2d');
+  let size = 160;
+  const setFont = g => { g.font = `900 ${size}px Fraunces`; g.letterSpacing = '3px'; g.textBaseline = 'alphabetic'; };
+  setFont(probe);
+  let tw = probe.measureText(TITLE).width;
+  if (tw > 1540) { size = Math.floor(size * 1540 / tw); setFont(probe); tw = probe.measureText(TITLE).width; }
+  const x0 = Math.round((W - tw) / 2), base = 210, cap = size * 0.7;
+  const xs = [];
+  for (let i = 0; i <= TITLE.length; i++) xs.push(x0 + probe.measureText(TITLE.slice(0, i)).width);
+  const art = draw => { const c = canvasOf(TB.w, TB.h), g = c.getContext('2d'); setFont(g); draw(g); return c; };
+  const glyph = art(g => { g.fillStyle = '#fff'; g.fillText(TITLE, x0, base); });
+  const fat = art(g => { g.fillStyle = g.strokeStyle = '#fff'; g.lineWidth = 5; g.lineJoin = 'round'; g.fillText(TITLE, x0, base); g.strokeText(TITLE, x0, base); });
+  const N = TB.w * TB.h, ga = glyph.getContext('2d').getImageData(0, 0, TB.w, TB.h).data;
+  const A = new Float32Array(N), ins = new Uint8Array(N), outs = new Uint8Array(N);
+  for (let i = 0; i < N; i++) { A[i] = ga[i * 4 + 3] / 255; ins[i] = A[i] >= 0.5 ? 1 : 0; outs[i] = 1 - ins[i]; }
+  // the cloisonné outline from distances to the glyph edge; its width breathes ±20% along the letters
+  const dIn = chamfer(ins, TB.w, TB.h), dOut = chamfer(outs, TB.w, TB.h);
+  const cont = canvasOf(TB.w, TB.h);
+  {
+    const cg = cont.getContext('2d'), im = cg.createImageData(TB.w, TB.h), d = im.data;
+    const C1 = rgbOf('#1c3566'), C2 = rgbOf('#22305e'), C3 = rgbOf('#15284f');
+    for (let y = 0; y < TB.h; y++) for (let x = 0; x < TB.w; x++) {
+      const i = y * TB.w + x, sd = ins[i] ? dIn[i] - 0.5 : -(dOut[i] - 0.5);
+      if (sd < -9 || sd > 7) continue;
+      const j = 1 + 0.4 * (noise(x / 38, y / 38, 71) - 0.5), wo = 4.6 * j, wi = 3.4 * j;
+      let al = clamp01(sd + wo + 0.5) * clamp01(wi - sd + 0.5);
+      if (al <= 0) continue;
+      al *= 0.55 + 0.45 * sstep((noise(x * 0.06, y * 0.28, 72) - 0.08) / 0.14);   // a few thin, dry places
+      const t1 = noise(x / 20, y / 20, 73), t2 = noise(x * 0.4, y * 0.1, 74);
+      const o = i * 4;
+      for (let ch = 0; ch < 3; ch++) d[o + ch] = lerp(lerp(C1[ch], C2[ch], t1), C3[ch], t2 * 0.6);
+      d[o + 3] = al * 255;
+    }
+    cg.putImageData(im, 0, 0);
+  }
+  const contShadowed = canvasOf(TB.w, TB.h);
+  {
+    const g = contShadowed.getContext('2d');
+    g.filter = 'brightness(0.25) blur(1.5px)'; g.globalAlpha = 0.5; g.drawImage(cont, 2, 3);
+    g.filter = 'none'; g.globalAlpha = 1; g.drawImage(cont, 0, 0);
+  }
+  const sub = canvasOf(TB.w, TB.h);
+  {
+    const g = sub.getContext('2d');
+    g.font = 'italic 500 56px Fraunces'; g.letterSpacing = '6px'; g.textAlign = 'center';
+    g.shadowColor = 'rgba(6,12,40,0.85)'; g.shadowBlur = 8; g.shadowOffsetY = 3;
+    g.fillStyle = '#f7eec2'; g.fillText(SUBTITLE, W / 2, base + 92);
+  }
+  // the run of each stem and bowl, from the glyph's smoothed structure tensor
+  const gxx = new Float32Array(N), gyy = new Float32Array(N), gxy = new Float32Array(N);
+  for (let y = 1; y < TB.h - 1; y++) for (let x = 1; x < TB.w - 1; x++) {
+    const i = y * TB.w + x, gx = A[i + 1] - A[i - 1], gy = A[i + TB.w] - A[i - TB.w];
+    gxx[i] = gx * gx; gyy[i] = gy * gy; gxy[i] = gx * gy;
+  }
+  const Jxx = boxBlur(gxx, TB.w, TB.h, 22), Jyy = boxBlur(gyy, TB.w, TB.h, 22), Jxy = boxBlur(gxy, TB.w, TB.h, 22);
+  const r = rng(1905), nL = TITLE.length;
+  // the halo: warm dabs laid round the outside of the word, 14–26 px out from the letters (never in the counters)
+  const ext = new Uint8Array(N), stack = [];
+  const flood = i => { if (outs[i] && !ext[i]) { ext[i] = 1; stack.push(i); } };
+  for (let x = 0; x < TB.w; x++) { flood(x); flood((TB.h - 1) * TB.w + x); }
+  for (let y = 0; y < TB.h; y++) { flood(y * TB.w); flood(y * TB.w + TB.w - 1); }
+  while (stack.length) {
+    const i = stack.pop(), x = i % TB.w;
+    if (x > 0) flood(i - 1); if (x < TB.w - 1) flood(i + 1); if (i >= TB.w) flood(i - TB.w); if (i < N - TB.w) flood(i + TB.w);
+  }
+  for (let y = 4; y < TB.h - 4; y += 7) for (let x = x0 - 50; x < x0 + tw + 50; x += 7) {
+    const px = Math.round(x + (r() - 0.5) * 6), py = Math.round(y + (r() - 0.5) * 6);
+    if (px < 1 || px >= TB.w - 1 || py < 1 || py >= TB.h - 1) continue;
+    const i = py * TB.w + px, len = 15 + 15 * r(), d = dOut[i], d0 = 8 + len / 2;   // the ray's inner end stays clear of the outline
+    if (!ext[i] || d < d0 || d > d0 + 14 || r() < 0.5 + 0.03 * (d - d0)) continue;
+    const gx = dOut[i + 1] - dOut[i - 1], gy = dOut[i + TB.w] - dOut[i - TB.w];
+    if (gx * gx + gy * gy < 0.2) continue;   // ridges between letters, where no direction is outward
+    const ang = Math.atan2(gy, gx) + (r() - 0.5) * 0.35, near = (d - len / 2) < 18;
+    let li = 0; while (li < nL - 1 && xs[li + 1] <= px) li++;
+    HALO.push({ x: px, y: py, ang, len, wid: 8 + 5 * r(), p: pig(near ? (r() < 0.7 ? 'tHaloY' : 'tHaloO') : (r() < 0.75 ? 'tHaloO' : 'tHaloY')), v: (r() * DRAGS) | 0,
+      side: r() < 0.5 ? 1 : -1, born: TT0 + li * TSTEP + 0.12 + 0.25 * r() });
+  }
+  HALO.sort((a, b) => a.born - b.born);
+  for (let y = 6; y < TB.h - 4; y += 6) for (let x = x0 - 10; x < x0 + tw + 10; x += 6) {
+    const px = Math.round(x + (r() - 0.5) * 5), py = Math.round(y + (r() - 0.5) * 5);
+    if (px < 0 || px >= TB.w || py < 0 || py >= TB.h) continue;
+    const i = py * TB.w + px;
+    if (!ins[i] || dIn[i] < 1.5) continue;
+    const e = Jxx[i] + Jyy[i];
+    const ang = (e > 1e-6 ? 0.5 * Math.atan2(2 * Jxy[i], Jxx[i] - Jyy[i]) + Math.PI / 2 : Math.PI / 2) + (r() - 0.5) * 0.16 + (r() < 0.5 ? Math.PI : 0);
+    let li = 0; while (li < nL - 1 && xs[li + 1] <= px) li++;
+    const vy = clamp01((py - (base - cap)) / cap), v = vy + 0.22 * (noise(px / 45, py / 45, 61) - 0.5);
+    const key = v < 0.32 ? (r() < 0.8 ? 'tLemon' : 'tChrome') : v < 0.68 ? wpick(r, [['tChrome', 85], ['tLemon', 8], ['tOrange', 7]]) : (r() < 0.75 ? 'tOrange' : 'tChrome');
+    TFILL.push({ x: px, y: py, ang, len: logn(r, 24, 0.3, 14, 36), wid: 8 + 4 * r(), p: pig(key), v: (r() * DRAGS) | 0, side: r() < 0.5 ? 1 : -1, li,
+      born: TT0 + li * TSTEP + 0.05 + vy * 0.24 + r() * 0.04 });
+  }
+  TFILL.sort((a, b) => a.born - b.born);
+  TT = canvasOf(TB.w, TB.h); TTG = TT.getContext('2d');
+  TITLE_ART = { xs, fat, cont: contShadowed, sub, base, size, end: TT0 + (nL - 1) * TSTEP + 0.34 };
+}
+const SUB_T0 = () => TITLE_ART.end + 0.32;
+
+// ── drawing ──
+// Once the night has buried the whole day sky (the camera is still by then) the dark underlayer is painted
+// once into a screen-space layer, the same marks in the same order, and reused.
+let DAY_DONE = null;
+function drawDaySky(tau) {
+  if (tau >= DAY_GONE) {
+    if (!DAY_DONE) {
+      DAY_DONE = canvasOf(W, H);
+      const keep = ctx;
+      ctx = DAY_DONE.getContext('2d');
+      paintDaySky(DAY_GONE); paintAfterglow(DAY_GONE);
+      ctx = keep;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(DAY_DONE, 0, 0);
+    return;
+  }
+  paintDaySky(tau);
+}
+function paintDaySky(tau) {
+  const turns = turnOf(BANDS, spinClock(tau)), live = PULSES.map(p => tau - p).filter(a => a >= 0 && a < 1.6);
+  const x0 = -CAM.ox / CAM.z - 70, x1 = (W - CAM.ox) / CAM.z + 70, y0 = -CAM.oy / CAM.z - 70;
+  for (const s of DAY) {
+    if (tau < s.born) continue;
+    const b = BANDS[s.b], [a, c, sn] = turns[s.b];
+    const x = b.cx + s.dx * c - s.dy * sn, y = b.cy + s.dx * sn + s.dy * c;
+    if (x < x0 || x > x1 || y < y0 || y > 645) continue;
+    let ang = s.a0 + a;
+    const night = tau >= s.sw, wash = s.v >= WASH;
+    if (s.flatAt && tau > s.flatAt && !night) {   // once the night has it, it is dark underpaint again, as it was
+      const k = sstep(span(tau, s.flatAt, s.flatAt + 0.4)), flat = Math.cos(ang) >= 0 ? 0 : Math.PI;
+      ang += k * ((((flat - ang) % TAU) + 3 * Math.PI) % TAU - Math.PI);
+    }
+    if (wash) ctx.globalAlpha = washAlpha(tau, s.born);
+    stamp(ctx, night ? s.pN : s.p, s.v, x, y, ang, s.len, s.wid, growOf(tau, s.born), s.side);
+    if (wash) ctx.globalAlpha = 1;
+    if (live.length && !night && !wash) {   // a ring of light passing through the bands
+      let k = 0;
+      for (const t of live) { const d = (s.rho - (140 + 620 * easeOut(t / 1.6))) / 36; k += (1 - t / 1.6) * Math.exp(-d * d); }
+      if (k > 0.04) {
+        ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = Math.min(1, k * 1.1);
+        stamp(ctx, s.pS, s.v, x, y, ang, s.len, s.wid, 1, s.side);
+        ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+      }
+    }
+  }
+}
+function drawAfterglow(tau) {
+  if (tau >= DAY_GONE) return;   // part of the cached underlayer from then on
+  paintAfterglow(tau);
+}
+function paintAfterglow(tau) {
+  if (tau < AFTER_FIRST) return;
+  for (const s of AFTER) {
+    if (tau < s.born) continue;
+    const cool = tau >= s.sw, gn = growOf(tau, s.sw);
+    if (!cool || gn < 1) stamp(ctx, s.p, s.v, s.x, s.y, s.ang, s.len, s.wid, cool ? 1 : growOf(tau, s.born), s.side);
+    if (cool) stamp(ctx, s.pN, s.v, s.x, s.y, s.ang, s.len, s.wid, gn, s.side);
+  }
+}
+// As the sun starts to go down its halo comes apart, outer rings first, so no ring ever circles the sinking
+// disc: each dab leaves the sun at its own moment, the lower ones sliding down flat onto the ridge as
+// afterglow and dying away there, the rest fading where they were. The disc sinks alone.
+function planHaloBreak() {
+  SUN.forEach((s, i) => {
+    if (!s.halo) return;
+    const h = k => hash3(i, k, 607);
+    s.melt = 5.5 + (s.r > 150 ? 0 : 0.04) + 0.1 * h(1);
+    const thm = s.th + s.spin * spinClock(s.melt);
+    s.settle = s.v < WASH && Math.sin(thm) > 0.05 && h(2) < 0.85;
+    if (!s.settle) return;
+    s.tx = DC.x + Math.cos(thm) * (s.r * 1.3 + 60 + 150 * h(3)) + (h(4) - 0.5) * 90;
+    s.ty = ridgeFar(s.tx) - 6 - 24 * h(5);
+    s.gone = 6.12 + 0.3 * h(6);
+  });
+}
+function drawSun(tau, t) {
+  const dy = sunDy(tau), sc = spinClock(tau), sw = haloSwell(tau);
+  for (const s of SUN) {
+    if (tau < s.born) continue;
+    const th = s.th + s.spin * sc, rad = s.r + (s.halo ? sw * 7 * (s.r / 150) : 0);
+    let x = DC.x + rad * Math.cos(th), y = DC.y + dy + rad * Math.sin(th), ang = th + s.da, fade = 1;
+    if (s.halo && tau >= s.melt) {
+      y = DC.y + sunDy(s.melt) + rad * Math.sin(th);   // it no longer follows the disc down
+      if (s.settle) {
+        const k = easeOut(span(tau, s.melt, s.melt + 0.35)), flat = Math.cos(ang) >= 0 ? 0 : Math.PI;
+        x = lerp(x, s.tx, k); y = lerp(y, s.ty, k);
+        ang += k * ((((flat - ang) % TAU) + 3 * Math.PI) % TAU - Math.PI);   // turned flat, the short way round
+        fade = 1 - span(tau, s.gone, s.gone + 0.3);
+      } else fade = 1 - span(tau, s.melt, s.melt + 0.12);
+      if (fade <= 0) continue;
+    }
+    if (y > 690) continue;
+    const wash = s.v >= WASH;
+    if (wash || fade < 1) ctx.globalAlpha = (wash ? washAlpha(tau, s.born) : 1) * fade;
+    stamp(ctx, tau >= s.dusk ? s.pd : s.p, s.v, x, y, ang, s.settle && tau >= s.melt ? s.len * 0.85 : s.len, s.wid, growOf(tau, s.born), s.side);
+    ctx.globalAlpha = 1;
+  }
+  // the sun's swoosh stays over its paint through the lay-in, until it is struck again
+  for (const K of CONTOURS) if (K.group === 'sun') {
+    if (t < K.t1 + 0.16) showContour(K, K.under, underProg(K, t), tau);
+    showContour(K, K.over, overProg(K, t), tau);
+  }
+}
+function drawNightSky(tau) {
+  if (tau < NIGHT0) return;
+  const turns = turnOf(NBANDS, nightClock(tau));
+  const x0 = -CAM.ox / CAM.z - 70, x1 = (W - CAM.ox) / CAM.z + 70, y0 = -CAM.oy / CAM.z - 70;
+  for (const s of NIGHT) {
+    if (tau < s.born) continue;
+    const b = NBANDS[s.b], [a, c, sn] = turns[s.b];
+    const x = b.cx + s.dx * c - s.dy * sn, y = b.cy + s.dx * sn + s.dy * c;
+    if (x < x0 || x > x1 || y < y0 || y > 645) continue;
+    const wash = s.v >= WASH;
+    if (wash) ctx.globalAlpha = washAlpha(tau, s.born);
+    stamp(ctx, s.p, s.v, x, y, s.a0 + a, s.len, s.wid, growOf(tau, s.born), s.side);
+    if (wash) ctx.globalAlpha = 1;
+  }
+}
+// the stars step back a little while the title is painted, then come forward again
+const starDim = t => 1 - 0.18 * (sstep(span(t, TT0 - 0.02, TT0 + 0.4)) - sstep(span(t, 8.6, 9.0)));
+function drawStars(tau, t) {
+  const dim = starDim(t);
+  for (const st of STARS) {
+    const a = tau - st.at;
+    if (a < 0) continue;
+    const ign = easeOut(a / 0.35), tw = 1 + 0.035 * Math.sin(tau * 5.3 + st.ph);
+    ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = 0.85 * ign * dim;
+    const gs = st.out * 1.45 * tw * CAM.z;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(GLOW, CAM.z * st.x + CAM.ox - gs, CAM.z * st.y + CAM.oy - gs, gs * 2, gs * 2);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = dim;
+    for (const d of st.dabs) {
+      if (a < d.born) continue;
+      let rad = d.d, th = d.th;
+      if (d.ring >= 0) {
+        rad *= overshoot(span(a, d.born, d.born + 0.3)) * (1 + 0.04 * Math.sin(tau * 4.1 + st.ph + d.ring * 1.7));
+        th += (d.ring % 2 ? -1 : 1) * 0.22 * (tau - st.at);
+        if (rad < 1) continue;
+      }
+      const x = st.x + rad * Math.cos(th), y = st.y + rad * Math.sin(th);
+      stamp(ctx, d.p, d.v, x, y, d.radial ? th : th + Math.PI / 2, d.len, d.wid, growOf(tau, st.at + d.born), d.side);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+// Once the night has reached every stroke the camera is still, so the land is painted once into a
+// screen-space layer (the same marks in the same order) and reused.
+let LAND_NIGHT_AT = 0, LAND_DONE = null, DAY_GONE = 0, AFTER_FIRST = 0;
+function drawLand(tau) {
+  if (tau >= LAND_NIGHT_AT) {
+    if (!LAND_DONE) {
+      LAND_DONE = canvasOf(W, H);
+      paintLand(LAND_DONE.getContext('2d'), LAND_NIGHT_AT);
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(LAND_DONE, 0, 0);
+    return;
+  }
+  paintLand(ctx, tau);
+}
+function paintLand(g, tau) {
+  const gf = tau >= GUST[0] && tau <= GUST[1] ? -320 + 2560 * (tau - GUST[0]) / (GUST[1] - GUST[0]) : null, gp = pig('gust');
+  for (const s of LAND) {
+    if (tau < s.born) continue;
+    let ang = s.ang, x = s.x, y = s.y, lift = 0;
+    if (s.gk && gf !== null) {
+      const d = (s.x - gf) / 260, b = Math.exp(-d * d) * s.gk;
+      if (b > 0.01) {
+        const db = 0.62 * b;
+        if (s.pivot) {   // a blade bends from its foot
+          const hx = x - Math.cos(ang) * s.len / 2, hy = y - Math.sin(ang) * s.len / 2;
+          ang += db; x = hx + Math.cos(ang) * s.len / 2; y = hy + Math.sin(ang) * s.len / 2;
+        } else ang += db;
+        lift = b;
+      }
+    }
+    const wash = s.v >= WASH;
+    if (tau < s.sw) {
+      if (wash) g.globalAlpha = washAlpha(tau, s.born);
+      stamp(g, s.p, s.v, x, y, ang, s.len, s.wid, growOf(tau, s.born), s.side);
+      if (wash) g.globalAlpha = 1;
+      if (lift > 0.06) { g.globalAlpha = Math.min(0.75, 0.7 * lift); stamp(g, gp, s.v, x, y, ang, s.len, s.wid, 1, s.side); g.globalAlpha = 1; }
+    } else {
+      const gn = growOf(tau, s.sw);
+      if (gn < 1) stamp(g, s.p, s.v, x, y, ang, s.len, s.wid, 1, s.side);
+      stamp(g, s.pN, s.v, x, y, ang, s.len, s.wid, gn, s.side);
+    }
+  }
+}
+function skyClip() {
+  ctx.save();
+  ctx.setTransform(CAM.z, 0, 0, CAM.z, CAM.ox, CAM.oy);
+  ctx.beginPath(); ctx.moveTo(-200, -400); ctx.lineTo(W + 200, -400);
+  for (let x = W + 200; x >= -200; x -= 20) ctx.lineTo(x, SKY_FLOOR(x));
+  ctx.closePath(); ctx.clip();
+}
+function drawTitle(t, tau) {
+  if (t < TT0) return;
+  const A = TITLE_ART, nL = TITLE.length, xs = A.xs;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const g = TTG, keep = { z: CAM.z, ox: CAM.ox, oy: CAM.oy };
+  // the halo of warm dabs round each painted letter, in pure colour against the night
+  CAM.z = 1; CAM.ox = TB.x; CAM.oy = TB.y;
+  for (const s of HALO) { if (tau < s.born) break; stamp(ctx, s.p, s.v, s.x, s.y, s.ang, s.len, s.wid, growOf(tau, s.born), s.side); }
+  // impasto fill, held inside the letters
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, TB.w, TB.h);
+  CAM.z = 1; CAM.ox = 0; CAM.oy = 0;
+  for (const s of TFILL) { if (tau < s.born) break; stamp(g, s.p, s.v, s.x, s.y, s.ang, s.len, s.wid, growOf(tau, s.born), s.side); }
+  Object.assign(CAM, keep);
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-in'; g.drawImage(A.fat, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(TT, TB.x, TB.y);
+  // the cloisonné outline: each letter's contour is brushed down as it starts
+  for (let i = 0; i < nL; i++) {
+    const p = span(t, TT0 + i * TSTEP, TT0 + i * TSTEP + 0.1);
+    if (p <= 0) continue;
+    const a = i === 0 ? 0 : xs[i], b = i === nL - 1 ? W : xs[i + 1], hh = TB.h * easeOut(p);
+    ctx.drawImage(A.cont, a, 0, b - a, hh, TB.x + a, TB.y, b - a, hh);
+  }
+  // the dates
+  const s0 = SUB_T0(), sp = span(t, s0, s0 + 0.32);
+  if (sp > 0) {
+    const wx = W * 0.5 - 220 + 440 * easeOut(sp), rise = 7 * (1 - easeOut(span(t, s0, s0 + 0.45)));
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, wx, H); ctx.clip();
+    ctx.globalAlpha = sstep(span(t, s0, s0 + 0.2));
+    ctx.drawImage(A.sub, TB.x, TB.y + rise);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+}
+
+function frame(t) {
+  const tau = quant(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(WEAVE, 0, 0);
+  setCamera(tau);
+  for (const K of CONTOURS) if (K.group === 'land') showContour(K, K.under, underProg(K, t), tau);
+  skyClip();
+  for (const K of CONTOURS) if (K.group === 'sky') showContour(K, K.under, underProg(K, t), tau);
+  drawDaySky(tau);
+  drawAfterglow(tau);
+  drawSun(tau, t);
+  for (const K of CONTOURS) if (K.group === 'sky') showContour(K, K.over, overProg(K, t), tau);
+  drawNightSky(tau);
+  drawStars(tau, t);
+  ctx.restore();
+  drawLand(tau);
+  for (const K of CONTOURS) if (K.group === 'land') showContour(K, K.over, overProg(K, t), tau);
+  drawTitle(t, tau);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'soft-light'; ctx.globalAlpha = 0.1; ctx.drawImage(RELIEF, 0, 0);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  const dark = sstep(span(t, CLOSE, DUR));   // the film opens on the bare canvas and closes into the dark
+  if (dark > 0) { ctx.fillStyle = `rgba(9,14,34,${dark})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.draw = ({ t }) => { frame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => {
+  const pan = x => +Math.max(-1, Math.min(1, x / W * 2 - 1)).toFixed(3);
+  const ev = [{ k: 'bed', t: 0, d: DUR }];
+  CONTOURS.forEach((K, i) => ev.push({ k: 'contour', t: K.t0, d: K.dur, pan: pan(K.cx), i, hero: K.group === 'sun' ? 1 : 0 }));
+  CONTOURS.forEach((K, i) => ev.push({ k: 'reassert', t: K.t1, pan: pan(K.cx), i }));
+  // paint landing: one cue per painted frame of the lay-in, weighted by how many strokes land in it
+  const bins = new Map(), seen = (born, px) => { const b = Math.floor(born * CADENCE); const e = bins.get(b) || { n: 0, x: 0 }; e.n++; e.x += px; bins.set(b, e); };
+  for (const s of SUN) seen(s.born, DC.x);
+  for (const s of DAY) { const b = BANDS[s.b], x = b.cx + s.dx, y = b.cy + s.dy; if (x > 0 && x < W && y < 620 && s.born < 3.5) seen(s.born, x); }
+  for (const s of LAND) if (s.x > 0 && s.x < W) seen(s.born, s.x);
+  [...bins.entries()].sort((a, b) => a[0] - b[0]).forEach(([b, e]) => ev.push({ k: 'dabs', t: +(b / CADENCE).toFixed(3), n: e.n, pan: pan(e.x / e.n) }));
+  ev.push({ k: 'day', t: 0.7 });
+  PULSES.forEach(p => ev.push({ k: 'pulse', t: p, pan: pan(DC.x) }));
+  ev.push({ k: 'gust', t: GUST[0], d: GUST[1] - GUST[0] });
+  ev.push({ k: 'sunset', t: SINK[0], d: SINK[1] - SINK[0] });
+  ev.push({ k: 'afterglow', t: AFTER_FIRST, d: 0.8 });
+  ev.push({ k: 'night', t: NIGHT0, d: NIGHT_SPREAD + NIGHT_SWEEP });
+  STARS.forEach((s, i) => ev.push({ k: 'star', t: +s.at.toFixed(3), pan: pan(DC.x + (s.x - DC.x) * CAM_Z), size: +(s.out * CAM_Z).toFixed(0), i }));
+  for (let i = 0; i < TITLE.length; i++) {
+    const x = (TITLE_ART.xs[i] + TITLE_ART.xs[i + 1]) / 2;
+    ev.push({ k: 'letter', t: +(TT0 + i * TSTEP).toFixed(3), pan: pan(x), i });
+  }
+  ev.push({ k: 'title', t: TT0, n: TITLE.length, step: TSTEP, end: +TITLE_ART.end.toFixed(3) });
+  ev.push({ k: 'subtitle', t: +SUB_T0().toFixed(3) });
+  ev.push({ k: 'close', t: CLOSE });
+  return ev;
+};
+window.ready = (async () => {
+  await Promise.all(['900 160px Fraunces', 'italic 500 56px Fraunces'].map(f => document.fonts.load(f)));
+  await document.fonts.ready;
+  buildAtlas();
+  buildWeave();
+  makeBands(rng(1887));
+  buildContours(rng(1891));
+  buildSun(rng(95));
+  planHaloBreak();
+  buildDaySky(rng(1888));
+  buildAfterglow(rng(1892));
+  buildNightSky(rng(1889));
+  buildStars(rng(1890));
+  buildLand(rng(1886));
+  buildTitle();
+  LAND_NIGHT_AT = Math.max(5.0, quant(Math.max(...LAND.map(s => s.sw)) + LAND_T) + 2 / CADENCE);
+  DAY_GONE = quant(Math.max(...DAY.map(s => s.sw), ...AFTER.map(s => s.sw)) + LAND_T) + 2 / CADENCE;
+  AFTER_FIRST = Math.min(...AFTER.map(s => s.born));
+})();
+</script>
+</body></html>

@@ -26,7 +26,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Archivo Black](https://fonts.google.com/specimen/Archivo+Black) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [dada](styles/dada), [glitch](styles/glitch), [neo-brutalism](styles/neo-brutalism), [risograph](styles/risograph), [weather-tv](styles/weather-tv) |
 | [Bangers](https://fonts.google.com/specimen/Bangers) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [comic-book](styles/comic-book), [digital-comic](styles/digital-comic), [storytime](styles/storytime) |
 | [Barlow](https://fonts.google.com/specimen/Barlow) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [split-flap](styles/split-flap) |
-| [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s), [blueprint](styles/blueprint), [oscilloscope](styles/oscilloscope), [split-flap](styles/split-flap), [weather-tv](styles/weather-tv) |
+| [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s), [blueprint](styles/blueprint), [oscilloscope](styles/oscilloscope), [pop-art](styles/pop-art), [split-flap](styles/split-flap), [weather-tv](styles/weather-tv) |
 | [Big Shoulders Stencil Display](https://fonts.google.com/specimen/Big+Shoulders+Stencil+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [stencil-street](styles/stencil-street) |
 | [Bodoni Moda](https://fonts.google.com/specimen/Bodoni+Moda) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [neoclassicism](styles/neoclassicism) |
 | [Bowlby One SC](https://fonts.google.com/specimen/Bowlby+One+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [mid-century](styles/mid-century) |
@@ -48,11 +48,11 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Exo 2](https://fonts.google.com/specimen/Exo+2) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [digital-comic](styles/digital-comic), [handheld-lcd](styles/handheld-lcd), [synthwave](styles/synthwave) |
 | [Federo](https://fonts.google.com/specimen/Federo) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-nouveau](styles/art-nouveau) |
 | [Forum](https://fonts.google.com/specimen/Forum) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [byzantine](styles/byzantine) |
-| [Fraunces](https://fonts.google.com/specimen/Fraunces) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [feature-animation-3d](styles/feature-animation-3d), [liquid-motion](styles/liquid-motion), [paper-cutout](styles/paper-cutout), [retro-1970s](styles/retro-1970s) |
+| [Fraunces](https://fonts.google.com/specimen/Fraunces) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [feature-animation-3d](styles/feature-animation-3d), [liquid-motion](styles/liquid-motion), [paper-cutout](styles/paper-cutout), [post-impressionism](styles/post-impressionism), [retro-1970s](styles/retro-1970s) |
 | [Fredoka](https://fonts.google.com/specimen/Fredoka) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [clay](styles/clay), [felt-stopmotion](styles/felt-stopmotion), [inflated-3d](styles/inflated-3d), [infographic](styles/infographic), [kurzgesagt](styles/kurzgesagt), [retro-1970s](styles/retro-1970s), [surreal-loop](styles/surreal-loop) |
 | [Gaegu](https://fonts.google.com/specimen/Gaegu) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [relatable-webcomic](styles/relatable-webcomic) |
 | [Gochi Hand](https://fonts.google.com/specimen/Gochi+Hand) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [absurd-webcomic](styles/absurd-webcomic), [underground-comix](styles/underground-comix) |
-| [Grenze Gotisch](https://fonts.google.com/specimen/Grenze+Gotisch) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [illuminated-manuscript](styles/illuminated-manuscript) |
+| [Grenze Gotisch](https://fonts.google.com/specimen/Grenze+Gotisch) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [expressionism](styles/expressionism), [illuminated-manuscript](styles/illuminated-manuscript) |
 | [Homemade Apple](https://fonts.google.com/specimen/Homemade+Apple) | [Apache 2.0](licenses/Apache-2.0.txt) | [watercolor-memory](styles/watercolor-memory) |
 | [IBM Plex Mono](https://fonts.google.com/specimen/IBM+Plex+Mono) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [ascii-art](styles/ascii-art), [blueprint](styles/blueprint), [dark-documentary](styles/dark-documentary), [oscilloscope](styles/oscilloscope), [ray-traced-cgi](styles/ray-traced-cgi), [technical-cutaway](styles/technical-cutaway) |
 | [IM Fell English](https://fonts.google.com/specimen/IM+Fell+English) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [baroque](styles/baroque), [history-comedy](styles/history-comedy), [scientific-plate](styles/scientific-plate), [silhouette](styles/silhouette), [sunday-strip](styles/sunday-strip), [victorian-engraving](styles/victorian-engraving) |
@@ -101,6 +101,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Rammetto One](https://fonts.google.com/specimen/Rammetto+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [saturday-cartoon](styles/saturday-cartoon) |
 | [Reenie Beanie](https://fonts.google.com/specimen/Reenie+Beanie) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [existential-stick](styles/existential-stick) |
 | [Rubik](https://fonts.google.com/specimen/Rubik) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [absurd-minimal](styles/absurd-minimal), [memphis](styles/memphis) |
+| [Rubik Mono One](https://fonts.google.com/specimen/Rubik+Mono+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [pop-art](styles/pop-art) |
 | [Russo One](https://fonts.google.com/specimen/Russo+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s) |
 | [Rye](https://fonts.google.com/specimen/Rye) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [rubber-hose](styles/rubber-hose) |
 | [Short Stack](https://fonts.google.com/specimen/Short+Stack) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [minimal-strip](styles/minimal-strip) |
@@ -111,7 +112,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [isometric](styles/isometric), [neo-brutalism](styles/neo-brutalism) |
 | [Space Mono](https://fonts.google.com/specimen/Space+Mono) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [risograph](styles/risograph) |
 | [Special Elite](https://fonts.google.com/specimen/Special+Elite) | [Apache 2.0](licenses/Apache-2.0.txt) | [map-documentary](styles/map-documentary) |
-| [Stardos Stencil](https://fonts.google.com/specimen/Stardos+Stencil) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [chinese-papercut](styles/chinese-papercut) |
+| [Stardos Stencil](https://fonts.google.com/specimen/Stardos+Stencil) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [chinese-papercut](styles/chinese-papercut), [cubism](styles/cubism) |
 | [Tiny5](https://fonts.google.com/specimen/Tiny5) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [point-and-click](styles/point-and-click) |
 | [Titan One](https://fonts.google.com/specimen/Titan+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [absurd-webcomic](styles/absurd-webcomic), [flash-cartoon](styles/flash-cartoon), [golden-age-comic](styles/golden-age-comic) |
 | [Unbounded](https://fonts.google.com/specimen/Unbounded) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [particles](styles/particles) |
@@ -210,6 +211,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Rammetto One**: Copyright 2011 The Rammetto Project Authors (https://github.com/googlefonts/RammettoFont), with Reserved Font Name Rammetto.
 - **Reenie Beanie**: Copyright (c) 2010 Typeco (james@typeco.com). All rights reserved.
 - **Rubik**: Copyright 2015 The Rubik Project Authors (https://github.com/googlefonts/rubik)
+- **Rubik Mono One**: Copyright 2015 The Rubik Project Authors (mail@hubertfischer.com)
 - **Russo One**: Copyright (c) 2011-2012, Jovanny Lemonad (lemonad@jovanny.ru), with Reserved Font Name "Russo"
 - **Rye**: Copyright (c) 2012, Sorkin Type Co (eben@eyebytes.com) with Reserved Font Name 'Rye'
 - **Short Stack**: Copyright (c) 2011, Sorkin Type Co (www.sorkintype.com eben@eyebytes.com) with Reserved Font Names "Short Stack" and "Short Stack One".

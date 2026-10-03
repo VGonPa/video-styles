@@ -520,7 +520,9 @@
    ],
    "credits": [],
    "webgl": true,
-   "render": {},
+   "render": {
+    "gpu": "metal"
+   },
    "recipe": false,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-glass-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-glass.mp4"
@@ -2807,6 +2809,86 @@
    "recipe": false,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impressionism-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impressionism.mp4"
+  },
+  {
+   "slug": "post-impressionism",
+   "number": 142,
+   "name": "Post-Impressionism",
+   "feel": "Impasto, swirl, burning colour",
+   "best_for": "Emotion, energy and expressive reveals",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Post-Impressionist painting — Van Gogh's impasto and swirling skies, Gauguin and Bernard's cloisonnist outlines, Cézanne's constructive brushwork"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/post-impressionism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/post-impressionism.mp4"
+  },
+  {
+   "slug": "expressionism",
+   "number": 143,
+   "name": "Expressionism",
+   "feel": "Angular line, colour as sound",
+   "best_for": "Tension, ideas and abstract explainers",
+   "family": "art-movements",
+   "use_cases": [
+    "explainer",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Wassily Kandinsky's Improvisations, Franz Marc and Der Blaue Reiter, with the woodcuts of Die Brücke"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/expressionism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/expressionism.mp4"
+  },
+  {
+   "slug": "cubism",
+   "number": 144,
+   "name": "Cubism",
+   "feel": "Faceted planes, one object, many views",
+   "best_for": "Showing several sides of one thing at once",
+   "family": "art-movements",
+   "use_cases": [
+    "explainer",
+    "product"
+   ],
+   "credits": [
+    "Inspired by Pablo Picasso, Georges Braque and Juan Gris"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cubism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cubism.mp4"
+  },
+  {
+   "slug": "pop-art",
+   "number": 146,
+   "name": "Pop Art",
+   "feel": "Ben-Day dots, flat colour, repeat",
+   "best_for": "Repetition, consumption and loud product beats",
+   "family": "art-movements",
+   "use_cases": [
+    "social",
+    "product"
+   ],
+   "credits": [
+    "Inspired by Roy Lichtenstein's Ben-Day dot paintings, Andy Warhol's silkscreen repeats and Richard Hamilton's British Pop"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pop-art-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pop-art.mp4"
   }
  ]
 }

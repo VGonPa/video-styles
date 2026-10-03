@@ -5,13 +5,13 @@
     "3blue1brown": {
       "video": {
         "file": "3blue1brown.mp4",
-        "size": 3521843,
-        "sha256": "3848817de8c6fff821eb1abca246e19b279dfc537205b767c7fb6641a5c3c61f"
+        "size": 3305899,
+        "sha256": "cb52954f3eaff47da89732075a81f34d8b296aa9d21af5548f8aaf6a22bcbde1"
       },
       "preview": {
         "file": "3blue1brown-preview.gif",
-        "size": 557423,
-        "sha256": "f8a04d0090741845e327904e2c9a9fcc5ad81265c40cc9af3003fb0f3938335a"
+        "size": 730282,
+        "sha256": "7ce0ca6363d541766baaba5b51f61b401c6d74aee3f2fd5b28fae6e7bcfd09df"
       }
     },
     "absurd-minimal": {
@@ -350,6 +350,18 @@
         "sha256": "36a6f0237ec5f2c3b20f084c87580b60523c40094bc12af67d8408d3550cc9ac"
       }
     },
+    "cubism": {
+      "video": {
+        "file": "cubism.mp4",
+        "size": 6604222,
+        "sha256": "aa9c40bac7a25eafb7fc2a036dfdd1675e8ee03813c16b94d9b54de3d27659d9"
+      },
+      "preview": {
+        "file": "cubism-preview.gif",
+        "size": 1089607,
+        "sha256": "c9cce8d64a30052221c7bb50dcc9d0120657c5c54b07e074b810439596d66e3c"
+      }
+    },
     "dada": {
       "video": {
         "file": "dada.mp4",
@@ -492,6 +504,18 @@
         "file": "existential-stick-preview.gif",
         "size": 2280687,
         "sha256": "66838d5156edad68f0fc351a350245199030abf917f3d93e143862a8b88b7b41"
+      }
+    },
+    "expressionism": {
+      "video": {
+        "file": "expressionism.mp4",
+        "size": 18794078,
+        "sha256": "406166313fb641bcc9f659540805ecd55f5e9f656cf50a3c54b186300afe7727"
+      },
+      "preview": {
+        "file": "expressionism-preview.gif",
+        "size": 1810603,
+        "sha256": "0ae85a15dda0451891c5c3565d9b4ae9df2f02771a2672aea6069b8f7e0c084e"
       }
     },
     "feature-animation-3d": {
@@ -797,13 +821,13 @@
     "liquid-glass": {
       "video": {
         "file": "liquid-glass.mp4",
-        "size": 5976903,
-        "sha256": "3328e736437c16c712d8502655a302c1579507d5f221b23465d340d8738430c3"
+        "size": 4847867,
+        "sha256": "e8827ffa591249b8bec06a8d73b102a944cf7f0a237491d347eddcb0adbee198"
       },
       "preview": {
         "file": "liquid-glass-preview.gif",
-        "size": 1411024,
-        "sha256": "e4fdff73abfd7d2ad3eb1906d96b59dfeb67959ed9d9d9bf3d99e9710b3e734c"
+        "size": 1551883,
+        "sha256": "d24cfd1203bf388d3fbc909ebce2472367e4ec0126e83f8383554452b57b1e61"
       }
     },
     "liquid-motion": {
@@ -1152,6 +1176,30 @@
         "file": "pointillism-preview.gif",
         "size": 2540651,
         "sha256": "b00b0d01c3046bc0384ed704745ee109d92e72be7079e65c45f1a4242a557c26"
+      }
+    },
+    "pop-art": {
+      "video": {
+        "file": "pop-art.mp4",
+        "size": 19613940,
+        "sha256": "dba71d794f99d18a7846df70a3ade9bd77456dc37b8c1a03a33e4337e36c654c"
+      },
+      "preview": {
+        "file": "pop-art-preview.gif",
+        "size": 1709407,
+        "sha256": "fb1cfafcf65479e43c9b1835158a58d68520c6bfb22791afb898b084f7d59c93"
+      }
+    },
+    "post-impressionism": {
+      "video": {
+        "file": "post-impressionism.mp4",
+        "size": 24651669,
+        "sha256": "d0d9dadf32e7031eb500c1e7d188b384564bdbd877cbdc1d95e30b66efc54263"
+      },
+      "preview": {
+        "file": "post-impressionism-preview.gif",
+        "size": 2188686,
+        "sha256": "8ed430f38d6138ea09fafcb28f0c63c8474b72c63d27515eaa3573766a3f3a80"
       }
     },
     "product-ui": {
@@ -1565,13 +1613,13 @@
     "ukiyo-e": {
       "video": {
         "file": "ukiyo-e.mp4",
-        "size": 10987343,
-        "sha256": "5e641029ddf687fea047138c51af683828dd6b0e08f16137ec5c45346938b638"
+        "size": 7233140,
+        "sha256": "3466860780c23b0fcee83d585a93595bc570aa06661a49ab76991e591459ca93"
       },
       "preview": {
         "file": "ukiyo-e-preview.gif",
-        "size": 1529603,
-        "sha256": "30b69a944a8722aab27bb6d89275d8e2a11d482df4def66b66669ba98378f5b8"
+        "size": 939650,
+        "sha256": "abc230c740c1ba18e8e628e59434878d5888f4eb793dfd3d9b97ef16887ab2b6"
       }
     },
     "underground-comix": {

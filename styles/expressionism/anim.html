@@ -1,0 +1,818 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── expressionism · a village that turns into sound ─────────────────────────────────────────────
+// On a primed cream canvas ink drops spatter in at the corner and a loaded brush hits the frame: a
+// long kinked slash that becomes the foot of the mountains, then a steep second one. Colour floods in
+// that owes nothing to nature: a yellow sky, a vermilion sun, ultramarine and violet mountains
+// snapping up behind the first slash, an acid-green slope with a pink road, a crooked village
+// (skewed houses, a leaning tower) and a crimson tree. For a bar the landscape bends to a 120 BPM beat:
+// houses sway, peaks pump, the black lines twang, the sun throws coloured rings and a field swaps hue
+// on the off-beats. Then every shape lets go of the landscape and becomes an improvisation: big
+// wedges and planes, a target, whiplash lines over translucent painted colour clouds. It winds up and
+// is blown outward by a yellow plate stamped with the title.
+// Fills are brush plates (one per colour, tileable, precomputed) laid in under each shape's own
+// transform, so the brushwork travels with the shape; outlines are tapered ribbons of bristle
+// strands that only split into dry streaks where the brush runs out. A colour never blends into
+// another: shapes that turn black are wiped over with ink. Canvas weave and grain are one static
+// overlay. Everything is seeded; a frame depends only on t.
+const W = 1920, H = 1080, DUR = 10, PI = Math.PI, TAU = 2 * PI;
+const cv = document.getElementById('c'), cx = cv.getContext('2d');
+const cl = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const mix = (a, b, k) => a + (b - a) * k;
+const span = (t, a, b) => cl((t - a) / (b - a));
+const sm = k => (k = cl(k), k * k * (3 - 2 * k));
+const out3 = k => 1 - (1 - cl(k)) ** 3;
+const inOut = k => (k = cl(k), k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
+const eback = (k, s = 1.7) => { if (k <= 0) return 0; if (k >= 1) return 1; k -= 1; return 1 + k * k * ((s + 1) * k + s); };
+function prng(seed) {
+  let a = Math.imul(seed + 1, 0x9E3779B1) >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let z = a; z = Math.imul(z ^ (z >>> 15), z | 1); z ^= z + Math.imul(z ^ (z >>> 7), z | 61); return ((z ^ (z >>> 14)) >>> 0) / 4294967296; };
+}
+function hash(i, s) {
+  let h = Math.imul(i | 0, 0x85ebca6b) ^ Math.imul((s | 0) + 0x632be5ab, 0xc2b2ae35);
+  h ^= h >>> 15; h = Math.imul(h, 0x27d4eb2f); h ^= h >>> 13; h = Math.imul(h, 0x165667b1); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+const wiggle = seed => x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return mix(hash(i, seed), hash(i + 1, seed), u) * 2 - 1; };
+const tri = x => 2 / PI * Math.asin(Math.sin(TAU * x));   // triangle wave, period 1
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+// ── affine 2D: [a, b, c, d, e, f] as in setTransform ──
+const Mx = {
+  I: [1, 0, 0, 1, 0, 0],
+  mul: (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]],
+  T: (x, y) => [1, 0, 0, 1, x, y],
+  R: a => { const c = Math.cos(a), s = Math.sin(a); return [c, s, -s, c, 0, 0]; },
+  S: (x, y = x) => [x, 0, 0, y, 0, 0],
+  K: k => [1, 0, k, 1, 0, 0],                    // shear: x += k·y
+};
+const chain = (...ms) => ms.reduce(Mx.mul);
+const about = (x, y, m) => chain(Mx.T(x, y), m, Mx.T(-x, -y));
+const ap = (m, p) => [m[0] * p[0] + m[2] * p[1] + m[4], m[1] * p[0] + m[3] * p[1] + m[5]];
+
+// ── polygons ──
+const centroid = ps => { let x = 0, y = 0; for (const p of ps) { x += p[0]; y += p[1]; } return [x / ps.length, y / ps.length]; };
+const area = ps => { let s = 0; for (let i = 0; i < ps.length; i++) { const p = ps[i], q = ps[(i + 1) % ps.length]; s += p[0] * q[1] - q[0] * p[1]; } return s / 2; };
+const off = (ps, x, y) => ps.map(p => [p[0] + x, p[1] + y]);
+function subdiv(ctrl, step) {   // straight runs cut into ~step-long pieces: bends stay angular kinks
+  const out = [ctrl[0]];
+  for (let i = 1; i < ctrl.length; i++) {
+    const a = ctrl[i - 1], b = ctrl[i], m = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / step));
+    for (let j = 1; j <= m; j++) out.push([mix(a[0], b[0], j / m), mix(a[1], b[1], j / m)]);
+  }
+  return out;
+}
+const vnormals = ps => ps.map((p, i) => {
+  const a = ps[Math.max(0, i - 1)], b = ps[Math.min(ps.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+  return [-dy / l, dx / l];
+});
+function resample(poly, n) {     // n points along the outline, every original corner kept
+  const m = poly.length, len = poly.map((p, i) => { const q = poly[(i + 1) % m]; return Math.hypot(q[0] - p[0], q[1] - p[1]); });
+  const L = len.reduce((a, b) => a + b, 0), cnt = len.map(l => Math.max(1, Math.round(n * l / L)));
+  let tot = cnt.reduce((a, b) => a + b, 0);
+  while (tot < n) { let b = 0; for (let i = 1; i < m; i++) if (len[i] / cnt[i] > len[b] / cnt[b]) b = i; cnt[b]++; tot++; }
+  while (tot > n) { let b = -1; for (let i = 0; i < m; i++) if (cnt[i] > 1 && (b < 0 || len[i] / cnt[i] < len[b] / cnt[b])) b = i; cnt[b]--; tot--; }
+  const pts = [], idx = [];
+  for (let i = 0; i < m; i++) {
+    idx.push(pts.length); const p = poly[i], q = poly[(i + 1) % m];
+    for (let j = 0; j < cnt[i]; j++) pts.push([mix(p[0], q[0], j / cnt[i]), mix(p[1], q[1], j / cnt[i])]);
+  }
+  return { pts, idx };
+}
+function alignTo(la, lb) {       // rotate lb's start index so each vertex pairs with its nearest twin in la
+  const n = la.length, rms = ps => Math.sqrt(ps.reduce((a, p) => a + p[0] * p[0] + p[1] * p[1], 0) / n) || 1, ra = rms(la), rb = rms(lb);
+  let best = 0, bc = Infinity;
+  for (let o = 0; o < n; o++) {
+    let c = 0;
+    for (let i = 0; i < n; i++) { const q = lb[(i + o) % n]; c += (la[i][0] / ra - q[0] / rb) ** 2 + (la[i][1] / ra - q[1] / rb) ** 2; }
+    if (c < bc) { bc = c; best = o; }
+  }
+  return la.map((_, i) => lb[(i + best) % n]);
+}
+function polyPath(ps, p = new Path2D()) { p.moveTo(ps[0][0], ps[0][1]); for (let i = 1; i < ps.length; i++) p.lineTo(ps[i][0], ps[i][1]); p.closePath(); return p; }
+function inset(ps, ins) {        // pull some edges in: slivers of cream ground show inside the black outline
+  const c = centroid(ps);
+  return ps.map((p, i) => { const dx = c[0] - p[0], dy = c[1] - p[1], l = Math.hypot(dx, dy) || 1, d = Math.min(ins[i], l * 0.3); return [p[0] + dx / l * d, p[1] + dy / l * d]; });
+}
+const disc = (x, y, r, seed, m = 18) => Array.from({ length: m }, (_, i) => { const a = i / m * TAU + 0.3, rr = r * (0.94 + 0.12 * hash(i, seed)); return [x + Math.cos(a) * rr, y + Math.sin(a) * rr]; });
+
+// ── colour: the Blue Rider palette ──
+const PAL = {
+  ultra: '#1d3fbf', prussian: '#142a6e', cobalt: '#3d7fd9', yellow: '#f6c21c', lemon: '#f3e04a',
+  vermilion: '#e2441f', crimson: '#b5163b', orange: '#f08a16', emerald: '#138a5e', acid: '#7cc242',
+  violet: '#6b2a8f', pink: '#e86aa0', cream: '#f1e6cc', black: '#141414',
+};
+const INK = '#141414';
+function hsl(hx) {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hx.slice(i, i + 2), 16) / 255);
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d) return [0, 0, l];
+  const h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, d / (1 - Math.abs(2 * l - 1)), l];
+}
+const hsla = (h, s, l, a = 1) => `hsla(${h.toFixed(1)},${(cl(s) * 100).toFixed(1)}%,${(cl(l) * 100).toFixed(1)}%,${a.toFixed(3)})`;
+
+// ── timing: 120 BPM, beats on 0.30 + 0.5k. Every cue lives here; window.events() reads the same table ──
+const BEAT0 = 0.30, SPB = 0.5, BEATS = Array.from({ length: 20 }, (_, k) => +(BEAT0 + SPB * k).toFixed(2));
+const T = {
+  drops: [0.19, 0.21, 0.235, 0.255],  // ink spatters in at the corner while the brush loads
+  s1: [0.18, 0.27, 0.42],          // the bristle tip creeps in at the edge, then the whip across
+  s2: [0.76, 0.90],
+  sky: [0.80, 0.32], sun: [0.90, 0.42],
+  mtn: [1.30, 0.46], far: [1.37, 0.46], ridge: [1.40, 1.76], facet: 1.50,
+  slope: [1.55, 0.28], field: [1.61, 0.28], road: [1.64, 0.30], hatch: 1.70,
+  tower: 2.05, tree: 2.30,
+  swaps: [[2.80, 'sky', 'orange'], [3.80, 'slope', 'lemon']],
+  morph: 4.30, clouds: 4.80, marks: [5.30, 5.80],
+  windup: 6.00, title: 6.30, sub: 6.80, close: 9.20, black: 9.95,
+};
+// how hard the landscape answers each beat
+const beatAmp = b => b < 2.29 ? 0 : b < 4.29 ? 1 : b < 6.29 ? 0.7 : b < 6.31 ? 0 : b < 9.19 ? 0.42 : 0.15;
+const settle = t => 1 - sm(span(t, T.close, T.close + 0.7));
+const tw = t => t < T.close ? t : T.close + 0.45 * (1 - Math.exp(-(t - T.close) / 0.45));   // clock that coasts to a stop
+function osc(t, tau, f, alt = true) {           // damped swing after each beat, alternating direction
+  const k = Math.floor((t - BEAT0) / SPB + 1e-6); let v = 0;
+  for (let j = Math.max(0, k - 2); j <= Math.min(k, BEATS.length - 1); j++) {
+    const d = t - BEATS[j]; if (d < 0) continue;
+    v += beatAmp(BEATS[j]) * (alt && j % 2 ? -1 : 1) * Math.exp(-d / tau) * Math.sin(TAU * f * d);
+  }
+  return v * settle(t);
+}
+function pulse(t, tau) {                        // a push on each beat that decays
+  const k = Math.floor((t - BEAT0) / SPB + 1e-6); let v = 0;
+  for (let j = Math.max(0, k - 2); j <= Math.min(k, BEATS.length - 1); j++) {
+    const d = t - BEATS[j]; if (d < 0) continue;
+    v += beatAmp(BEATS[j]) * (d < 0.05 ? sm(d / 0.05) : Math.exp(-(d - 0.05) / tau));
+  }
+  return v * settle(t);
+}
+const swapK = (t, ts) => sm(span(t, ts - 0.01, ts + 0.05)) * (1 - sm(span(t, ts + 0.3, ts + 0.47)));
+const C0 = [960, 515];                          // the title plate's centre: the recoil blows away from it
+function pushK(t) {                             // contract on the upbeat, then spring outward on the slam
+  if (t < T.windup) return 1;
+  if (t < T.title) return 1 - 0.05 * inOut(span(t, T.windup, T.title));
+  const d = t - T.title;
+  return 1.05 + Math.exp(-d / 0.24) * (-0.1 * Math.cos(TAU * 1.5 * d) + 0.16 * Math.sin(TAU * 1.5 * d));
+}
+
+// ── brush plates: base colour worked over with broad short strokes, one direction per plate ──
+const PS = 640, PLATE = {}, PAT = {};
+const DIRS = { yellow: -0.35, lemon: -0.5, acid: 0.32, emerald: 0.2, ultra: -1.05, violet: 0.95, prussian: 1.35, cream: 0.6, black: 0.8 };
+function daub(g, x, y, a, len, wid, h, s, l, al, sd) {
+  const r = prng(sd), ca = Math.cos(a), sa = Math.sin(a), N = 7, top = [], bot = [];
+  for (let i = 0; i <= N; i++) {
+    const u = i / N, along = (u - 0.5) * len;
+    const hw = wid / 2 * (u < 0.15 ? 0.7 + 2 * u : 1) * (u > 0.7 ? 1 - (u - 0.7) / 0.3 * 0.8 : 1) * (0.88 + r() * 0.24);
+    top.push([x + ca * along - sa * hw, y + sa * along + ca * hw]); bot.push([x + ca * along + sa * hw, y + sa * along - ca * hw]);
+  }
+  g.beginPath(); top.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); for (let i = N; i >= 0; i--) g.lineTo(bot[i][0], bot[i][1]); g.closePath();
+  g.fillStyle = hsla(h, s, l, al); g.fill();
+  g.lineCap = 'round';
+  for (let j = 0; j < 4; j++) {                  // bristle tracks inside the daub
+    const o = (r() - 0.5) * wid * 0.8, l2 = l + (r() < 0.5 ? -1 : 1) * (0.035 + r() * 0.05), u0 = -0.5 + r() * 0.15, u1 = 0.25 + r() * 0.25;
+    g.strokeStyle = hsla(h, s, l2, 0.32); g.lineWidth = 1 + r() * 2.2;
+    g.beginPath(); g.moveTo(x + ca * u0 * len - sa * o, y + sa * u0 * len + ca * o); g.lineTo(x + ca * u1 * len - sa * o, y + sa * u1 * len + ca * o); g.stroke();
+  }
+}
+function makePlate(key, seed) {
+  const c = mk(PS, PS), g = c.getContext('2d'), r = prng(seed), [h, s, l] = hsl(PAL[key]);
+  const dl = key === 'black' ? 0.03 : key === 'cream' ? 0.035 : 0.08, dh = key === 'cream' ? 4 : 7, dir = DIRS[key] ?? r() * PI;
+  g.fillStyle = PAL[key]; g.fillRect(0, 0, PS, PS);
+  for (let i = 0; i < 380; i++) {
+    const x = r() * PS, y = r() * PS, a = dir + (r() - 0.5) * 0.8, len = 40 + r() * 100, wid = 10 + r() * 20;
+    const L = cl(l + (r() * 2 - 1) * dl, 0.04, 0.96), Hh = h + (r() * 2 - 1) * dh, S = s * (0.9 + r() * 0.2), al = 0.35 + r() * 0.45, sd = (r() * 1e9) | 0;
+    for (const ox of [-PS, 0, PS]) for (const oy of [-PS, 0, PS]) {   // wrap so the plate tiles without seams
+      if ((ox && (x + ox < -90 || x + ox > PS + 90)) || (oy && (y + oy < -90 || y + oy > PS + 90))) continue;
+      daub(g, x + ox, y + oy, a, len, wid, Hh, S, L, al, sd);
+    }
+  }
+  PLATE[key] = c; PAT[key] = cx.createPattern(c, 'repeat');
+}
+function paint(path, col, m) { const p = PAT[col]; p.setTransform(new DOMMatrix(m)); cx.fillStyle = p; cx.fill(path); }
+
+// ── the black brush: a tapered ribbon of bristle strands. The strands overlap into one solid body; only
+// where the stroke runs out does each strand stop at its own place, tapering to a point, so the tail
+// splits into narrow dry streaks. Drawn on (p < 1), the outer strands trail the inner ones: a split,
+// pointed, loaded head. o.press(u) scales the width along the stroke (u = 0..1).
+function brush(path, pts, o) {
+  const n = pts.length; if (n < 2) return;
+  const cum = [0];
+  for (let i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const L = cum[n - 1], Lv = L * cl(o.p ?? 1);
+  if (L < 2 || Lv < 1) return;
+  const w = o.w ?? 1, seed = o.seed | 0, step = o.step || 7, tin = o.tin ?? 0.05, tout = o.tout ?? 0.22, dry = o.dry ?? 0.5, K = o.k || 5, press = o.press;
+  if (w * (press ? press(0.5) : 1) < 0.6) return;
+  const nx = [], ny = [];
+  for (let i = 0; i < n - 1; i++) { const dx = pts[i + 1][0] - pts[i][0], dy = pts[i + 1][1] - pts[i][1], l = Math.hypot(dx, dy) || 1; nx.push(-dy / l); ny.push(dx / l); }
+  const wn = wiggle(seed + 11), ea = wiggle(seed + 12), eb = wiggle(seed + 13);
+  const half = s => 0.5 * w * (press ? press(s / L) : 1) * (0.88 + 0.24 * (0.5 + 0.5 * wn(s / 85))) * (0.32 + 0.68 * sm(s / (L * tin + 3))) * (1 - 0.92 * sm(span(s, L * (1 - tout), L)));
+  let j = 0;
+  const at = s => {                              // centre, normal (mitred at corners) and half-width at arc length s
+    if (s < cum[j]) j = 0;
+    while (j < n - 2 && s >= cum[j + 1]) j++;
+    const u = (s - cum[j]) / ((cum[j + 1] - cum[j]) || 1);
+    let ax = nx[j], ay = ny[j];
+    if (j > 0 && s - cum[j] < 1e-6) {
+      let mx = nx[j - 1] + nx[j], my = ny[j - 1] + ny[j]; const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml;
+      const sc = 1 / Math.max(0.5, mx * nx[j] + my * ny[j]); ax = mx * sc; ay = my * sc;
+    }
+    return [mix(pts[j][0], pts[j + 1][0], u), mix(pts[j][1], pts[j + 1][1], u), ax, ay, half(s), s];
+  };
+  const S = [];
+  for (let s = step; s < Lv; s += step) S.push(s);
+  for (let i = 1; i < n - 1; i++) if (cum[i] < Lv) S.push(cum[i]);
+  S.sort((a, b) => a - b);
+  const smp = S.map(at);
+  const RO = S.map(s => { const q = Math.round(s / step); return [0.09 * ea(s / 23) + (hash(q, seed) - 0.5) * 0.05, 0.09 * eb(s / 23) + (hash(q, seed + 1) - 0.5) * 0.05]; });
+  const r = prng(seed * 7 + 3), drawing = cl((L - Lv) / 60), hHead = half(Math.max(0, Lv - 1));
+  const pt = (q, off) => [q[0] + q[2] * q[4] * off, q[1] + q[3] * q[4] * off];
+  for (let k = 0; k < K; k++) {
+    const lo = k === 0 ? -1 : -1 + 2 * k / K - 0.06, hi = k === K - 1 ? 1 : -1 + 2 * (k + 1) / K + 0.06;
+    const c = (lo + hi) / 2, h = (hi - lo) / 2, edge = k === 0 || k === K - 1;
+    const s0 = L * tin * dry * 0.4 * r();
+    const s1 = L * (1 - tout * dry * (0.1 + 0.9 * r()) * (edge ? 1 : 0.55));
+    const lag = drawing * hHead * (0.1 + 1.9 * Math.abs(c) ** 1.3) * (0.7 + 0.6 * r());
+    const e = Math.min(s1, Lv - lag); if (e - s0 < 3) continue;
+    const tl = e < s1 - 0.5 ? cl(2.4 * hHead, 6, 80) : cl(0.5 * (e - s0), 4, 70);   // a loaded head while drawing, a run-out tail after
+    const A = [pt(at(s0), c)], B = [];
+    for (let i = 0; i < S.length; i++) {
+      const s = S[i]; if (s <= s0 || s >= e) continue;
+      const f = Math.sqrt(Math.min(1, (s - s0) / 12, (e - s) / tl)), q = smp[i];
+      A.push(pt(q, c - h * f + (k === 0 ? RO[i][0] * f : 0))); B.push(pt(q, c + h * f + (k === K - 1 ? RO[i][1] * f : 0)));
+    }
+    A.push(pt(at(e), c));
+    path.moveTo(A[0][0], A[0][1]); for (let m = 1; m < A.length; m++) path.lineTo(A[m][0], A[m][1]);
+    for (let m = B.length - 1; m >= 0; m--) path.lineTo(B[m][0], B[m][1]);
+    path.closePath();
+  }
+}
+function runPts(ps, i0, i1, ext) {             // a stretch of an outline, overshooting its corners a little
+  const n = ps.length, out = [];
+  for (let i = i0; i <= i1; i++) out.push(ps[((i % n) + n) % n]);
+  if (out.length > 1 && ext) {
+    const ext1 = (a, b) => { const dx = a[0] - b[0], dy = a[1] - b[1], l = Math.hypot(dx, dy) || 1; return [a[0] + dx / l * ext, a[1] + dy / l * ext]; };
+    out[0] = ext1(out[0], out[1]); out[out.length - 1] = ext1(out[out.length - 1], out[out.length - 2]);
+  }
+  return out;
+}
+function smoothPath(ctrl, per = 14) {          // uniform Catmull-Rom through the control points
+  const out = [], C = (a, b, c, d, u) => 0.5 * (2 * b + (c - a) * u + (2 * a - 5 * b + 4 * c - d) * u * u + (3 * b - a - 3 * c + d) * u * u * u);
+  for (let i = 0; i < ctrl.length - 1; i++) {
+    const p0 = ctrl[Math.max(0, i - 1)], p1 = ctrl[i], p2 = ctrl[i + 1], p3 = ctrl[Math.min(ctrl.length - 1, i + 2)];
+    for (let j = 0; j < per; j++) out.push([C(p0[0], p1[0], p2[0], p3[0], j / per), C(p0[1], p1[1], p2[1], p3[1], j / per)]);
+  }
+  out.push(ctrl[ctrl.length - 1]);
+  return out;
+}
+function resampleOpen(ps, n) {                 // n points evenly spaced along an open polyline
+  const cum = [0]; for (let i = 1; i < ps.length; i++) cum.push(cum[i - 1] + Math.hypot(ps[i][0] - ps[i - 1][0], ps[i][1] - ps[i - 1][1]));
+  const L = cum[cum.length - 1], out = []; let j = 0;
+  for (let i = 0; i < n; i++) {
+    const s = L * i / (n - 1); while (j < ps.length - 2 && s > cum[j + 1]) j++;
+    const u = (s - cum[j]) / ((cum[j + 1] - cum[j]) || 1); out.push([mix(ps[j][0], ps[j + 1][0], u), mix(ps[j][1], ps[j + 1][1], u)]);
+  }
+  return out;
+}
+
+// ── flood: colour grows outward from lines in angular shards ──
+function mkFlood(lines, t0, dur, D, seed) {
+  return { t0, dur, parts: lines.map(([line, sides], m) => { const pts = subdiv(line, 90); return { pts, sides, nrm: vnormals(pts), d: pts.map((_, i) => D * (0.5 + 0.9 * hash(i, seed + m * 7))), del: pts.map((_, i) => 0.09 * hash(i, seed + m * 7 + 5)) }; }) };
+}
+function flood(F, t) {
+  if (t >= F.t0 + F.dur + 0.1) return null;
+  const path = new Path2D();
+  for (const P of F.parts) {
+    const e = P.pts.map((_, i) => out3(span(t, F.t0 + P.del[i], F.t0 + P.del[i] + F.dur)) * P.d[i]);
+    for (const sd of P.sides) for (let i = 0; i < P.pts.length - 1; i++) {
+      const a = P.pts[i], b = P.pts[i + 1], na = P.nrm[i], nb = P.nrm[i + 1];
+      let q = [a, b, [b[0] + sd * nb[0] * e[i + 1], b[1] + sd * nb[1] * e[i + 1]], [a[0] + sd * na[0] * e[i], a[1] + sd * na[1] * e[i]]];
+      if (area(q) < 0) q = q.reverse();
+      polyPath(q, path);
+    }
+  }
+  return path;
+}
+function axisOf(ps) {                           // direction of a shape's long axis
+  const c = centroid(ps); let xx = 0, yy = 0, xy = 0;
+  for (const p of ps) { const dx = p[0] - c[0], dy = p[1] - c[1]; xx += dx * dx; yy += dy * dy; xy += dx * dy; }
+  return 0.5 * Math.atan2(2 * xy, xx - yy);
+}
+function wipeClip(ps, ang, w, seed) {           // everything behind a ragged ink front sweeping along `ang`
+  const ca = Math.cos(ang), sa = Math.sin(ang), ux = -sa, uy = ca;
+  let a0 = 1e9, a1 = -1e9, b0 = 1e9, b1 = -1e9;
+  for (const p of ps) { const a = p[0] * ca + p[1] * sa, b = p[0] * ux + p[1] * uy; a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b); }
+  const th = a0 - 24 + (a1 - a0 + 48) * w, P = (a, b) => [ca * a + ux * b, sa * a + uy * b], out = [P(a0 - 60, b0 - 30)];
+  for (let i = 0; i <= 8; i++) out.push(P(th + (hash(i, seed) - 0.5) * 36, mix(b0 - 30, b1 + 30, i / 8)));
+  out.push(P(a0 - 60, b1 + 30));
+  return polyPath(out);
+}
+
+// ── pieces: a filled, outlined shape with a landscape state A (a polygon under a time-varying
+// transform) and an abstract state B (centre, angle, outline). Both outlines are resampled to the same
+// count; the morph lerps outline, centre and angle with an overshooting ease. Colour never lerps.
+function piece(o) {
+  const r = resample(o.A, o.n), n = o.n;
+  const pc = Object.assign({ md: 0.75, mb: 1.5, wB: 0 }, o, { la: r.pts });
+  pc.off = [hash(o.seed, 1) * PS, hash(o.seed, 2) * PS];
+  const wg = wiggle(o.seed + 9);
+  pc.ins = r.pts.map((_, i) => Math.max(0, 3 + 10 * wg(i * 0.3)));
+  pc.runs = (o.runs || []).map(([a, b, w, win], j) => {
+    const i0 = r.idx[a % o.A.length]; let i1 = r.idx[b % o.A.length]; if (i1 <= i0) i1 += n;
+    return { i0, i1, w, win, seed: o.seed * 13 + j };
+  });
+  if (o.B) {
+    let lb = resample(o.B.pts, n).pts; const cb = centroid(lb), ca = centroid(r.pts);
+    lb = lb.map(p => [p[0] - cb[0], p[1] - cb[1]]);
+    if (Math.sign(area(lb)) !== Math.sign(area(r.pts))) lb.reverse();
+    pc.lb = alignTo(r.pts.map(p => [p[0] - ca[0], p[1] - ca[1]]), lb);
+    pc.ratio = Math.sqrt(Math.abs(area(lb)) / (Math.abs(area(r.pts)) || 1));
+    const s0 = Math.floor(hash(o.seed, 4) * n);
+    pc.runsB = pc.wB ? [[s0, s0 + Math.round(n * 0.56)], [s0 + Math.round(n * 0.5), s0 + n + 2]].map(([i0, i1], j) => ({ i0, i1, w: pc.wB, seed: o.seed * 17 + j })) : [];
+  }
+  return pc;
+}
+function bstate(pc, t) {                         // where the abstract form sits now: pushed, drifting, on the beat
+  const g = pc.gseed ?? pc.seed, p = pushK(t), st = settle(t), ph = hash(g, 7) * TAU, sg = hash(g, 8) < 0.5 ? -1 : 1, u = tw(t);
+  const c = [C0[0] + (pc.B.c[0] - C0[0]) * p + 7 * Math.sin(0.9 * u + ph), C0[1] + (pc.B.c[1] - C0[1]) * p + 6 * Math.sin(0.7 * u + 1.3 * ph)];
+  return { c, r: pc.B.r + 0.05 * sg * osc(t, 0.3, 1.7) + 0.025 * Math.sin(0.6 * u + ph), s: 1 + 0.035 * pulse(t, 0.22) * st };
+}
+function morphK(pc, t) { return pc.lb ? eback(span(t, pc.m0, pc.m0 + pc.md), pc.mb) : 0; }
+function place(pc, t) {                          // the piece's outline, brush transform and morph frame at time t
+  const MA = pc.amat(t); if (!MA) return null;
+  const k = morphK(pc, t), kl = pc.lb ? span(t, pc.m0, pc.m0 + pc.md) : 0;
+  let pts = pc.la.map(q => ap(MA, q)), PM = Mx.mul(MA, Mx.T(pc.off[0], pc.off[1])), fr = null;
+  if (k > 0) {
+    const ca = centroid(pts), b = bstate(pc, t);
+    const c = [mix(ca[0], b.c[0], k), mix(ca[1], b.c[1], k)], rr = b.r * k, s = mix(1, b.s, cl(k)), cs = Math.cos(rr), sn = Math.sin(rr);
+    pts = pts.map((q, i) => { const x = mix(q[0] - ca[0], pc.lb[i][0], k) * s, y = mix(q[1] - ca[1], pc.lb[i][1], k) * s; return [c[0] + cs * x - sn * y, c[1] + sn * x + cs * y]; });
+    PM = chain(Mx.T(c[0], c[1]), Mx.R(rr), Mx.S(s), Mx.T(-ca[0], -ca[1]), PM);
+    fr = { ca, c, rr, s };
+  }
+  return { pts, PM, k, kl, fr, MA };
+}
+function drawPiece(pc, t) {
+  const pl = place(pc, t); if (!pl) return;
+  const { pts, PM, k, kl, fr } = pl, kk = cl(k);
+  // a piece that folds away to nothing is gone once its morph ends (no leftover speck)
+  const a = (pc.alpha ? pc.alpha(t) : 1) * mix(1, pc.aB ?? 1, kk) * (pc.vanish ? 1 - span(kl, 0.8, 1) : 1); if (a <= 0.004) return;
+  cx.save();
+  const clip = pc.clip && pc.clip(t); if (clip) cx.clip(clip);
+  cx.globalAlpha = a;
+  const body = pc.sliver ? inset(pts, pc.ins) : pts, bp = polyPath(body);
+  if (pc.sliver) paint(polyPath(pts), 'cream', PM);
+  paint(bp, pc.col, PM);
+  if (pc.swap) { const w = swapK(t, pc.swap[0]); if (w > 0) { cx.globalAlpha = a * w; paint(bp, pc.swap[1], PM); cx.globalAlpha = a; } }
+  if (pc.colB && kl > 0) {                       // inked in two frames as it leaps off, a ragged band across its width: never a blend
+    const wp = sm(span(kl, 0.02, 0.11));
+    if (wp >= 1) paint(bp, pc.colB, PM);
+    else if (wp > 0) { cx.save(); cx.clip(wipeClip(pts, axisOf(pts) + PI / 2, wp, pc.seed)); paint(bp, pc.colB, PM); cx.restore(); }
+  }
+  const ink = new Path2D();
+  for (const r of pc.runs) { const w = r.w * (1 - kk); if (w > 0.5) brush(ink, runPts(pts, r.i0, r.i1, 9), { w, p: r.win ? out3(span(t, r.win[0], r.win[1])) : 1, seed: r.seed, dry: 0.55, tout: 0.18 }); }
+  for (const r of pc.runsB || []) { const w = r.w * kk; if (w > 0.5) brush(ink, runPts(pts, r.i0, r.i1, 9), { w, p: kk, seed: r.seed, dry: 0.55, tout: 0.18 }); }
+  if (pc.bars && fr) {                           // black bars cross the plane once it has settled
+    const p = out3(span(t, pc.m0 + pc.md * 0.55, pc.m0 + pc.md * 0.55 + 0.32));
+    if (p > 0) pc.bars.forEach(([ba, d, len], i) => {
+      const an = fr.rr + ba, dx = Math.cos(an), dy = Math.sin(an), c = [fr.c[0] - dy * d, fr.c[1] + dx * d];
+      brush(ink, [[c[0] - dx * len / 2, c[1] - dy * len / 2], [c[0] + dx * len / 2, c[1] + dy * len / 2]], { w: 1, press: u => 6 + 8 * Math.sin(PI * u), p, seed: pc.seed * 3 + i, dry: 0.5, k: 3, step: 6, tout: 0.3 });
+    });
+  }
+  cx.globalAlpha = a; cx.fillStyle = INK; cx.fill(ink);
+  cx.restore();
+}
+function drawWin(wn, t) {                        // a window lives in its house; in the morph it shrinks away in place
+  const h = place(wn.host, t); if (!h) return;
+  let ps = wn.la.map(q => ap(h.MA, q));
+  if (h.fr) {
+    const f = 1 - sm(span(h.kl, 0, wn.shrink ?? 0.4)); if (f <= 0.01) return;
+    const g = mix(1, wn.host.ratio, cl(h.k)) * h.fr.s, cs = Math.cos(h.fr.rr), sn = Math.sin(h.fr.rr);
+    ps = ps.map(q => { const x = (q[0] - h.fr.ca[0]) * g, y = (q[1] - h.fr.ca[1]) * g; return [h.fr.c[0] + cs * x - sn * y, h.fr.c[1] + sn * x + cs * y]; });
+    const wc = centroid(ps); ps = ps.map(q => [wc[0] + (q[0] - wc[0]) * f, wc[1] + (q[1] - wc[1]) * f]);
+  }
+  paint(polyPath(ps), 'black', h.PM);
+}
+
+// ── scene ──
+// The first slash is the horizon: the mountains stand on it, the slope falls away below it.
+const S1C = [[-80, 100], [420, 360], [1240, 410], [2000, 780]], S2C = [[130, 1140], [380, 560], [960, -60]];
+const hy = x => { for (let i = 0; i < S1C.length - 1; i++) { const a = S1C[i], b = S1C[i + 1]; if (x <= b[0] || i === S1C.length - 2) return mix(a[1], b[1], (x - a[0]) / (b[0] - a[0])); } };
+let GROUND, WEAVE, HCLIP, LAYERS = [], CUES = [], TITLE, PLATE_PTS, PLATE_IN, SUN, LINES = [], HATCH = [], MARKS = [], CLOUDS = [], DROPS = [];
+const pan = x => +cl((x - W / 2) / (W / 2), -1, 1).toFixed(2);
+const cue = (k, t, o = {}) => CUES.push(Object.assign({ k, t: +t.toFixed(3) }, o));
+const RINGC = ['crimson', 'cobalt', 'pink', 'emerald', 'violet', 'orange'];
+
+// translucent painted colour clouds for the improvisation: daubs that thin out towards a soft edge
+function makeCloud(col, r, seed) {
+  const S = Math.ceil(r * 2.5), c = mk(S, S), g = c.getContext('2d'), rr = prng(seed), [h, s, l] = hsl(PAL[col]), dir = rr() * PI;
+  for (let i = 0; i < 720; i++) {
+    const a = rr() * TAU, d = r * Math.sqrt(rr()) * (0.55 + 0.55 * rr()), fall = 1 - (d / (r * 1.12)) ** 2; if (fall <= 0) continue;
+    daub(g, S / 2 + Math.cos(a) * d * 1.18, S / 2 + Math.sin(a) * d * 0.86, dir + (rr() - 0.5) * 0.9, 60 + rr() * 130, 18 + rr() * 30,
+      h + (rr() * 2 - 1) * 7, s, cl(l + (rr() * 2 - 1) * 0.07), 0.14 + 0.38 * fall, seed * 1000 + i);
+  }
+  return c;
+}
+function splat(x, y, r, seed) {                  // an ink drop flattened on the canvas, with a couple of spikes
+  return Array.from({ length: 13 }, (_, i) => { const a = i / 13 * TAU + hash(i, seed) * 0.3, f = (i === 3 || i === 9) ? 1.7 : 0.75 + 0.45 * hash(i, seed + 3); return [x + Math.cos(a) * r * f, y + Math.sin(a) * r * f * 0.85]; });
+}
+
+function build() {
+  for (const [i, key] of Object.keys(PAL).entries()) makePlate(key, 101 + i * 17);
+
+  // the primed ground and the static canvas weave
+  GROUND = mk(W, H); { const g = GROUND.getContext('2d'), p = g.createPattern(PLATE.cream, 'repeat'); g.fillStyle = p; g.fillRect(0, 0, W, H); }
+  WEAVE = mk(W, H); {
+    const g = WEAVE.getContext('2d'), im = g.createImageData(W, H), d = im.data, mo = wiggle(77), mo2 = wiggle(78);
+    const row = Float32Array.from({ length: H }, (_, y) => hash(y / 5 | 0, 11)), col = Float32Array.from({ length: W }, (_, x) => hash(x / 5 | 0, 23));
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const ty = (y % 5) / 4, tx = (x % 5) / 4, over = ((x / 5 | 0) + (y / 5 | 0)) & 1;
+      const thread = over ? (2 * ty - 1) ** 2 * 0.06 + row[y] * 0.035 : (2 * tx - 1) ** 2 * 0.06 + col[x] * 0.035;
+      const mott = 0.035 * (0.5 + 0.5 * mo(x / 210 + mo2(y / 260) * 0.8)) + 0.03 * hash(x + y * W, 5);
+      const vx = (x - W / 2) / (W / 2), vy = (y - H / 2) / (H / 2), vig = 0.16 * Math.max(0, Math.hypot(vx * 0.9, vy) - 0.55) ** 1.6;
+      const v = 1 - thread - mott - vig, i = (y * W + x) * 4;
+      d[i] = 255 * v; d[i + 1] = 251 * v; d[i + 2] = 243 * v; d[i + 3] = 255;
+    }
+    g.putImageData(im, 0, 0);
+  }
+  CLOUDS = [['lemon', 430, 330, 400, 0.92], ['cobalt', 1520, 640, 360, 0.85], ['pink', 860, 900, 340, 0.85], ['vermilion', 1200, 250, 240, 0.78]]
+    .map(([c, x, y, r, a], i) => ({ c, cv: makeCloud(c, r, 61 + i), x, y, a, t0: T.clouds + i * 0.12 }));
+  HCLIP = polyPath([[-200, -200], [2120, -200], ...S1C.slice().reverse().map(p => [p[0] + (p[0] > 1900 ? 200 : p[0] < 0 ? -200 : 0), p[1] + 12])]);
+
+  // the two slashes. In the landscape they are kinked straight runs (a bend is a corner, not a curve); in
+  // the improvisation they become whiplash curves. Width follows the brush pressure along the stroke.
+  const mkLine = (ctrl, bctrl, o) => {
+    const base = subdiv(ctrl, 55), n = base.length; let L = 0;
+    const u = base.map((p, i) => (i && (L += Math.hypot(p[0] - base[i - 1][0], p[1] - base[i - 1][1])), L));
+    const B = resampleOpen(smoothPath(bctrl), n);
+    return Object.assign({ base, nr: vnormals(base), u: u.map(v => v / L), B, nb: vnormals(B) }, o);
+  };
+  const swell = (a, b, c, ph) => u => (u < 0.45 ? mix(a, b, sm(u / 0.45)) : mix(b, c, sm((u - 0.45) / 0.55))) * (1 + 0.2 * Math.sin(TAU * 2.5 * u + ph));
+  const whip = m => u => 7 + m * Math.sin(PI * Math.min(1, u * 1.08)) ** 1.3 * (1 - 0.35 * u);
+  LINES = [
+    mkLine(S1C, [[-60, 820], [130, 700], [250, 520], [330, 330], [470, 175], [690, 85], [900, 100], [1000, 180], [960, 262]],
+      { seed: 5, mode: 3, sgn: 1, pa: swell(30, 75, 45, 0.8), pb: whip(58), m0: 4.40, md: 1.0,
+        prog: t => t < T.s1[1] ? 0.14 * span(t, T.s1[0], T.s1[1]) ** 1.5 : 0.14 + 0.86 * out3(span(t, T.s1[1], T.s1[2])) }),
+    mkLine(S2C, [[1180, 1120], [1270, 960], [1430, 860], [1650, 800], [1810, 700], [1890, 560], [1850, 460], [1770, 455]],
+      { seed: 9, mode: 4, sgn: -1, pa: swell(24, 58, 36, 2.2), pb: whip(48), m0: 4.50, md: 1.0, prog: t => out3(span(t, T.s2[0], T.s2[1])) }),
+  ];
+  DROPS = [[95, 255, 17, T.drops[0]], [170, 312, 10, T.drops[1]], [55, 78, 9, T.drops[2]], [222, 138, 13, T.drops[3]]];
+  cue('brush', T.s1[0], { d: T.s1[1] - T.s1[0], pan: -1 });
+  DROPS.forEach(([x, , r, t]) => cue('drop', t, { pan: pan(x), v: r / 17 }));
+  cue('whip', T.s1[1], { d: T.s1[2] - T.s1[1], from: -1, to: 1, v: 1 });
+  cue('whip', T.s2[0], { d: T.s2[1] - T.s2[0], from: -0.85, to: 0, v: 0.8 });
+
+  // sky: floods out of both slashes (above the first one)
+  const FSKY = mkFlood([[S2C, [1, -1]], [S1C, [-1]]], T.sky[0], T.sky[1], 1500, 31);
+  const sky = piece({ seed: 3, col: 'yellow', n: 48, A: [[-80, -80], [2000, -80], ...S1C.slice().reverse().map(p => [p[0], p[1] + 12])],
+    amat: t => t < T.sky[0] ? null : Mx.I, clip: t => flood(FSKY, t), swap: [2.80, 'orange'],
+    B: { c: [430, 330], r: -0.3, pts: [[-6, -3], [5, -4], [6, 2], [-4, 4]] }, m0: 4.95, md: 0.3, mb: 1.0, vanish: true });
+  cue('flood', T.sky[0], { c: 'yellow', d: T.sky[1], pan: 0.3 });
+
+  // the sun: three concentric discs (only the vermilion one shows) that open into a target
+  const SC = [1560, 170], TC = [1600, 205];
+  const sunMat = t => t < T.sun[0] ? null : about(SC[0], SC[1], Mx.S(eback(span(t, T.sun[0], T.sun[0] + T.sun[1]), 2.6) * (1 + 0.05 * pulse(t, 0.2))));
+  const ring = (R, seed) => disc(0, 0, R, seed, 18), tgt = { m0: T.morph, md: 0.8, gseed: 40 };
+  const D0 = piece({ seed: 41, col: 'ultra', n: 36, A: disc(SC[0], SC[1], 98, 40, 18), amat: sunMat, alpha: t => span(t, T.morph, T.morph + 0.08), sliver: true,
+    B: { c: TC, r: 0.4, pts: ring(175, 42) }, wB: 13, ...tgt });
+  const D1 = piece({ seed: 43, col: 'vermilion', n: 36, A: disc(SC[0], SC[1], 112, 44, 18), amat: sunMat, sliver: true,
+    runs: [[0, 10, 11], [9, 19, 10]], B: { c: TC, r: 0.2, pts: ring(116, 45) }, wB: 8, ...tgt });
+  const D2 = piece({ seed: 47, col: 'lemon', n: 36, A: disc(SC[0], SC[1], 6, 48, 18), amat: sunMat, alpha: t => span(t, T.morph, T.morph + 0.08), sliver: true,
+    B: { c: TC, r: 0.1, pts: ring(60, 49) }, wB: 10, ...tgt });
+  SUN = D1;
+  cue('pop', T.sun[0], { c: 'vermilion', pan: pan(SC[0]), v: 1 });
+
+  // mountains rise from behind the first slash; contours draw on after them
+  const rise = (t0, d, h) => t => t < t0 ? null : chain(Mx.T(0, h * (1 - eback(span(t, t0, t0 + d), 1.5))), about(960, 560, Mx.S(1, 1 + 0.08 * pulse(t, 0.18))));
+  const mclip = t => t < T.morph ? HCLIP : null;
+  const farTop = [[300, 330], [430, 230], [560, 290], [700, 150], [840, 250], [980, 130], [1120, 230], [1250, 140], [1380, 262], [1500, 300], [1620, 340], [1760, 420], [1880, 470], [2000, 520]];
+  const far = piece({ seed: 51, col: 'violet', n: 96, A: [[280, 900], ...farTop, [2000, 900]], amat: rise(T.far[0], T.far[1], 380), clip: mclip,
+    runs: [[1, 8, 8, [1.48, 1.72]], [7, 14, 8, [1.52, 1.78]]],
+    B: { c: [700, 140], r: -0.13, pts: [[-470, 80], [460, -70], [-340, 150]] }, wB: 11, m0: 4.68 });
+  const frontTop = [[380, 359], [470, 193], [560, 308], [660, 164], [770, 301], [880, 198], [990, 325], [1100, 171], [1200, 318], [1300, 259], [1410, 422], [1520, 346], [1630, 519], [1740, 483], [1860, 652], [2000, 680]];
+  const mtnMat = rise(T.mtn[0], T.mtn[1], 440);
+  const front = piece({ seed: 53, col: 'ultra', n: 96, A: [[360, 900], ...frontTop, [2000, 900]], amat: mtnMat, clip: mclip,
+    runs: [[1, 6, 13, [1.40, 1.62]], [5, 11, 12, [1.46, 1.68]], [10, 16, 12, [1.52, 1.76]]],
+    B: { c: [400, 850], r: -0.33, pts: [[-520, 70], [480, -110], [390, 40], [-440, 160]] }, wB: 14, m0: 4.72 });
+  const facetA = t => t < T.facet ? 0 : sm(span(t, T.facet, T.facet + 0.1));
+  const facets = [                               // lit and shadowed planes on the peaks; in the morph they fold away into their peaks
+    ['cobalt', [[660, 164], [560, 308], [640, 380], [680, 280]]],
+    ['cobalt', [[1100, 171], [990, 325], [1080, 390], [1118, 290]]],
+    ['cobalt', [[1520, 346], [1410, 422], [1500, 470], [1534, 420]]],
+    ['prussian', [[880, 198], [990, 325], [950, 400], [895, 300]]],
+    ['prussian', [[470, 193], [560, 308], [520, 380], [480, 290]]],
+  ].map(([c, A], i) => piece({ seed: 61 + i, col: c, n: 24, A, amat: mtnMat, clip: mclip, alpha: facetA, runs: [[0, 1, 7]],
+    B: { c: centroid(A), r: 0, pts: A.map(p => [(p[0] - centroid(A)[0]) * 0.03, (p[1] - centroid(A)[1]) * 0.03]) }, m0: 4.62 + 0.03 * i, md: 0.5, mb: 1.0, vanish: true }));
+  cue('rise', T.mtn[0], { c: 'ultra', pan: 0, v: 1 }); cue('rise', T.far[0], { c: 'violet', pan: 0.3, v: 0.7 });
+  cue('ink', T.ridge[0], { d: T.ridge[1] - T.ridge[0], pan: 0.1 });
+
+  // slope and foreground field flood down from the first slash
+  const FSL = mkFlood([[S1C, [1]]], T.slope[0], T.slope[1], 1150, 73);
+  const slope = piece({ seed: 75, col: 'acid', n: 72, A: [...subdiv(S1C, 140).map(p => [p[0], p[1] + 12]), [2000, 1170], [-80, 1170]],
+    amat: t => t < T.slope[0] ? null : Mx.I, clip: t => flood(FSL, t), swap: [3.80, 'lemon'],
+    B: { c: [1790, 660], r: -0.4, pts: [[-60, -66], [63, -58], [58, 66], [-65, 62]] }, gseed: 211, m0: 4.95, md: 0.3, mb: 1.0, vanish: true });
+  const fieldTop = [[-80, 880], [420, 930], [820, 1010], [1060, 1170]];
+  const FFI = mkFlood([[fieldTop, [1]]], T.field[0], T.field[1], 500, 77);
+  const field = piece({ seed: 79, col: 'emerald', n: 40, A: [...fieldTop, [-80, 1170]], amat: t => t < T.field[0] ? null : Mx.I, clip: t => flood(FFI, t),
+    runs: [[0, 3, 9, [1.64, 1.84]]], B: { c: [110, 960], r: 0.3, pts: [[-130, -90], [150, -70], [120, 100], [-140, 80]] }, wB: 10, m0: 4.92 });
+  cue('flood', T.slope[0], { c: 'acid', d: T.slope[1], pan: 0 }); cue('flood', T.field[0], { c: 'emerald', d: T.field[1], pan: -0.5 });
+
+  // hatches on the slope: groups of 2 to 6 pointed strokes, each group its own length and slant
+  HATCH = [[560, 560], [760, 640], [930, 560], [620, 800], [860, 880], [1560, 900], [1830, 900], [1690, 1030], [470, 980]].map(([x, y], g) => {
+    const m = 2 + Math.floor(hash(g, 80) * 5), a = -1.0 + 0.9 * (hash(g, 81) - 0.5), ca = Math.cos(a), sa = Math.sin(a), gap = 13 + 9 * hash(g, 83), len = 26 + 24 * hash(g, 84), t0 = T.hatch + g * 0.05;
+    return { c: [x, y], t0, strokes: Array.from({ length: m }, (_, i) => { const o = (i - (m - 1) / 2) * gap, l = len * (0.7 + 0.6 * hash(i, g + 82)), px = x - sa * o + ca * 8 * hash(i, g + 85), py = y + ca * o + sa * 8 * hash(i, g + 85); return [[px - ca * l, py - sa * l], [px + ca * l, py + sa * l]]; }) };
+  });
+  cue('hatch', T.hatch, { d: HATCH.length * 0.05 + 0.1, pan: 0.2 });
+
+  // the road zigzags up to the village; revealed from the bottom
+  const rc = [[1420, 1170], [980, 1000], [1300, 880], [1120, 780], [1230, 700]], rw = [300, 190, 120, 70, 36], rn = vnormals(rc);
+  const rl = rc.map((p, i) => [p[0] + rn[i][0] * rw[i] / 2, p[1] + rn[i][1] * rw[i] / 2]), rr = rc.map((p, i) => [p[0] - rn[i][0] * rw[i] / 2, p[1] - rn[i][1] * rw[i] / 2]);
+  const roadClip = t => {
+    if (t > T.road[0] + T.road[1] + 0.05) return null;
+    const y = mix(1180, 640, out3(span(t, T.road[0], T.road[0] + T.road[1]))), ps = [[-100, 1300], [2100, 1300]];
+    for (let i = 0; i <= 24; i++) ps.push([2100 - i * 2200 / 24, y + (hash(i, 85) - 0.5) * 40]);
+    return polyPath(ps);
+  };
+  const road = piece({ seed: 87, col: 'pink', n: 40, A: [...rl, ...rr.reverse()], amat: t => t < T.road[0] ? null : Mx.I, clip: roadClip, sliver: true,
+    runs: [[0, 4, 8], [5, 9, 8]], B: { c: [1000, 965], r: -0.15, pts: [[-320, 55], [330, -75], [220, 80]] }, wB: 10, m0: 4.86 });
+  cue('pop', T.road[0], { c: 'pink', pan: pan(1250), v: 0.6 });
+
+  // the village: skewed walls, crooked roofs, black slanted windows (never two level marks side by side)
+  const houseParts = [];
+  const house = o => {
+    const bl = [o.x - o.w / 2, o.y], tl = [o.x - o.w / 2 + o.sk, o.y - o.hl], tr = [o.x + o.w / 2 + o.sk, o.y - o.hr], br = [o.x + o.w / 2, o.y];
+    const roof = o.gable ? [[tl[0] - 16, tl[1] + 5], [mix(tl[0], tr[0], 0.5) + o.ra, Math.min(tl[1], tr[1]) - o.rh], [tr[0] + 18, tr[1] + 7]]
+      : [[tl[0] - 14, tl[1] + 4], [tl[0] + 8 + o.ra, tl[1] - o.rh], [tr[0] + 22, tr[1] - o.rh * 0.35], [tr[0] + 16, tr[1] + 6]];
+    const at = (u, v) => [mix(mix(bl[0], br[0], u), mix(tl[0], tr[0], u), v), mix(mix(bl[1], br[1], u), mix(tl[1], tr[1], u), v)];
+    const slit = (c, ww, wh, sl) => { const s = sl * wh / 2; return [[c[0] - ww / 2 - s, c[1] + wh / 2], [c[0] - ww / 2 + s, c[1] - wh / 2], [c[0] + ww / 2 + s, c[1] - wh / 2 - 3], [c[0] + ww / 2 - s, c[1] + wh / 2 + 2]]; };
+    const opening = ([kind, ...a]) => {
+      if (kind === 's') { const [u, v, ww, wh, sl] = a; return [slit(at(u, v), ww, wh, sl)]; }
+      if (kind === 'd') { const [u, ww, hv, sl] = a, b = at(u, 0), tp = at(u, hv), s = sl * (b[1] - tp[1]) / 2; return [[[b[0] - ww / 2, b[1] + 1], [tp[0] - ww / 2 + s, tp[1]], [tp[0] + ww / 2 + s, tp[1] - 4], [b[0] + ww / 2, b[1] + 1]]]; }
+      const [u, v, pw, ph, gp, sl] = a, c = at(u, v);  // a four-pane window
+      return [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([i, j]) => slit([c[0] + i * (pw + gp) / 2, c[1] + j * (ph + gp) / 2], pw, ph, sl));
+    };
+    const amat = t => {
+      if (t < o.t0) return null;
+      const d = t - o.t0, sy = eback(d / 0.36, 2.6), sx = eback(d / 0.44, 1.6);
+      const kx = o.dir * (0.25 * (1 - cl(d / 0.34)) ** 2 + 0.11 * osc(t, 0.34, 2.1));
+      return about(o.x, o.y, chain(Mx.K(kx), Mx.S(sx, sy)));
+    };
+    const wall = piece({ seed: o.seed, col: o.wall, n: 32, A: [bl, tl, tr, br], amat, sliver: true, runs: [[0, 2, 9], [2, 4, 9]], B: o.wB, wB: 10, m0: o.m0, bars: o.bars });
+    const wins = o.wins.flatMap(opening).map(la => ({ host: wall, la }));
+    const roofP = piece({ seed: o.seed + 1, col: o.roof, n: 24, A: roof, amat, sliver: true, runs: [[0, roof.length - 1, 9], [roof.length - 2, roof.length, 8]],
+      B: o.rB, wB: o.rB.gone ? 0 : 10, vanish: o.rB.gone, m0: o.m0 + 0.03 });
+    houseParts.push({ y: o.y, draw: [t => drawPiece(wall, t), ...wins.map(w => t => drawWin(w, t)), t => drawPiece(roofP, t)] });
+    cue('pop', o.t0, { c: o.wall, pan: pan(o.x), v: 0.8 });
+    cue('morph', o.m0, { c: o.wall, pan: pan(o.wB.c[0]) });
+  };
+  const RB = (c, r, pts) => ({ c, r, pts }), gone = c => ({ ...RB(c, 0, [[-2, -2], [2, -2], [2, 2], [-2, 2]]), gone: true });
+  house({ seed: 201, x: 1080, y: 662, w: 150, hl: 118, hr: 104, sk: 14, wall: 'vermilion', roof: 'prussian', gable: true, rh: 88, ra: -18, t0: 1.80, dir: 1, m0: 4.62,
+    wins: [['d', 0.28, 26, 0.5, 0.1], ['s', 0.74, 0.72, 13, 34, 0.25]], bars: [[0.9, -16, 310], [0.9, 18, 280]],
+    wB: RB([1560, 930], 0.3, [[-120, -85], [125, -72], [110, 90], [-128, 80]]), rB: RB([300, 240], -0.25, [[-120, 80], [20, -125], [125, 70]]) });
+  house({ seed: 211, x: 1240, y: 625, w: 128, hl: 150, hr: 160, sk: -10, wall: 'emerald', roof: 'crimson', gable: true, rh: 110, ra: 12, t0: 1.86, dir: -1, m0: 4.47,
+    wins: [['s', 0.24, 0.36, 12, 30, -0.25], ['s', 0.5, 0.52, 12, 48, -0.2], ['s', 0.76, 0.7, 12, 26, -0.3]],
+    wB: RB([1790, 660], -0.4, [[-110, -120], [115, -105], [105, 120], [-118, 112]]), rB: RB([1010, 200], 0.35, [[-125, 72], [8, -130], [130, 78]]) });
+  house({ seed: 221, x: 1440, y: 680, w: 175, hl: 104, hr: 92, sk: 18, wall: 'orange', roof: 'violet', gable: false, rh: 70, ra: 10, t0: 1.92, dir: 1, m0: 4.57,
+    wins: [['s', 0.16, 0.36, 13, 22, 0.3], ['s', 0.38, 0.5, 13, 52, 0.25], ['s', 0.6, 0.5, 13, 30, 0.3], ['s', 0.82, 0.58, 13, 62, 0.2]], bars: [[-0.75, -22, 370], [-0.75, 8, 340], [-0.75, 36, 300]],
+    wB: RB([1270, 960], -0.2, [[-150, -75], [155, -88], [145, 78], [-148, 88]]), rB: RB([1860, 270], 0.6, [[-90, -50], [80, -70], [95, 55], [-70, 65]]) });
+  house({ seed: 231, x: 1590, y: 720, w: 120, hl: 138, hr: 128, sk: -14, wall: 'pink', roof: 'ultra', gable: true, rh: 100, ra: -10, t0: 2.11, dir: -1, m0: 4.42,
+    wins: [['s', 0.3, 0.74, 13, 34, -0.2], ['d', 0.68, 26, 0.48, -0.1]],
+    wB: RB([1250, 120], 0.2, [[-90, -70], [95, -60], [85, 72], [-92, 66]]), rB: gone([1590, 560]) });
+  house({ seed: 241, x: 1760, y: 790, w: 150, hl: 100, hr: 112, sk: 12, wall: 'cobalt', roof: 'lemon', gable: false, rh: 64, ra: -6, t0: 2.17, dir: 1, m0: 4.52,
+    wins: [['g', 0.3, 0.6, 13, 17, 5, 0.2], ['d', 0.74, 24, 0.5, 0.1]], bars: [[1.0, 0, 250]],
+    wB: RB([1830, 1000], 0.15, [[-95, -60], [100, -66], [90, 62], [-98, 60]]), rB: RB([640, 1020], -0.3, [[-110, 55], [90, -70], [125, 50], [-80, 80]]) });
+
+  // the leaning tower
+  const tb = [1350, 600], lean = 0.1, tw0 = T.tower;
+  const leanP = ps => ps.map(([x, y]) => { const c = Math.cos(lean), s = Math.sin(lean); return [tb[0] + c * x - s * y, tb[1] + s * x + c * y]; });
+  const towerMat = t => {
+    if (t < tw0) return null;
+    const d = t - tw0, sy = eback(d / 0.4, 2.2), sx = eback(d / 0.3, 1.4);
+    return about(tb[0], tb[1], chain(Mx.R(0.18 * (1 - cl(d / 0.45)) ** 2 + 0.03 * osc(t, 0.34, 1.9)), Mx.S(sx, sy)));
+  };
+  const towerBody = piece({ seed: 301, col: 'lemon', colB: 'black', n: 32, A: leanP([[-38, 0], [-31, -270], [37, -282], [42, 0]]), amat: towerMat, sliver: true,
+    runs: [[0, 2, 9], [2, 4, 9]], B: { c: [1530, 880], r: -0.38, pts: [[-430, -14], [430, -14], [430, 14], [-430, 14]] }, m0: 4.36 });
+  const spire = piece({ seed: 303, col: 'crimson', colB: 'black', n: 24, A: leanP([[-48, -268], [4, -446], [46, -284]]), amat: towerMat, sliver: true,
+    runs: [[0, 2, 8], [1, 3, 8]], B: { c: [1790, 430], r: 0.15, pts: [[-160, 50], [180, -10], [-150, -40]] }, m0: 4.38 });
+  const towerWins = [[-6, -205, 12, 46], [4, -118, 12, 30]].map(([x, y, w, h]) => ({ host: towerBody, la: leanP([[x - w / 2 - 6, y + h / 2], [x - w / 2 + 6, y - h / 2], [x + w / 2 + 6, y - h / 2 - 3], [x + w / 2 - 6, y + h / 2 + 2]]), shrink: 0.04 }));
+  cue('pop', tw0, { c: 'lemon', pan: pan(tb[0]), v: 0.9 }); cue('morph', 4.36, { c: 'black', pan: pan(1530) });
+
+  // the tree: a broad, jagged crimson crown on a short plain trunk, its top standing in the yellow sky
+  const trB = [250, 582], crC = [250, 280];
+  const crown = Array.from({ length: 18 }, (_, i) => {
+    const a = (i + 0.35 * hash(i, 404)) / 18 * TAU - PI / 2, f = (i % 2 ? 0.84 : 1) * (0.93 + 0.14 * hash(i, 405)), sy = Math.sin(a) > 0 ? 0.78 : 1;
+    return [Math.cos(a) * 215 * f, Math.sin(a) * 150 * f * sy];
+  });
+  const lit = [crown[13], crown[14], crown[15], crown[16], crown[17], crown[0], [-30, -40], [-120, 10]];
+  const treeMat = t => {
+    if (t < T.tree) return null;
+    const d = t - T.tree, sy = eback(d / 0.42, 2.4), sx = eback(d / 0.5, 1.6);
+    return about(trB[0], trB[1], chain(Mx.K(-0.2 * (1 - cl(d / 0.4)) ** 2 + 0.06 * osc(t, 0.3, 2.4, false)), Mx.S(sx, sy)));
+  };
+  const trunk = piece({ seed: 401, col: 'black', n: 16, A: off([[-20, 100], [18, 98], [28, 300], [-30, 302]], ...crC), amat: treeMat,
+    B: { c: [225, 655], r: 1.15, pts: [[-165, -10], [165, -10], [165, 10], [-165, 10]] }, m0: 4.84 });
+  const crownP = piece({ seed: 403, col: 'crimson', n: 72, A: off(crown, ...crC), amat: treeMat, sliver: true, runs: [[0, 9, 11], [9, 18, 11]],
+    B: { c: [220, 640], r: 0.3, pts: [[-150, -110], [120, -130], [160, 50], [50, 145], [-130, 110]] }, wB: 12, m0: 4.80 });
+  const litP = piece({ seed: 405, col: 'vermilion', n: 28, A: off(lit, ...crC), amat: treeMat, runs: [[5, 7, 6]],
+    B: { c: [160, 585], r: 0.3, pts: [[-70, -55], [60, -75], [55, 45], [-80, 40]] }, wB: 8, m0: 4.82 });
+  cue('pop', T.tree, { c: 'crimson', pan: pan(trB[0]), v: 1 }); cue('morph', 4.80, { c: 'crimson', pan: pan(220) });
+
+  // marks of the improvisation (they only exist in the abstract state)
+  MARKS = [
+    { kind: 'hatch', t0: T.marks[0], c: [150, 400], lines: Array.from({ length: 5 }, (_, i) => [[112 + i * 19, 350 + i * 5], [146 + i * 19, 450 + i * 5]]) },
+    { kind: 'arc', t0: T.marks[1], c: TC, sun: true, R: 240, a0: 1.9, a1: 3.7 },
+    { kind: 'arc', t0: T.marks[1] + 0.08, c: [860, 1060], R: 150, a0: 3.5, a1: 5.4 },
+  ];
+  MARKS.forEach((m, i) => cue('mark', m.t0, { kind: m.kind, pan: pan(m.c[0]), i }));
+
+  // layer order, back to front
+  houseParts.sort((a, b) => a.y - b.y);
+  LAYERS = [
+    drawClouds, t => drawPiece(sky, t), drawRings, t => drawPiece(D0, t), t => drawPiece(D1, t), t => drawPiece(D2, t),
+    t => drawPiece(far, t), t => drawPiece(front, t), ...facets.map(f => t => drawPiece(f, t)),
+    t => drawPiece(slope, t), t => drawPiece(field, t), drawHatches, t => drawPiece(road, t), drawLines,
+    t => drawPiece(towerBody, t), ...towerWins.map(w => t => drawWin(w, t)), t => drawPiece(spire, t),
+    ...houseParts.flatMap(h => h.draw),
+    t => drawPiece(trunk, t), t => drawPiece(crownP, t), t => drawPiece(litP, t), drawMarks,
+  ];
+
+  // morph, swaps, rings and the rest of the cue list
+  cue('morph', T.morph, { c: 'vermilion', pan: pan(SC[0]) });
+  cue('morph', 4.68, { c: 'violet', pan: pan(700) }); cue('morph', 4.72, { c: 'ultra', pan: pan(400) }); cue('morph', 4.86, { c: 'pink', pan: pan(1000) });
+  cue('morph', 4.95, { c: 'yellow', pan: pan(430) }); cue('morph', 4.95, { c: 'acid', pan: pan(1790) });
+  CLOUDS.forEach(c => cue('cloud', c.t0, { c: c.c, pan: pan(c.x) }));
+  cue('swell', T.morph, { d: T.title - T.morph });
+  T.swaps.forEach(([t, f, c]) => cue('swap', t, { c, field: f }));
+  BEATS.forEach((b, i) => { cue('beat', b, { i, v: i === 12 ? 1.4 : b < 2.29 ? 0.8 : beatAmp(b) || 1 }); if (b >= 2.29 && b < 6.29) cue('tick', b + 0.25, { v: beatAmp(b) }); });
+  BEATS.forEach((b, i) => { if (b >= 2.29 && b < T.close) cue('ring', b, { c: RINGC[i % RINGC.length], pan: pan(b < T.morph ? SC[0] : TC[0]) }); });
+  cue('windup', T.windup, { d: T.title - T.windup });
+  cue('title', T.title); cue('sub', T.sub);
+  cue('close', T.close, { d: T.black - T.close });
+  CUES.sort((a, b) => a.t - b.t);
+
+  buildTitle();
+}
+
+// ── per-frame layers ──
+function sunNow(t) {                             // centre and radius of the sun / target, for its rings
+  const k = morphK(SUN, t), b = k > 0 ? bstate(SUN, t) : null, c = [1560, 170];
+  if (b) { c[0] = mix(c[0], b.c[0], k); c[1] = mix(c[1], b.c[1], k); }
+  return { c, R: mix(112, 175, cl(k)) };
+}
+function drawClouds(t) {
+  const push = pushK(t);
+  for (const c of CLOUDS) {
+    const k = sm(span(t, c.t0, c.t0 + 0.7)); if (k <= 0) continue;
+    const s = c.cv.width * (0.75 + 0.25 * eback(span(t, c.t0, c.t0 + 0.8), 1.4)), x = C0[0] + (c.x - C0[0]) * push, y = C0[1] + (c.y - C0[1]) * push;
+    cx.globalAlpha = c.a * k; cx.drawImage(c.cv, x - s / 2, y - s / 2, s, s);
+  }
+  cx.globalAlpha = 1;
+}
+function ringBand(c, rad, wd, a0, cov, seed) {  // an angular band from angle a0 through cov radians
+  const m = 26, st = TAU / m, rj = j => 0.95 + 0.1 * hash(((j % m) + m) % m, seed), jit = a => { const x = a / st, i = Math.floor(x); return mix(rj(i), rj(i + 1), x - i); };
+  const angs = [a0]; for (let j = Math.floor(a0 / st) + 1; j * st < a0 + cov - 1e-6; j++) angs.push(j * st); angs.push(a0 + cov);
+  const out = angs.map(a => { const k = jit(a); return [c[0] + Math.cos(a) * (rad + wd / 2) * k, c[1] + Math.sin(a) * (rad + wd / 2) * k]; });
+  const inn = angs.map(a => { const k = jit(a); return [c[0] + Math.cos(a) * (rad - wd / 2) * k, c[1] + Math.sin(a) * (rad - wd / 2) * k]; });
+  return polyPath(out.concat(inn.reverse()));
+}
+function drawRings(t) {                          // each beat throws a band out to at most 2.2x the disc; it ends by retracting along its arc
+  if (t < 2.25) return;
+  const { c, R } = sunNow(t);
+  BEATS.forEach((b, i) => {
+    const d = t - b; if (b < 2.29 || b >= T.close || d < 0 || d >= 0.6) return;
+    const u = d / 0.6, rad = R + 16 + (Math.min(1.2 * R, 150) - 16) * out3(u), wd = 14 + 10 * (1 - u) * (b < 4.29 ? 1 : b < 6.29 ? 0.9 : 0.8);
+    const gone = span(u, 0.4, 1) ** 2, a0 = hash(i, 905) * TAU + gone * TAU;   // slow to start, quick to finish: no lingering stub
+    if (gone >= 0.995) return;
+    paint(ringBand(c, rad, wd, a0, TAU * (1 - gone), 900 + i), RINGC[i % RINGC.length], Mx.T(c[0] + i * 37, c[1]));
+  });
+}
+function drawLines(t) {
+  const ink = new Path2D(), push = pushK(t), ph = tw(t);
+  for (const ln of LINES) {
+    const p = ln.prog(t); if (p <= 0) continue;
+    const k = eback(span(t, ln.m0, ln.m0 + ln.md), 1.25), kk = cl(k), pl = 26 * osc(t, 0.33, 5.5) * ln.sgn;
+    const pts = ln.base.map((q, i) => {
+      const u = ln.u[i], n = ln.nr[i], da = pl * tri(ln.mode * u / 2);
+      let x = q[0] + n[0] * da, y = q[1] + n[1] * da;
+      if (k > 0) {                               // the whiplash: a ripple runs along it and it twangs on the beats
+        const nb = ln.nb[i], db = (7 * Math.sin(TAU * 2.5 * u - 2.4 * ph + ln.seed) + 0.6 * pl * Math.sin(TAU * u)) * kk;
+        x = mix(x, ln.B[i][0] + nb[0] * db, k); y = mix(y, ln.B[i][1] + nb[1] * db, k);
+      }
+      return [C0[0] + (x - C0[0]) * push, C0[1] + (y - C0[1]) * push];
+    });
+    brush(ink, pts, { w: 1, p, seed: ln.seed, press: u => mix(ln.pa(u), ln.pb(u), kk), tin: mix(0.03, 0.1, kk), tout: mix(0.06, 0.35, kk), dry: 0.5, k: 6, step: 6 });
+  }
+  cx.fillStyle = INK; cx.fill(ink);
+  const dr = new Path2D(), push2 = (x, y) => [C0[0] + (x - C0[0]) * push, C0[1] + (y - C0[1]) * push];
+  DROPS.forEach(([x, y, r, tl], i) => {        // ink thrown off the loaded brush before it lands
+    if (t < tl - 0.08) return;
+    if (t < tl) { const u = span(t, tl - 0.08, tl) ** 2; polyPath(disc(mix(-90, x, u), mix(-70 - 30 * i, y, u), r * 0.55, 800 + i, 8), dr); return; }
+    const s = eback((t - tl) / 0.12, 2.5), c = push2(x, y);
+    polyPath(splat(c[0], c[1], r * s, 810 + i), dr);
+    polyPath(disc(c[0] + r * 2.1 * Math.cos(i * 2.1), c[1] + r * 2.1 * Math.sin(i * 2.1), r * 0.22 * s, 820 + i, 7), dr);
+  });
+  cx.fill(dr);
+}
+function drawHatches(t) {
+  const ink = new Path2D();
+  HATCH.forEach((h, g) => {
+    if (t < h.t0) return;
+    const col = 1 - out3(span(t, 4.5 + g * 0.04, 4.85 + g * 0.04)); if (col <= 0) return;
+    h.strokes.forEach((s, i) => {
+      const p = out3(span(t, h.t0 + i * 0.025, h.t0 + i * 0.025 + 0.13));
+      brush(ink, s.map(q => [h.c[0] + (q[0] - h.c[0]) * col, h.c[1] + (q[1] - h.c[1]) * col]), { w: 1, press: u => 3 + 6 * (1 - u), p, seed: 500 + g * 7 + i, dry: 0.4, step: 5, k: 3, tin: 0.08, tout: 0.45 });
+    });
+  });
+  cx.fillStyle = INK; cx.fill(ink);
+}
+function drawMarks(t) {
+  const push = pushK(t), ink = new Path2D(), pp = (x, y) => [C0[0] + (x - C0[0]) * push, C0[1] + (y - C0[1]) * push];
+  for (const [mi, m] of MARKS.entries()) {
+    if (t < m.t0) continue;
+    const d = t - m.t0;
+    if (m.kind === 'hatch') m.lines.forEach((l, i) => {
+      const p = out3(span(d, i * 0.04, i * 0.04 + 0.14)); if (p > 0) brush(ink, l.map(q => pp(q[0], q[1])), { w: 1, press: u => 4 + 7 * Math.sin(PI * u), p, seed: 720 + i, dry: 0.5, k: 3, step: 5, tout: 0.35 });
+    });
+    if (m.kind === 'arc') {
+      const p = out3(span(d, 0, 0.3)), c = m.sun ? sunNow(t).c : pp(...m.c);
+      const ps = Array.from({ length: 25 }, (_, i) => { const a = mix(m.a0, m.a1, i / 24); return [c[0] + Math.cos(a) * m.R, c[1] + Math.sin(a) * m.R]; });
+      brush(ink, ps, { w: 1, press: u => 5 + 10 * Math.sin(PI * u), p, seed: 760 + mi, dry: 0.5, k: 4, tout: 0.3 });
+    }
+  }
+  cx.fillStyle = INK; cx.fill(ink);
+}
+
+// ── the title plate ──
+const TXT = 'Expressionism', SUB = 'Germany · c. 1905–1920';
+const PLATE_RUNS = [[0, 3, 26], [3, 7, 24], [7, 10, 26], [10, 14, 24]];
+function buildTitle() {
+  // an irregular jagged polygon: notched corner breaks on both long edges, blunt cut ends
+  PLATE_PTS = [[-668, -148], [-352, -184], [-306, -142], [40, -168], [336, -198], [380, -152], [662, -150], [690, 38], [628, 178], [246, 192], [198, 150], [-236, 170], [-652, 182], [-684, 30]];
+  const wg = wiggle(911); PLATE_IN = PLATE_PTS.map((_, i) => Math.max(0, 2 + 9 * wg(i * 0.9)));
+  let size = 186; cx.font = `900 ${size}px "Grenze Gotisch"`;
+  const w0 = cx.measureText(TXT).width; size = Math.min(210, size * 1110 / w0); cx.font = `900 ${size}px "Grenze Gotisch"`;
+  const m = cx.measureText(TXT), A = m.actualBoundingBoxAscent, D = m.actualBoundingBoxDescent, x0 = -m.width / 2;
+  const glyphs = [...TXT].map((ch, i) => { const a = cx.measureText(TXT.slice(0, i)).width, b = cx.measureText(TXT.slice(0, i + 1)).width; return { ch, x: x0 + a, cx: x0 + (a + b) / 2, i }; });
+  const base = (A - D) / 2 + 4;
+  cx.font = '600 60px "Grenze Gotisch"';
+  const sm2 = cx.measureText(SUB);
+  TITLE = { font: `900 ${size}px "Grenze Gotisch"`, glyphs, base, mid: base - A / 2, sub: { font: '600 60px "Grenze Gotisch"', w: sm2.width, base: (sm2.actualBoundingBoxAscent - sm2.actualBoundingBoxDescent) / 2 } };
+}
+function drawTitle(t) {
+  if (t < T.title) return;
+  const d = t - T.title, st = settle(t);
+  const s = 1.18 - 0.18 * eback(d / 0.26, 2.4), rot = -0.035 + 0.007 * osc(t, 0.3, 1.8);
+  const M = chain(Mx.T(C0[0], C0[1]), Mx.R(rot), Mx.S(s));
+  cx.save(); cx.setTransform(...M);
+  paint(polyPath(PLATE_PTS), 'cream', Mx.T(37, 11));
+  paint(polyPath(inset(PLATE_PTS, PLATE_IN)), 'yellow', Mx.T(211, 97));
+  const ink = new Path2D(), loop = [...PLATE_PTS, ...PLATE_PTS];
+  PLATE_RUNS.forEach(([a, b, w], i) => brush(ink, runPts(loop, a, b, 16), { w, seed: 930 + i, dry: 0.5, tout: 0.14, k: 6 }));
+  cx.fillStyle = INK; cx.fill(ink);
+  // every letter is on from the first frame; after the slam each one ticks a degree or two on the beats
+  cx.font = TITLE.font; cx.textBaseline = 'alphabetic'; cx.fillStyle = INK;
+  const kb = Math.floor((t - BEAT0) / SPB + 1e-6);
+  for (const g of TITLE.glyphs) {
+    let a = 0;
+    for (let j = Math.max(13, kb - 1); j <= kb && j < BEATS.length; j++) { const db = t - BEATS[j]; if (db >= 0) a += 0.03 * beatAmp(BEATS[j]) / 0.42 * ((g.i + j) % 2 ? 1 : -1) * (1 - Math.exp(-db / 0.025)) * Math.exp(-db / 0.3); }
+    a *= st;
+    cx.save(); cx.translate(g.cx, TITLE.mid); cx.rotate(a); cx.fillText(g.ch, g.x - g.cx, TITLE.base - TITLE.mid); cx.restore();
+  }
+  if (t >= T.sub) {                              // the subtitle pops in whole on a slanted black strip
+    const ds = t - T.sub, ps = 0.72 + 0.28 * eback(ds / 0.24, 2.0);
+    cx.globalAlpha = cl(ds / 0.07);
+    cx.transform(...chain(Mx.T(30, 262), Mx.R(-0.025 + 0.004 * osc(t, 0.3, 1.6)), Mx.S(ps)));
+    const strip = new Path2D(), half = TITLE.sub.w / 2 + 120;
+    brush(strip, subdiv([[-half, 4], [half, -4]], 60), { w: 98, seed: 950, dry: 0.45, tin: 0.04, tout: 0.1, k: 6 });
+    cx.fillStyle = INK; cx.fill(strip);
+    cx.font = TITLE.sub.font; cx.fillStyle = PAL.cream; cx.textAlign = 'center';
+    cx.fillText(SUB, 0, TITLE.sub.base);
+  }
+  cx.restore();
+}
+
+function frame(t) {
+  cx.setTransform(1, 0, 0, 1, 0, 0); cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over';
+  const z = 1 + 0.025 * inOut(span(t, 2.3, 4.6));
+  cx.setTransform(z, 0, 0, z, W / 2 * (1 - z), H / 2 * (1 - z));
+  cx.drawImage(GROUND, 0, 0);
+  for (const L of LAYERS) L(t);
+  cx.setTransform(1, 0, 0, 1, 0, 0); cx.globalAlpha = 1;
+  drawTitle(t);
+  cx.setTransform(1, 0, 0, 1, 0, 0); cx.globalAlpha = 1;
+  cx.globalCompositeOperation = 'multiply'; cx.drawImage(WEAVE, 0, 0); cx.globalCompositeOperation = 'source-over';
+  const fade = Math.max(0.55 * (1 - sm(span(t, 0, 0.22))), sm(span(t, T.close + 0.05, T.black)));
+  if (fade > 0) { cx.fillStyle = `rgba(0,0,0,${fade})`; cx.fillRect(0, 0, W, H); }
+}
+
+window.draw = ({ t }) => { frame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => CUES;
+window.ready = (async () => {
+  await document.fonts.load('900 100px "Grenze Gotisch"'); await document.fonts.load('600 60px "Grenze Gotisch"'); await document.fonts.ready;
+  build();
+})();
+</script>
+</body></html>

@@ -1,456 +1,953 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<link rel="stylesheet" href="fonts.css">
-<style>html,body{margin:0;background:#000}canvas{display:block}</style>
-</head><body>
-<canvas id="c" width="1920" height="1080"></canvas>
+<html lang="en"><head><meta charset="utf-8"><title>Ukiyo-e</title>
+<link href="fonts.css" rel="stylesheet">
+<style>html, body { margin: 0; background: #eee2c7; overflow: hidden } canvas { display: block }</style>
+</head>
+<body><canvas id="c" width="1920" height="1080"></canvas>
 <script>
-// ── ukiyo-e · "The Great Wave at Dawn" — an Edo-period woodblock print that moves ─────────────────────────
-// Blank washi → the black key block is rubbed on (baren sweep) → the colour blocks follow → push in.
-// Pre-dawn sea: parallax swells with claw foam, two oar boats, a distant twin-peaked mountain, mist bands.
-// A great wave rises on the right, curls, hangs — and crashes across the frame (the wave is the transition),
-// then falls away to reveal dawn: bokashi sky, the mountain up close, the vermilion sun rising, birds.
-// Title cartouche with vertical text, a subtitle cartouche, and the red seal stamped last → pull back → fade to paper.
-const W = 1920, H = 1080, TAU = Math.PI * 2;
-const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const lerp = (a, b, u) => a + (b - a) * u;
-const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
-const eOut = u => 1 - Math.pow(1 - u, 3);
-const eIn = u => u * u * u;
-const eBack = u => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); };
-function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-const hash = (n) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+'use strict';
+// Ukiyo-e: a woodblock print is pulled block by block (key lines, then sky, sea, red and earth
+// plates), the tall wave rises and breaks, its spray turns into plovers, a second print is rubbed
+// in behind the flock (dusk, snowy peak), its cartouche is printed and the artist's seal stamped.
+// Every frame is a pure function of t; all randomness is seeded and textures are made once.
 
-const TITLE = '"Zen Antique"', SUB = '"Cormorant SC"';
-const PAL = {
-  ink: '#1d1a1c', paper: '#efe3c5', prus: '#1f4f8e', prusD: '#15335f', prusM: '#2c64a3', prusL: '#6b98c6', stripe: '#a9c6df',
-  indigo: '#1e2c50', pink: '#e5a898', cream: '#f3e6c6', foam: '#f7f0dc', verm: '#cf3f28', ochre: '#c89243', cartY: '#ebd28a',
-  rust: '#a9533a', rustD: '#6f3529', green: '#2f4b36', wood: '#d8bf8a', far: '#4d77a6', farD: '#355b88'
-};
-let X = ctx, PROOF = false;
-const C = k => PROOF ? PAL.paper : (PAL[k] || k);
-function vgrad(y0, y1, stops) { if (PROOF) return PAL.paper; const g = X.createLinearGradient(0, y0, 0, y1); for (const [o, k] of stops) g.addColorStop(o, PAL[k] || k); return g; }
-// fill (slightly mis-registered, like a colour block printed a hair off the key block) + key line
-function fs(p, fill, lw = 3) {
-  if (PROOF) { X.fillStyle = PAL.paper; X.fill(p); }
-  else { X.save(); X.translate(1.8, 1.2); X.fillStyle = fill; X.fill(p); X.restore(); }
-  if (lw > 0) { X.lineWidth = lw; X.strokeStyle = PAL.ink; X.stroke(p); }
-}
-// carved line of varying weight (thick in the middle, tapering at both ends)
-function taper(pts, w0, color, pw = .6) {
-  const n = pts.length; if (n < 2) return; const A = [], B = [];
-  for (let i = 0; i < n; i++) {
-    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
-    let dx = b[0] - a[0], dy = b[1] - a[1]; const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
-    const w = w0 * .5 * Math.pow(Math.sin(Math.PI * i / (n - 1)), pw) + .3;
-    A.push([pts[i][0] - dy * w, pts[i][1] + dx * w]); B.push([pts[i][0] + dy * w, pts[i][1] - dx * w]);
-  }
-  X.beginPath(); X.moveTo(A[0][0], A[0][1]); for (const p of A) X.lineTo(p[0], p[1]);
-  for (let i = n - 1; i >= 0; i--) X.lineTo(B[i][0], B[i][1]); X.closePath(); X.fillStyle = color; X.fill();
-}
-const bez = (p0, p1, p2, p3, s) => { const m = 1 - s; return [m * m * m * p0[0] + 3 * m * m * s * p1[0] + 3 * m * s * s * p2[0] + s * s * s * p3[0], m * m * m * p0[1] + 3 * m * m * s * p1[1] + 3 * m * s * s * p2[1] + s * s * s * p3[1]]; };
-const bezPts = (p0, p1, p2, p3, n = 16, a = 0, b = 1) => Array.from({ length: n + 1 }, (_, i) => bez(p0, p1, p2, p3, lerp(a, b, i / n)));
-
-// ── timeline ──
-const T = {
-  k0: .12, k1: .72, c0: .62, c1: 1.3, push0: .75, push1: 2.1, cart: 1.45, cartTxt: 1.85,
-  bw0: 2.0, bw1: 4.4, curl0: 3.05, curl1: 4.75, cr0: 4.95, cr1: 5.5, dr1: 6.3,
-  sun0: 5.9, sun1: 9.1, sub: 6.75, seal: 8.1, pb0: 8.75, pb1: 9.95, f0: 9.5, f1: 10.0
+const W = 1920, H = 1080;
+const view = document.getElementById('c');
+const main = view.getContext('2d');
+const FRAME = { x: 56, y: 50, w: 1808, h: 980 };            // the printed image area
+const PAPER_RGB = [238, 226, 199];
+const INK = {
+  sumi: '#241e1a', prussian: '#22527f', indigo: '#1c2f52', pale: '#a3c0d2', mid: '#6d97ba',
+  beni: '#c9452f', pink: '#eab4a1', straw: '#eed88f', earth: '#a1805a', bark: '#6b4b35',
+  pine: '#3f5d48', moss: '#728856', slate: '#7186a1', sealRed: '#b22a1e',
 };
 
-// ── claw foam: a curled finger of spray (local: grows up, tip hooks toward +x) ──
-function claw(x, y, s, ang, flip) {
-  X.save(); X.translate(x, y); X.rotate(ang); if (flip) X.scale(-1, 1);
-  const w = s * .26, p = new Path2D();
-  p.moveTo(-w, 0); p.bezierCurveTo(-w * 1.15, -s * .58, s * .02, -s * 1.1, s * .72, -s * .9);
-  p.bezierCurveTo(s * .64, -s * .74, s * .44, -s * .7, s * .3, -s * .78);
-  p.bezierCurveTo(s * .12, -s * .52, w * .9, -s * .3, w, 0); p.closePath();
-  X.fillStyle = C('foam'); X.fill(p); X.lineWidth = Math.max(1.3, s * .055); X.strokeStyle = PAL.ink; X.stroke(p);
-  X.restore();
-}
-function dot(x, y, r) { X.beginPath(); X.arc(x, y, r, 0, TAU); X.fillStyle = C('foam'); X.fill(); X.lineWidth = Math.max(1, r * .28); X.strokeStyle = PAL.ink; X.stroke(); }
+// ---- small maths --------------------------------------------------------------------------
+const clamp = (v, lo = 0, hi = 1) => (v < lo ? lo : v > hi ? hi : v);
+const span = (t, a, b) => clamp((t - a) / (b - a));
+const mix = (a, b, u) => a + (b - a) * u;
+const smooth = u => u * u * (3 - 2 * u);
+const inOut = u => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(2 - 2 * u, 3) / 2);
+const outC = u => 1 - Math.pow(1 - u, 3);
+const inC = u => u * u * u;
+const outBack = u => { const k = 1.9, v = u - 1; return 1 + (k + 1) * v * v * v + k * v * v; };
+const TAU = Math.PI * 2;
 
-// ── swell layers: sharp crests, steep leading (left) face; they scroll left at depth-dependent speed ──
-const mkL = (o) => ({ A2: 0, lam2: 900, v2: 12, ph: 0, pk: 2.4, ns: 0, sg: 12, cs: 0, lw: 3, gd: 160, c1: 'prusD', c2: 'prus', seed: 1, ...o });
-const SKEW = .36;
-function lf(L, x, t) {
-  const u = (x + L.v * t + L.ph) / L.lam, f = u - Math.floor(u);
-  const g = f < SKEW ? f / SKEW * .5 : .5 + (f - SKEW) / (1 - SKEW) * .5;
-  return Math.pow(.5 + .5 * Math.cos(TAU * (g - .5)), L.pk);
+// xorshift32 stream, seeded per use so frames never depend on draw order
+function seeded(seed) {
+  let s = (seed * 2654435761) >>> 0 || 7;
+  return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
 }
-const ly = (L, x, t) => L.base - L.A * lf(L, x, t) - L.A2 * Math.sin(TAU * (x + L.v2 * t) / L.lam2 + L.ph * .01);
-function seaLayer(L, t) {
-  const top = [];
-  for (let x = -40; x <= W + 40; x += 6) top.push([x, ly(L, x, t)]);
-  const p = new Path2D(); p.moveTo(top[0][0], top[0][1]); for (const q of top) p.lineTo(q[0], q[1]);
-  p.lineTo(W + 40, H + 60); p.lineTo(-40, H + 60); p.closePath();
-  const f = new Path2D(); f.moveTo(top[0][0], top[0][1]); for (const q of top) f.lineTo(q[0], q[1]);
-  fs(p, vgrad(L.base - L.A - L.A2, L.base + L.gd, [[0, L.c1], [1, L.c2]]), 0);
-  // contour stripes following each crest
-  const k0 = Math.floor((-200 + L.v * t + L.ph) / L.lam) - 1, k1 = Math.ceil((W + 200 + L.v * t + L.ph) / L.lam) + 1;
-  for (let k = k0; k <= k1; k++) {
-    const xc = (k + SKEW) * L.lam - L.v * t - L.ph;
-    for (let j = 1; j <= L.ns; j++) {
-      const pts = []; const a = xc - L.lam * .3, b = xc + L.lam * (.42 - j * .05);
-      for (let i = 0; i <= 18; i++) { const x = lerp(a, b, i / 18); pts.push([x + j * L.sg * .5, ly(L, x, t) + j * L.sg]); }
-      taper(pts, L.sg * .32, C('stripe'), .8);
+function lattice(ix, iy, k) {
+  let h = Math.imul(ix | 0, 0x27d4eb2d) ^ Math.imul(iy | 0, 0x165667b1) ^ Math.imul(k, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b); h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function vnoise(x, y, k) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const a = lattice(ix, iy, k), b = lattice(ix + 1, iy, k), c = lattice(ix, iy + 1, k), d = lattice(ix + 1, iy + 1, k);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+const sheet = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+// Catmull-Rom through control points -> dense polyline
+function through(P, per = 10) {
+  const out = [];
+  for (let i = 0; i < P.length - 1; i++) {
+    const a = P[Math.max(0, i - 1)], b = P[i], c = P[i + 1], d = P[Math.min(P.length - 1, i + 2)];
+    for (let k = 0; k < per; k++) {
+      const u = k / per, u2 = u * u, u3 = u2 * u;
+      const f = (p0, p1, p2, p3) => 0.5 * (2 * p1 + (p2 - p0) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (3 * p1 - p0 - 3 * p2 + p3) * u3);
+      out.push([f(a[0], b[0], c[0], d[0]), f(a[1], b[1], c[1], d[1])]);
     }
   }
-  X.lineWidth = L.lw; X.strokeStyle = PAL.ink; X.stroke(f);
-  if (L.cs > 0) for (let k = k0; k <= k1; k++) {
-    const xc = (k + SKEW) * L.lam - L.v * t - L.ph; if (xc < -120 || xc > W + 120) continue;
-    const r = rng(L.seed * 1000 + k * 7 + 3); const cy = ly(L, xc, t);
-    // foam cap riding on the crest
-    const cap = new Path2D(), a = xc - L.lam * .05, b = xc + L.lam * .11, n = 10;
-    cap.moveTo(a, ly(L, a, t)); for (let i = 1; i <= n; i++) { const x = lerp(a, b, i / n); cap.lineTo(x, ly(L, x, t)); }
-    for (let i = n; i >= 0; i--) { const x = lerp(a, b, i / n); cap.lineTo(x, ly(L, x, t) + L.cs * .32 * Math.sin(Math.PI * i / n)); }
-    cap.closePath(); fs(cap, C('foam'), L.lw * .7);
-    const nc = 4 + Math.floor(r() * 3);
-    for (let i = 0; i < nc; i++) {
-      const x = xc + lerp(-.05, .1, i / (nc - 1)) * L.lam + (r() - .5) * 8, y = ly(L, x, t) + 2;
-      const wig = .1 * Math.sin(t * 5 + k + i * 1.7);
-      claw(x, y, L.cs * (.65 + .55 * r()) * (1 - i / nc * .35), -.45 - i * .08 + wig + (r() - .5) * .3, true);
+  out.push(P[P.length - 1].slice());
+  return out;
+}
+function trace(g, pts, dx = 0, dy = 0, from = 0, to = pts.length - 1) {
+  g.moveTo(pts[from][0] + dx, pts[from][1] + dy);
+  for (let i = from + 1; i <= to; i++) g.lineTo(pts[i][0] + dx, pts[i][1] + dy);
+}
+// evenly spaced samples (with outward normals) along a stretch of polyline
+function alongArc(pts, from, to, n) {
+  const seg = [0];
+  for (let i = from + 1; i <= to; i++) seg.push(seg[seg.length - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const total = seg[seg.length - 1], res = [];
+  let j = 0;
+  for (let k = 0; k < n; k++) {
+    const want = total * k / (n - 1);
+    while (j < seg.length - 2 && seg[j + 1] < want) j++;
+    const u = seg[j + 1] > seg[j] ? (want - seg[j]) / (seg[j + 1] - seg[j]) : 0;
+    const p = pts[from + j], q = pts[from + j + 1];
+    const tx = q[0] - p[0], ty = q[1] - p[1], len = Math.hypot(tx, ty) || 1;
+    res.push({ x: mix(p[0], q[0], u), y: mix(p[1], q[1], u), nx: ty / len, ny: -tx / len, q: k / (n - 1) });
+  }
+  return res;
+}
+
+// ---- textures, made once in window.ready -----------------------------------------------------
+let PAPER, GRAIN, EDGE, SEAL, SEAL_SHADOW;
+const inkC = sheet(W, H), inkG = inkC.getContext('2d');
+const keyC = sheet(W, H), keyG = keyC.getContext('2d');
+const maskC = sheet(W, H), maskG = maskC.getContext('2d');
+const twoC = sheet(W, H), twoG = twoC.getContext('2d');
+
+function cloudField(cw, ch, scale, k) {
+  const f = new Float32Array(cw * ch);
+  for (let j = 0; j < ch; j++) for (let i = 0; i < cw; i++) {
+    const x = i / scale, y = j / scale;
+    f[j * cw + i] = vnoise(x, y, k) * 0.58 + vnoise(x * 2.1, y * 2.1, k + 1) * 0.28 + vnoise(x * 4.7, y * 4.7, k + 2) * 0.14;
+  }
+  return f;
+}
+function sampleField(f, cw, ch, x, y) {
+  const i0 = Math.min(cw - 2, x | 0), j0 = Math.min(ch - 2, y | 0), tx = x - i0, ty = y - j0;
+  const a = f[j0 * cw + i0], b = f[j0 * cw + i0 + 1], c = f[(j0 + 1) * cw + i0], d = f[(j0 + 1) * cw + i0 + 1];
+  const top = a + (b - a) * tx;
+  return top + (c + (d - c) * tx - top) * ty;
+}
+
+function makePaper() {
+  const c = sheet(W, H), g = c.getContext('2d'), R = seeded(11);
+  const img = g.createImageData(W, H), px = img.data;
+  const cw = 242, ch = 137, field = cloudField(cw, ch, 10, 3);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const m = sampleField(field, cw, ch, x / 8, y / 8);
+    const n = (R() - 0.5) * 8 + (m - 0.5) * 18;
+    const o = (y * W + x) * 4;
+    px[o] = PAPER_RGB[0] + n; px[o + 1] = PAPER_RGB[1] + n * 0.95; px[o + 2] = PAPER_RGB[2] + n * 0.82; px[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  // kozo fibres: long pale strands and a few darker ones
+  for (let i = 0; i < 2800; i++) {
+    const x = R() * W, y = R() * H, len = 10 + R() * 52, a = R() * TAU, bend = (R() - 0.5) * 1.1;
+    g.beginPath(); g.moveTo(x, y);
+    g.quadraticCurveTo(x + Math.cos(a + bend) * len * 0.5, y + Math.sin(a + bend) * len * 0.5, x + Math.cos(a) * len, y + Math.sin(a) * len);
+    g.strokeStyle = R() < 0.62 ? `rgba(255,251,238,${0.2 + R() * 0.28})` : `rgba(122,96,62,${0.05 + R() * 0.08})`;
+    g.lineWidth = 0.5 + R() * 1.2; g.stroke();
+  }
+  for (let i = 0; i < 180; i++) {
+    g.fillStyle = `rgba(92,70,44,${0.07 + R() * 0.12})`;
+    g.beginPath(); g.ellipse(R() * W, R() * H, 0.6 + R() * 1.7, 0.4 + R() * 0.8, R() * 3, 0, TAU); g.fill();
+  }
+  const age = g.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 1.08);
+  age.addColorStop(0, 'rgba(0,0,0,0)'); age.addColorStop(1, 'rgba(126,92,48,0.17)');
+  g.fillStyle = age; g.fillRect(0, 0, W, H);
+  return c;
+}
+
+// ink unevenness: wood grain streaks + baren mottling, used 'source-atop' on the ink layer
+function makeGrain() {
+  const c = sheet(W, H), g = c.getContext('2d'), R = seeded(23);
+  const img = g.createImageData(W, H), px = img.data;
+  const cw = 322, ch = 182, warp = cloudField(cw, ch, 40, 31), mot = cloudField(cw, ch, 7, 37);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const wv = sampleField(warp, cw, ch, x / 6, y / 6), mv = sampleField(mot, cw, ch, x / 6, y / 6);
+    // long, nearly level grain lines of the cherry block, gently bowed
+    const streak = Math.pow(Math.max(0, Math.sin((y + wv * 26 + Math.sin(x / 310) * 5) * 0.21)), 14);
+    const blot = clamp((mv - 0.6) * 2.2);
+    const a = streak * 0.075 + blot * 0.09 + R() * 0.03;
+    const o = (y * W + x) * 4;
+    px[o] = 250; px[o + 1] = 246; px[o + 2] = 232; px[o + 3] = a * 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+// the rubbed edge of a fresh impression: opaque on the left, mottled, clear on the right
+function makeEdge() {
+  const w = 520, c = sheet(w, H), g = c.getContext('2d');
+  const img = g.createImageData(w, H), px = img.data;
+  for (let y = 0; y < H; y++) for (let x = 0; x < w; x++) {
+    const ramp = (0.5 - x / w) * 2.6;
+    // streaky like a baren pass: stretched along the stroke, soft at the front
+    const n = (vnoise(x / 60, y / 9, 41) * 0.55 + vnoise(x / 22, y / 3.5, 43) * 0.3 + vnoise(x / 120, y / 40, 47) * 0.15 - 0.5) * 1.5;
+    const o = (y * w + x) * 4;
+    px[o] = px[o + 1] = px[o + 2] = 0; px[o + 3] = clamp(ramp + n + 0.05) * 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+// the artist's seal: vermilion square, an abstract sun-over-waves mark carved out (no lettering), worn edges
+function makeSeal() {
+  const s = 136, c = sheet(s, s), g = c.getContext('2d'), R = seeded(77);
+  g.fillStyle = INK.sealRed;
+  g.beginPath();
+  const pts = [];
+  for (let i = 0; i < 48; i++) {
+    const side = Math.floor(i / 12), u = (i % 12) / 12, j = (R() - 0.5) * 3.2;
+    const p = [[8 + u * 120, 8 + j], [128 + j, 8 + u * 120], [128 - u * 120, 128 + j], [8 + j, 128 - u * 120]][side];
+    pts.push(p);
+  }
+  trace(g, pts); g.closePath(); g.fill();
+  g.globalCompositeOperation = 'destination-out';
+  g.lineWidth = 5; g.strokeRect(19, 19, 98, 98);
+  g.beginPath(); g.arc(46, 46, 13, 0, TAU); g.fill();                    // the sun, upper left
+  g.lineWidth = 5.5; g.lineCap = 'round';
+  [70, 88, 106].forEach((y, k) => {                                     // three swells of sea under it
+    g.beginPath();
+    for (let x = 30; x <= 106; x += 2) g.lineTo(x, y + 5 * Math.sin((x - 30) / 76 * 2 * TAU + k * 1.6));
+    g.stroke();
+  });
+  g.lineCap = 'butt';
+  for (let i = 0; i < 340; i++) {
+    g.globalAlpha = 0.25 + R() * 0.6;
+    g.beginPath(); g.arc(R() * s, R() * s, 0.4 + R() * R() * 2.6, 0, TAU); g.fill();
+  }
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  return c;
+}
+function makeSealShadow() {
+  const c = sheet(260, 260), g = c.getContext('2d');
+  g.filter = 'blur(7px)'; g.fillStyle = 'rgba(40,24,14,1)'; g.fillRect(62, 62, 136, 136); g.filter = 'none';
+  return c;
+}
+
+const patterns = new Map();
+function paperInk(g) {
+  let p = patterns.get(g);
+  if (!p) { p = g.createPattern(PAPER, 'no-repeat'); patterns.set(g, p); }
+  return p;
+}
+
+// ---- plates: each colour block lands with a small drop and its own registration ------------
+const SETTLED = { a: 1, dy: 0 };
+function landing(t, t0) {
+  if (t0 === undefined) return SETTLED;
+  const u = span(t, t0, t0 + 0.26);
+  if (u <= 0) return null;
+  return { a: clamp(u * 2.6), dy: -22 * (1 - outBack(u)) };
+}
+function plate(g, st, reg, draw) {
+  if (!st) return;
+  g.save(); g.globalAlpha = st.a; g.translate(reg[0], reg[1] + st.dy); draw(g); g.restore();
+}
+function inkOpen() {
+  const g = inkG;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+  g.clearRect(0, 0, W, H);
+  g.save(); g.beginPath(); g.rect(FRAME.x, FRAME.y, FRAME.w, FRAME.h); g.clip();
+  return g;
+}
+function inkClose(g) {
+  inkG.restore();
+  inkG.globalCompositeOperation = 'source-atop'; inkG.drawImage(GRAIN, 0, 0);
+  inkG.globalCompositeOperation = 'source-over';
+  g.save(); g.globalCompositeOperation = 'multiply'; g.drawImage(inkC, 0, 0); g.restore();
+}
+function clipFrame(g) { g.beginPath(); g.rect(FRAME.x, FRAME.y, FRAME.w, FRAME.h); g.clip(); }
+
+// mist bands (kasumi): erased from the ink, tinted along the lower edge
+function mistPath(g, m, t) {
+  const x = m.x + m.v * t;
+  g.beginPath();
+  g.roundRect(x, m.y, m.w, m.h, m.h / 2);
+  g.roundRect(x + m.w * 0.2, m.y + m.h * 0.6, m.w * 0.55, m.h * 0.84, m.h * 0.42);
+}
+function eraseMist(g, list, t) {
+  g.save(); g.globalCompositeOperation = 'destination-out'; g.fillStyle = '#000';
+  list.forEach(m => { mistPath(g, m, t); g.fill(); });
+  g.restore();
+}
+function tintMist(g, list, t, color) {
+  list.forEach(m => {
+    const gr = g.createLinearGradient(0, m.y, 0, m.y + m.h * 1.45);
+    gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.3, 'rgba(0,0,0,0)'); gr.addColorStop(1, color);
+    mistPath(g, m, t); g.fillStyle = gr; g.fill();
+    g.globalAlpha *= 0.28; g.fillStyle = color; g.fill(); g.globalAlpha /= 0.28;
+  });
+}
+
+// ---- shared print furniture ------------------------------------------------------------------
+// cartouche text is factual only: the style's own name and its period. Print one's cartouche is wiped away
+// right to left, so every left-anchored prefix must stay harmless (no "JAPAN": it would pass through "JAP").
+const SERIES = 'EDO PERIOD', TITLE = ['Ukiyo-e'], DATES = '17th–19th c.';
+function cartoucheInk(g, b) {
+  g.fillStyle = INK.straw; g.fillRect(b.x, b.y, b.w, b.h);
+}
+function cartoucheBand(g, b) {
+  g.fillStyle = INK.beni; g.fillRect(b.x, b.y, b.w, 54);
+}
+function cartoucheKey(g, b, lines, num, t, t0) {
+  g.strokeStyle = INK.sumi; g.lineWidth = 3.4; g.strokeRect(b.x, b.y, b.w, b.h);
+  g.lineWidth = 1.4; g.strokeRect(b.x + 8, b.y + 8, b.w - 16, b.h - 16);
+  g.beginPath(); g.moveTo(b.x, b.y + 54); g.lineTo(b.x + b.w, b.y + 54); g.lineWidth = 2.4; g.stroke();
+  g.fillStyle = INK.sumi; g.textBaseline = 'alphabetic';
+  g.font = "400 60px 'Zen Antique'";
+  let n = 0;
+  lines.forEach((line, li) => {
+    const wd = g.measureText(line).width, y = b.y + 54 + 72 + li * 66 + (2 - lines.length) * 33;   // a single line sits centred
+    let x = b.x + (b.w - wd) / 2;
+    for (const ch of line) {
+      const cw = g.measureText(ch).width;
+      const u = t0 === undefined ? 1 : span(t, t0 + n * 0.045, t0 + n * 0.045 + 0.16);
+      if (u > 0) { g.globalAlpha = u; g.fillText(ch, x, y - 9 * (1 - outC(u))); }
+      x += cw; n++;
     }
-    if (L.cs > 25) for (let i = 0; i < 3; i++) dot(xc - L.cs * (.9 + r() * 1.4), cy - L.cs * (.6 + r() * .9) + 4 * Math.sin(t * 3 + i), 2 + r() * 3);
-  }
+  });
+  g.globalAlpha = 1;
+  const u = t0 === undefined ? 1 : span(t, t0 + n * 0.045, t0 + n * 0.045 + 0.2);
+  g.globalAlpha = u; g.font = "600 22px 'Cormorant SC'"; g.textAlign = 'right';
+  g.fillText(num, b.x + b.w - 22, b.y + b.h - 18); g.textAlign = 'left'; g.globalAlpha = 1;
 }
-const slope = (L, x, t, d = 60) => Math.atan2(ly(L, x + d, t) - ly(L, x - d, t), 2 * d);
-
-// ── oar boat with a crouched crew ──
-function boat(x, y, ang, len, crew, t, seed) {
-  X.save(); X.translate(x, y); X.rotate(ang);
-  const L = len / 2, yt = s => len * ((1 - s) * (1 - s) * -.05 + 2 * s * (1 - s) * -.005 + s * s * -.095);
-  for (let i = 0; i < crew; i++) {
-    const s = .12 + i / (crew - 1) * .7, px = lerp(-L, L, s), py = yt(s), sw = Math.sin(t * 3.1 + seed + i * .15);
-    X.lineWidth = Math.max(1.5, len * .007); X.strokeStyle = PAL.ink; X.beginPath(); X.moveTo(px - len * .01, py + len * .01);
-    X.lineTo(px - len * (.1 + .03 * sw), py + len * (.13 - .02 * sw)); X.stroke();
-    const body = new Path2D(); body.ellipse(px, py - len * .016, len * .03, len * .03, -.35, Math.PI, TAU); body.lineTo(px + len * .03, py + len * .004); body.lineTo(px - len * .03, py + len * .004); body.closePath();
-    fs(body, C('indigo'), Math.max(1.4, len * .006));
-    const hd = new Path2D(); hd.arc(px + len * .02, py - len * .048, len * .0135, 0, TAU); fs(hd, C('cream'), Math.max(1.3, len * .005));
-    X.fillStyle = PAL.ink; X.beginPath(); X.arc(px + len * .02, py - len * .052, len * .0115, Math.PI * .95, Math.PI * 2.05); X.fill();
-  }
-  const hull = new Path2D(); hull.moveTo(-L, -len * .05); hull.quadraticCurveTo(0, -len * .005, L * 1.02, -len * .095);
-  hull.quadraticCurveTo(L * .92, len * .02, L * .62, len * .05); hull.quadraticCurveTo(0, len * .07, -L * .88, len * .028); hull.closePath();
-  fs(hull, C('wood'), Math.max(2, len * .009));
-  X.lineWidth = Math.max(1.2, len * .005); X.strokeStyle = PAL.ink; X.beginPath(); X.moveTo(-L * .95, -len * .03); X.quadraticCurveTo(0, len * .014, L * .97, -len * .07); X.stroke();
-  X.restore();
+function cartoucheLetters(g, b) {
+  g.font = "700 21px 'Cormorant SC'"; g.letterSpacing = '1.5px'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = paperInk(g); g.fillText(SERIES, b.x + b.w / 2 + 1, b.y + 28, b.w - 40);
+  g.letterSpacing = '0px'; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
 }
-function boatOn(Lr, x, len, crew, t, seed) { boat(x, ly(Lr, x, t) + len * .02, slope(Lr, x, t, len * .35) * .8, len, crew, t, seed); }
-
-// ── twin-peaked mountain (original shape): rust slopes, indigo foot, snow cap with streaks ──
-const MPTS = [[-640, 0], [-520, -80], [-400, -200], [-300, -320], [-225, -415], [-172, -472], [-128, -446], [-78, -392], [-22, -336], [30, -362], [92, -420], [140, -452], [188, -424], [250, -350], [318, -300], [392, -276], [462, -214], [590, -104], [760, 0]];
-const ridge = x => { for (let i = 0; i < MPTS.length - 1; i++) { const [x0, y0] = MPTS[i], [x1, y1] = MPTS[i + 1]; if (x >= x0 && x <= x1) return lerp(y0, y1, (x - x0) / (x1 - x0)); } return 0; };
-const ZZ = (() => { const o = []; let k = 0; for (let x = -330; x <= 330; x += 22, k++) { const rg = ridge(x), dp = clamp((-rg - 330) / 130) * 115; o.push([x, rg + (dp > 1 ? dp * (k % 2 ? .45 : 1) + 6 * hash(k) : -12)]); } return o; })();
-const PINES = (() => { const r = rng(5), o = []; for (let i = 0; i < 70; i++) o.push([lerp(-600, 720, r()), -8 - r() * 34, 11 + r() * 9]); return o.sort((a, b) => a[1] - b[1]); })();
-function mountain(ox, oy, sc, far) {
-  X.save(); X.translate(ox, oy); X.scale(sc, sc);
-  const p = new Path2D(); p.moveTo(MPTS[0][0], 30); p.lineTo(MPTS[0][0], MPTS[0][1]);
-  for (let i = 1; i < MPTS.length - 1; i++) { const m = [(MPTS[i][0] + MPTS[i + 1][0]) / 2, (MPTS[i][1] + MPTS[i + 1][1]) / 2]; p.quadraticCurveTo(MPTS[i][0], MPTS[i][1], m[0], m[1]); }
-  p.lineTo(MPTS[MPTS.length - 1][0], MPTS[MPTS.length - 1][1]); p.lineTo(MPTS[MPTS.length - 1][0], 30); p.closePath();
-  const g = far ? vgrad(-500, 0, [[0, 'farD'], [1, 'far']]) : vgrad(-480, 20, [[0, 'rustD'], [.25, 'rust'], [.66, '#8a4632'], [1, 'indigo']]);
-  fs(p, g, 0);
-  X.save(); X.clip(p);
-  if (!far) {
-    const rl = [[[-172, -465], [-250, -330], [-330, -200], [-430, -70]], [[-172, -465], [-120, -330], [-110, -200], [-60, -60]], [[140, -448], [110, -330], [60, -200], [20, -60]], [[140, -448], [220, -330], [300, -200], [360, -70]], [[392, -276], [420, -190], [470, -110], [540, -30]], [[-22, -336], [-20, -230], [0, -140], [-10, -40]]];
-    for (const q of rl) taper(bezPts(q[0], q[1], q[2], q[3], 20), 9, C('rustD'), .5);
-  }
-  const sn = new Path2D(); sn.moveTo(-340, -700); for (const q of ZZ) sn.lineTo(q[0], q[1]); sn.lineTo(340, -700); sn.closePath();
-  X.fillStyle = C('foam'); X.fill(sn);
-  X.lineWidth = far ? 5 : 2.6; X.strokeStyle = PAL.ink; X.beginPath(); ZZ.forEach((q, i) => i ? X.lineTo(q[0], q[1]) : X.moveTo(q[0], q[1])); X.stroke();
-  X.restore();
-  X.lineWidth = far ? 8 : 3.4; X.strokeStyle = PAL.ink; X.stroke(p);
-  if (!far) for (const [x, y, s] of PINES) { // pine groves along the foot
-    const q = new Path2D(); for (let k = 0; k < 3; k++) { const yy = y - k * s * .42, ww = s * (1 - k * .26); q.moveTo(x - ww, yy); q.quadraticCurveTo(x, yy - s * .55, x + ww, yy); q.closePath(); }
-    fs(q, C('green'), 1.3);
-  }
-  X.restore();
+function border(g) {
+  g.strokeStyle = INK.sumi; g.lineWidth = 2.6; g.strokeRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
+}
+// outlined paper blobs: stroke all, then fill all, so only the outer edge of the union stays inked
+function blobs(g, list, lw, tint) {
+  if (!list.length) return;
+  g.beginPath();
+  list.forEach(c => { g.moveTo(c.x + c.r, c.y); g.arc(c.x, c.y, c.r, 0, TAU); });
+  g.strokeStyle = INK.sumi; g.lineWidth = lw; g.stroke();
+  g.fillStyle = paperInk(g); g.fill();
+  if (tint) { g.fillStyle = tint; g.fill(); }
 }
 
-// ── mist bands (kasumi): flat stepped bands, graded, with curled ends ──
-function kasumi(x, y, w, h, col) {
-  const p = new Path2D(), q = h / 4;
-  const add = (x0, y0, w0) => {
-    p.moveTo(x0 + q, y0); p.lineTo(x0 + w0 - q, y0);
-    p.arc(x0 + w0 - q, y0 + q, q, -Math.PI / 2, Math.PI / 2); p.arc(x0 + w0 - q * 1.6, y0 + 3 * q, q, -Math.PI / 2, Math.PI / 2);
-    p.lineTo(x0 + q * 1.6, y0 + h); p.arc(x0 + q * 1.6, y0 + 3 * q, q, Math.PI / 2, Math.PI * 1.5); p.arc(x0 + q, y0 + q, q, Math.PI / 2, Math.PI * 1.5); p.closePath();
-  };
-  add(x, y, w); add(x + w * .2, y + h * .95, w * .6);
-  fs(p, vgrad(y, y + h * 2, [[0, C(col)], [1, col === 'pink' ? '#f1d2c0' : '#f7eedb']]), 2.2);
+// ---- scene 1: the tall wave at dawn ----------------------------------------------------------
+const POSE = {
+  A: [[80, 936], [520, 852], [700, 818], [830, 784], [930, 752], [1030, 734], [1118, 738], [1182, 754], [1178, 770], [1150, 773], [1150, 790], [1190, 820], [1290, 850], [1700, 936]],
+  B: [[70, 936], [460, 862], [630, 836], [760, 806], [860, 782], [960, 770], [1040, 772], [1098, 786], [1094, 800], [1068, 802], [1070, 816], [1110, 838], [1220, 862], [1690, 936]],
+  C: [[80, 936], [500, 822], [700, 672], [840, 502], [960, 362], [1090, 286], [1232, 292], [1330, 362], [1300, 414], [1222, 394], [1170, 472], [1206, 642], [1330, 800], [1720, 936]],
+  C2: [[80, 936], [500, 818], [700, 658], [846, 482], [972, 338], [1102, 264], [1252, 270], [1362, 346], [1332, 406], [1242, 386], [1182, 466], [1212, 640], [1336, 800], [1724, 936]],
+  D: [[90, 936], [520, 832], [720, 704], [862, 566], [992, 456], [1122, 404], [1282, 424], [1420, 542], [1402, 602], [1322, 562], [1252, 582], [1272, 690], [1390, 812], [1740, 936]],
+  E: [[100, 936], [560, 864], [760, 842], [900, 826], [1020, 812], [1150, 804], [1280, 808], [1380, 826], [1376, 838], [1352, 840], [1352, 850], [1390, 866], [1480, 880], [1760, 936]],
+};
+const blend = (P, Q, u) => P.map((p, i) => [mix(p[0], Q[i][0], u), mix(p[1], Q[i][1], u)]);
+function waveAt(t) {
+  let P;
+  if (t < 1.7) P = POSE.A;
+  else if (t < 2.2) P = blend(POSE.A, POSE.B, inOut(span(t, 1.7, 2.2)));
+  else if (t < 3.6) P = blend(POSE.B, POSE.C2, inOut(span(t, 2.2, 3.6)));
+  else if (t < 3.95) P = blend(POSE.C2, POSE.C, smooth(span(t, 3.6, 3.95)));
+  else if (t < 4.35) P = blend(POSE.C, POSE.D, inC(span(t, 3.95, 4.35)));
+  else if (t < 5.1) P = blend(POSE.D, POSE.E, outC(span(t, 4.35, 5.1)));
+  else P = POSE.E;
+  const heave = Math.sin(t * 2.3) * 5;
+  P = P.map(([x, y], i) => [x + Math.sin(t * 1.6 + i * 0.6) * 2, y < 860 ? y + heave : y]);
+  const tall = inOut(span(t, 2.2, 3.6)) * (1 - outC(span(t, 4.35, 5.1)));
+  return { pts: through(P, 10), tall };
 }
-
-// ── the great wave (local coords, drawn mirrored so it rises on the right and breaks to the left) ──
-function waveGeom(t) {
-  const g = eInOut(seg(t, T.bw0, T.bw1));
-  const c = eOut(seg(t, T.curl0, T.curl1)) + .3 * eIn(seg(t, T.cr0, T.cr0 + .45));
-  const push = 1100 * eIn(seg(t, T.cr0, T.cr0 + .5));
-  const sz = .3 + .7 * g, r = 215 * sz, bob = 7 * Math.sin(t * 2.2) * g;
-  const dx = lerp(-160, 10, g) + push;
-  const P = [520 + dx, lerp(1060, 205, g) + bob], Q = [P[0] + r * .34, P[1] + r * .94];
-  const th0 = Math.atan2(P[1] - Q[1], P[0] - Q[0]), span = c * 3.7;
-  return { g, c, sz, r, dx, P, Q, th0, span };
+function bodyPath(g, d) {
+  g.beginPath(); trace(g, d);
+  g.lineTo(d[d.length - 1][0], 1100); g.lineTo(d[0][0], 1100); g.closePath();
 }
-// lip as a tapering spiral: s∈[0,1] from crest to tip
-function lipPt(G, s, inner) {
-  const { r, Q, th0, span, c } = G, a = th0 + span * s;
-  const ro = r * (1 - .3 * s * s), th = r * lerp(.5, .06, Math.pow(s, .8)) * Math.min(1, c * 2.2) + r * .02;
-  const rr = inner ? ro - th : ro; return [Q[0] + Math.cos(a) * rr, Q[1] + Math.sin(a) * rr, a];
+function waveInk(g, wv) {
+  const d = wv.pts, sc = mix(0.5, 1, wv.tall);
+  g.save(); bodyPath(g, d); g.clip();
+  g.fillStyle = INK.prussian; g.fillRect(0, 0, W, H);
+  let gr = g.createLinearGradient(0, 690, 0, 900);
+  gr.addColorStop(0, 'rgba(28,47,82,0)'); gr.addColorStop(1, 'rgba(28,47,82,0.92)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  const f = d[112];
+  gr = g.createRadialGradient(f[0] + 24, f[1] - 18, 8, f[0] + 24, f[1] - 18, 200 * sc);
+  gr.addColorStop(0, 'rgba(126,170,202,0.95)'); gr.addColorStop(1, 'rgba(126,170,202,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  for (let k = 1; k <= 12; k++) {
+    g.beginPath(); trace(g, d, k * 12 * sc, k * 19 * sc, 0, 76);
+    g.strokeStyle = `rgba(183,207,224,${0.95 - k * 0.055})`; g.lineWidth = Math.max(1.4, 5.4 - k * 0.34); g.stroke();
+  }
+  g.restore();
 }
-function bigWave(t) {
-  const G = waveGeom(t); const { sz, r, dx, P, Q, th0, span, c } = G;
-  X.save(); X.translate(W, 0); X.scale(-1, 1);
-  const b0 = [-380 + dx * .4, 1200], b1 = [60 + dx, 1170], b2 = [P[0] - 420 * sz, P[1] + 40 * sz];
-  const N = 36, outer = [], inner = [];
-  for (let i = 0; i <= N; i++) { outer.push(lipPt(G, i / N, false)); inner.push(lipPt(G, i / N, true)); }
-  const I0 = inner[0];
-  const f1 = [I0[0] - r * .1, I0[1] + r * .9], f2 = [Q[0] + r * .9, Q[1] + r * 1.8], fe = [Q[0] + r * 2.9, 1200];
-  const p = new Path2D(); p.moveTo(...b0); p.bezierCurveTo(...b1, ...b2, ...P);
-  for (const q of outer) p.lineTo(q[0], q[1]); for (let i = N; i >= 0; i--) p.lineTo(inner[i][0], inner[i][1]);
-  p.bezierCurveTo(...f1, ...f2, ...fe); p.closePath();
-  fs(p, vgrad(P[1], 1080, [[0, 'prusD'], [.5, 'prus'], [1, 'prusM']]), 0);
-  X.save(); X.clip(p);
-  for (let k = 1; k <= 11; k++) { const o = [k * 30 * sz, k * 20 * sz]; const sh = q => [q[0] + o[0], q[1] + o[1]]; taper(bezPts(sh(b0), sh(b1), sh(b2), sh(P), 26, .4, 1), 9 * sz, C('stripe'), .7); }
-  for (let k = 1; k <= 3; k++) { const o = -k * 34 * sz; const sh = q => [q[0] + o, q[1] + o * .15]; taper(bezPts(sh(I0), sh(f1), sh(f2), sh(fe), 24, .45, .9), 8 * sz, C('stripe'), .7); }
-  if (c > .05) for (const f of [.3, .52]) { const pts = []; for (let i = 0; i <= 24; i++) { const s = i / 24 * .85, o = lipPt(G, s, false), n = lipPt(G, s, true); pts.push([lerp(o[0], n[0], f + .25), lerp(o[1], n[1], f + .25)]); } taper(pts, 7 * sz, C('stripe'), .7); }
-  X.restore();
-  X.lineWidth = 4.6; X.strokeStyle = PAL.ink; X.stroke(p);
-  // foam cap along the outer lip
-  if (c > .02) {
-    const fb = new Path2D(); const m = Math.floor(N * .92);
-    for (let i = 0; i <= m; i++) { const q = outer[i]; i ? fb.lineTo(q[0], q[1]) : fb.moveTo(q[0], q[1]); }
-    for (let i = m; i >= 0; i--) { const o = outer[i], n = inner[i], f = .3 * (1 - i / m) + .12; fb.lineTo(lerp(o[0], n[0], f), lerp(o[1], n[1], f)); }
-    fb.closePath(); fs(fb, C('foam'), 2.6);
+function waveKey(g, wv) {
+  const d = wv.pts, sc = mix(0.5, 1, wv.tall);
+  g.save(); bodyPath(g, d); g.clip();
+  g.strokeStyle = INK.sumi; g.lineCap = 'round';
+  for (let k = 1; k <= 3; k++) {
+    g.beginPath(); trace(g, d, k * 12 * sc + 6 * sc, k * 19 * sc + 9 * sc, 26, 74);
+    g.lineWidth = 1.7; g.stroke();
   }
-  const rr = rng(91);
-  for (let i = 0; i < 8; i++) { // claws along the back, near the crest
-    const s = .78 + i * .028, q = bez(b0, b1, b2, P, s), q2 = bez(b0, b1, b2, P, s + .01), tx = q2[0] - q[0], ty = q2[1] - q[1], d = Math.hypot(tx, ty) || 1;
-    const ang = Math.atan2(-tx / d, ty / d) + Math.PI / 2; claw(q[0], q[1] + 3, 40 * sz * (.5 + .7 * (i / 8)) * (.8 + .4 * rr()), ang + .25 + .1 * Math.sin(t * 4 + i), false);
-  }
-  // clustered claws ("fingers") along the lip, each group a hand of 3
-  const n = Math.max(1, Math.floor(span / .3));
-  for (let i = 0; i <= n; i++) {
-    const s = i / n * .95, o = lipPt(G, s, false), sc = 60 * sz * (1 - .45 * s) * (.8 + .4 * rr()), wig = .1 * Math.sin(t * 5.5 + i * 1.3);
-    for (let j = -1; j <= 1; j++) claw(o[0] + j * 6, o[1] + j * 4, sc * (j ? .62 : 1), o[2] + Math.PI / 2 + .3 + j * .42 + wig, false);
-  }
-  if (c > .4) { const o = lipPt(G, 1, false); for (let i = 0; i < 4; i++) claw(o[0], o[1], 36 * sz * (1 - i * .16), o[2] + Math.PI * .9 + i * .25 + .15 * Math.sin(t * 6 + i), false); }
-  if (G.g > .5) for (let i = 0; i < 18; i++) { const a = th0 + rr() * (span + .4) - .35, d = r * (1.15 + rr() * .55) + 6 * Math.sin(t * 3 + i); dot(Q[0] + Math.cos(a) * d, Q[1] + Math.sin(a) * d, 3 + rr() * 5 * sz); }
-  X.restore();
+  g.restore();
+  g.beginPath(); trace(g, d); g.strokeStyle = INK.sumi; g.lineWidth = 4.6; g.lineJoin = 'round'; g.stroke();
 }
-
-// ── the crash: a wall of water sweeps across (phase 1), then falls away (phase 2) ──
-function curtain(t) {
-  const u1 = seg(t, T.cr0 + .08, T.cr1), u2 = seg(t, T.cr1, T.dr1); if (u1 <= 0 || u2 >= 1) return;
-  X.save(); X.translate(W, 0); X.scale(-1, 1);
-  const p = new Path2D(), edge = [];
-  if (u2 <= 0) {
-    const xf = lerp(700, 2750, eInOut(u1));
-    const front = y => xf + 320 * Math.pow(1 - clamp(y / 1080), 2) - 160 + 22 * Math.sin(y * .02 + t * 7);
-    p.moveTo(-60, -80); for (let y = -80; y <= 1160; y += 12) { const q = [front(y), y]; p.lineTo(q[0], q[1]); edge.push(q); } p.lineTo(-60, 1160); p.closePath();
-  } else {
-    const yt = lerp(-140, 1260, u2 * u2 * (1.6 - .6 * u2));
-    const top = x => yt + 46 * Math.sin(x * .0105 + 1.3) + 22 * Math.sin(x * .031 + t * 4);
-    p.moveTo(-60, top(-60)); for (let x = -60; x <= W + 60; x += 12) { const q = [x, top(x)]; p.lineTo(q[0], q[1]); edge.push(q); } p.lineTo(W + 60, 1200); p.lineTo(-60, 1200); p.closePath();
-  }
-  fs(p, vgrad(0, 1080, [[0, 'prusD'], [.5, 'prus'], [1, 'prusD']]), 0);
-  X.save(); X.clip(p);
-  for (let y0 = -60; y0 < 1180; y0 += 38) { const pts = []; for (let x = -60; x <= W + 60; x += 40) pts.push([x, y0 + 16 * Math.sin(x / 150 + y0 * .7) + (u2 > 0 ? 0 : 0)]); taper(pts, 7, C('stripe'), .9); }
-  X.restore();
-  X.lineWidth = 4.6; X.strokeStyle = PAL.ink; X.stroke(p);
-  { const fb = new Path2D(); edge.forEach((q, i) => i ? fb.lineTo(q[0], q[1]) : fb.moveTo(q[0], q[1]));
-    for (let i = edge.length - 1; i >= 0; i--) { const q = edge[i], w = 34 + 16 * Math.sin(i * .7); fb.lineTo(q[0] - (u2 <= 0 ? w : 0), q[1] + (u2 <= 0 ? 0 : w)); }
-    fb.closePath(); fs(fb, C('foam'), 2.4); }
-  const r = rng(404);
-  for (let i = 2; i < edge.length - 1; i += (u2 <= 0 ? 7 : 5)) {
-    const q = edge[i], nx = edge[i + 1], tx = nx[0] - q[0], ty = nx[1] - q[1], d = Math.hypot(tx, ty) || 1;
-    const nrm = u2 <= 0 ? Math.atan2(-tx / d, ty / d) : Math.atan2(-tx / d, ty / d) - Math.PI; // outward normal
-    const sc = (u2 <= 0 ? 72 : 56) + 34 * r(), wig = .12 * Math.sin(t * 8 + i), tilt = u2 <= 0 ? -.25 : -.35;
-    for (let j = -1; j <= 1; j++) claw(q[0] + (u2 <= 0 ? -8 : j * 12), q[1] + (u2 <= 0 ? j * 12 : 8), sc * (j ? .6 : 1), nrm + Math.PI / 2 + tilt + j * .45 + wig, false);
-  }
-  X.restore();
+function foamSize(t, q) {
+  const t0 = 2.5 + q * 0.95, grow = outBack(span(t, t0, t0 + 0.42));
+  return mix(0.42, 1, grow) * (1 + 0.22 * smooth(span(t, 3.95, 4.35))) * mix(1, 0.6, smooth(span(t, 4.35, 5.1)));
 }
-// falling spray after the crash
-const SPRAY = (() => { const r = rng(2024); return Array.from({ length: 46 }, () => ({ x: r() * W, y: 150 + r() * 700, vx: (r() - .5) * 240, vy: -300 - r() * 500, s: 3 + r() * 9, tr: T.cr1 + .05 + r() * .6 })); })();
-function spray(t) {
-  for (const d of SPRAY) { const dt = t - d.tr; if (dt < 0) continue; const y = d.y + d.vy * dt + 1100 * dt * dt; if (y > H + 30) continue; dot(d.x + d.vx * dt, y, d.s); }
-}
-
-// ── scenes ──
-const A0 = mkL({ base: 662, A: 9, A2: 3, lam: 150, v: 18, pk: 3, lw: 2, c1: 'farD', c2: 'prusM', gd: 90, seed: 1 });
-const A1 = mkL({ base: 770, A: 34, A2: 9, lam: 330, v: 46, pk: 2.6, cs: 22, ns: 2, sg: 10, lw: 2.6, ph: 90, c1: 'prusD', c2: 'prusM', gd: 140, seed: 2 });
-const A2 = mkL({ base: 905, A: 70, A2: 16, lam: 540, v: 82, pk: 2.4, cs: 36, ns: 3, sg: 15, lw: 3.2, ph: 260, c1: 'prusD', c2: 'prus', gd: 200, seed: 3 });
-const A3 = mkL({ base: 1050, A: 64, A2: 12, lam: 660, v: 135, pk: 2.2, cs: 44, ns: 3, sg: 17, lw: 3.6, ph: 40, c1: 'prusD', c2: 'prus', gd: 150, seed: 4 });
-const B0 = mkL({ base: 742, A: 6, A2: 2, lam: 140, v: 14, pk: 3, lw: 2, c1: 'farD', c2: 'prusM', gd: 90, seed: 5 });
-const B1 = mkL({ base: 836, A: 26, A2: 7, lam: 300, v: 34, pk: 2.6, cs: 18, ns: 2, sg: 9, lw: 2.5, ph: 30, c1: 'prusD', c2: 'prusM', gd: 130, seed: 6 });
-const B2 = mkL({ base: 955, A: 48, A2: 12, lam: 480, v: 62, pk: 2.4, cs: 30, ns: 3, sg: 13, lw: 3.1, ph: 170, c1: 'prusD', c2: 'prus', gd: 170, seed: 7 });
-const B3 = mkL({ base: 1062, A: 44, A2: 10, lam: 600, v: 100, pk: 2.2, cs: 36, ns: 3, sg: 15, lw: 3.5, ph: 330, c1: 'prusD', c2: 'prus', gd: 120, seed: 8 });
-
-function sceneA(t) {
-  X.fillStyle = vgrad(0, 670, [[0, '#1c2a50'], [.3, '#3f5580'], [.66, '#c5b9a0'], [1, '#e9d9b6']]); X.fillRect(0, 0, W, H);
-  kasumi(980 - 14 * t, 250, 620, 34, 'cream'); kasumi(-120 - 8 * t, 420, 700, 30, 'pink'); kasumi(1250 - 20 * t, 505, 520, 26, 'pink');
-  mountain(560, 664, .28, true);
-  seaLayer(A0, t); seaLayer(A1, t); boatOn(A1, 360 + 14 * Math.sin(t * .7), 230, 6, t, 1);
-  seaLayer(A2, t); boatOn(A2, 690 + 18 * Math.sin(t * .6 + 1), 360, 8, t, 2);
-  if (t > T.bw0) bigWave(t);
-  seaLayer(A3, t);
-}
-function sceneB(t) {
-  X.fillStyle = vgrad(0, 745, [[0, '#23345c'], [.2, '#3e4f7a'], [.44, '#e3a595'], [.72, '#f0d6b0'], [1, '#f5e7c8']]); X.fillRect(0, 0, W, H);
-  // sun (with a faint bokashi halo)
-  const su = eOut(seg(t, T.sun0, T.sun1)), sx = 560, sy = lerp(830, 350, su);
-  if (!PROOF) { const hg = X.createRadialGradient(sx, sy, 100, sx, sy, 330); hg.addColorStop(0, 'rgba(240,150,110,.45)'); hg.addColorStop(1, 'rgba(240,150,110,0)'); X.fillStyle = hg; X.fillRect(0, 0, W, H); }
-  const sp = new Path2D(); sp.arc(sx, sy, 112, 0, TAU); fs(sp, C('verm'), 3.2);
-  kasumi(1500 - 16 * (t - 5), 150, 560, 30, 'cream');
-  mountain(1140, 748, 1, false);
-  kasumi(640 - 22 * (t - 5), 560, 760, 38, 'pink'); kasumi(1480 - 30 * (t - 5), 640, 520, 30, 'cream');
-  // birds
-  for (let i = 0; i < 5; i++) {
-    const bt = t - 6.3 - i * .12; if (bt < 0) continue;
-    const bx = 2000 - bt * 170 - i * 58 + (i % 2) * 20, by = 300 + i * 22 - (i % 2) * 30 + 10 * Math.sin(bt * 1.5 + i), s = 20 - i * 1.2, f = Math.sin(bt * 9 + i);
-    const wing = (dir) => { const e = [bx + dir * s, by - s * (.25 + .55 * f)]; const m = [bx + dir * s * .5, by - s * (.5 + .25 * f)]; taper(bezPts([bx, by], m, m, e, 8), s * .28, PAL.ink, .4); };
-    wing(-1); wing(1);
+function waveFoam(g, wv, t) {
+  const crest = alongArc(wv.pts, 32, 96, 30);
+  // claws reaching off the lip, drawn first so the foam heads cover their roots
+  const show = 1 - span(t, 4.25, 4.6);
+  if (show > 0) {
+    for (let j = 0; j < 6; j++) {
+      const s = crest[17 + j * 2], grow = outBack(span(t, 3.05 + j * 0.08, 3.5 + j * 0.08)) * show;
+      if (grow <= 0.02) continue;
+      const len = (46 + (j % 3) * 10) * grow * (1 + 0.5 * span(t, 3.95, 4.3));
+      let a = Math.atan2(s.ny, s.nx) - 0.35, x = s.x + s.nx * 10, y = s.y + s.ny * 10;
+      const pts = [[x, y]];
+      for (let k = 1; k <= 9; k++) { a += 0.3; x += Math.cos(a) * len / 9; y += Math.sin(a) * len / 9; pts.push([x, y]); }
+      for (const pass of [0, 1]) {
+        g.strokeStyle = pass ? paperInk(g) : INK.sumi; g.lineCap = 'round';
+        for (let k = 0; k < 9; k++) {
+          g.beginPath(); g.moveTo(pts[k][0], pts[k][1]); g.lineTo(pts[k + 1][0], pts[k + 1][1]);
+          g.lineWidth = 13 * (1 - k / 9) * grow + 2.5 + (pass ? 0 : 5); g.stroke();
+        }
+      }
+    }
   }
-  seaLayer(B0, t); seaLayer(B1, t); boatOn(B1, 880 + 12 * Math.sin(t * .7), 240, 6, t, 3);
-  seaLayer(B2, t); boatOn(B2, 1360 + 16 * Math.sin(t * .6 + 2), 370, 8, t, 4); seaLayer(B3, t);
+  const list = crest.map(s => {
+    const r = (8 + 17 * smooth(clamp(s.q / 0.7)) - 9 * smooth(span(s.q, 0.84, 1))) * foamSize(t, s.q);
+    return { x: s.x + s.nx * r * 0.3, y: s.y + s.ny * r * 0.3, r };
+  });
+  blobs(g, list, 6);
+  // little curls inside the larger foam heads
+  g.strokeStyle = INK.sumi; g.lineWidth = 1.6;
+  list.forEach((c, i) => {
+    if (c.r < 13 || i % 2) return;
+    g.beginPath(); g.arc(c.x - c.r * 0.12, c.y + c.r * 0.1, c.r * 0.5, Math.PI * 0.9, Math.PI * 2.1); g.stroke();
+  });
 }
-
-// ── cartouches (vertical English text) + seal ──
-function cartouche(x, y, w, h, bg, text, font, reveal, fsz, wt = '') {
-  const p = new Path2D(); p.rect(x, y, w, h); fs(p, C(bg), 3.4);
-  X.lineWidth = 1.6; X.strokeStyle = PAL.ink; X.strokeRect(x + 9, y + 9, w - 18, h - 18);
-  if (PROOF || reveal <= 0) return;
-  X.save(); X.beginPath(); X.rect(x, y, w, 14 + (h - 14) * reveal); X.clip();
-  X.translate(x + w / 2, y + h / 2); X.rotate(Math.PI / 2);
-  X.font = `${wt} ${fsz}px ${font}`; X.textAlign = 'center'; X.textBaseline = 'middle'; X.fillStyle = PAL.ink;
-  X.fillText(text, 0, fsz * .04); X.restore();
+const SPRAY = [];
+function initSpray() {
+  const R = seeded(57);
+  // flung from the falling lip in a fan, heavier drops first
+  for (let i = 0; i < 64; i++) {
+    const u = R(), a = -1.25 + u * 1.1, sp = 260 + R() * 420;
+    SPRAY.push({
+      te: 3.96 + R() * 0.36, x: 1290 + u * 130 + R() * 30, y: 360 + u * 120 + R() * 30,
+      vx: Math.cos(a) * sp + 120, vy: Math.sin(a) * sp, r: 3.5 + R() * R() * 11, life: 0.75 + R() * 0.7,
+    });
+  }
+  for (let i = 0; i < 22; i++) SPRAY.push({
+    te: 3.05 + R() * 0.9, x: 1110 + R() * 220, y: 270 + R() * 60,
+    vx: 140 + R() * 260, vy: -80 - R() * 200, r: 2.8 + R() * 4, life: 0.45 + R() * 0.45,
+  });
 }
-const CART = { x: 56, y: 56, w: 124, h: 660 }, SUBC = { x: 196, y: 56, w: 74, h: 430 };
-let SEAL, TFS = 50, SFS = 30;
-function overlays(t) {
-  if (t > T.cart) {
-    const u = seg(t, T.cart, T.cart + .5), yy = lerp(-CART.h - 40, CART.y, eBack(u));
-    cartouche(CART.x, yy, CART.w, CART.h, 'cartY', 'THE GREAT WAVE AT DAWN', TITLE, eOut(seg(t, T.cartTxt, T.cartTxt + .6)), TFS);
+function spray(g, t) {
+  const list = [];
+  for (const s of SPRAY) {
+    const age = t - s.te;
+    if (age < 0 || age > s.life) continue;
+    const r = s.r * (1 - Math.pow(age / s.life, 2));
+    list.push({ x: s.x + s.vx * age, y: s.y + s.vy * age + 470 * age * age, r });
   }
-  if (t > T.sub) {
-    const u = seg(t, T.sub, T.sub + .45), yy = lerp(-SUBC.h - 40, SUBC.y, eBack(u));
-    cartouche(SUBC.x, yy, SUBC.w, SUBC.h, 'pink', 'VIEWS OF THE EASTERN SEA', SUB, eOut(seg(t, T.sub + .35, T.sub + .85)), SFS, '700');
-  }
-  const sx = SUBC.x - 12 + (SUBC.w - 104) / 2 + 12, sy = SUBC.y + SUBC.h + 30;
-  if (t > T.seal - .3 && t < T.seal) { // stamp block approaching: its shadow tightens
-    const u = seg(t, T.seal - .3, T.seal), s = lerp(1.7, 1.02, eIn(u));
-    X.fillStyle = `rgba(30,20,20,${.16 * u})`; X.fillRect(sx + 52 - 52 * s + 8 * (1 - u), sy + 52 - 52 * s + 10 * (1 - u), 104 * s, 104 * s);
-  }
-  if (t >= T.seal && !PROOF) {
-    X.drawImage(SEAL, sx, sy, 104, 104);
-    const u = seg(t, T.seal, T.seal + .35); // block lifting away
-    if (u < 1) { const s = lerp(1.02, 1.5, eOut(u)); X.fillStyle = `rgba(30,20,20,${.14 * (1 - u)})`; X.fillRect(sx + 52 - 52 * s + 10 * u, sy + 52 - 52 * s + 12 * u, 104 * s, 104 * s); }
+  blobs(g, list, 3.2, 'rgba(150,186,210,0.45)');
+  // the break hitting the water: a ring of foam heads that swells and sinks
+  const u = span(t, 4.22, 5.25);
+  if (u > 0 && u < 1) {
+    const ring = [];
+    for (let i = 0; i < 15; i++) {
+      const a = Math.PI * (1.05 + 0.9 * i / 14), dist = 24 + 150 * outC(u) * (0.7 + 0.3 * ((i * 7) % 5) / 4);
+      ring.push({ x: 1440 + Math.cos(a) * dist * 1.25, y: 800 + Math.sin(a) * dist * 0.75 + 70 * u * u, r: (13 + (i % 4) * 4) * (1 - u * u * u) * outBack(clamp(u * 4)) });
+    }
+    blobs(g, ring, 5);
   }
 }
-function drawPrint(c, t, proof) {
-  X = c.getContext('2d'); PROOF = proof; X.setTransform(1, 0, 0, 1, 0, 0); X.lineJoin = 'round'; X.lineCap = 'round';
-  if (t < T.cr1) sceneA(t); else sceneB(t);
-  curtain(t); if (t > T.cr1) spray(t);
-  overlays(t);
-  X.lineWidth = 6; X.strokeStyle = PAL.ink; X.strokeRect(3, 3, W - 6, H - 6);
-}
-
-// ── textures (built once) ──
-let WASHI, FIBER, WOOD, PRINT, PROOFC;
-function buildTextures() {
-  const r = rng(7);
-  WASHI = mk(2240, 1260); let x = WASHI.getContext('2d'); x.fillStyle = PAL.paper; x.fillRect(0, 0, 2240, 1260);
-  for (let i = 0; i < 70; i++) { const cx = r() * 2240, cy = r() * 1260, rr = 80 + r() * 260, g = x.createRadialGradient(cx, cy, 0, cx, cy, rr); const dk = r() < .5; g.addColorStop(0, dk ? 'rgba(170,140,95,.045)' : 'rgba(255,250,235,.08)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(cx - rr, cy - rr, rr * 2, rr * 2); }
-  FIBER = mk(2240, 1260); const f = FIBER.getContext('2d');
-  const id = f.createImageData(2240, 1260), d = id.data;
-  for (let i = 0; i < d.length; i += 4) { const v = 244 + r() * 11; d[i] = v; d[i + 1] = v - 1; d[i + 2] = v - 4; d[i + 3] = 255; }
-  f.putImageData(id, 0, 0);
-  for (let i = 0; i < 2600; i++) {
-    const x0 = r() * 2240, y0 = r() * 1260, a = r() * TAU, l = 14 + r() * 70, bend = (r() - .5) * 30;
-    f.strokeStyle = r() < .55 ? `rgba(150,125,90,${.06 + r() * .12})` : `rgba(255,255,250,${.35 + r() * .4})`; f.lineWidth = .5 + r() * 1.3;
-    f.beginPath(); f.moveTo(x0, y0); f.quadraticCurveTo(x0 + Math.cos(a) * l / 2 - Math.sin(a) * bend, y0 + Math.sin(a) * l / 2 + Math.cos(a) * bend, x0 + Math.cos(a) * l, y0 + Math.sin(a) * l); f.stroke();
-  }
-  for (let i = 0; i < 900; i++) { f.fillStyle = `rgba(120,95,70,${.12 + r() * .25})`; f.beginPath(); f.arc(r() * 2240, r() * 1260, .5 + r() * 1.4, 0, TAU); f.fill(); }
-  WOOD = mk(W, H); const w = WOOD.getContext('2d'); w.fillStyle = '#fff'; w.fillRect(0, 0, W, H);
-  for (let i = 0; i < 260; i++) {
-    const y0 = r() * H, a1 = 3 + r() * 9, p1 = r() * TAU, p2 = r() * TAU, l1 = 200 + r() * 500;
-    w.strokeStyle = `rgba(110,85,60,${.05 + r() * .12})`; w.lineWidth = .8 + r() * 3.2; w.beginPath();
-    for (let xx = -10; xx <= W + 10; xx += 20) { const yy = y0 + a1 * Math.sin(xx / l1 + p1) + 2.5 * Math.sin(xx / 61 + p2); xx < 0 ? w.moveTo(xx, yy) : w.lineTo(xx, yy); }
-    w.stroke();
-  }
-  // a few knots in the block
-  for (let k = 0; k < 3; k++) { const cx = r() * W, cy = r() * H; for (let j = 1; j < 9; j++) { w.strokeStyle = 'rgba(110,85,60,.08)'; w.lineWidth = 1.5; w.beginPath(); w.ellipse(cx, cy, j * 14, j * 5, 0, 0, TAU); w.stroke(); } }
-  SEAL = mk(208, 208); const s = SEAL.getContext('2d'); const sr = rng(77);
-  s.fillStyle = PAL.verm; s.beginPath();
-  const edge = []; for (let i = 0; i < 4; i++) for (let j = 0; j < 20; j++) { const u = j / 20; const pt = [[8 + u * 192, 8], [200, 8 + u * 192], [200 - u * 192, 200], [8, 200 - u * 192]][i]; edge.push([pt[0] + (sr() - .5) * 4, pt[1] + (sr() - .5) * 4]); }
-  edge.forEach((q, i) => i ? s.lineTo(q[0], q[1]) : s.moveTo(q[0], q[1])); s.closePath(); s.fill();
-  s.globalCompositeOperation = 'destination-out'; s.strokeStyle = '#000'; s.lineCap = 'round';
-  s.lineWidth = 9; s.strokeRect(30, 30, 148, 148);
-  s.lineWidth = 12; s.beginPath(); s.arc(104, 82, 30, 0, TAU); s.stroke();
-  for (let i = 0; i < 3; i++) { s.beginPath(); s.arc(62 + i * 42, 158, 21, Math.PI * 1.05, Math.PI * 1.95); s.stroke(); }
-  s.lineWidth = 7; s.beginPath(); s.moveTo(50, 124); s.lineTo(158, 124); s.stroke();
-  for (let i = 0; i < 420; i++) { s.fillStyle = `rgba(0,0,0,${.2 + sr() * .7})`; s.beginPath(); s.arc(sr() * 208, sr() * 208, .6 + sr() * 2.2, 0, TAU); s.fill(); }
-  s.globalCompositeOperation = 'source-atop';
-  for (let i = 0; i < 30; i++) { s.fillStyle = sr() < .5 ? 'rgba(120,20,10,.18)' : 'rgba(255,180,160,.14)'; s.beginPath(); s.arc(sr() * 208, sr() * 208, 10 + sr() * 30, 0, TAU); s.fill(); }
-  s.globalCompositeOperation = 'source-over';
-  PRINT = mk(W, H); PROOFC = mk(W, H);
-}
-function fitFonts() {
-  const x = ctx; x.font = `100px ${TITLE}`; const tw = x.measureText('THE GREAT WAVE AT DAWN').width;
-  TFS = Math.min(58, Math.floor(100 * (CART.h - 70) / tw));
-  x.font = `700 100px ${SUB}`; const sw = x.measureText('VIEWS OF THE EASTERN SEA').width;
-  SFS = Math.min(36, Math.floor(100 * (SUBC.h - 56) / sw));
-}
-// rough, rubbed edge of a baren sweep (diagonal, left → right)
-function sweepPath(xs, seed) {
-  const p = new Path2D(); p.moveTo(-300, -200);
-  for (let y = -200; y <= H + 200; y += 10) { const j = 16 * (hash(Math.floor(y / 10) + seed) - .5) + 10 * Math.sin(y * .031 + seed); p.lineTo(xs + (H / 2 - y) * .32 + j, y); }
-  p.lineTo(-300, H + 200); p.closePath(); return p;
-}
-function render(t) {
-  const u1 = seg(t, T.k0, T.k1), u2 = seg(t, T.c0, T.c1);
-  drawPrint(PRINT, t, false);
-  if (u2 < 1) drawPrint(PROOFC, t, true);
-  const x = ctx; x.setTransform(1, 0, 0, 1, 0, 0);
-  let sc = 1; if (t < T.push1) sc = lerp(.9, 1, eInOut(seg(t, T.push0, T.push1))); if (t > T.pb0) sc = lerp(1, .9, eInOut(seg(t, T.pb0, T.pb1)));
-  const sh = seg(t, T.seal, T.seal + .22), shk = t > T.seal ? 3.5 * (1 - sh) * Math.sin(t * 90) : 0;
-  const crashK = seg(t, T.cr0 + .1, T.cr0 + .6), shk2 = crashK > 0 && crashK < 1 ? 5 * Math.sin(crashK * Math.PI) * Math.sin(t * 73) : 0;
-  x.setTransform(sc, 0, 0, sc, W / 2 * (1 - sc) + shk2, H / 2 * (1 - sc) + shk + shk2 * .6);
-  x.drawImage(WASHI, -160, -90);
-  if (u2 >= 1) x.drawImage(PRINT, 0, 0);
-  else {
-    const xs1 = lerp(-500, W + 500, eInOut(u1)), xs2 = lerp(-500, W + 500, eInOut(u2));
-    x.save(); x.beginPath(); x.rect(0, 0, W, H); x.clip();
-    if (u1 > 0) { x.save(); x.clip(sweepPath(xs1, 11)); x.drawImage(PROOFC, 0, 0); x.restore(); }
-    if (u2 > 0) { x.save(); x.clip(sweepPath(xs2, 37)); x.drawImage(PRINT, 0, 0); x.restore(); }
-    x.restore();
-  }
-  // block grain inside the printed area, washi fibres everywhere
-  x.save(); x.beginPath(); x.rect(0, 0, W, H); x.clip();
-  x.globalCompositeOperation = 'multiply'; x.globalAlpha = u2 >= 1 ? .5 : .5 * u2; x.drawImage(WOOD, 0, 0); x.restore();
-  x.globalCompositeOperation = 'multiply'; x.globalAlpha = 1; x.drawImage(FIBER, -160, -90);
-  x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1;
-  x.setTransform(1, 0, 0, 1, 0, 0);
-  const fade = Math.max(1 - seg(t, 0, .12), eInOut(seg(t, T.f0, T.f1)));
-  if (fade > 0) { x.fillStyle = PAL.paper; x.globalAlpha = fade; x.fillRect(0, 0, W, H); x.globalAlpha = 1; }
-}
-
-window.ready = (async () => {
-  await Promise.all([`100px ${TITLE}`, `700 100px ${SUB}`, `600 100px ${SUB}`].map(f => document.fonts.load(f, 'THE GREAT WAVE AT DAWN VIEWS OF EASTERN SEA')));
-  await document.fonts.ready;
-  buildTextures(); fitFonts(); render(0);
-})();
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
-// audio cue list (read by events.mjs → events.json → audio.py)
-window.events = () => [
-  { t: .08, k: 'clack' }, { t: .3, k: 'clack', v: .8 },
-  { t: T.k0, k: 'rub', d: T.k1 - T.k0 }, { t: T.c0, k: 'rub', d: T.c1 - T.c0 },
-  { t: T.cart + .32, k: 'tock' }, { t: T.cartTxt, k: 'koto', n: 64 }, { t: T.cartTxt + .22, k: 'koto', n: 69 },
-  { t: T.bw0, k: 'rise', d: T.cr0 - T.bw0 + .1 }, { t: T.cr0, k: 'crash' }, { t: T.cr0 + .02, k: 'taiko' },
-  { t: T.cr1 + .05, k: 'splash', d: 1.4 },
-  { t: T.sun0 + .5, k: 'koto', n: 64 }, { t: T.sun0 + .8, k: 'koto', n: 65 }, { t: T.sun0 + 1.1, k: 'koto', n: 69 }, { t: T.sun0 + 1.55, k: 'koto', n: 71 },
-  { t: T.sub + .3, k: 'tock', v: .6 }, { t: T.sun0 + 2.2, k: 'koto', n: 72 }, { t: T.sun0 + 2.5, k: 'koto', n: 71 },
-  { t: T.seal, k: 'seal' }, { t: T.seal + .05, k: 'chord' }
+const MIST1 = [
+  { x: 330, y: 318, w: 600, h: 40, v: 9 },
+  { x: 1090, y: 196, w: 520, h: 34, v: -7 },
+  { x: 150, y: 548, w: 680, h: 34, v: 6 },
 ];
+const ROWS1 = [
+  { base: 928, amp: 46, per: 300, v: 34, off: 40, col: INK.prussian },
+  { base: 1002, amp: 40, per: 250, v: 50, off: 170, col: INK.indigo },
+];
+const rowY = (x, r, ph) => r.base - r.amp * Math.pow(0.5 + 0.5 * Math.cos((x - ph) * TAU / r.per), 2.6);
+function rowPts(r, t) {
+  const ph = r.off + r.v * t, pts = [];
+  for (let x = FRAME.x - 12; x <= FRAME.x + FRAME.w + 12; x += 6) pts.push([x, rowY(x, r, ph)]);
+  return pts;
+}
+function rowInk(g, r, t, stripes) {
+  const pts = rowPts(r, t);
+  g.save(); g.beginPath(); trace(g, pts);
+  g.lineTo(pts[pts.length - 1][0], 1100); g.lineTo(pts[0][0], 1100); g.closePath();
+  g.fillStyle = r.col; g.fill(); g.clip();
+  for (let k = 1; k <= stripes; k++) {
+    g.beginPath(); trace(g, pts, 0, k * 13);
+    g.strokeStyle = `rgba(170,198,218,${0.85 - k * 0.2})`; g.lineWidth = 3.4 - k * 0.6; g.stroke();
+  }
+  g.restore();
+}
+function rowKey(g, r, t, foam) {
+  const pts = rowPts(r, t);
+  g.beginPath(); trace(g, pts); g.strokeStyle = INK.sumi; g.lineWidth = 3.4; g.stroke();
+  if (!foam) return;
+  const ph = r.off + r.v * t, list = [];
+  for (let n = -2; n < 12; n++) {
+    const xp = ph % r.per + n * r.per, yp = r.base - r.amp;
+    if (xp < FRAME.x - 40 || xp > FRAME.x + FRAME.w + 40) continue;
+    list.push({ x: xp, y: yp - 3, r: 10 }, { x: xp - 15, y: yp + 4, r: 7 }, { x: xp + 13, y: yp + 4, r: 6.5 });
+  }
+  blobs(g, list, 5);
+}
+const ROCK = [[1590, 1040], [1584, 930], [1600, 842], [1632, 772], [1676, 724], [1730, 702], [1790, 714], [1830, 692], [1872, 700], [1872, 1040]];
+const TRUNK = [[1792, 712], [1772, 652], [1738, 602], [1692, 562], [1642, 532], [1592, 516]];
+const NEEDLES = [{ x: 1658, y: 470, rx: 58, ry: 22, b: 3 }, { x: 1600, y: 508, rx: 84, ry: 26 }, { x: 1704, y: 552, rx: 88, ry: 27 }, { x: 1772, y: 624, rx: 62, ry: 22, b: 3 }];
+function trunkPath(g) {
+  const d = through(TRUNK, 6), L = [], Rr = [];
+  d.forEach((p, i) => {
+    const q = d[Math.min(d.length - 1, i + 1)], o = d[Math.max(0, i - 1)];
+    const tx = q[0] - o[0], ty = q[1] - o[1], len = Math.hypot(tx, ty) || 1, w = mix(13, 4, i / (d.length - 1));
+    L.push([p[0] - ty / len * w, p[1] + tx / len * w]); Rr.push([p[0] + ty / len * w, p[1] - tx / len * w]);
+  });
+  g.beginPath(); trace(g, L); for (let i = Rr.length - 1; i >= 0; i--) g.lineTo(Rr[i][0], Rr[i][1]); g.closePath();
+}
+function islandInk(g) {
+  g.beginPath(); trace(g, ROCK); g.closePath(); g.fillStyle = INK.earth; g.fill();
+  g.save(); g.clip();
+  const gr = g.createLinearGradient(0, 760, 0, 1000); gr.addColorStop(0, 'rgba(70,52,40,0)'); gr.addColorStop(1, 'rgba(70,52,40,0.7)');
+  g.fillStyle = gr; g.fillRect(1500, 680, 420, 400);
+  g.fillStyle = INK.moss;
+  [[1660, 735, 34, 9], [1745, 712, 40, 9], [1835, 702, 30, 8], [1612, 800, 18, 7]].forEach(([x, y, rx, ry]) => { g.beginPath(); g.ellipse(x, y, rx, ry, -0.1, 0, TAU); g.fill(); });
+  g.restore();
+  trunkPath(g); g.fillStyle = INK.bark; g.fill();
+  NEEDLES.forEach(n => {
+    clumpPath(g, n); g.fillStyle = INK.pine; g.fill();
+    g.save(); g.clip();
+    const gr = g.createLinearGradient(0, n.y - n.ry, 0, n.y + n.ry);
+    gr.addColorStop(0, 'rgba(120,150,96,0.55)'); gr.addColorStop(0.55, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(20,34,28,0.6)');
+    g.fillStyle = gr; g.fillRect(n.x - n.rx - 4, n.y - n.ry * 2, n.rx * 2 + 8, n.ry * 3.5);
+    g.restore();
+  });
+}
+// a pine clump: a row of rounded fans on a flat underside
+function clumpPath(g, n) {
+  const B = n.b || 4, step = n.rx * 2 / B, x0 = n.x - n.rx, base = n.y + n.ry * 0.35;
+  g.beginPath(); g.moveTo(x0, base);
+  for (let i = 0; i < B; i++) {
+    const xa = x0 + i * step, lift = (i === 0 || i === B - 1) ? 0.95 : 1.35;
+    g.bezierCurveTo(xa - step * 0.1, n.y - n.ry * lift, xa + step * 1.1, n.y - n.ry * lift, xa + step, i === B - 1 ? base : n.y - n.ry * 0.05);
+  }
+  g.quadraticCurveTo(n.x, n.y + n.ry * 0.95, x0, base);
+  g.closePath();
+}
+function islandKey(g) {
+  g.strokeStyle = INK.sumi; g.lineJoin = 'round'; g.lineCap = 'round';
+  g.beginPath(); trace(g, ROCK, 0, 0, 0, ROCK.length - 2); g.lineWidth = 4; g.stroke();
+  g.lineWidth = 2;
+  [[[1640, 802], [1662, 860], [1650, 934]], [[1722, 742], [1742, 822], [1730, 904]], [[1802, 732], [1792, 804], [1806, 860]], [[1612, 880], [1630, 960]]]
+    .forEach(c => { g.beginPath(); trace(g, through(c, 6)); g.stroke(); });
+  trunkPath(g); g.lineWidth = 2.6; g.stroke();
+  NEEDLES.forEach(n => {
+    clumpPath(g, n); g.lineWidth = 2.4; g.stroke();
+    const B = n.b || 4, step = n.rx * 2 / B;
+    g.save(); clumpPath(g, n); g.clip();
+    g.lineWidth = 1.15; g.beginPath();
+    for (let i = 0; i < B; i++) {
+      const cx = n.x - n.rx + (i + 0.5) * step, cy = n.y + n.ry * 0.45;
+      for (let k = 0; k <= 8; k++) {
+        const a = -Math.PI * (0.88 - k * 0.095), len = n.ry * 1.25;
+        g.moveTo(cx + Math.cos(a) * len * 0.25, cy + Math.sin(a) * len * 0.25); g.lineTo(cx + Math.cos(a) * len, cy + Math.sin(a) * len);
+      }
+    }
+    g.stroke(); g.restore();
+  });
+}
+function farSeaHooks(g, t, rows, avoid) {
+  g.save();
+  g.beginPath(); g.rect(FRAME.x, 640, FRAME.w, 400);
+  avoid.forEach(fn => fn(g));
+  g.clip('evenodd');
+  g.strokeStyle = INK.sumi; g.lineCap = 'round';
+  for (let j = 0; j < rows; j++) {
+    const y = 652 + j * 13 + j * j * 4, size = 5 + j * 2.2, gap = 70 + j * 26, v = 6 + j * 3;
+    g.lineWidth = 1 + j * 0.16; g.beginPath();
+    for (let k = 0; k < 40; k++) {
+      const span0 = FRAME.w + 120, x = FRAME.x - 60 + (((k * gap + (j % 2) * gap * 0.5 + v * t) % span0) + span0) % span0;
+      const yy = y + Math.sin(k * 2.1 + t * 1.3 + j) * 2;
+      g.moveTo(x - size, yy); g.quadraticCurveTo(x, yy - size * 0.9, x + size, yy);
+    }
+    g.stroke();
+  }
+  g.restore();
+}
+const BOX1 = { x: 112, y: 98, w: 362, h: 238 };
+function scene1Key(g, t, wv) {
+  g.save(); clipFrame(g);
+  g.save();
+  g.beginPath(); trace(g, rowPts(ROWS1[0], t)); g.lineTo(FRAME.x + FRAME.w + 20, 0); g.lineTo(FRAME.x - 20, 0); g.closePath(); g.clip();
+  g.beginPath(); g.rect(0, 0, W, H); trace(g, ROCK); g.closePath(); g.clip('evenodd');
+  waveKey(g, wv);
+  g.restore();
+  waveFoam(g, wv, t);
+  farSeaHooks(g, t, 8, [gg => { trace(gg, wv.pts); gg.lineTo(wv.pts[wv.pts.length - 1][0], 1100); gg.lineTo(wv.pts[0][0], 1100); gg.closePath(); },
+    gg => { trace(gg, ROCK); gg.closePath(); }]);
+  g.save();
+  g.beginPath(); trace(g, rowPts(ROWS1[0], t)); g.lineTo(FRAME.x + FRAME.w + 20, 0); g.lineTo(FRAME.x - 20, 0); g.closePath(); g.clip();
+  islandKey(g);
+  g.restore();
+  rowKey(g, ROWS1[0], t, true);
+  rowKey(g, ROWS1[1], t, true);
+  spray(g, t);
+  cartoucheKey(g, BOX1, TITLE, DATES);
+  g.restore();
+  border(g);
+}
+function scene1(g, t) {
+  g.drawImage(PAPER, 0, 0);
+  const wv = waveAt(t);
+  if (t >= 0.84) {
+    const gi = inkOpen();
+    const sky = landing(t, 0.86), sea = landing(t, 1.02), deep = landing(t, 1.18), red = landing(t, 1.34), earth = landing(t, 1.5);
+    plate(gi, sky, [0, 0], p => {
+      let gr = p.createLinearGradient(0, FRAME.y, 0, 300);
+      gr.addColorStop(0, 'rgba(30,48,86,0.94)'); gr.addColorStop(0.45, 'rgba(52,84,124,0.45)'); gr.addColorStop(1, 'rgba(60,95,135,0)');
+      p.fillStyle = gr; p.fillRect(0, FRAME.y, W, 260);
+      gr = p.createLinearGradient(0, 460, 0, 645);
+      gr.addColorStop(0, 'rgba(112,136,162,0)'); gr.addColorStop(1, 'rgba(112,136,162,0.55)');
+      p.fillStyle = gr; p.fillRect(0, 460, W, 185);
+    });
+    plate(gi, red, [3, 1], p => { p.fillStyle = INK.beni; p.beginPath(); p.arc(700, 292, 68, 0, TAU); p.fill(); });
+    eraseMist(gi, MIST1, t);
+    plate(gi, earth, [-1, -2], p => tintMist(p, MIST1, t, 'rgba(234,180,161,0.9)'));
+    plate(gi, sea, [2, -1], p => {
+      p.fillStyle = '#9fbdd0'; p.fillRect(0, 640, W, 460);
+      p.fillStyle = 'rgba(118,136,158,0.75)';
+      p.beginPath(); trace(p, through([[40, 642], [56, 614], [140, 602], [230, 606], [300, 592], [390, 608], [470, 624], [560, 642]], 6)); p.closePath(); p.fill();
+    });
+    plate(gi, deep, [-2, 2], p => {
+      const gr = p.createLinearGradient(0, 650, 0, 900);
+      gr.addColorStop(0, 'rgba(34,82,127,0)'); gr.addColorStop(1, 'rgba(34,82,127,0.88)');
+      p.fillStyle = gr; p.fillRect(0, 640, W, 460);
+      waveInk(p, wv);
+    });
+    plate(gi, earth, [-1, -2], islandInk);
+    plate(gi, deep, [-2, 2], p => { rowInk(p, ROWS1[0], t, 2); rowInk(p, ROWS1[1], t, 2); });
+    plate(gi, earth, [-1, -2], p => cartoucheInk(p, BOX1));
+    plate(gi, red, [3, 1], p => cartoucheBand(p, BOX1));
+    inkClose(g);
+    cartoucheLetters(g, BOX1);
+    scene1Key(g, t, wv);
+  } else if (t > 0.06) {
+    // the key block impression is rubbed across the sheet
+    keyG.setTransform(1, 0, 0, 1, 0, 0); keyG.globalCompositeOperation = 'source-over'; keyG.clearRect(0, 0, W, H);
+    scene1Key(keyG, t, wv);
+    wipeMask(mix(-300, W + 300, smooth(span(t, 0.06, 0.78))), true);
+    keyG.globalCompositeOperation = 'destination-in'; keyG.drawImage(maskC, 0, 0); keyG.globalCompositeOperation = 'source-over';
+    g.drawImage(keyC, 0, 0);
+  }
+}
+function wipeMask(front, revealLeft) {
+  const g = maskG, hw = EDGE.width / 2;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, W, H);
+  g.fillStyle = '#000';
+  if (revealLeft) { g.fillRect(0, 0, Math.max(0, front - hw), H); g.drawImage(EDGE, front - hw, 0); }
+  else { g.fillRect(front + hw, 0, W, H); g.save(); g.translate(front + hw, 0); g.scale(-1, 1); g.drawImage(EDGE, 0, 0); g.restore(); }
+}
+
+// ---- scene 2: plovers at dusk ----------------------------------------------------------------
+const PEAK = [[150, 642], [300, 590], [430, 500], [540, 405], [620, 335], [668, 302], [702, 292], [742, 290], [780, 296], [822, 318], [902, 386], [1012, 472], [1142, 562], [1292, 642]];
+const PEAK_D = through(PEAK, 8);
+const SNOW = [[380, 240], [1120, 240], [1120, 414], [962, 422], [932, 474], [902, 426], [864, 492], [828, 432], [792, 480], [758, 430], [722, 474], [690, 426], [652, 466], [620, 418], [590, 450], [560, 408], [380, 408]];
+const MIST2 = [
+  { x: 40, y: 466, w: 640, h: 38, v: 7 },
+  { x: 880, y: 598, w: 660, h: 40, v: -6 },
+  { x: 1180, y: 236, w: 300, h: 26, v: 5 },
+];
+const SHORE_D = through([[30, 858], [220, 880], [430, 918], [650, 958], [870, 994], [1070, 1020], [1300, 1046]], 8);
+const RIPPLES = [];
+const GRIT = [];
+function initGrit() {
+  const R = seeded(149);
+  for (let i = 0; i < 260; i++) GRIT.push([FRAME.x + R() * 1240, 880 + R() * 150, 0.8 + R() * 1.6]);
+}
+function initRipples() {
+  const R = seeded(131);
+  for (let j = 0; j < 11; j++) {
+    const y = 660 + j * 17 + j * j * 2.1;
+    let x = FRAME.x - 200 + R() * 160;
+    while (x < FRAME.x + FRAME.w + 200) {
+      const len = (16 + R() * 54) * (1 + j * 0.13);
+      RIPPLES.push({ x, y: y + (R() - 0.5) * 7, len, v: 3 + j * 1.3, w: 1 + j * 0.09, a: 0.55 + R() * 0.45 });
+      x += len + (70 + R() * 260) * (1 + j * 0.1);
+    }
+  }
+}
+const BOATS = [{ x: 360, y: 662, s: 0.55, v: 5 }, { x: 930, y: 690, s: 0.75, v: 4 }, { x: 1560, y: 722, s: 0.95, v: 7 }];
+const BOX2 = { x: 1446, y: 98, w: 362, h: 238 };
+const SEAL_AT = { x: 1676, y: 362 };
+function peakPath(g) { g.beginPath(); trace(g, PEAK_D); g.closePath(); }
+function boatShape(b, t) { return { x: b.x + b.v * t, y: b.y + Math.sin(t * 1.4 + b.x) * 1.5, s: b.s }; }
+function scene2(g, t) {
+  g.drawImage(PAPER, 0, 0);
+  const gi = inkOpen();
+  let gr = gi.createLinearGradient(0, FRAME.y, 0, 330);
+  gr.addColorStop(0, 'rgba(28,44,82,0.95)'); gr.addColorStop(0.5, 'rgba(60,82,128,0.4)'); gr.addColorStop(1, 'rgba(70,90,135,0)');
+  gi.fillStyle = gr; gi.fillRect(0, FRAME.y, W, 290);
+  gr = gi.createLinearGradient(0, 360, 0, 642);
+  gr.addColorStop(0, 'rgba(234,180,161,0)'); gr.addColorStop(0.55, 'rgba(234,170,148,0.75)'); gr.addColorStop(1, 'rgba(214,112,80,0.9)');
+  gi.fillStyle = gr; gi.fillRect(0, 360, W, 282);
+  // the peak: slate body, deep blue crown, pink foot; snow is left as bare paper
+  peakPath(gi); gi.fillStyle = INK.slate; gi.fill();
+  gi.save(); gi.clip();
+  gr = gi.createLinearGradient(0, 290, 0, 560);
+  gr.addColorStop(0, 'rgba(30,58,100,0.9)'); gr.addColorStop(1, 'rgba(30,58,100,0)');
+  gi.fillStyle = gr; gi.fillRect(0, 280, W, 300);
+  gr = gi.createLinearGradient(0, 520, 0, 642);
+  gr.addColorStop(0, 'rgba(226,150,130,0)'); gr.addColorStop(1, 'rgba(226,150,130,0.6)');
+  gi.fillStyle = gr; gi.fillRect(0, 500, W, 150);
+  gi.globalCompositeOperation = 'destination-out'; gi.fillStyle = '#000';
+  gi.beginPath(); trace(gi, SNOW); gi.closePath(); gi.fill();
+  gi.restore();
+  gi.fillStyle = INK.beni; gi.beginPath(); gi.arc(1292, 578, 62, 0, TAU); gi.fill();
+  eraseMist(gi, MIST2, t);
+  gr = gi.createLinearGradient(0, 642, 0, 1030);
+  gr.addColorStop(0, '#c4d3d9'); gr.addColorStop(0.35, '#86a9c2'); gr.addColorStop(1, '#2a5683');
+  gi.fillStyle = gr; gi.fillRect(0, 642, W, 460);
+  // sunset glitter on the water
+  gi.fillStyle = 'rgba(201,69,47,0.85)';
+  for (let k = 0; k < 11; k++) {
+    const y = 652 + k * 15 + k * k * 1.2, half = (54 - k * 3.4) * (0.75 + 0.25 * Math.sin(t * 2.2 + k * 1.7));
+    gi.fillRect(1292 - half + Math.sin(t * 1.3 + k) * 6, y, half * 2, 4 + k * 0.35);
+  }
+  BOATS.forEach(b => {
+    const p = boatShape(b, t);
+    gi.fillStyle = INK.bark; gi.beginPath();
+    gi.moveTo(p.x - 30 * p.s, p.y); gi.lineTo(p.x + 30 * p.s, p.y); gi.lineTo(p.x + 20 * p.s, p.y + 9 * p.s); gi.lineTo(p.x - 22 * p.s, p.y + 9 * p.s); gi.closePath(); gi.fill();
+  });
+  // sand of the near shore with a bare-paper surf band
+  gi.save(); gi.globalCompositeOperation = 'destination-out';
+  gi.beginPath(); trace(gi, SHORE_D, 0, -9); gi.lineWidth = 26; gi.stroke(); gi.restore();
+  gi.beginPath(); trace(gi, SHORE_D); gi.lineTo(1300, 1100); gi.lineTo(0, 1100); gi.closePath();
+  gr = gi.createLinearGradient(0, 860, 0, 1040);
+  gr.addColorStop(0, 'rgba(222,196,140,0.9)'); gr.addColorStop(1, 'rgba(176,140,92,0.95)');
+  gi.fillStyle = gr; gi.fill();
+  gi.save(); gi.clip();
+  gi.beginPath(); trace(gi, SHORE_D, 0, 10); gi.strokeStyle = 'rgba(150,122,86,0.45)'; gi.lineWidth = 22; gi.stroke();
+  gi.fillStyle = 'rgba(96,74,50,0.5)';
+  GRIT.forEach(([x, y, r]) => { gi.beginPath(); gi.arc(x, y, r, 0, TAU); gi.fill(); });
+  gi.restore();
+  tintMist(gi, MIST2, t, 'rgba(234,180,161,0.95)');
+  const cart = landing(t, 6.62);
+  plate(gi, cart, [-1, -2], p => cartoucheInk(p, BOX2));
+  plate(gi, cart, [3, 1], p => cartoucheBand(p, BOX2));
+  inkClose(g);
+
+  // key block
+  g.save(); clipFrame(g);
+  g.strokeStyle = INK.sumi; g.lineJoin = 'round'; g.lineCap = 'round';
+  g.save();
+  // keep the key lines out of every mist band: one even-odd clip per rounded piece, so the clips
+  // intersect into "outside the union" (a single even-odd path let lines through where two pieces overlap)
+  MIST2.forEach(m => {
+    const x = m.x + m.v * t;
+    [[x, m.y, m.w, m.h, m.h / 2], [x + m.w * 0.2, m.y + m.h * 0.6, m.w * 0.55, m.h * 0.84, m.h * 0.42]].forEach(([rx, ry, rw, rh, rr]) => {
+      g.beginPath(); g.rect(0, 0, W, H); g.roundRect(rx, ry, rw, rh, rr); g.clip('evenodd');
+    });
+  });
+  g.beginPath(); trace(g, PEAK_D, 0, 0, 1, PEAK_D.length - 2); g.lineWidth = 3.6; g.stroke();
+  g.save(); peakPath(g); g.clip();
+  g.beginPath(); trace(g, SNOW, 0, 0, 2, SNOW.length - 2); g.lineWidth = 2; g.stroke();
+  g.lineWidth = 1.5; g.beginPath();
+  [[702, 300, 690, 420], [742, 296, 758, 425], [668, 312, 650, 400], [790, 306, 828, 428], [620, 345, 600, 410], [860, 350, 900, 420]]
+    .forEach(([a, b, c, d]) => { g.moveTo(a, b); g.quadraticCurveTo((a + c) / 2 + 6, (b + d) / 2, c, d); });
+  g.stroke();
+  g.restore();
+  g.restore();
+  g.save(); g.beginPath(); g.rect(FRAME.x, 646, FRAME.w, 400); trace(g, SHORE_D); g.lineTo(1300, 1100); g.lineTo(0, 1100); g.closePath(); g.clip('evenodd');
+  const spanX = FRAME.w + 400;
+  RIPPLES.forEach(r => {
+    const x = FRAME.x - 200 + (((r.x - FRAME.x + 200 + r.v * t) % spanX) + spanX) % spanX;
+    g.beginPath(); g.moveTo(x, r.y); g.lineTo(x + r.len, r.y); g.lineWidth = r.w; g.globalAlpha = r.a; g.stroke();
+  });
+  g.globalAlpha = 1; g.restore();
+  // the near shore: surf line and the wavelets just off it
+  g.beginPath(); trace(g, SHORE_D); g.lineWidth = 2.4; g.stroke();
+  g.beginPath();
+  for (let i = 2; i < SHORE_D.length - 2; i += 3) {
+    const p = SHORE_D[i], q = SHORE_D[i + 1], ph = Math.sin(t * 1.8 + i * 0.7) * 3;
+    g.moveTo(p[0] - 10, p[1] - 15 + ph); g.quadraticCurveTo((p[0] + q[0]) / 2, p[1] - 24 + ph, q[0] + 10, q[1] - 15 + ph);
+  }
+  g.lineWidth = 1.6; g.stroke();
+  BOATS.forEach(b => {
+    const p = boatShape(b, t), s = p.s;
+    g.beginPath(); g.moveTo(p.x - 30 * s, p.y); g.lineTo(p.x + 30 * s, p.y); g.lineTo(p.x + 20 * s, p.y + 9 * s); g.lineTo(p.x - 22 * s, p.y + 9 * s); g.closePath();
+    g.lineWidth = 1.8; g.stroke();
+    g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x, p.y - 52 * s); g.stroke();
+    g.beginPath(); g.rect(p.x - 18 * s, p.y - 48 * s, 36 * s, 40 * s);
+    g.fillStyle = paperInk(g); g.fill(); g.lineWidth = 1.8; g.stroke();
+    g.beginPath(); for (let k = 1; k < 4; k++) { g.moveTo(p.x - 18 * s, p.y - 48 * s + k * 10 * s); g.lineTo(p.x + 18 * s, p.y - 48 * s + k * 10 * s); }
+    g.lineWidth = 1; g.stroke();
+  });
+  if (cart) {
+    g.save(); g.globalAlpha = cart.a; g.translate(0, cart.dy);
+    cartoucheLetters(g, BOX2);
+    g.restore();
+    g.save(); g.translate(0, cart.dy); g.globalAlpha = cart.a;
+    cartoucheKey(g, BOX2, TITLE, DATES, t, 6.86);
+    g.restore();
+  }
+  g.restore();
+  border(g);
+  // the seal comes down, lands with a press and stays
+  const near = span(t, 7.5, 7.93);
+  if (near > 0 && t < 7.93) {
+    const k = mix(1.3, 1.0, inC(near));
+    g.save(); g.globalAlpha = 0.26 * smooth(near);
+    g.translate(SEAL_AT.x + 68 + 8 * (1 - near), SEAL_AT.y + 68 + 12 * (1 - near)); g.scale(k, k);
+    g.drawImage(SEAL_SHADOW, -130, -130); g.restore();
+  }
+  if (t >= 7.93) {
+    const u = span(t, 7.93, 8.13), k = 1 + 0.08 * (1 - outC(u));
+    g.save(); g.globalCompositeOperation = 'multiply'; g.globalAlpha = clamp(span(t, 7.93, 7.97) * 0.7 + 0.3);
+    g.translate(SEAL_AT.x + 68, SEAL_AT.y + 68); g.scale(k, k); g.drawImage(SEAL, -68, -68); g.restore();
+  }
+}
+
+// ---- the plovers ----------------------------------------------------------------------------
+const FLOCK = [[4.4, 1390, 440], [4.85, 1545, 265], [5.3, 1480, 165], [5.8, 1180, 165], [6.4, 880, 190], [7.2, 590, 218], [8.2, 420, 252], [10.2, 320, 278]];
+// a loose skein, leaders to the left (the flock flies left once it has turned)
+const SKEIN = [[-250, -60], [-190, -20], [-140, -75], [-80, -30], [-30, -90], [20, -40], [70, 10], [120, -60], [170, -10], [230, 30], [280, -30]];
+const BIRDS = [];
+function initBirds() {
+  const R = seeded(91);
+  for (let i = 0; i < 11; i++) BIRDS.push({
+    tb: 4.3 + i * 0.05,
+    p0: [1220 + (i % 4) * 96 + R() * 30, 300 + Math.floor(i / 4) * 88 + (i % 4) * 26 + R() * 30],
+    v0: [-70 + (i % 4) * 75 + R() * 40, -280 - R() * 160],
+    off: [SKEIN[i][0] + (R() - 0.5) * 12, SKEIN[i][1] + (R() - 0.5) * 12],
+    ph: R() * TAU, rate: 2.5 + R() * 0.7, size: 0.88 + R() * 0.28,
+  });
+}
+function flockAt(t) {
+  const F = FLOCK;
+  if (t <= F[0][0]) return [F[0][1], F[0][2]];
+  let k = 0;
+  while (k < F.length - 2 && t > F[k + 1][0]) k++;
+  const u = clamp((t - F[k][0]) / (F[k + 1][0] - F[k][0]));
+  const a = F[Math.max(0, k - 1)], b = F[k], c = F[k + 1], d = F[Math.min(F.length - 1, k + 2)];
+  const u2 = u * u, u3 = u2 * u;
+  const f = (p0, p1, p2, p3) => 0.5 * (2 * p1 + (p2 - p0) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (3 * p1 - p0 - 3 * p2 + p3) * u3);
+  return [f(a[1], b[1], c[1], d[1]), f(a[2], b[2], c[2], d[2])];
+}
+const depth = t => mix(1, 0.7, inOut(span(t, 6.0, 8.4))) * mix(1, 0.94, span(t, 8.4, 10));
+function birdAt(b, t) {
+  const age = Math.max(0, t - b.tb), w = smooth(span(t, b.tb, b.tb + 1.0));
+  const lx = b.p0[0] + b.v0[0] * age, ly = b.p0[1] + b.v0[1] * age + 150 * age * age;
+  const F = flockAt(t), P = depth(t);
+  const fx = F[0] + b.off[0] * P, fy = F[1] + b.off[1] * P + Math.sin(t * 2.1 + b.ph) * 9 * P;
+  return [mix(lx, fx, w), mix(ly, fy, w)];
+}
+function plover(g, x, y, s, facing, tilt, flap) {
+  const m = new DOMMatrix().translate(x, y).scale(facing * s, s).rotate(tilt * 180 / Math.PI);
+  const lw = Math.max(1.2, 2.7 * s);
+  const build = fn => { g.save(); g.setTransform(m); g.beginPath(); fn(); g.restore(); };
+  const wing = (f, dx, dy) => () => {
+    const tipX = -32 - 6 * Math.abs(f) + dx, tipY = -2 - 46 * f + dy;
+    g.moveTo(9 + dx, -7 + dy);
+    g.quadraticCurveTo(-4 + dx, -12 - 34 * f + dy, tipX, tipY);
+    g.quadraticCurveTo(-13 + dx, -3 - 16 * f + dy, -11 + dx, -1 + dy);
+    g.closePath();
+  };
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  build(wing(flap * 0.85, 5, -3));
+  g.fillStyle = paperInk(g); g.fill(); g.fillStyle = 'rgba(60,74,96,0.28)'; g.fill();
+  g.strokeStyle = INK.sumi; g.lineWidth = lw; g.stroke();
+  build(() => {
+    g.ellipse(0, 0, 24, 12.5, 0, 0, TAU);
+    g.moveTo(31, -9); g.arc(21, -9, 10, 0, TAU);
+    g.moveTo(-18, -4); g.lineTo(-36, -9); g.lineTo(-33, 3); g.lineTo(-18, 6); g.closePath();
+  });
+  g.fillStyle = paperInk(g); g.fill(); g.lineWidth = lw; g.stroke();
+  // erase the inner seams so the body reads as one shape
+  build(() => { g.ellipse(0, 0, 22, 10.8, 0, 0, TAU); g.moveTo(29.5, -9); g.arc(21, -9, 8.5, 0, TAU); });
+  g.fillStyle = paperInk(g); g.fill();
+  build(() => { g.moveTo(-10, 5); g.quadraticCurveTo(4, 10, 16, 4); });
+  g.strokeStyle = 'rgba(36,30,26,0.55)'; g.lineWidth = Math.max(0.8, 1.3 * s); g.stroke();
+  build(() => { g.moveTo(30, -11); g.lineTo(41, -7.5); g.lineTo(30, -5.5); g.closePath(); });
+  g.fillStyle = INK.sumi; g.fill();
+  build(() => { g.moveTo(26.2, -11); g.arc(24.5, -11, 1.9, 0, TAU); });
+  g.fill();
+  build(wing(flap, 0, 0));
+  g.fillStyle = paperInk(g); g.fill();
+  g.save(); g.clip();
+  build(() => { const tx = -32 - 6 * Math.abs(flap), ty = -2 - 46 * flap; g.moveTo(tx + 18, ty); g.arc(tx, ty, 18, 0, TAU); });
+  g.fillStyle = 'rgba(52,66,90,0.85)'; g.fill(); g.restore();
+  build(wing(flap, 0, 0));
+  g.strokeStyle = INK.sumi; g.lineWidth = lw; g.stroke();
+}
+function drawBirds(g, t) {
+  const list = [];
+  for (const b of BIRDS) {
+    if (t < b.tb) continue;
+    const p = birdAt(b, t), a = birdAt(b, t - 0.025), c = birdAt(b, t + 0.025);
+    list.push({ b, p, vx: (c[0] - a[0]) / 0.05, vy: (c[1] - a[1]) / 0.05 });
+  }
+  list.sort((u, v) => u.b.size - v.b.size);
+  // the last of the spray swells into each bird
+  const pops = list.filter(o => t - o.b.tb < 0.2).map(o => ({ x: o.p[0], y: o.p[1], r: 13 * (1 - (t - o.b.tb) / 0.2) }));
+  blobs(g, pops, 3.2, 'rgba(150,186,210,0.45)');
+  for (const o of list) {
+    const born = outBack(span(t, o.b.tb, o.b.tb + 0.28));
+    const s = o.b.size * depth(t) * born;
+    if (s < 0.05) continue;
+    let facing = clamp(o.vx / 170, -1, 1);
+    if (Math.abs(facing) < 0.55) facing = facing < 0 ? -0.55 : 0.55;
+    const tilt = clamp(Math.atan2(o.vy, Math.abs(o.vx)), -0.25, 0.25);
+    // quicker beats just after take-off (phase integrated so it never runs backwards), then a glide
+    const age = Math.min(1.2, t - o.b.tb), boost = 0.45 * (age - age * age / 2.4);
+    const beat = Math.sin(TAU * o.b.rate * (t + boost) + o.b.ph), amp = mix(1, 0.45, smooth(span(t, 6.2, 7.6)));
+    plover(g, o.p[0], o.p[1], s, facing, tilt, beat * amp + 0.15 * (1 - amp));
+  }
+}
+
+// ---- the film -------------------------------------------------------------------------------
+function render(t) {
+  const g = main;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+  if (t < 5.06) scene1(g, t);
+  else if (t >= 6.02) scene2(g, t);
+  else {
+    // a fresh sheet is rubbed in from the right, behind the flock
+    scene1(g, t);
+    twoG.setTransform(1, 0, 0, 1, 0, 0); twoG.globalCompositeOperation = 'source-over'; twoG.globalAlpha = 1;
+    scene2(twoG, t);
+    wipeMask(mix(W + 260, -260, inOut(span(t, 5.06, 6.02))), false);
+    maskG.globalCompositeOperation = 'source-in'; maskG.drawImage(twoC, 0, 0); maskG.globalCompositeOperation = 'source-over';
+    g.drawImage(maskC, 0, 0);
+  }
+  if (t >= 4.3) { g.save(); clipFrame(g); drawBirds(g, t); g.restore(); }
+  const out = inOut(span(t, 9.2, 9.97));
+  if (out > 0) { g.globalAlpha = out; g.drawImage(PAPER, 0, 0); g.globalAlpha = 1; }
+}
+
+window.events = () => {
+  const cues = [], cue = (t, k, o = {}) => cues.push({ t: +t.toFixed(3), k, ...o });
+  cue(0, 'sea', { d: 10, v: 0.5 });
+  cue(0.1, 'rub', { d: 0.7, v: 0.55 });
+  cue(0.12, 'tok', { f: 150, v: 0.55 });
+  [0.86, 1.02, 1.18, 1.34, 1.5].forEach((t, i) => {
+    cue(t + 0.05, 'tok', { f: 190 + i * 24, v: 0.42 });
+    cue(t + 0.06, 'koto', { n: [0, 3, 5, 7, 12][i], v: 0.5 });
+  });
+  cue(1.72, 'swell', { d: 2.5, v: 0.75 });
+  [2.3, 2.55, 2.8, 3.02, 3.22, 3.4, 3.56].forEach((t, i) => cue(t, 'koto', { n: [0, 1, 5, 7, 8, 12, 13][i], v: 0.32 + i * 0.03 }));
+  cue(4.12, 'crash', { v: 0.95 });
+  cue(4.28, 'taiko', { f: 62, v: 0.95 });
+  cue(4.1, 'hiss', { d: 1.3, v: 0.55 });
+  BIRDS.forEach((b, i) => cue(b.tb + 0.06, 'peep', { f: 2500 + (i % 4) * 260, v: 0.2 }));
+  [4.95, 5.25].forEach((t, i) => cue(t, 'peep', { f: 2900 - i * 300, v: 0.12 }));
+  cue(5.04, 'rub', { d: 1.0, v: 0.5 });
+  [6.1, 6.42, 6.74, 7.16, 7.5].forEach((t, i) => cue(t, 'koto', { n: [12, 8, 7, 5, 3][i], v: 0.42 }));
+  cue(6.66, 'tok', { f: 240, v: 0.38 });
+  for (let i = 0; i < TITLE.join('').length; i++) cue(6.88 + i * 0.045, 'tick', { f: 1900 + (i % 3) * 180, v: 0.06 });
+  cue(7.93, 'stamp', { v: 0.85 });
+  cue(7.96, 'rin', { f: 880, v: 0.4 });
+  cue(8.6, 'koto', { n: 0, v: 0.38 });
+  cue(8.95, 'koto', { n: 7, v: 0.3 });
+  return cues;
+};
+window.draw = ({ t }) => {
+  render(t);
+  return view.toDataURL('image/jpeg', 0.92).replace(/^data:image\/jpeg;base64,/, '');
+};
+window.ready = (async () => {
+  await document.fonts.ready;
+  await Promise.all([
+    ["400 60px 'Zen Antique'", TITLE.join(' ')],
+    ["700 22px 'Cormorant SC'", SERIES],
+    ["600 22px 'Cormorant SC'", DATES],
+  ].map(([spec, txt]) => document.fonts.load(spec, txt)));
+  PAPER = makePaper(); GRAIN = makeGrain(); EDGE = makeEdge(); SEAL = makeSeal(); SEAL_SHADOW = makeSealShadow();
+  initSpray(); initBirds(); initRipples(); initGrit();
+})();
 </script>
-</body></html>
+</body>
+</html>
