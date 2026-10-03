@@ -84,7 +84,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Open Sans](https://fonts.google.com/specimen/Open+Sans) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [frutiger-aero](styles/frutiger-aero) |
 | [Orbitron](https://fonts.google.com/specimen/Orbitron) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [digital-comic](styles/digital-comic), [synthwave](styles/synthwave) |
 | [Oswald](https://fonts.google.com/specimen/Oswald) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [atomic-wasteland](styles/atomic-wasteland), [constructivism](styles/constructivism), [dark-comic](styles/dark-comic), [map-documentary](styles/map-documentary), [title-sequence](styles/title-sequence) |
-| [Outfit](https://fonts.google.com/specimen/Outfit) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [low-poly](styles/low-poly) |
+| [Outfit](https://fonts.google.com/specimen/Outfit) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [grainy-flat](styles/grainy-flat), [low-poly](styles/low-poly) |
 | [Patrick Hand](https://fonts.google.com/specimen/Patrick+Hand) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [clear-line](styles/clear-line), [comic-book](styles/comic-book), [history-comedy](styles/history-comedy), [stick-webcomic](styles/stick-webcomic), [storytime](styles/storytime), [sunday-strip](styles/sunday-strip) |
 | [Patrick Hand SC](https://fonts.google.com/specimen/Patrick+Hand+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [comic-strip](styles/comic-strip) |
 | [Pixelify Sans](https://fonts.google.com/specimen/Pixelify+Sans) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [retro-desktop](styles/retro-desktop) |
