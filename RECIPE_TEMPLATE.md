@@ -11,6 +11,11 @@ length and possibly in 9:16, that a viewer would recognise as this style.
   `python3 skills/animating-in-video-styles/scripts/fetch_style.py <slug> /tmp/<slug>-ref`, then
   `bash skills/animating-in-video-styles/scripts/contact_sheet.sh /tmp/<slug>-ref` and stills at 0.5, 1.5 and
   2.5 s (`node render.mjs stills 30 0 10 1 0.5,1.5,2.5` in that folder). Check the Signature against them.
+- **Render the formats you advise on.** In a scratch copy, set the canvas and `W`/`H` to 1080 × 1920, apply
+  your 9:16 values and render stills of the opening, a middle beat and the end card; check that nothing
+  defining the look leaves the frame, nothing is left unpainted, and key text stays out of the bands in
+  review.md. Give only values you rendered; if you could not test one, say so. Untested format advice was the
+  most common serious error in the pilot recipes.
 - **Derive every fact from the current code** (`styles/<slug>/anim.html` and the scripts it loads, `audio.py`,
   `render.json`, `fonts.css`). The style's original brief or PR description, when you have them, explain the
   intent; where they disagree with the code, the code wins.
@@ -88,7 +93,8 @@ never does.>
 <What audio.py synthesizes, which cue kinds trigger each sound and the fields and ranges they carry (d, v, f,
 n…), the bed, the mix. Which cues a new scene should emit, and which ones audio.py looks up by name and cannot
 run without (often the cue it times the music from). Which music and bed parts audio.py writes at fixed times
-rather than from cues, and where.>
+rather than from cues, and where. The field values or cue counts beyond which audio.py breaks (a pan formula
+that passes ±1 gives NaN and a silent track).>
 
 ## Reuse map
 | Piece | Where | Call / key params | Reuse |
@@ -125,7 +131,8 @@ Someone other than the author reviews every recipe. Check:
 4. The Film grammar table matches the code's timeline; the Sound cues match what audio.py reads, and the recipe
    says which sounds are timed for the demo and which cues audio.py cannot run without.
 5. A cold reader could draw an object the demo never had, in this style, from Shapes, Palette and Texture
-   alone, and could recompose it for 9:16 from Composition and Adapting.
+   alone, and could recompose it for 9:16 from Composition and Adapting: render the recipe's 9:16 values in a
+   scratch copy and look (sun, title, characters in frame; nothing unpainted; text clear of the bands).
 6. It is concise, explains the why, names no line numbers and repeats nothing the catalog already holds.
 
 The reviewer writes a report of required changes; the author fixes them; a new reviewer checks the next round.

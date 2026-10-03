@@ -54,7 +54,9 @@ The output file is named after the project folder (`SLUG=$(basename "$PWD")` in 
 A clip's length is set in three places; change them together:
 
 1. The timeline in anim.html or the scripts it loads: a `DUR` constant, a table of cue times and the closing
-   fade (in kawaii the timeline is in kawaii.js; in anime-80s `DUR` is in common.js).
+   fade. Some styles spread it across files: in kawaii the timeline is in kawaii.js; in anime-80s a `T` table
+   sets the cuts but the shot files also hard-code their start times, and the `DUR` in common.js is unused.
+   Search every script for literal times, not only `DUR`.
 2. audio.py: `SR, DUR = 48000, 10.0` (the default varies, 9.5–10) sizes the sound buffer. Many audio.py files
    also write their music and bed at fixed times for the demo: a chord or melody list, `if te > 8.9: break` in
    clay, `T_END` in pixel-art, `tune(7.55, 9.6, …)` in absurd-webcomic. Re-time these from your new timeline or
@@ -100,7 +102,10 @@ every sound with NumPy, without samples. To re-score a film, emit cues from your
 fields audio.py already handles, extend audio.py only for sounds the style lacks, and keep its `DUR` in step.
 About one style in six looks up a named cue and times its music from it
 (`next(e for e in ev if e['k'] == 'end')`, `E['snap']`): keep emitting that cue, or audio.py stops with
-StopIteration or KeyError.
+StopIteration or KeyError. Nearly every audio.py pans with `sqrt(0.5 - pan / 2)`, where the pan comes from a
+cue field or a running counter: a value past the demo's range (more letters, a larger `v`) pushes the pan past
+±1, NumPy returns NaN, and audio.py writes a silent or broken track while still printing "ok". Keep fields in
+the ranges the recipe gives, or clamp the pan with `np.clip`, and check that the peak it prints is a number.
 To add a user's voiceover or music, load the WAV in audio.py (the standard `wave` module plus NumPy), resample
 to 48 kHz stereo if needed and mix it into the buffer, keeping `DUR` long enough for it. A silent stereo track
 is acceptable when sound would hurt.

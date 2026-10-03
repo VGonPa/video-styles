@@ -31,6 +31,8 @@ Check the frames against the Guardrails in SKILL.md.
 ## Technical checks
 - The duration ffprobe prints at the end of build.sh matches the plan (see "Duration: three places" in
   contract.md), at 30 fps, with an audio stream.
+- audio.py printed a numeric peak, not `nan`, and the MP4 is not silent: a cue field or counter past the
+  demo's range can push a pan past ±1 and silence the whole track.
 - The score covers the whole film: no music that stops early or plays at the original's times. Listen to the
   MP4; if you cannot, check every time written as a number in audio.py against your timeline.
 - Determinism: draw one moment alone and again after other frames, then compare, inside the project folder:
