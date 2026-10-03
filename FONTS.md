@@ -52,7 +52,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Gochi Hand](https://fonts.google.com/specimen/Gochi+Hand) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [absurd-webcomic](styles/absurd-webcomic), [underground-comix](styles/underground-comix) |
 | [Grenze Gotisch](https://fonts.google.com/specimen/Grenze+Gotisch) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [illuminated-manuscript](styles/illuminated-manuscript) |
 | [Homemade Apple](https://fonts.google.com/specimen/Homemade+Apple) | [Apache 2.0](licenses/Apache-2.0.txt) | [watercolor-memory](styles/watercolor-memory) |
-| [IBM Plex Mono](https://fonts.google.com/specimen/IBM+Plex+Mono) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [ascii-art](styles/ascii-art), [blueprint](styles/blueprint), [dark-documentary](styles/dark-documentary), [technical-cutaway](styles/technical-cutaway) |
+| [IBM Plex Mono](https://fonts.google.com/specimen/IBM+Plex+Mono) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [ascii-art](styles/ascii-art), [blueprint](styles/blueprint), [dark-documentary](styles/dark-documentary), [ray-traced-cgi](styles/ray-traced-cgi), [technical-cutaway](styles/technical-cutaway) |
 | [IM Fell English](https://fonts.google.com/specimen/IM+Fell+English) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [history-comedy](styles/history-comedy), [scientific-plate](styles/scientific-plate), [silhouette](styles/silhouette), [sunday-strip](styles/sunday-strip), [victorian-engraving](styles/victorian-engraving) |
 | [IM Fell English SC](https://fonts.google.com/specimen/IM+Fell+English+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [dither-1bit](styles/dither-1bit), [history-comedy](styles/history-comedy), [scientific-plate](styles/scientific-plate), [silhouette](styles/silhouette), [sunday-strip](styles/sunday-strip), [victorian-engraving](styles/victorian-engraving) |
 | [Instrument Serif](https://fonts.google.com/specimen/Instrument+Serif) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [kinetic-typography](styles/kinetic-typography) |
@@ -73,6 +73,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Marcellus](https://fonts.google.com/specimen/Marcellus) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [egyptian-papyrus](styles/egyptian-papyrus), [islamic-geometric](styles/islamic-geometric) |
 | [Marcellus SC](https://fonts.google.com/specimen/Marcellus+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-deco](styles/art-deco), [egyptian-papyrus](styles/egyptian-papyrus), [islamic-geometric](styles/islamic-geometric) |
 | [Martian Mono](https://fonts.google.com/specimen/Martian+Mono) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [reel-chrome](styles/reel-chrome), [sci-fi-interface](styles/sci-fi-interface) |
+| [Michroma](https://fonts.google.com/specimen/Michroma) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [ray-traced-cgi](styles/ray-traced-cgi) |
 | [Mochiy Pop One](https://fonts.google.com/specimen/Mochiy+Pop+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [kawaii](styles/kawaii) |
 | [Monoton](https://fonts.google.com/specimen/Monoton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [retro-1970s](styles/retro-1970s) |
 | [Montserrat](https://fonts.google.com/specimen/Montserrat) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bold-captions](styles/bold-captions), [cosmic-epic](styles/cosmic-epic) |
@@ -177,6 +178,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Marcellus**: Copyright (c) 2012 by Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Name "Marcellus"
 - **Marcellus SC**: Copyright (c) 2012 by Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Name "Marcellus"
 - **Martian Mono**: Copyright 2020 The Martian Mono Project Authors (https://github.com/evilmartians/mono)
+- **Michroma**: Copyright 2011 The Michroma Project Authors (https://github.com/googlefonts/Michroma-font)
 - **Mochiy Pop One**: Copyright 2020 The MochiyPop Project Authors (https://github.com/fontdasu/Mochiypop)
 - **Monoton**: Copyright (c) 2011, Vernon Adams (vern@newtypography.co.uk) with Reserved Font Name 'Monoton'. All rights reserved.
 - **Montserrat**: Copyright 2011 The Montserrat Project Authors (https://github.com/JulietaUla/Montserrat)
