@@ -12,6 +12,7 @@ Copyright © 2010-2023 three.js authors. Vendored as `vendor/three.min.js`, with
 license text in `vendor/LICENSE-three.txt`, in:
 [blob-sim](styles/blob-sim/THIRD_PARTY_NOTICES.md),
 [cel-shaded-3d](styles/cel-shaded-3d/THIRD_PARTY_NOTICES.md),
+[feature-animation-3d](styles/feature-animation-3d/THIRD_PARTY_NOTICES.md),
 [inflated-3d](styles/inflated-3d/THIRD_PARTY_NOTICES.md),
 [low-poly](styles/low-poly/THIRD_PARTY_NOTICES.md),
 [origami](styles/origami/THIRD_PARTY_NOTICES.md),
