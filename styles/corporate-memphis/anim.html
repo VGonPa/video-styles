@@ -691,7 +691,7 @@ function sceneB(t) {
   if (mk1 > 0) {
     X.save(); X.translate(1250, 380); X.scale(mk1, mk1);
     blob(0, 0, 30, 28, 1.1, t, P.coral, 1, .08); dot([22, -14], 15, P.lilac);
-    X.fillStyle = P.ink; X.font = `800 54px ${FONT}`; X.textBaseline = 'middle'; X.fillText('teamtide', 52, 2);
+    X.fillStyle = P.ink; X.font = `800 54px ${FONT}`; X.textBaseline = 'middle'; X.fillText('huddlewick', 52, 2);
     X.restore();
   }
   const msg = ['Work better,', 'together.'], total = msg.join('').length, nType = Math.floor(total * seg(t, T.type0, T.type1) + 1e-6);
@@ -733,7 +733,7 @@ function render(t) {
 }
 
 window.ready = (async () => {
-  await document.fonts.load(`800 100px ${FONT}`, 'Work better, together. teamtide');
+  await document.fonts.load(`800 100px ${FONT}`, 'Work better, together. huddlewick');
   await document.fonts.ready;
   LEAF_D = buildLeaf(P.leaf, P.leafRib); LEAF_M = buildLeaf(P.leaf2, '#56C99E');
   render(0);
