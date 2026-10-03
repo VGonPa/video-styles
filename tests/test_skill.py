@@ -43,6 +43,19 @@ class SearchTests(unittest.TestCase):
         self.assertFalse(hit("art", {"artist"}))
 
 
+    def top(self, *query):
+        result = subprocess.run([sys.executable, str(SCRIPTS / "find_style.py"), *query],
+                                capture_output=True, text=True)
+        return [l.split()[0] for l in result.stdout.splitlines() if l and not l.endswith(":")]
+
+    def test_ranking_puts_the_obvious_style_first(self):
+        self.assertEqual(self.top("graphite")[0], "pencil-sketch")
+        self.assertEqual(self.top("ink")[0], "ink-wash")
+        self.assertEqual(set(self.top("anime")[:2]), {"anime-80s", "lofi-anime"})
+        self.assertEqual(self.top("explainer", "video", "for", "kids")[0], "felt-stopmotion")
+        self.assertEqual(self.top("clay", "stop-motion")[0], "clay")
+
+
 class RecipeCheckTests(unittest.TestCase):
     code = "const LN = '232,241,255'; const BG = '#1F5AA6'; function dimension(vertical, at) {}"
     flat = code.replace(" ", "")
@@ -71,14 +84,22 @@ class RecipeCheckTests(unittest.TestCase):
     def test_correct_recipes_pass(self):
         # Code in js/ (cave-painting), three.js 0x colours and vendor/ (low-poly), digit-led hex strings
         # (kawaii, anime-80s), placeholders, font strings and directories.
-        for slug in ("cave-painting", "low-poly", "kawaii", "anime-80s"):
+        for slug in ("cave-painting", "low-poly", "kawaii", "anime-80s", "sunday-strip", "cosmic-epic",
+                     "bayeux-tapestry", "neon-sign", "oscilloscope"):
             with self.subTest(slug=slug):
                 self.assertEqual(self.check(FIXTURES / "good", slug), [])
 
     def test_wrong_recipe_fails(self):
         problems = self.check(FIXTURES / "wrong", "blueprint")
-        for expected in ("gives no colour", "hsl(12, 80%, 50%)", "0x123456", "#fff", "`bogus`",
-                         "in backticks", "drawGhostTitle", "loadTitleFont"):
+        for expected in ("give the colour value", "hsl(12,80%,50%)", "0x123456", "#fff", "`bogus`",
+                         "in backticks", "drawGhostTitle", "loadTitleFont", "drawGhostCard", "`Futura`",
+                         "`tone` is not defined in anim.html"):
+            self.assertTrue(any(expected in p for p in problems), (expected, problems))
+        self.assertFalse(any("ground()" in p for p in problems), problems)   # prose after a non-call span
+
+    def test_invented_facts_in_a_correct_recipe_fail(self):
+        problems = self.check(FIXTURES / "wrong", "sunday-strip")
+        for expected in ("'paper': give the colour value", "`Bangers`", "`whoosh`", "`brush` is not defined in js/fantasy.js"):
             self.assertTrue(any(expected in p for p in problems), (expected, problems))
 
     def test_template_and_checker_agree_on_headings(self):

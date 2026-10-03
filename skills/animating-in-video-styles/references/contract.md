@@ -69,7 +69,9 @@ Frames come from the canvas, not a screenshot, so the renderer needs no change f
 1. Set `width="1080" height="1920"` on the canvas and update the style's `W`/`H` constants (in the four
    shared-kit styles they live in common.js; edit them there, since your project is yours).
 2. Many styles also hard-code 1920, 1080, 960 and 540 in scenes and textures (anime-80s has `mk(1920, 90)` and
-   `% 1920`). Find them with `grep -nE '\b(1920|1080|960|540)\b' *.html *.js js/*.js` and turn the ones in
+   `% 1920`). Find them with
+   `grep -rnE '\b(1920|1080|960|540)\b' --include='*.html' --include='*.js' --exclude-dir=vendor .`
+   (works in bash and zsh) and turn the ones in
    parts you keep into `W`/`H` expressions.
 3. Recompose: plan the layout again rather than scaling the 16:9 one. Each recipe's "Composition and camera"
    and "Adapting" sections say what survives a format change.

@@ -17,7 +17,7 @@ A WRONG recipe: every fact below is false or unverifiable, yet should it pass?
 ## Typography and copy
 Titles use `Futura` via `loadTitleFont()`.
 ## Texture and finish
-None.
+Uses `paper` for the ground (see `drawGhostCard()`).
 ## Shapes, line and figures
 None.
 ## Composition and camera

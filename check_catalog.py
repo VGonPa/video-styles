@@ -112,19 +112,56 @@ def section(text, heading):
     return match.group(1) if match else ""
 
 
+SEPARATOR = re.compile(r"^\|\s*:?-{3,}")
+# The tables the checks read; each must be present with this exact header.
+TABLES = {"Palette": ["Role", "Colour", "In code"],
+          "Film grammar": ["Time (s)", "What happens", "In code"],
+          "Reuse map": ["Piece", "Where", "Call / key params", "Reuse"]}
+
+
 def table_rows(block):
-    """Cells of a markdown table's body rows."""
-    rows = [l.strip().strip("|").split("|") for l in block.splitlines() if l.strip().startswith("|")]
-    return [[c.strip() for c in r] for r in rows[2:]]
+    """Cells of the body rows of every markdown table in a block (header and separator rows skipped)."""
+    lines = [l.strip() for l in block.splitlines()]
+    rows = []
+    for i, line in enumerate(lines):
+        if not line.startswith("|") or SEPARATOR.match(line) \
+                or (i + 1 < len(lines) and SEPARATOR.match(lines[i + 1])):
+            continue
+        rows.append([c.strip() for c in line.strip("|").split("|")])
+    return rows
+
+
+def recipe_table(text, heading, problems):
+    """Body rows of a required table, reporting a missing table, a wrong header or short rows."""
+    block = section(text, heading)
+    headers = [[c.strip() for c in l.strip().strip("|").split("|")] for l in block.splitlines()
+               if l.strip().startswith("|") and not SEPARATOR.match(l.strip())]
+    if TABLES[heading] not in headers:
+        problems.append(f"recipe {heading} needs its table with the header | {' | '.join(TABLES[heading])} |")
+        return []
+    rows = table_rows(block)
+    if not rows:
+        problems.append(f"recipe {heading} table has no rows")
+    for row in rows:
+        if len(row) < len(TABLES[heading]):
+            problems.append(f"recipe {heading} row '{row[0]}' has {len(row)} columns, expected {len(TABLES[heading])}")
+    return [r for r in rows if len(r) >= len(TABLES[heading])]
 
 
 COLOUR = re.compile(r"#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3,4}\b|0x[0-9a-fA-F]{6}\b"
                     r"|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}|(?<![\w.])\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?![\w.])")
-FILE = re.compile(r"(?<![\w./-])([\w.-]+(?:/[\w.-]+)*\.(?:html|js|mjs|py|json|css|md|sh|txt|woff2?|ttf|otf|glsl|frag|vert))\b"
-                  r"|(?<![\w./-])([\w-]+(?:/[\w-]+)*/)(?![\w])")
+# A file or folder path relative to the style folder; `*` globs allowed (`fonts/*.woff2`).
+FILE = re.compile(r"(?<![\w./*-])([\w.*][\w.*-]*(?:/[\w.*-]+)*\.(?:html|js|mjs|py|json|css|md|sh|txt|woff2?|ttf|otf|glsl|frag|vert))\b"
+                  r"|(?<![\w./*-])(\w[\w-]*(?:/[\w-]+)*/)(?![\w])")
 # Members of browser and JavaScript globals (a recipe may say "never `performance.now()`").
 GLOBAL_MEMBER = re.compile(r"\b(?:window|document|Math|Date|performance|JSON|Number|Object|Array|String|Promise|"
                            r"console|THREE)\.[\w$]+")
+
+
+# Calls a recipe may name without the style defining them: CSS and GLSL colour functions, browser built-ins.
+CALL_OK = {"rgb", "rgba", "hsl", "hsla", "url", "var", "calc", "vec2", "vec3", "vec4",
+           "requestAnimationFrame", "setTimeout", "setInterval", "fetch", "Image"}
+SLUGS = {s["slug"] for s in MANIFEST["styles"]}
 
 
 def rgb_of(colour):
@@ -153,24 +190,50 @@ def cited_names(cell, folder, code, problems, where):
     for token in re.findall(r"`([^`]+)`", cell):
         for found in FILE.finditer(token):
             path = found.group(1) or found.group(2)
-            if not (folder / path).exists():
+            if not (any(folder.glob(path)) if "*" in path else (folder / path).exists()):
                 problems.append(f"recipe {where} cites missing file {path}")
         token = FILE.sub(" ", token)
         token = re.sub(r"<[^<>]*>", " ", token)                    # placeholders such as T.<beat>
         token = re.sub(r"'[^']*'|\"[^\"]*\"", lambda m: " " + " ".join(re.findall(r"[A-Za-z_$][\w$]*", m.group(0)))
                        if not COLOUR.search(m.group(0)) else " ", token)   # keep words in strings, drop colours
         token = GLOBAL_MEMBER.sub(" ", COLOUR.sub(" ", token))
-        token = re.sub(r"0x[0-9a-fA-F]+|(?<![\w$])\d[\w.%]*", " ", token)
+        # Numbers with their unit (`12 fps`, `4 px`) and hyphenated keywords (`ease-out`) are not code names.
+        token = re.sub(r"0x[0-9a-fA-F]+|(?<![\w$])\d[\w.%]*(?:\s+[A-Za-z]+\b)?", " ", token)
+        token = re.sub(r"(?<![\w$-])[A-Za-z]+(?:-[A-Za-z]+)+(?![\w$-])", " ", token)
         for ident in re.findall(r"[A-Za-z_$][\w$]*", token):
-            if len(ident) > 1 and not re.search(rf"(?<![\w$]){re.escape(ident)}(?![\w$])", code):
+            if len(ident) > 1 and ident not in SLUGS \
+                    and not re.search(rf"(?<![\w$]){re.escape(ident)}(?![\w$])", code):
                 problems.append(f"recipe {where} cites `{ident}`, not found in the code")
+
+
+def expression_in_code(expr, code):
+    """True if the code contains this expression, ignoring whitespace, as a whole (not inside a longer name)."""
+    body = r"\s*".join(re.escape(ch) for ch in re.sub(r"\s+", "", expr))
+    return bool(re.search(rf"(?<![\w$]){body}(?![\w$])", code))
+
+
+def defines(name, text):
+    """True if the text defines name: a function, class, variable, method or object key."""
+    n = re.escape(name)
+    return bool(re.search(rf"\bfunction\s*\*?\s*{n}\b|\bclass\s+{n}\b|(?<![\w$]){n}\s*[:=](?!=)"
+                          rf"|^\s*(?:async\s+)?{n}\s*\([^)]*\)\s*\{{|\bdef\s+{n}\b", text, re.M))
+
+
+def names_in_named_file(cell, folder, problems, where):
+    """In `path` → `name`, that file must define the name (where it lives), not merely use it."""
+    for path, target in re.findall(r"`([\w./-]+\.(?:html|js|mjs|py|css|json|glsl|frag|vert))`\s*→\s*`([^`]+)`", cell):
+        source = folder / path
+        if source.is_file():
+            text = source.read_text(errors="ignore")
+            target = re.sub(r"^\s*(?:window|document|globalThis)\.", "", target)
+            name = re.match(r"\s*([A-Za-z_$][\w$]*)", target)       # `name(args)` or `name.key` → name
+            if name and len(name.group(1)) > 1 and not defines(name.group(1), text):
+                problems.append(f"recipe {where}: `{name.group(1)}` is not defined in {path}")
 
 
 def check_palette(text, folder, code, problems):
     flat = re.sub(r"\s+", "", code)
-    for row in table_rows(section(text, "Palette")):
-        if len(row) < 3:
-            continue
+    for row in recipe_table(text, "Palette", problems):
         role, cell = row[0], row[1]
         colours = COLOUR.findall(cell)
         for colour in colours:
@@ -178,11 +241,12 @@ def check_palette(text, folder, code, problems):
                 problems.append(f"recipe palette colour {colour.strip()} ({role}) not found in the code")
         if not colours:
             # A computed colour: its expression, in backticks, must appear in the code as written.
-            literals = re.findall(r"`([^`]+)`", cell)
-            if not literals:
-                problems.append(f"recipe palette row '{role}' gives no colour from the code")
-            elif not any(re.sub(r"\s+", "", lit) in flat for lit in literals):
-                problems.append(f"recipe palette row '{role}': {literals[0]} not found in the code")
+            literals = [re.sub(r"\s+", "", lit) for lit in re.findall(r"`([^`]+)`", cell)]
+            expressions = [lit for lit in literals if re.search(r"[(\[,]", lit)]
+            if not expressions:
+                problems.append(f"recipe palette row '{role}': give the colour value or the expression that computes it")
+            elif not any(expression_in_code(lit, code) for lit in expressions):
+                problems.append(f"recipe palette row '{role}': {expressions[0]} not found in the code")
         cited_names(row[2], folder, code, problems, "palette")
 
 
@@ -201,21 +265,25 @@ def check_recipe(s, problems, notes):
     # Derived from the code: cited files, identifiers and colours must exist in the style's code.
     folder, code = ROOT / "styles" / s["slug"], style_code(s["slug"])
     check_palette(text, folder, code, problems)
-    for row in table_rows(section(text, "Film grammar")):
-        if len(row) >= 3:
-            cited_names(row[2], folder, code, problems, "film grammar")
-    for row in table_rows(section(text, "Reuse map")):
-        if len(row) >= 3:
-            if "`" not in row[1]:
-                problems.append(f"recipe reuse map row '{row[0]}': put where it lives in backticks")
-            cited_names(row[1], folder, code, problems, "reuse map")
-            cited_names(row[2], folder, code, problems, "reuse map")
-    # Calls named anywhere in prose, e.g. `drawTitle()`, must exist too.
+    for row in recipe_table(text, "Film grammar", problems):
+        cited_names(row[2], folder, code, problems, "film grammar")
+    for row in recipe_table(text, "Reuse map", problems):
+        if "`" not in row[1]:
+            problems.append(f"recipe reuse map row '{row[0]}': put where it lives in backticks")
+        cited_names(row[1], folder, code, problems, "reuse map")
+        cited_names(row[2], folder, code, problems, "reuse map")
+        names_in_named_file(row[1], folder, problems, "reuse map")
+    # Fonts, cue names and fields in backticks are facts the reader acts on.
+    for heading in ("Typography and copy", "Sound"):
+        cited_names(section(text, heading), folder, code, problems, heading.split()[0].lower())
+    # Calls in backticks anywhere in prose (`drawTitle()`) must exist; each code span is checked whole.
     prose = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("|"))
-    for call in re.findall(r"`[^`]*?([A-Za-z_$][\w$]*)\s*\([^`]*`", prose):
-        if call not in {"rgb", "rgba", "hsl", "hsla", "url", "var", "calc", "vec2", "vec3", "vec4"} \
-                and not re.search(rf"(?<![\w$]){re.escape(call)}(?![\w$])", code):
-            problems.append(f"recipe cites `{call}()`, not found in the code")
+    prose = re.sub(r"^```.*?^```[^\n]*$", "", prose, flags=re.S | re.M)
+    for span in re.findall(r"`([^`\n]+)`", prose):
+        span = GLOBAL_MEMBER.sub(" ", re.sub(r"'[^']*'|\"[^\"]*\"", " ", span))
+        for call in re.findall(r"([A-Za-z_$][\w$]*)\s*\(", span):
+            if call not in CALL_OK and not re.search(rf"(?<![\w$]){re.escape(call)}(?![\w$])", code):
+                problems.append(f"recipe cites `{call}()`, not found in the code")
 
 
 def check_skill():

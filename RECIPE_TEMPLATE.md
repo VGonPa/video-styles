@@ -17,8 +17,10 @@ length and possibly in 9:16, that a viewer would recognise as this style.
 - **Name what the reader can find:** functions, constants, files (paths relative to the style folder, such as
   `js/lib.js` or `vendor/three.min.js`), with their parameters. Never line numbers. `check_catalog.py` verifies
   that every file and identifier in backticks in the Palette's "In code" column, the Film grammar's "In code"
-  column and the Reuse map exists in the style's code, that every call in backticks anywhere (`drawTitle()`)
-  exists, and that every palette colour occurs in the code.
+  column, the Reuse map and the Typography and Sound sections exists in the style's code (font names and cue
+  kinds included), that in `path` → `name` the file defines that name, that every call in backticks anywhere
+  (`drawTitle()`) exists, and that every palette colour occurs in the code. Write `()` only after functions
+  that exist; name a function you suggest the reader write without parentheses.
 - **Write each colour as the code writes it:** `#rrggbb`, `0xrrggbb` or r,g,b numbers. When the code computes it
   (a GLSL `vec3(…)`, an `hsl()` template, a blend function), put that expression in backticks in the Colour
   column, exactly as written in the code, instead of a hex you worked out.
@@ -26,8 +28,9 @@ length and possibly in 9:16, that a viewer would recognise as this style.
   had ("no overshoot: Manim's `smooth` rate function is part of the look").
 - **Stay concise:** about 100–200 lines, one fact per bullet, no praise or history. The catalog already holds
   family, use cases, feel, "best for" and credits; do not repeat them.
-- **Keep every heading below, in this order** (`check_catalog.py` enforces it). Write "None." rather than
-  dropping a section. English, in the repository's plain style.
+- **Keep every heading below, in this order** (`check_catalog.py` enforces it). The Palette, Film grammar and
+  Reuse map tables are required, with the headers shown; elsewhere write "None." rather than dropping a
+  section. English, in the repository's plain style.
 
 ## Template
 

@@ -40,23 +40,41 @@ def words(text):
     return [SYNONYMS.get(w, w) for w in re.findall(r"[a-z0-9]+", text.casefold().replace("’", "'").replace("'s", ""))]
 
 
-def tokens(style, catalog):
+def name_tokens(style):
+    """Words of the style's slug and name (they rank highest)."""
+    return set(words(f"{style['slug']} {style['name']}"))
+
+
+def own_tokens(style):
+    """Words that describe the style itself."""
+    return set(words(" ".join([style["feel"], style["best_for"], *style["credits"]])))
+
+
+def context_tokens(style, catalog):
+    """Words it shares with its whole family or use cases (they rank below the style's own words)."""
     family = catalog["families"][style["family"]]
-    fields = [style["slug"], style["name"], style["feel"], style["best_for"], *style["credits"],
-              style["family"], family["title"], family["description"],
-              *style["use_cases"], *(catalog["use_cases"][u]["title"] for u in style["use_cases"])]
-    return set(words(" ".join(fields)))
+    return set(words(" ".join([style["family"], family["title"], family["description"], *style["use_cases"],
+                               *(catalog["use_cases"][u]["title"] for u in style["use_cases"])])))
+
+
+def match(word, toks):
+    """1 for an exact word, 0.6 for a related one (one is a prefix of the other, or they share five or more
+    leading letters covering all but the last two of the shorter: science ~ scientific, child ~ children,
+    not anime ~ animals), else 0."""
+    if word in toks:
+        return 1.0
+    if len(word) < 4:
+        return 0.0
+    for t in toks:
+        if len(t) >= 4 and (t.startswith(word) or word.startswith(t)):
+            return 0.6
+        if len(os.path.commonprefix([word, t])) >= max(5, min(len(word), len(t)) - 2):
+            return 0.6
+    return 0.0
 
 
 def hit(word, toks):
-    """A query word matches a token that equals it, or that shares a prefix of at least four letters covering
-    all but the last two letters of the shorter word: science ~ scientific, math ~ mathematical, not data ~ dark."""
-    if word in toks:
-        return True
-    if len(word) < 4:
-        return False
-    return any(len(os.path.commonprefix([word, t])) >= max(4, min(len(word), len(t)) - 2)
-               for t in toks if len(t) >= 4)
+    return match(word, toks) > 0
 
 
 def label(style, catalog):
@@ -110,16 +128,26 @@ def main():
             if (not uses or any(u in s["use_cases"] for u in uses))
             and (not fams or s["family"] in fams)
             and not (args.no_gpu and s["webgl"])]
-    query = [SYNONYMS.get(w, w) for w in words(" ".join(args.query)) if w not in STOPWORDS]
+    query = [w for w in words(" ".join(args.query)) if w not in STOPWORDS]
     exact = " ".join(args.query).casefold()
-    # Rank by matched words, each weighted by how rare it is in the catalog, so "kids" outweighs "explainer".
-    toks = {st["slug"]: tokens(st, catalog) for st in styles}
-    weight = {w: math.log((1 + len(styles)) / (1 + sum(hit(w, t) for t in toks.values()))) + 0.1 for w in query}
+    # Score each word by where it matches (slug or name 2, the style's description and credits 1, family and
+    # use-case words 0.25) and by how rare it is in the catalog, so "kids" outweighs "explainer".
+    name = {st["slug"]: name_tokens(st) for st in styles}
+    own = {st["slug"]: own_tokens(st) for st in styles}
+    ctx = {st["slug"]: context_tokens(st, catalog) for st in styles}
+    def score(word, st):
+        return max(2 * match(word, name[st["slug"]]), match(word, own[st["slug"]]), 0.25 * match(word, ctx[st["slug"]]))
+    # Rarity counts only styles whose own words match: a family description ("paper, graphite, ink, clay")
+    # would otherwise make every word in it look common.
+    def described(word, st):
+        return match(word, name[st["slug"]]) > 0 or match(word, own[st["slug"]]) > 0
+    weight = {w: math.log((1 + len(styles)) / (1 + sum(described(w, st) for st in styles))) + 0.1 for w in query}
     scored = []
     for s in pool:
-        matched = [w for w in query if hit(w, toks[s["slug"]])]
+        scores = [score(w, s) for w in query]
         first = exact in (s["slug"], s["name"].casefold())
-        scored.append((not first, -sum(weight[w] for w in matched), s["name"].casefold(), s, len(matched)))
+        scored.append((not first, -sum(weight[w] * x for w, x in zip(query, scores)), s["name"].casefold(), s,
+                       sum(x > 0 for x in scores)))
     scored.sort(key=lambda x: x[:3])
     full = [x for x in scored if x[4] == len(query)]
 
@@ -127,6 +155,9 @@ def main():
         found, partial = [x[3] for x in full], False
     else:
         found, partial = [x[3] for x in scored if x[4] > 0][:5], True
+    # Few full matches: also offer the best partial ones, so a narrow query still shows alternatives.
+    extra = [x[3] for x in scored if 0 < x[4] < len(query)][:5] if not partial and len(full) < 3 and len(query) > 1 else []
+
     # Exit 0 for full matches, 1 for partial or no matches, in both output modes.
     if args.json:
         print(json.dumps(found, indent=1, ensure_ascii=False))
@@ -139,6 +170,11 @@ def main():
     for x in (scored if partial else full):
         if x[3] in found:
             print(label(x[3], catalog) + (f"  ({x[4]} of {len(query)} words)" if partial else ""))
+    if extra:
+        print("\nalso close (not every word):")
+        for x in scored:
+            if x[3] in extra:
+                print(label(x[3], catalog) + f"  ({x[4]} of {len(query)} words)")
     print(f"\n{len(found)} of {len(styles)} styles", file=sys.stderr)
     sys.exit(1 if partial else 0)
 
