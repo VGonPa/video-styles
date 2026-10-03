@@ -4,8 +4,9 @@
 Run after build_index.py. Add --media to also validate downloaded or rebuilt clips and GIFs.
 """
 
-import json
 import argparse
+import builtins
+import json
 import re
 import subprocess
 import sys
@@ -160,7 +161,13 @@ GLOBAL_MEMBER = re.compile(r"\b(?:window|document|Math|Date|performance|JSON|Num
 
 # Calls a recipe may name without the style defining them: CSS and GLSL colour functions, browser built-ins.
 CALL_OK = {"rgb", "rgba", "hsl", "hsla", "url", "var", "calc", "vec2", "vec3", "vec4",
-           "requestAnimationFrame", "setTimeout", "setInterval", "fetch", "Image"}
+           "requestAnimationFrame", "setTimeout", "setInterval", "fetch", "Image",
+           # Canvas 2D methods, which a recipe may forbid ("never `arc()`") in a style that never calls them.
+           "arc", "arcTo", "bezierCurveTo", "quadraticCurveTo", "moveTo", "lineTo", "ellipse", "rect", "roundRect",
+           "fill", "stroke", "clip", "fillText", "strokeText", "measureText", "drawImage", "getImageData",
+           "putImageData", "createLinearGradient", "createRadialGradient", "createPattern", "save", "restore",
+           "translate", "rotate", "scale", "setTransform"}
+PY_BUILTINS = set(vars(builtins)) | {"ndarray"}
 SLUGS = {s["slug"] for s in MANIFEST["styles"]}
 
 
@@ -178,9 +185,9 @@ def colour_in_code(colour, code, flat):
     """True if the code writes this colour in any form: #rrggbb, #rgb, 0xrrggbb or r,g,b (whole numbers)."""
     r, g, b = rgb_of(colour)
     h = f"{r:02x}{g:02x}{b:02x}"
-    forms = [rf"#{h}(?![0-9a-f])", rf"0x{h}(?![0-9a-f])"]
+    forms = [rf"#{h}(?:[0-9a-f]{{2}})?(?![0-9a-f])", rf"0x{h}(?![0-9a-f])"]     # alpha suffix allowed
     if h[0] == h[1] and h[2] == h[3] and h[4] == h[5]:
-        forms.append(rf"#{h[0]}{h[2]}{h[4]}(?![0-9a-f])")
+        forms.append(rf"#{h[0]}{h[2]}{h[4]}[0-9a-f]?(?![0-9a-f])")
     lower = code.lower()
     return any(re.search(f, lower) for f in forms) or bool(re.search(rf"(?<![\d.]){r},{g},{b}(?![\d.])", flat))
 
@@ -194,14 +201,14 @@ def cited_names(cell, folder, code, problems, where):
                 problems.append(f"recipe {where} cites missing file {path}")
         token = FILE.sub(" ", token)
         token = re.sub(r"<[^<>]*>", " ", token)                    # placeholders such as T.<beat>
-        token = re.sub(r"'[^']*'|\"[^\"]*\"", lambda m: " " + " ".join(re.findall(r"[A-Za-z_$][\w$]*", m.group(0)))
-                       if not COLOUR.search(m.group(0)) else " ", token)   # keep words in strings, drop colours
+        token = re.sub(r"'[^']*'|\"[^\"]*\"", lambda m: " " + " ".join(re.findall(r"(?<![\w$])[A-Za-z_$][\w$]*", m.group(0)))
+                       if not COLOUR.search(m.group(0)) else " ", token)   # keep words in strings (not 64px), drop colours
         token = GLOBAL_MEMBER.sub(" ", COLOUR.sub(" ", token))
         # Numbers with their unit (`12 fps`, `4 px`) and hyphenated keywords (`ease-out`) are not code names.
         token = re.sub(r"0x[0-9a-fA-F]+|(?<![\w$])\d[\w.%]*(?:\s+[A-Za-z]+\b)?", " ", token)
         token = re.sub(r"(?<![\w$-])[A-Za-z]+(?:-[A-Za-z]+)+(?![\w$-])", " ", token)
         for ident in re.findall(r"[A-Za-z_$][\w$]*", token):
-            if len(ident) > 1 and ident not in SLUGS \
+            if len(ident) > 1 and ident not in SLUGS and ident not in PY_BUILTINS and ident not in CALL_OK \
                     and not re.search(rf"(?<![\w$]){re.escape(ident)}(?![\w$])", code):
                 problems.append(f"recipe {where} cites `{ident}`, not found in the code")
 
@@ -213,10 +220,14 @@ def expression_in_code(expr, code):
 
 
 def defines(name, text):
-    """True if the text defines name: a function, class, variable, method or object key."""
+    """True if the text defines name: a function, class, variable, method, object key, Python def, or a GLSL
+    function or uniform."""
     n = re.escape(name)
+    glsl = r"(?:void|float|int|bool|[biu]?vec[234]|mat[234])"
     return bool(re.search(rf"\bfunction\s*\*?\s*{n}\b|\bclass\s+{n}\b|(?<![\w$]){n}\s*[:=](?!=)"
-                          rf"|^\s*(?:async\s+)?{n}\s*\([^)]*\)\s*\{{|\bdef\s+{n}\b", text, re.M))
+                          rf"|^\s*(?:async\s+)?{n}\s*\([^)]*\)\s*\{{|\bdef\s+{n}\b"
+                          rf"|^\s*(?:(?:highp|mediump|lowp)\s+)?{glsl}\s+{n}\s*\("          # GLSL function
+                          rf"|\buniform\s+\w+\s+(?:\w+\s*,\s*)*{n}\b", text, re.M))      # GLSL uniform
 
 
 def names_in_named_file(cell, folder, problems, where):
@@ -229,6 +240,21 @@ def names_in_named_file(cell, folder, problems, where):
             name = re.match(r"\s*([A-Za-z_$][\w$]*)", target)       # `name(args)` or `name.key` → name
             if name and len(name.group(1)) > 1 and not defines(name.group(1), text):
                 problems.append(f"recipe {where}: `{name.group(1)}` is not defined in {path}")
+
+
+def check_sound(slug, text, problems):
+    """Cue kinds and fields named in Sound must be strings that audio.py (or render.json) reads: a cue that only
+    anim.html mentions is silent in the film."""
+    folder = ROOT / "styles" / slug
+    reads = "\n".join(p.read_text() for p in (folder / "audio.py", folder / "render.json") if p.is_file())
+    for token in re.findall(r"`([^`]+)`", section(text, "Sound")):
+        if not re.fullmatch(r"[a-z_][a-z0-9_]+", token):
+            continue        # calls, files, expressions, constants and one-letter fields
+        if re.search(rf"^\s*(?:import|from)\b.*\b{token}\b", reads, re.M):
+            continue        # a module audio.py imports (`wave`)
+        if not re.search(rf"['\"]{token}['\"]", reads):
+            problems.append(f"recipe sound: `{token}` is not a cue kind or field audio.py reads; "
+                            "write synth functions as `name()`")
 
 
 def check_palette(text, folder, code, problems):
@@ -273,16 +299,24 @@ def check_recipe(s, problems, notes):
         cited_names(row[1], folder, code, problems, "reuse map")
         cited_names(row[2], folder, code, problems, "reuse map")
         names_in_named_file(row[1], folder, problems, "reuse map")
-    # Fonts, cue names and fields in backticks are facts the reader acts on.
-    for heading in ("Typography and copy", "Sound"):
-        cited_names(section(text, heading), folder, code, problems, heading.split()[0].lower())
-    # Calls in backticks anywhere in prose (`drawTitle()`) must exist; each code span is checked whole.
-    prose = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("|"))
-    prose = re.sub(r"^```.*?^```[^\n]*$", "", prose, flags=re.S | re.M)
+    # Names in backticks in the prose sections are facts the reader acts on (Technical notes stays out: it
+    # names things a style lacks, such as "no `render.json`").
+    for heading in ("Signature", "Typography and copy", "Texture and finish", "Shapes, line and figures",
+                    "Composition and camera", "Motion", "Sound", "Adapting"):
+        prose = "\n".join(l for l in section(text, heading).splitlines() if not l.lstrip().startswith("|"))
+        cited_names(prose, folder, code, problems, heading.split(",")[0].split()[0].lower())
+    check_sound(s["slug"], text, problems)
+    # "Poor fit: use `x`" sends the reader to another style, which must exist.
+    for token in re.findall(r"`([^`]+)`", section(text, "Boundaries")):
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", token) and token not in SLUGS:
+            problems.append(f"recipe boundaries: `{token}` is not a style in the catalog")
+    # Calls in backticks anywhere, tables included (`drawTitle()`), must exist; each code span is checked whole.
+    prose = re.sub(r"^```.*?^```[^\n]*$", "", text, flags=re.S | re.M)
     for span in re.findall(r"`([^`\n]+)`", prose):
         span = GLOBAL_MEMBER.sub(" ", re.sub(r"'[^']*'|\"[^\"]*\"", " ", span))
         for call in re.findall(r"([A-Za-z_$][\w$]*)\s*\(", span):
-            if call not in CALL_OK and not re.search(rf"(?<![\w$]){re.escape(call)}(?![\w$])", code):
+            if call not in CALL_OK and call not in PY_BUILTINS \
+                    and not re.search(rf"(?<![\w$]){re.escape(call)}(?![\w$])", code):
                 problems.append(f"recipe cites `{call}()`, not found in the code")
 
 

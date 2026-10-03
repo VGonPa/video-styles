@@ -38,6 +38,6 @@ Cue `{ k: 'whoosh' }`.
 ## Adapting
 None.
 ## Boundaries
-None.
+- **Poor fit:** dense data; use `retro-terminal` instead.
 ## Technical notes
 None.

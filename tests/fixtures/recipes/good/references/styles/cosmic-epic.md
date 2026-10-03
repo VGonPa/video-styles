@@ -61,7 +61,7 @@ melancholic.
 
 ## Sound
 - audio.py: a D-minor drone bed (`pad()`), a `shimmer()` when the star clears the limb, a `riser()`, an `inhale()` for the collapse, a `boom()` and a `bell()` for the title, through a convolution hall.
-- Cues: `tick` (v 0.7–1, n), `emerge`, `swell`, `collapse`, `burst`, `dim`, `title`.
+- Cues: `tick` (v 0.7–1, n), `emerge`, `swell`, `collapse`, `burst`, `title`.
 
 ## Reuse map
 | Piece | Where | Call / key params | Reuse |

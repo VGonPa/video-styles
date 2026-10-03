@@ -67,7 +67,7 @@ fantasy. Warm, nostalgic, gently comic.
 
 ## Sound
 - audio.py synthesizes paper rustle, brush swish, glockenspiel, balloon pops, a roar, a snap and piano chords.
-- Cues: `rustle` (d), `wash` (d), `pop`, `glide` (d), `jungle` (d), `swell` (d), `roar`, `snap`, `kitchen` (d), `blink`, `chord`, `whoosh`.
+- Cues: `rustle` (d), `wash` (d), `pop`, `glide` (d), `jungle` (d), `swell` (d), `roar`, `snap`, `blink`, `chord`, `whoosh`.
 - A new panel should emit `wash` when it soaks in and `pop` for each balloon.
 
 ## Reuse map

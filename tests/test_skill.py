@@ -85,7 +85,8 @@ class RecipeCheckTests(unittest.TestCase):
         # Code in js/ (cave-painting), three.js 0x colours and vendor/ (low-poly), digit-led hex strings
         # (kawaii, anime-80s), placeholders, font strings and directories.
         for slug in ("cave-painting", "low-poly", "kawaii", "anime-80s", "sunday-strip", "cosmic-epic",
-                     "bayeux-tapestry", "neon-sign", "oscilloscope"):
+                     "bayeux-tapestry", "neon-sign", "oscilloscope", "nes-8bit", "persian-miniature",
+                     "absurd-webcomic"):
             with self.subTest(slug=slug):
                 self.assertEqual(self.check(FIXTURES / "good", slug), [])
 
@@ -93,13 +94,14 @@ class RecipeCheckTests(unittest.TestCase):
         problems = self.check(FIXTURES / "wrong", "blueprint")
         for expected in ("give the colour value", "hsl(12,80%,50%)", "0x123456", "#fff", "`bogus`",
                          "in backticks", "drawGhostTitle", "loadTitleFont", "drawGhostCard", "`Futura`",
-                         "`tone` is not defined in anim.html"):
+                         "`tone` is not defined in anim.html", "`retro-terminal` is not a style"):
             self.assertTrue(any(expected in p for p in problems), (expected, problems))
         self.assertFalse(any("ground()" in p for p in problems), problems)   # prose after a non-call span
 
     def test_invented_facts_in_a_correct_recipe_fail(self):
         problems = self.check(FIXTURES / "wrong", "sunday-strip")
-        for expected in ("'paper': give the colour value", "`Bangers`", "`whoosh`", "`brush` is not defined in js/fantasy.js"):
+        for expected in ("'paper': give the colour value", "`Bangers`", "`whoosh` is not a cue kind",
+                         "`brush` is not defined in js/fantasy.js", "`easeOutElastic`"):
             self.assertTrue(any(expected in p for p in problems), (expected, problems))
 
     def test_template_and_checker_agree_on_headings(self):

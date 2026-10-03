@@ -17,10 +17,14 @@ length and possibly in 9:16, that a viewer would recognise as this style.
 - **Name what the reader can find:** functions, constants, files (paths relative to the style folder, such as
   `js/lib.js` or `vendor/three.min.js`), with their parameters. Never line numbers. `check_catalog.py` verifies
   that every file and identifier in backticks in the Palette's "In code" column, the Film grammar's "In code"
-  column, the Reuse map and the Typography and Sound sections exists in the style's code (font names and cue
-  kinds included), that in `path` → `name` the file defines that name, that every call in backticks anywhere
-  (`drawTitle()`) exists, and that every palette colour occurs in the code. Write `()` only after functions
-  that exist; name a function you suggest the reader write without parentheses.
+  column, the Reuse map and the prose sections (all but Technical notes) exists in the style's code (font names
+  included), that in `path` → `name` the file defines that name, that every call in backticks anywhere
+  (`drawTitle()`) exists, that every palette colour occurs in the code, and that every style named in
+  Boundaries is in the catalog. In Sound, a lower-case name in backticks must be a cue kind or field that
+  audio.py reads: write synth functions as `name()`, and leave out cues that anim.html emits but audio.py
+  ignores (they are silent). Backticks mean "this is in the style's code": write positional fields and
+  anything outside it in plain words, write `()` only after functions that exist, and name a function you
+  suggest the reader write without parentheses.
 - **Write each colour as the code writes it:** `#rrggbb`, `0xrrggbb` or r,g,b numbers. When the code computes it
   (a GLSL `vec3(…)`, an `hsl()` template, a blend function), put that expression in backticks in the Colour
   column, exactly as written in the code, instead of a hex you worked out.
