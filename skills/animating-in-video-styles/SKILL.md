@@ -87,8 +87,8 @@ for sounds the style lacks, in the same synthesized character. Re-time any music
 at fixed times for the original (see "Duration" in contract.md), or it stops early or ends at the wrong time.
 Then run `node events.mjs && python3 audio.py` in the project folder: it takes seconds and catches a crash (a
 missing field, a cue looked up by name) or a `nan` peak, while build.sh reaches audio.py only after rendering
-every frame, and deletes them when it fails. It does not catch a cue kind audio.py has no handler for: that cue
-is silently dropped, so check every kind you emit against audio.py.
+every frame, and deletes them when it fails. A cue kind audio.py has no handler for is silently dropped in most
+styles (some crash on it instead, which this run catches), so check every kind you emit against audio.py.
 
 ### 8. Look, critique, fix
 Run `bash <skill>/scripts/contact_sheet.sh <project-dir> <seconds>` and look at `_review/sheet.jpg` and the
