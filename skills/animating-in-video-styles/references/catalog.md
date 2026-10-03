@@ -146,7 +146,7 @@ Glossy materials, glass, and light.
 Code-driven systems, particles, and 3D forms.
 
 - `blob-sim` **Blob Simulation** — Cute 3D blobs obeying simple rules. Best for game theory, evolution sims, and data-driven explainers · explainer, data · Inspired by Primer (Justin Helps) · *WebGL* · *no recipe yet*
-- `cel-shaded-3d` **Cel-Shaded 3D** — Toon-shaded 3D with ink outlines. Best for playful 3D worlds, game-style stories and product scenes · story, product · *WebGL* · *no recipe yet*
+- `cel-shaded-3d` **Cel-Shaded 3D** — Toon-shaded 3D with ink outlines. Best for playful 3D worlds, game-style stories and product scenes · story, product · *WebGL*
 - `cosmic-epic` **Cosmic Epic** — Vast, glowing, awe-struck deep time. Best for epic title reveals and big-picture science timelines · titles, explainer · Inspired by melodysheep (John D. Boswell) · *WebGL* · *no recipe yet*
 - `feature-animation-3d` **Feature-Animation 3D** — Glossy PBR character, studio light. Best for character shorts and playful product stories · story, product · Inspired by @karanC_12's “Asked for a dot” post · *WebGL* · *no recipe yet*
 - `particles` **Generative Particles** — Luminous flow-field particle swarms. Best for tech title reveals, data stories, and abstract openers · titles, data · *WebGL* · *no recipe yet*
