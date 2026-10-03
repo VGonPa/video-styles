@@ -2046,7 +2046,7 @@
     "explainer"
    ],
    "credits": [],
-   "webgl": false,
+   "webgl": true,
    "render": {
     "gpu": "full",
     "eventsGpu": "full"
@@ -2541,6 +2541,90 @@
    "recipe": false,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/weather-tv-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/weather-tv.mp4"
+  },
+  {
+   "slug": "reel-chrome",
+   "number": 129,
+   "name": "Reel Chrome",
+   "feel": "Ember title card, studio chrome",
+   "best_for": "Reels, openers and identity title cards",
+   "family": "polished",
+   "use_cases": [
+    "titles",
+    "social"
+   ],
+   "credits": [
+    "Inspired by the \"Claude motion reel\" teaser posted by @Saccc_c"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/reel-chrome-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/reel-chrome.mp4"
+  },
+  {
+   "slug": "feature-animation-3d",
+   "number": 130,
+   "name": "Feature-Animation 3D",
+   "feel": "Glossy PBR character, studio light",
+   "best_for": "Character shorts and playful product stories",
+   "family": "generative-3d",
+   "use_cases": [
+    "story",
+    "product"
+   ],
+   "credits": [
+    "Inspired by @karanC_12's “Asked for a dot” post"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "full"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/feature-animation-3d-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/feature-animation-3d.mp4"
+  },
+  {
+   "slug": "byzantine",
+   "number": 131,
+   "name": "Byzantine",
+   "feel": "Gold ground, flattened halo, icon",
+   "best_for": "Icons, ceremony and sacred storytelling",
+   "family": "world-history",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by the mosaics of Ravenna and Constantinople"
+   ],
+   "webgl": false,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/byzantine-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/byzantine.mp4"
+  },
+  {
+   "slug": "dada",
+   "number": 132,
+   "name": "Dada",
+   "feel": "Cut-up, absurd, deliberate mistranslation",
+   "best_for": "Anti-advertising, jokes and rule-breaking",
+   "family": "experimental",
+   "use_cases": [
+    "social",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Hannah Höch and Berlin Dada photomontage"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dada-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dada.mp4"
   }
  ]
 }

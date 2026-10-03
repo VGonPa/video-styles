@@ -16,6 +16,7 @@ import media
 
 ROOT = manifest.ROOT
 MANIFEST = manifest.load()
+FONTS_MD = (ROOT / "FONTS.md").read_text()
 REQUIRED = {"number", "name", "feel", "best_for", "family", "use_cases"}
 # Every style folder carries an unmodified copy of these shared scripts from tools/.
 SHARED_SCRIPTS = ["render.mjs", "events.mjs"]
@@ -78,6 +79,12 @@ def check_pages(s, problems):
     if not style_page.is_file() or f"# {s['name']}\n" not in style_page.read_text() \
             or target not in style_page.read_text() or video not in style_page.read_text():
         problems.append("missing or stale styles/<slug>/README.md")
+
+
+def check_fonts_listed(s, problems):
+    fonts = ROOT / "styles" / s["slug"] / "fonts"
+    if fonts.is_dir() and any(fonts.iterdir()) and f"(styles/{s['slug']})" not in FONTS_MD:
+        problems.append("fonts/ not listed in FONTS.md")
 
 
 def check_shared_scripts(s, problems):
@@ -219,10 +226,20 @@ def check_skill():
     match = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     if not match:
         return ["SKILL.md has no frontmatter"]
-    front = dict(re.findall(r"^([A-Za-z-]+):[ \t]*(.*)$", match.group(1), re.M))
+    front, parent = {}, None
+    for line in match.group(1).splitlines():
+        key = re.match(r"^([A-Za-z0-9_-]+):[ \t]*(.*)$", line)
+        if key:
+            parent = key.group(1)
+            value = key.group(2).strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+            front[parent] = value
+        elif line.strip() and parent != "metadata":
+            problems.append(f"frontmatter {parent} continues on another line; keep it on one line")
     problems += [f"frontmatter key {k!r} is not in the Agent Skills spec" for k in front if k not in SKILL_KEYS]
     problems += [f"frontmatter {k} uses a block scalar; write it on one line" for k, v in front.items()
-                 if v.strip() in {">", "|", ">-", "|-", ">+", "|+"}]
+                 if v in {">", "|", ">-", "|-", ">+", "|+"}]
     if front.get("name") != skill.name:
         problems.append(f"name {front.get('name')!r} must match the folder {skill.name!r}")
     if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", front.get("name", "")) or len(front.get("name", "")) > 64:
@@ -241,6 +258,17 @@ def check_skill():
         path = skill / name
         if not path.is_file() or path.read_text() != want:
             problems.append(f"{name} is stale: run build_index.py")
+    ref = build_index.SKILL_CODE_REF
+    if ref != "main":
+        if subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{ref}"],
+                          capture_output=True, cwd=ROOT).returncode:
+            problems.append(f"SKILL_CODE_REF {ref} is not a tag in this clone")
+        else:
+            for s in MANIFEST["styles"]:
+                recipe = skill / "references" / "styles" / f"{s['slug']}.md"
+                if recipe.is_file() and subprocess.run(["git", "diff", "--quiet", ref, "HEAD", "--",
+                                                        f"styles/{s['slug']}"], cwd=ROOT).returncode:
+                    problems.append(f"recipe for {s['slug']} describes code newer than {ref}; cut a new tag")
     for link in (".claude/skills", ".agents/skills"):
         path = ROOT / link / skill.name
         if not path.is_symlink() or path.resolve() != skill.resolve():
@@ -299,6 +327,7 @@ def main():
         check_pages(s, problems)
         if (n := derived_lines(s["slug"])) > 5:
             problems.append(f"{n} lines shared with the original catalog")
+        check_fonts_listed(s, problems)
         check_recipe(s, problems, notes)
         missing_recipes += bool(notes)
         status = "ok" if not problems else "; ".join(problems)

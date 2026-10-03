@@ -1,7 +1,9 @@
 # Reviewing a film
 
 Judge the frames, not the code. After every render, open `_review/sheet.jpg` and both key frames at full size,
-next to the original's `_reference/original-sheet.jpg`. If you cannot view images, ask the user to compare
+next to the original's full-resolution stills in `_reference/original/` (rendered before you edited; see SKILL.md
+step 4). The GIF-based `_reference/original-sheet.jpg` is 480 px wide and dithered: use it for overall feel, not
+for texture, line weight or exact colour. If you cannot view images, ask the user to compare
 them and tell you what they see; do not skip the review. Write down concrete defects (what, where, at what
 time), fix them, render again. Do at least two passes; stop when a fresh look finds nothing worth fixing.
 
@@ -38,5 +40,7 @@ time), fix them, render again. Do at least two passes; stop when a fresh look fi
   `node render.mjs _review/det-a 30 0 10 1 4.2`, `node render.mjs _review/det-b 30 0 10 1 0.5,2,4.2`,
   `cmp _review/det-a/t_4.20.jpg _review/det-b/t_4.20.jpg`. The files must be identical (render.mjs draws the
   times in order, so run b reaches 4.2 after other frames). A difference means an unseeded random number, a
-  clock or state carried between frames crept in.
+  clock or state carried between frames crept in. WebGL styles can differ by GPU rounding alone: compare with
+  `ffmpeg -i <a> -i <b> -lavfi psnr -f null - 2>&1 | grep average`, where above about 60 dB is rounding and a
+  real leak shows as visibly different content. Run the test once on the untouched project for a baseline.
 - Every character on screen renders in the intended font (missing glyphs show as boxes or a fallback face).

@@ -103,6 +103,10 @@ def licenses(root, slug, dest):
         lines = fonts.read_text(encoding="utf-8").splitlines()
         header = [l for l in lines if l.startswith("| Family") or l.startswith("|---")][:2]
         rows = [l for l in lines if l.startswith("|") and f"(styles/{slug})" in l]
+        if not rows and (dest / "fonts").is_dir():
+            files = ", ".join(sorted(x.name for x in (dest / "fonts").iterdir()))
+            rows = [f"| (not listed in FONTS.md: {files}) | see the font's own license | {slug} |"]
+            print(f"note: FONTS.md has no row for {slug}; check the licenses of: {files}", file=sys.stderr)
         (out / "FONTS.md").write_text(
             f"# Fonts used by the {slug} style\n\nFrom the catalog's FONTS.md; license texts are in this folder.\n"
             "Links are relative to the catalog repository.\n\n" + "\n".join(header + rows) + "\n", encoding="utf-8")

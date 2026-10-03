@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn an image into a JavaScript constant holding a data: URI, so anim.html can draw it.
 
-  python3 scripts/embed_image.py logo.png LOGO >> my-project/assets.js
+  python3 scripts/embed_image.py logo.png LOGO >> my-project/assets.js   # re-run to replace: the last one wins
 
 anim.html then loads it with <script src="assets.js"></script> and decodes it inside window.ready:
 
@@ -34,7 +34,8 @@ def main():
         data = base64.b64encode(path.read_bytes()).decode("ascii")
     except OSError as err:
         sys.exit(f"cannot read {path}: {err}")
-    print(f"const {name} = 'data:{mime};base64,{data}';  // {path.name}")
+    # var, not const: appending a revised image under the same name must not break the whole file.
+    print(f"var {name} = 'data:{mime};base64,{data}';  // {path.name}")
 
 
 if __name__ == "__main__":

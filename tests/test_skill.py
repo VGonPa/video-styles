@@ -2,14 +2,21 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import build_index
 import check_catalog
 import manifest
 
 SCRIPTS = manifest.SKILL / "scripts"
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "recipes"
+STYLES = {s["slug"]: s for s in manifest.load()["styles"]}
 
 
 def script(name):
@@ -55,6 +62,25 @@ class RecipeCheckTests(unittest.TestCase):
         check_catalog.cited_names("`ghost.js`, `nope(at)`", folder, self.code, problems, "x")
         self.assertEqual(len(problems), 2)
 
+    def check(self, skill_dir, slug):
+        problems, notes = [], []
+        with patch.object(manifest, "SKILL", skill_dir):
+            check_catalog.check_recipe(STYLES[slug], problems, notes)
+        return problems
+
+    def test_correct_recipes_pass(self):
+        # Code in js/ (cave-painting), three.js 0x colours and vendor/ (low-poly), digit-led hex strings
+        # (kawaii, anime-80s), placeholders, font strings and directories.
+        for slug in ("cave-painting", "low-poly", "kawaii", "anime-80s"):
+            with self.subTest(slug=slug):
+                self.assertEqual(self.check(FIXTURES / "good", slug), [])
+
+    def test_wrong_recipe_fails(self):
+        problems = self.check(FIXTURES / "wrong", "blueprint")
+        for expected in ("gives no colour", "hsl(12, 80%, 50%)", "0x123456", "#fff", "`bogus`",
+                         "in backticks", "drawGhostTitle", "loadTitleFont"):
+            self.assertTrue(any(expected in p for p in problems), (expected, problems))
+
     def test_template_and_checker_agree_on_headings(self):
         template = (manifest.ROOT / "RECIPE_TEMPLATE.md").read_text()
         block = template.split("```markdown", 1)[1].split("```", 1)[0]
@@ -74,7 +100,40 @@ class CatalogTests(unittest.TestCase):
     def test_webgl_detection(self):
         self.assertTrue(build_index.uses_webgl("low-poly"))      # three.js
         self.assertTrue(build_index.uses_webgl("liquid-glass"))  # raw WebGL2, no render.json
+        self.assertTrue(build_index.uses_webgl("cave-painting")) # WebGL2 in js/scene.js
         self.assertFalse(build_index.uses_webgl("neon-sign"))    # GPU raster only
+
+
+class FetchTests(unittest.TestCase):
+    """fetch_style.py from the local clone: no network needed."""
+
+    def run_fetch(self, *args):
+        return subprocess.run([sys.executable, str(SCRIPTS / "fetch_style.py"), *args],
+                              capture_output=True, text=True, cwd=manifest.ROOT)
+
+    def test_project_from_local_clone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "jrpg-test"
+            result = self.run_fetch("jrpg", str(dest), "--repo", str(manifest.ROOT), "--no-reference")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((dest / "anim.html").is_file())
+            self.assertFalse((dest / "meta.json").exists())
+            self.assertTrue(os.access(dest / "build.sh", os.X_OK))
+            self.assertIn("python3 audio.py", (dest / "build.sh").read_text())
+            self.assertEqual(sorted(x.name for x in (dest / "_licenses").iterdir()),
+                             ["Apache-2.0.txt", "FONTS.md", "LICENSE-video-styles.txt", "OFL-1.1.txt"])
+            self.assertIn("(styles/jrpg)", (dest / "_licenses" / "FONTS.md").read_text())
+
+    def test_rejects_bad_destinations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertNotEqual(self.run_fetch("clay", str(Path(tmp) / "my video")).returncode, 0)
+        self.assertNotEqual(self.run_fetch("clay", str(manifest.SKILL / "proj")).returncode, 0)
+        self.assertFalse((manifest.SKILL / "proj").exists())
+
+    def test_old_uv_line_is_rewritten(self):
+        fetch = script("fetch_style")
+        old = "node events.mjs && uv run --no-project --with numpy --index-url https://pypi.org/simple python audio.py"
+        self.assertEqual(fetch.UV_LINE.sub("python3 audio.py", old), "node events.mjs && python3 audio.py")
 
 
 if __name__ == "__main__":

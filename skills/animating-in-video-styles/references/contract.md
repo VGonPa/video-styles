@@ -64,11 +64,15 @@ to 10 s. Check the duration that ffprobe prints at the end of build.sh.
 
 ## Aspect ratio and size
 
-Frames come from the canvas, not a screenshot, so another size only needs the canvas changed: set
-`width="1080" height="1920"` on it and update the style's `W`/`H` constants (in the four shared-kit styles
-they live in common.js; edit them there, since your project is yours). Coordinates written for 16:9 then need
-recomposing: plan the layout again rather than scaling the old one. Each recipe's "Composition and camera" and
-"Adapting" sections say what survives a format change.
+Frames come from the canvas, not a screenshot, so the renderer needs no change for another size. In the film:
+
+1. Set `width="1080" height="1920"` on the canvas and update the style's `W`/`H` constants (in the four
+   shared-kit styles they live in common.js; edit them there, since your project is yours).
+2. Many styles also hard-code 1920, 1080, 960 and 540 in scenes and textures (anime-80s has `mk(1920, 90)` and
+   `% 1920`). Find them with `grep -nE '\b(1920|1080|960|540)\b' *.html *.js js/*.js` and turn the ones in
+   parts you keep into `W`/`H` expressions.
+3. Recompose: plan the layout again rather than scaling the 16:9 one. Each recipe's "Composition and camera"
+   and "Adapting" sections say what survives a format change.
 
 ## Images and brand assets
 

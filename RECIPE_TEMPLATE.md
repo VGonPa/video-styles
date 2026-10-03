@@ -14,10 +14,14 @@ length and possibly in 9:16, that a viewer would recognise as this style.
 - **Derive every fact from the current code** (`styles/<slug>/anim.html` and the scripts it loads, `audio.py`,
   `render.json`, `fonts.css`). The style's original brief or PR description, when you have them, explain the
   intent; where they disagree with the code, the code wins.
-- **Name what the reader can find:** functions, constants, files, with their parameters. Never line numbers.
-  `check_catalog.py` verifies that every backticked identifier in the Palette's "In code" column and in the
-  Reuse map occurs in the style's code, and that every palette colour occurs there (as hex, or as the r,g,b
-  numbers the code uses).
+- **Name what the reader can find:** functions, constants, files (paths relative to the style folder, such as
+  `js/lib.js` or `vendor/three.min.js`), with their parameters. Never line numbers. `check_catalog.py` verifies
+  that every file and identifier in backticks in the Palette's "In code" column, the Film grammar's "In code"
+  column and the Reuse map exists in the style's code, that every call in backticks anywhere (`drawTitle()`)
+  exists, and that every palette colour occurs in the code.
+- **Write each colour as the code writes it:** `#rrggbb`, `0xrrggbb` or r,g,b numbers. When the code computes it
+  (a GLSL `vec3(…)`, an `hsl()` template, a blend function), put that expression in backticks in the Colour
+  column, exactly as written in the code, instead of a hex you worked out.
 - **Explain why** a rule matters when it is not obvious, so the reader can apply it to scenes the demo never
   had ("no overshoot: Manim's `smooth` rate function is part of the look").
 - **Stay concise:** about 100–200 lines, one fact per bullet, no praise or history. The catalog already holds
@@ -97,7 +101,8 @@ n…), the bed, the mix. Which cues a new scene should emit.>
 
 ## Technical notes
 <render.json flags, WebGL or GPU needs, vendored libraries, approximate render time for 10 s, determinism traps,
-files besides anim.html.>
+files besides anim.html, and frame sizes hard-coded outside `W`/`H` (1920, 1080, 960, 540) that a 9:16 version
+must change.>
 ```
 
 ## Reviewing a recipe
