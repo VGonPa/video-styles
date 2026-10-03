@@ -153,15 +153,15 @@ class CatalogTests(unittest.TestCase):
 class AudioCheckTests(unittest.TestCase):
     """check_audio.py on the shapes audio.py writes: 16-bit stereo, and NaN turned to zeros by astype."""
 
-    def run_check(self, samples, *args):
+    def run_check(self, samples, *args, right=None):
         import numpy as np
         import wave
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "audio.wav"
-            pcm = (np.clip(samples, -1, 1) * 32767).astype(np.int16)
+            pcm = (np.clip(np.stack([samples, samples if right is None else right], axis=1), -1, 1) * 32767)
             with wave.open(str(path), "wb") as w:
                 w.setnchannels(2); w.setsampwidth(2); w.setframerate(48000)
-                w.writeframes(np.repeat(pcm[:, None], 2, axis=1).tobytes())
+                w.writeframes(pcm.astype(np.int16).tobytes())
             return subprocess.run([sys.executable, str(SCRIPTS / "check_audio.py"), str(path), *args],
                                   capture_output=True, text=True)
 
@@ -179,6 +179,10 @@ class AudioCheckTests(unittest.TestCase):
         self.assertIn("expected 10.00 s", self.run_check(0.5 * np.sin(2 * np.pi * 440 * t), "10").stdout)
         early = np.where(t < 1.5, 0.5 * np.sin(2 * np.pi * 440 * t), 0)
         self.assertIn("nothing sounds after 1.50 s", self.run_check(early, "4").stdout)
+        tone = 0.5 * np.sin(2 * np.pi * 440 * t)
+        result = self.run_check(tone, "4", right=np.where(t < 1, tone, 0))   # a NaN zeroed one channel at 1 s
+        self.assertIn("channel R goes silent at 1.00 s", result.stdout)
+        self.assertEqual(result.returncode, 1)
 
 
 class FetchTests(unittest.TestCase):

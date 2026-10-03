@@ -36,6 +36,11 @@ def main():
     print(f"{path}: {seconds:.2f} s, {channels} ch, {rate} Hz, peak {peak:.3f}, last sound at {last:.2f} s")
 
     problems = []
+    ends = [((np.nonzero(np.abs(pcm[:, c]) > 0.001)[0][-1:] + 1) / rate).sum() for c in range(channels)]
+    if channels > 1 and peak >= 0.001 and max(ends) - min(ends) > max(1.0, 0.25 * seconds):
+        quiet = "LR"[int(np.argmin(ends))] if channels == 2 else str(int(np.argmin(ends)))
+        problems.append(f"channel {quiet} goes silent at {min(ends):.2f} s while another sounds to {max(ends):.2f} s: "
+                        "a NaN in that channel usually causes this")
     if peak < 0.001:
         problems.append("silent: a NaN in the mix (a pan past ±1, a zero-length ramp) usually causes this")
     elif len(pcm) > 1 and float(pcm.std(axis=0).max()) < 1e-6:

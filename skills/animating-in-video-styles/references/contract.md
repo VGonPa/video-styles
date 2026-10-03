@@ -45,8 +45,11 @@ The output file is named after the project folder (`SLUG=$(basename "$PWD")` in 
   isolated stills, so a frame cannot rely on the frames before it. Use the style's seeded generator
   (`rng(seed)` or similar), never unseeded `Math.random()`, `Date`, `performance.now()` or state carried from
   frame to frame. That includes the canvas context itself: line dash, cap and join, alpha, composite mode,
-  filter, transform and clip persist from one `draw()` call to the next, so wrap every drawer you add in
-  `save()`/`restore()` (a leaking drawer passes a contact sheet but fails the determinism test).
+  filter, transform, clip and fill or stroke style persist from one `draw()` call to the next, so wrap every
+  drawer you add in `save()`/`restore()` (a leaking drawer passes a contact sheet but fails the determinism
+  test). Chromium also rasterizes some later fills a few levels differently once a gradient has been used as a
+  fill on the main canvas (pattern fills, text glow); if the determinism test differs only there, do one
+  transparent gradient `fillRect()` at the end of `window.ready` so every frame starts in that state.
   A simulation that depends on its history must pre-simulate inside `window.ready` and look the
   result up by `t`. Ten catalog styles still set `"schedule": "contiguous"`: a leftover, since their frames pass
   the stills test and their contact sheets are valid. Do not add it to new code; stills cannot honour it.
