@@ -90,7 +90,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Patrick Hand](https://fonts.google.com/specimen/Patrick+Hand) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [clear-line](styles/clear-line), [comic-book](styles/comic-book), [history-comedy](styles/history-comedy), [stick-webcomic](styles/stick-webcomic), [storytime](styles/storytime), [sunday-strip](styles/sunday-strip) |
 | [Patrick Hand SC](https://fonts.google.com/specimen/Patrick+Hand+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [comic-strip](styles/comic-strip) |
 | [Pixelify Sans](https://fonts.google.com/specimen/Pixelify+Sans) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [retro-desktop](styles/retro-desktop) |
-| [Playfair Display](https://fonts.google.com/specimen/Playfair+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [dada](styles/dada), [newspaper](styles/newspaper) |
+| [Playfair Display](https://fonts.google.com/specimen/Playfair+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [dada](styles/dada), [newspaper](styles/newspaper), [romanticism](styles/romanticism) |
 | [Plus Jakarta Sans](https://fonts.google.com/specimen/Plus+Jakarta+Sans) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [product-ui](styles/product-ui) |
 | [Poiret One](https://fonts.google.com/specimen/Poiret+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-deco](styles/art-deco) |
 | [Potta One](https://fonts.google.com/specimen/Potta+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [manga](styles/manga) |
