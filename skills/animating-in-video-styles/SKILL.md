@@ -85,9 +85,10 @@ notes. Embed the user's images as data URIs (`<skill>/scripts/embed_image.py`); 
 Emit cues from the new scenes with the cue kinds and fields audio.py already handles; extend audio.py only
 for sounds the style lacks, in the same synthesized character. Re-time any music or bed that audio.py writes
 at fixed times for the original (see "Duration" in contract.md), or it stops early or ends at the wrong time.
-Then run `node events.mjs && python3 audio.py` in the project folder: it takes seconds and catches a crash (a
-missing field, a cue looked up by name) or a `nan` peak, while build.sh reaches audio.py only after rendering
-every frame, and deletes them when it fails. A cue kind audio.py has no handler for is silently dropped in most
+Then run `node events.mjs && python3 audio.py && python3 <skill>/scripts/check_audio.py audio.wav <seconds>` in
+the project folder. It takes seconds and catches a crash (a missing field, a cue looked up by name), a track a
+NaN turned silent (most audio.py print only "ok"), a wrong length and a score that stops early, while build.sh
+reaches audio.py only after rendering every frame, and deletes them when it fails. A cue kind audio.py has no handler for is silently dropped in most
 styles (some crash on it instead, which this run catches), so check every kind you emit against audio.py.
 
 ### 8. Look, critique, fix
@@ -116,7 +117,7 @@ project's source, keep `_licenses/`, `THIRD_PARTY_NOTICES.md` and the license fi
 ## Files
 - `scripts/find_style.py`: search the catalog. `scripts/fetch_style.py`: start a project from a style.
   `scripts/contact_sheet.sh`: stills to review. `scripts/embed_image.py`: images as data URIs.
-  `scripts/check_env.sh`: dependency check.
+  `scripts/check_audio.py`: soundtrack check. `scripts/check_env.sh`: dependency check.
 - `references/catalog.md`: every style on one page. `references/styles/<slug>.md`: one recipe per style.
 - `references/contract.md`: how a film is built. `references/review.md`: what to check in the frames.
 - `assets/catalog.json`: machine-readable catalog used by the scripts (generated; do not edit).

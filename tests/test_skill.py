@@ -141,6 +141,37 @@ class CatalogTests(unittest.TestCase):
         self.assertFalse(build_index.uses_webgl("neon-sign"))    # GPU raster only
 
 
+class AudioCheckTests(unittest.TestCase):
+    """check_audio.py on the shapes audio.py writes: 16-bit stereo, and NaN turned to zeros by astype."""
+
+    def run_check(self, samples, *args):
+        import numpy as np
+        import wave
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "audio.wav"
+            pcm = (np.clip(samples, -1, 1) * 32767).astype(np.int16)
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(2); w.setsampwidth(2); w.setframerate(48000)
+                w.writeframes(np.repeat(pcm[:, None], 2, axis=1).tobytes())
+            return subprocess.run([sys.executable, str(SCRIPTS / "check_audio.py"), str(path), *args],
+                                  capture_output=True, text=True)
+
+    def test_sound_of_the_right_length_passes(self):
+        import numpy as np
+        t = np.arange(48000 * 4) / 48000
+        result = self.run_check(0.5 * np.sin(2 * np.pi * 440 * t), "4")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("peak 0.500", result.stdout)
+
+    def test_silent_short_or_early_tracks_are_flagged(self):
+        import numpy as np
+        self.assertIn("silent", self.run_check(np.zeros(48000 * 4)).stdout)
+        t = np.arange(48000 * 4) / 48000
+        self.assertIn("expected 10.00 s", self.run_check(0.5 * np.sin(2 * np.pi * 440 * t), "10").stdout)
+        early = np.where(t < 1.5, 0.5 * np.sin(2 * np.pi * 440 * t), 0)
+        self.assertIn("nothing sounds after 1.50 s", self.run_check(early, "4").stdout)
+
+
 class FetchTests(unittest.TestCase):
     """fetch_style.py from the local clone: no network needed."""
 

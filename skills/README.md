@@ -23,7 +23,7 @@ or copy `skills/animating-in-video-styles/` into your agent's skills directory (
 
 | File | Source |
 |---|---|
-| `SKILL.md`, `references/contract.md`, `references/review.md`, `scripts/` (find, fetch, contact sheet, embed image, env check) | Hand-written |
+| `SKILL.md`, `references/contract.md`, `references/review.md`, `scripts/` (find, fetch, contact sheet, embed image, audio check, env check) | Hand-written |
 | `references/styles/<slug>.md` | One recipe per style, written against [RECIPE_TEMPLATE.md](../RECIPE_TEMPLATE.md) and reviewed by someone other than its author |
 | `references/catalog.md`, `assets/catalog.json` | Generated from `styles/*/meta.json` by `build_index.py` |
 
