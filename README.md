@@ -395,6 +395,20 @@ The downloader checks each file against the size and SHA-256 in [`media.json`](m
 
 **Existing clones from before the media migration:** re-clone to get the reduced history. The cleanup rewrote `main` and the catalog tags; merging or pushing the old history back would reintroduce the large files. Local backups remain separate from the public repository.
 
+## Make your own video in a style
+
+The catalog ships an [agent skill](skills/README.md), `animating-in-video-styles`, in the open Agent Skills
+format: Claude Code, Codex, Cursor and other agents can use it to pick a style, start from its film and make a
+new clip about your own subject, length and format. It is already active in a clone of this repository; to use
+it anywhere else:
+
+```sh
+npx skills add VGonPa/video-styles --skill animating-in-video-styles
+```
+
+Then ask your agent for something like “a 15-second vertical teaser for our budgeting app in the `neo-brutalism`
+style”, or “which style suits a children's science explainer?”.
+
 ## How the clips are made
 
 Each film was written by Claude Code (Opus 5.5) against the [production brief](BRIEF.md), which sets the quality bar, the technical contract and the review steps; the motion design is left to the model, and every clip is checked on a contact sheet and full-resolution key frames before it is merged.

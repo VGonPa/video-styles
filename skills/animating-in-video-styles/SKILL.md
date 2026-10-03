@@ -1,0 +1,100 @@
+---
+name: animating-in-video-styles
+description: Makes short animated videos (explainers, product teasers, social clips, title sequences, data stories) in one of over a hundred ready-made visual styles, such as blueprint, chalkboard, ukiyo-e, synthwave, clay stop-motion, pixel art, manga, Manim-style math, newspaper comic strips, noir comics or inflated 3D icons, and styles inspired by Kurzgesagt, 3Blue1Brown, Saul Bass, Wes Anderson or Van Gogh. Films are drawn on an HTML canvas and rendered to MP4 with synthesized sound. Use it whenever someone wants to create, animate or render a video or motion graphic with a particular look, asks which animation style suits a topic or audience, names one of these styles or creators, or wants to recreate or adapt a style from the VGonPa/video-styles catalog for their own content, even if they never mention the catalog. Not for editing existing footage or live-action video.
+license: MIT
+compatibility: Needs bash (macOS or Linux; WSL on Windows), Node.js 18+ with Playwright and Chromium, ffmpeg, and Python 3 with NumPy. Fetching a style needs git or HTTPS access to GitHub unless you work inside a clone of VGonPa/video-styles. GPU flags target macOS; elsewhere WebGL styles render in software, more slowly.
+metadata:
+  repository: https://github.com/VGonPa/video-styles
+  version: "1.0"
+---
+
+# Animating in video styles
+
+Each style in the catalog is a working short film: an `anim.html` that draws every frame on a canvas as a
+pure function of time, an `audio.py` that synthesizes the soundtrack from cues the film emits, and a
+`build.sh` that renders and encodes it. You make a new video by starting from the style's film and replacing
+its subject with the user's while keeping what makes the style recognisable. The style's recipe says what
+that is and which parts of the code carry it, so the work is adaptation, not invention from scratch.
+
+Paths below are relative to this skill's folder.
+
+## Workflow
+
+### 1. Pin down the brief
+Subject and message, audience, length, aspect ratio, on-screen language, brand assets (logos, product
+shots), sound. Default to 16:9 at 1920 × 1080, 10–20 s, English text and synthesized sound, and ask only for
+what you cannot default. If the user only wants advice on which style to use, stop after step 2.
+
+### 2. Choose the style
+- The user named a style or a creator: resolve it with `python3 scripts/find_style.py <words>`.
+- Otherwise filter by use case, family or words, e.g.
+  `python3 scripts/find_style.py --use-case explainer --family technical` or `... retro game`.
+  Use cases: explainer, tutorial, product, social, story, data, news, titles. `--list` shows families.
+- For a broad look across everything, read `references/catalog.md` (one line per style, grouped by family).
+- Offer two or three candidates, one line each on why they fit, with their preview GIF links
+  (`find_style.py --json <slug>` prints them). Say when a candidate is marked WebGL: it renders slowly
+  without a GPU.
+
+### 3. Read the recipe
+Read `references/styles/<slug>.md` in full before touching code. It gives the 3-second signature, palette,
+type and copy, texture, composition, motion, the film's beat structure, sound, a reuse map of the code with
+call signatures, how to adapt length and format, and what the style must not become.
+
+If the style is marked "no recipe yet", build that knowledge yourself before editing, and tell the user you
+did: from the code and the original's contact sheet (step 4), note what makes the first 3 seconds
+recognisable, the palette constants, the fonts, the texture and finish functions, the easing functions, the
+timeline, and the cue kinds audio.py handles.
+
+### 4. Set up the project
+1. `bash scripts/check_env.sh` checks the tools; install what it reports missing.
+2. `python3 scripts/fetch_style.py <slug> <project-dir>` copies the style's film into a new folder named with
+   letters, digits and dashes; the output file takes that name. Inside a clone of the catalog, put the project
+   outside `styles/` (for example in a git-ignored folder), or the catalog will mistake it for a style.
+3. Look at `<project-dir>/_reference/original-sheet.jpg` now, so you know what the result should feel like.
+
+Work only inside the project folder. Read `references/contract.md` before editing: it explains the
+anim.html contract, where duration and size live, how to use the user's images, and how sound is wired.
+
+### 5. Plan the film
+Write a beat sheet: time ranges, what is on screen, what moves, what sounds. Put the style's signature in the
+first 3 seconds, keep one focus at a time, include at least one transformation or scene change, and end on a
+settle, fade or held final pose. Borrow the recipe's film grammar: how its scenes open, hold and hand over.
+
+### 6. Adapt the code
+Follow the recipe's reuse map: keep the kit (textures, palette, primitives, finish, instruments), replace the
+demo's scenes, timeline and copy. Keep frames a pure function of `t`, with seeded randomness only, because
+frames render out of order in parallel. Change length in all three places listed in contract.md, or the clip
+is silently cut short. For 9:16 or 1:1, change the canvas size and recompose with the recipe's composition
+notes. Embed the user's images as data URIs (`scripts/embed_image.py`); a file path breaks the render.
+
+### 7. Score it
+Emit cues from the new scenes with the cue kinds and fields audio.py already handles; extend audio.py only
+for sounds the style lacks, in the same synthesized character.
+
+### 8. Look, critique, fix
+Run `bash scripts/contact_sheet.sh <project-dir> <seconds>` and look at `_review/sheet.jpg` and the two key
+frames next to `_reference/original-sheet.jpg`. Critique against the recipe's signature and
+`references/review.md`, fix, and render again. Do at least two passes: first renders almost always have
+clipped text, crowded frames or a weak ending. If you cannot view images, ask the user to compare the sheets
+and describe what they see; do not skip the review.
+
+### 9. Build and deliver
+Run `DUR=<seconds> ./build.sh` in the project folder (it takes minutes; use a long timeout or run it in the
+background). It writes `<folder>.mp4` and `preview.gif` and prints an ffprobe summary: check the duration and
+the audio stream. Report the file paths, what the film shows and any known defects. If the user shares the
+project's source, keep `_licenses/`, `THIRD_PARTY_NOTICES.md` and the license files in `vendor/` with it.
+
+## Guardrails
+- Styles inspired by a creator take the visual language and tone only: never their characters, mascots,
+  logos, lettering or signature jokes, and do not imply endorsement.
+- Cultural styles: respect the tradition, use no sacred or religious iconography as decoration, and invent
+  no script that pretends to be a real language.
+- Show real brands, logos, products or people only when the user owns or supplies them.
+
+## Files
+- `scripts/find_style.py`: search the catalog. `scripts/fetch_style.py`: start a project from a style.
+  `scripts/contact_sheet.sh`: stills to review. `scripts/embed_image.py`: images as data URIs.
+  `scripts/check_env.sh`: dependency check.
+- `references/catalog.md`: every style on one page. `references/styles/<slug>.md`: one recipe per style.
+- `references/contract.md`: how a film is built. `references/review.md`: what to check in the frames.
+- `assets/catalog.json`: machine-readable catalog used by the scripts (generated; do not edit).
