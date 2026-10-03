@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── byzantine · an apse mosaic woken by lamplight ──────────────────────────────────────────────
+// Darkness → a spark, and the lamp in the icon's hand catches: its flame lights a frontal face, a
+// halo laid in concentric rings and an elongated raised hand, while the gold glass around it
+// glitters → the camera pulls back through the apse and four smaller figures (hierarchy of scale)
+// light their own lamps between palm trees, under banded clouds and a starry blue vault → a raking
+// light sweeps the wall and the gold inscription flashes letter by letter → hold, the lamps last.
+// The wall is one flat design rasterised as labels → distance field → tesserae set in rows that
+// follow every contour (gold ground: two hugging rows, then straight courses). Gold tiles are set at
+// small random tilts, so each one glints only when light, tile and eye line up: that is the shimmer.
+// Everything is seeded; each frame depends only on t.
+const W = 1920, H = 1080, DUR = 10, TAU = Math.PI * 2;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const sstep = u => { u = clamp(u); return u * u * (3 - 2 * u); };
+const smoother = u => { u = clamp(u); return u * u * u * (u * (u * 6 - 15) + 10); };
+const backOut = (u, s = 2.2) => { u = clamp(u); const v = u - 1; return 1 + (s + 1) * v * v * v + s * v * v; };
+function rng(seed) { let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const R = rng(1177);
+const gauss = () => { let u = 0; while (!u) u = R(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * R()); };
+
+// ── timeline ──
+const T = {
+  spark: 0.32, ignite: 0.46,           // the icon's lamp
+  pull: [2.35, 5.95],                  // camera pulls back through the apse
+  amb: [2.1, 5.6],                     // the whole wall comes up
+  side: [3.55, 3.8, 4.5, 4.72],        // inner left, inner right, outer left, outer right lamps
+  sweep: [6.15, 8.55],                 // raking light across the wall
+  out: [8.95, 9.7],
+};
+
+// ── palette ──
+const C = {
+  mortar: [74, 58, 40],
+  gold: [214, 168, 70], gold2: [226, 184, 88], haloGold: [232, 192, 98], silver: [206, 204, 194],
+  blue: [24, 40, 104], blueSp: [20, 32, 86], blueMid: [46, 78, 156], blueLt: [104, 136, 196],
+  red: [158, 32, 30], redDk: [104, 22, 26], purple: [104, 26, 46], purpleDk: [62, 14, 30],
+  white: [234, 228, 212], whiteSh: [160, 168, 178], whiteDk: [104, 112, 128],
+  green: [38, 88, 54], greenLt: [96, 146, 72], greenDk: [22, 54, 36],
+  flesh: [206, 160, 120], fleshSh: [150, 124, 84], fleshLt: [238, 210, 172], cheek: [204, 130, 104],
+  line: [52, 30, 22], lip: [156, 50, 42], eyeW: [232, 224, 208], iris: [36, 24, 18],
+  hairBr: [62, 38, 24], hairBrL: [112, 76, 46], hairGr: [150, 146, 140], hairGrL: [204, 200, 190],
+  hairBk: [34, 26, 24], hairBkL: [86, 70, 62], hairAu: [116, 56, 30], hairAuL: [164, 96, 54],
+  lamp: [196, 138, 56], lampDk: [92, 54, 24],
+  trunk: [104, 66, 40], trunkDk: [62, 38, 24], date: [176, 44, 34],
+  pearl: [240, 236, 222], outline: [44, 24, 20],
+  fR: [200, 52, 24], fO: [244, 126, 34], fY: [255, 206, 84], fW: [255, 246, 214],
+};
+
+// ── regions: label id → colour, tessera size (world px), K hugging rows (99 = follow edges throughout)
+const REG = [];
+function reg(col, s, o = {}) {
+  REG.push({ col, s, K: o.K ?? 99, gold: o.gold || 0, tilt: o.tilt ?? 0.11, emis: !!o.emis, nv: o.nv ?? 0.1 });
+  return REG.length - 1;
+}
+const lab = id => `rgb(${id + 1},${(id * 97 + 13) & 255},${(id * 53 + 101) & 255})`;
+
+const G_GOLD = reg(C.gold, 6.4, { K: 2, gold: 1, tilt: 0.15, nv: 0.13 });
+const G_SILVER = reg(C.silver, 6.4, { gold: 1, tilt: 0.15 });
+const G_SP = reg(C.blueSp, 6.0, { K: 1, nv: 0.12 });
+const G_STAR = reg(C.gold2, 2.6, { gold: 1 });
+const G_ARR = reg(C.red, 3.8), G_ARB = reg(C.blue, 4.2, { K: 1 }), G_ARP = reg(C.pearl, 2.5), G_ARW = reg(C.white, 2.5);
+const G_ARG = reg(C.red, 2.4);
+const G_GRN = reg(C.green, 4.6, { K: 1 }), G_GRL = reg(C.greenLt, 2.6), G_FLR = reg(C.red, 2.3), G_FLW = reg(C.pearl, 2.3);
+const G_CR = reg(C.red, 3.3), G_CB = reg(C.blueMid, 3.3), G_CW = reg(C.white, 3.3), G_CG = reg(C.gold2, 3.3, { gold: 1 });
+const G_TRK = reg(C.trunk, 3.1), G_TRD = reg(C.trunkDk, 2.3), G_FRN = reg(C.green, 3.0), G_FRL = reg(C.greenLt, 3.0), G_FRD = reg(C.greenDk, 2.2), G_DATE = reg(C.date, 2.3);
+const G_BRL = reg(C.red, 3.6), G_BPB = reg(C.redDk, 3.6, { K: 1 }), G_BPP = reg(C.pearl, 2.6), G_BPG = reg(C.gold2, 2.4, { gold: 1 });
+const G_INS = reg(C.blue, 4.6, { K: 2 }), G_LET = reg(C.gold2, 3.0, { gold: 1, tilt: 0.13 }), G_LOUT = reg(C.redDk, 2.5);
+const G_BOT = reg(C.redDk, 5.0, { K: 1 }), G_DEN = reg(C.gold2, 2.8, { gold: 1 }), G_BWL = reg(C.white, 2.6);
+const G_FL = [reg(C.fR, 8, { emis: true }), reg(C.fO, 8, { emis: true }), reg(C.fY, 8, { emis: true }), reg(C.fW, 8, { emis: true })];
+
+function figSet(z, sch) {
+  return {
+    halo: reg(C.haloGold, z.halo, { gold: 1, tilt: 0.12 }), haloRim: reg(C.red, z.line * 1.15), haloW: reg(C.pearl, z.line),
+    hair: reg(sch.hair, z.hair), hairL: reg(sch.hairL, z.line),
+    flesh: reg(C.flesh, z.face, { nv: 0.07 }), shade: reg(C.fleshSh, z.face, { nv: 0.07 }), light: reg(C.fleshLt, z.face * 0.9, { nv: 0.05 }),
+    cheek: reg(C.cheek, z.face, { nv: 0.06 }), eyeW: reg(C.eyeW, z.face * 0.8, { nv: 0.04 }), iris: reg(C.iris, z.face * 0.8, { nv: 0.04 }),
+    line: reg(C.line, z.line, { nv: 0.06 }), lip: reg(C.lip, z.face * 0.85, { nv: 0.05 }),
+    mantle: reg(sch.mantle, z.robe), mantleD: reg(sch.mantleD, z.line), mantleL: reg(sch.mantleL, z.line, { gold: sch.chryso ? 1 : 0 }),
+    tunic: reg(sch.tunic, z.robe * 0.9), tunicD: reg(sch.tunicD, z.line), clavus: reg(sch.clavus, z.line, { gold: sch.chryso ? 1 : 0 }),
+    sleeve: reg(sch.sleeve, z.robe * 0.75), cuff: reg(C.gold2, z.line, { gold: 1 }), outline: reg(C.outline, z.line, { nv: 0.05 }),
+    lamp: reg(C.lamp, z.lamp, { gold: 1, tilt: 0.12 }), lampD: reg(C.lampDk, z.line), gemR: reg(C.red, z.line), gemB: reg(C.blueMid, z.line),
+    shoe: reg(sch.shoe, z.lamp), collar: reg(C.gold2, z.lamp, { gold: 1 }), pearl: reg(C.pearl, z.line * 0.9),
+  };
+}
+const FIG_C = figSet({ face: 1.9, hair: 2.8, robe: 4.0, halo: 4.4, lamp: 2.4, line: 1.9 },
+  { hair: C.hairBr, hairL: C.hairBrL, mantle: C.purple, mantleD: C.purpleDk, mantleL: C.gold2, chryso: true,
+    tunic: C.blue, tunicD: C.blueSp, clavus: C.gold2, sleeve: C.blue, shoe: C.red });
+const sideSch = (hair, hairL) => ({ hair, hairL, mantle: C.white, mantleD: C.whiteSh, mantleL: C.whiteDk, chryso: false,
+  tunic: C.white, tunicD: C.whiteSh, clavus: C.purple, sleeve: C.white, shoe: C.trunkDk });
+const SZ_S = { face: 1.6, hair: 2.2, robe: 3.2, halo: 3.6, lamp: 1.9, line: 1.6 };
+const FIG_S = [sideSch(C.hairGr, C.hairGrL), sideSch(C.hairBk, C.hairBkL), sideSch(C.hairAu, C.hairAuL), sideSch(C.hairBr, C.hairBrL)]
+  .map(s => figSet(SZ_S, s));
+
+// ── layout (world = the 1920×1080 frame at zoom 1) ──
+const ARCH = { cx: 960, cy: 900, rx: 900, ry: 800 }, GROUND = 862, GB = 912;
+const UC = 80, US = 54;
+const CENTRAL = { cx: 960, top: GROUND - 8.15 * UC, u: UC };
+const SIDES = [-320, 320, -560, 560].map((dx, i) => ({ cx: 960 + dx, top: GROUND - 8.15 * US, u: US, beard: i === 0 || i === 3 }));
+// flame anchors (world) and heights; light centre sits 40% up the flame
+const LAMPS = [
+  { x: CENTRAL.cx + 0.14 * UC, y: CENTRAL.top + 2.61 * UC, h: 0.56 * UC, t: T.ignite, I: 1.35, Rr: 330, pan: 0 },
+  ...SIDES.map((f, i) => ({ x: f.cx, y: f.top + 2.65 * US, h: 0.6 * US, t: T.side[i], I: 0.85, Rr: 210, pan: (f.cx - 960) / 960 })),
+];
+const TEXT = 'THE LAMPLIGHTERS';
+const FT = { x: 200, y: H + 250, h: 200 };      // flame template, drawn below the wall in the label raster
+
+// ── path helpers (label canvas, world or figure-local units) ──
+function capsule(g, x0, y0, x1, y1, w0, w1) {
+  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1e-6, nx = -dy / L, ny = dx / L, an = Math.atan2(ny, nx);
+  g.moveTo(x0 + nx * w0 / 2, y0 + ny * w0 / 2); g.lineTo(x1 + nx * w1 / 2, y1 + ny * w1 / 2);
+  g.arc(x1, y1, w1 / 2, an, an - Math.PI, true); g.lineTo(x0 - nx * w0 / 2, y0 - ny * w0 / 2);
+  g.arc(x0, y0, w0 / 2, an - Math.PI, an - TAU, true); g.closePath();
+}
+const fillR = (g, id, rule) => { g.fillStyle = lab(id); g.fill(rule || 'nonzero'); };
+const strokeR = (g, id, w) => { g.strokeStyle = lab(id); g.lineWidth = w; g.lineCap = 'round'; g.lineJoin = 'round'; g.stroke(); };
+function archPath(g, inset, yb) {
+  g.beginPath(); g.ellipse(ARCH.cx, ARCH.cy, ARCH.rx - inset, ARCH.ry - inset, 0, Math.PI, TAU);
+  g.lineTo(ARCH.cx + ARCH.rx - inset, yb); g.lineTo(ARCH.cx - ARCH.rx + inset, yb); g.closePath();
+}
+function along(inset, step) {                       // points every `step` along the arch curve
+  const pts = [], rx = ARCH.rx - inset, ry = ARCH.ry - inset; let acc = step / 2, px = ARCH.cx - rx, py = ARCH.cy;
+  for (let a = Math.PI; a <= TAU + 1e-9; a += 0.0005) {
+    const x = ARCH.cx + rx * Math.cos(a), y = ARCH.cy + ry * Math.sin(a); acc += Math.hypot(x - px, y - py); px = x; py = y;
+    if (acc >= step) { acc -= step; pts.push([x, y, a]); }
+  }
+  return pts;
+}
+function star(g, x, y, r, n = 8) {
+  g.beginPath();
+  for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * Math.PI / n, rr = i % 2 ? r * 0.42 : r; g.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); }
+  g.closePath();
+}
+
+// ── one frontal figure; local units: u = head height, y = 0 at the crown ──
+function figure(g, F, cx, top, u, o) {
+  const lw = REG[F.line].s * 1.3 / u, lwR = REG[F.haloRim].s * 1.3 / u, side = !o.central;
+  g.save(); g.translate(cx, top); g.scale(u, u);
+  const P = () => g.beginPath();
+  // halo: a flat disc, rimmed
+  P(); g.arc(0, 0.52, 0.98, 0, TAU); fillR(g, F.halo);
+  P(); g.arc(0, 0.52, 0.98 - lwR / 2, 0, TAU); strokeR(g, F.haloRim, lwR);
+  P(); g.arc(0, 0.52, 0.98 - lwR - lw * 0.6, 0, TAU); strokeR(g, F.haloW, lw * 0.85);
+  // long hair behind the head
+  P(); g.ellipse(0, 0.5, 0.45, 0.53, 0, 0, TAU);
+  if (!o.beard) { g.moveTo(-0.43, 0.5); g.lineTo(-0.42, 1.12); g.quadraticCurveTo(-0.3, 1.26, 0, 1.22); g.quadraticCurveTo(0.3, 1.26, 0.42, 1.12); g.lineTo(0.43, 0.5); }
+  fillR(g, F.hair);
+  // tunic below the mantle hem
+  P(); g.moveTo(-0.8, 6.9); g.lineTo(-0.7, 7.78); g.quadraticCurveTo(0, 7.86, 0.7, 7.78); g.lineTo(0.8, 6.9); g.closePath();
+  fillR(g, F.tunic); strokeR(g, F.outline, lw);
+  if (side) for (const s of [-1, 1]) { P(); g.moveTo(s * 0.26, 6.95); g.lineTo(s * 0.24, 7.8); strokeR(g, F.clavus, lw * 1.2); }
+  for (const s of [-1, 1]) { P(); g.moveTo(s * 0.5, 7.15); g.quadraticCurveTo(s * 0.47, 7.5, s * 0.52, 7.76); strokeR(g, F.tunicD, lw); }
+  // feet, splayed, standing on nothing but the gold
+  for (const s of [-1, 1]) { P(); capsule(g, s * 0.24, 7.78, s * 0.42, 8.05, 0.17, 0.13); fillR(g, F.shoe); strokeR(g, F.outline, lw * 0.8); }
+  // mantle: the column of the body
+  P(); g.moveTo(-0.2, 1.22);
+  g.bezierCurveTo(-0.45, 1.3, -0.85, 1.32, -1.02, 1.55); g.bezierCurveTo(-1.12, 1.75, -1.1, 2.4, -1.06, 3.2);
+  g.bezierCurveTo(-1.02, 4.4, -0.98, 6.0, -0.9, 7.05); g.quadraticCurveTo(0, 7.24, 0.9, 7.05);
+  g.bezierCurveTo(0.98, 6.0, 1.02, 4.4, 1.06, 3.2); g.bezierCurveTo(1.1, 2.4, 1.12, 1.75, 1.02, 1.55);
+  g.bezierCurveTo(0.85, 1.32, 0.45, 1.3, 0.2, 1.22); g.quadraticCurveTo(0, 1.3, -0.2, 1.22); g.closePath();
+  fillR(g, F.mantle); strokeR(g, F.outline, lw);
+  if (o.central) {
+    // open mantle: blue tunic panel with a gold clavus
+    P(); g.moveTo(-0.17, 1.26); g.lineTo(-0.3, 7.12); g.quadraticCurveTo(0, 7.2, 0.3, 7.12); g.lineTo(0.17, 1.26); g.closePath();
+    fillR(g, F.tunic); strokeR(g, F.outline, lw);
+    P(); g.moveTo(0, 1.4); g.lineTo(0, 7.14); strokeR(g, F.clavus, lw * 1.5);
+    // chrysography: gold highlight folds, with dark folds beside them
+    for (const s of [-1, 1]) {
+      const folds = [[0.52, 1.8, 0.6, 3.8, 0.55, 6.9], [0.8, 2.2, 0.86, 4.6, 0.76, 6.95], [0.38, 3.4, 0.44, 5.2, 0.4, 7.05]];
+      for (const [a, b, c, d, e, f] of folds) {
+        P(); g.moveTo(s * a, b); g.quadraticCurveTo(s * c, d, s * e, f); strokeR(g, F.mantleL, lw);
+        P(); g.moveTo(s * (a + 0.07), b + 0.15); g.quadraticCurveTo(s * (c + 0.07), d, s * (e + 0.06), f - 0.05); strokeR(g, F.mantleD, lw);
+      }
+      P(); g.moveTo(s * 0.98, 1.66); g.quadraticCurveTo(s * 1.06, 2.3, s * 0.99, 2.92); strokeR(g, F.mantleL, lw);
+    }
+  } else {
+    // a wrapped mantle: a diagonal drape and soft grey folds
+    P(); g.moveTo(-0.95, 2.0); g.quadraticCurveTo(-0.1, 3.5, 0.95, 4.6); strokeR(g, F.mantleL, lw);
+    P(); g.moveTo(-0.92, 2.25); g.quadraticCurveTo(-0.05, 3.75, 0.97, 4.9); strokeR(g, F.mantleD, lw);
+    for (const s of [-1, 1]) {
+      for (const [a, b, c, d, e, f] of [[0.55, 4.2, 0.6, 5.6, 0.55, 6.95], [0.25, 5.0, 0.3, 6.0, 0.22, 7.05], [0.82, 3.6, 0.86, 5.2, 0.78, 6.95]]) {
+        P(); g.moveTo(s * a, b); g.quadraticCurveTo(s * c, d, s * e, f); strokeR(g, F.mantleD, lw);
+      }
+      P(); g.moveTo(s * 0.98, 1.66); g.quadraticCurveTo(s * 1.06, 2.3, s * 0.99, 2.92); strokeR(g, F.mantleD, lw);
+    }
+    P(); g.moveTo(-0.24, 1.3); g.quadraticCurveTo(0, 1.52, 0.24, 1.3); strokeR(g, F.mantleD, lw);
+  }
+  // forearm sleeves, bent at the elbow, with gold cuffs
+  const sleeve = (ex, ey, wx, wy) => {
+    P(); capsule(g, ex, ey, wx, wy, 0.36, 0.27); fillR(g, F.sleeve); strokeR(g, F.outline, lw);
+    const k = 0.84, cx2 = lerp(ex, wx, k), cy2 = lerp(ey, wy, k);
+    P(); capsule(g, cx2, cy2, wx, wy, 0.27, 0.27); fillR(g, F.cuff);
+    P(); capsule(g, ex, ey, wx, wy, 0.36, 0.27); strokeR(g, F.outline, lw);
+  };
+  // a hand is one flesh silhouette: outline every part, fill every part, then draw the finger joins
+  const hand = (parts, seps) => {
+    for (const pt of parts) { P(); pt(); strokeR(g, F.line, lw * 2); }
+    for (const pt of parts) { P(); pt(); fillR(g, F.flesh); }
+    for (const [x0, y0, x1, y1] of seps) { P(); g.moveTo(x0, y0); g.lineTo(x1, y1); strokeR(g, F.line, lw * 0.9); }
+  };
+  const cap = (x0, y0, x1, y1, w0, w1) => () => capsule(g, x0, y0, x1, y1, w0, w1);
+  // the lamp: a footed bowl
+  const lampAt = (lx, ry) => {
+    P(); g.moveTo(lx - 0.27, ry); g.quadraticCurveTo(lx, ry + 0.38, lx + 0.27, ry); g.closePath(); fillR(g, F.lamp); strokeR(g, F.lampD, lw);
+    P(); g.moveTo(lx - 0.27, ry); g.lineTo(lx + 0.27, ry); strokeR(g, F.lampD, lw * 1.2);
+    for (const [dx, dy, gm] of [[-0.12, 0.075, F.gemB], [0, 0.11, F.gemR], [0.12, 0.075, F.gemB]]) { P(); g.arc(lx + dx, ry + dy, 0.032, 0, TAU); fillR(g, gm); }
+    P(); g.moveTo(lx - 0.05, ry + 0.17); g.lineTo(lx + 0.05, ry + 0.17); g.lineTo(lx + 0.11, ry + 0.29); g.lineTo(lx - 0.11, ry + 0.29); g.closePath();
+    fillR(g, F.lamp); strokeR(g, F.lampD, lw);
+  };
+  if (o.central) {
+    // right arm raised, palm out, long fingers; left hand carries the lamp
+    sleeve(-0.92, 3.04, -0.53, 2.6);
+    const FG = [[-0.608, 1.87, -0.016], [-0.548, 1.77, -0.005], [-0.488, 1.75, 0.005], [-0.43, 1.83, 0.016]];
+    hand([
+      () => { g.moveTo(-0.635, 2.62); g.lineTo(-0.645, 2.25); g.lineTo(-0.405, 2.25); g.lineTo(-0.41, 2.6); g.quadraticCurveTo(-0.52, 2.67, -0.635, 2.62); g.closePath(); },
+      cap(-0.43, 2.52, -0.32, 2.33, 0.08, 0.064),                          // thumb, toward the body
+      ...FG.map(([x, ty, dx]) => cap(x, 2.3, x + dx, ty, 0.064, 0.05)),
+    ], FG.slice(1).map(([x, ty, dx], i) => { const [px, pty, pdx] = FG[i]; return [(x + px) / 2, 2.27, (x + dx + px + pdx) / 2, Math.max(ty, pty) + 0.05]; }));
+    P(); g.moveTo(-0.6, 2.44); g.quadraticCurveTo(-0.53, 2.5, -0.46, 2.4); strokeR(g, F.shade, lw * 0.8);   // palm crease
+    sleeve(0.94, 3.1, 0.52, 2.98);
+    lampAt(0.14, 2.62);
+    hand([                                                                   // fingers under the foot of the lamp, thumb up the bowl
+      () => { g.moveTo(0.56, 2.9); g.lineTo(0.56, 3.1); g.quadraticCurveTo(0.45, 3.13, 0.34, 3.09); g.lineTo(0.34, 2.92); g.closePath(); },
+      cap(0.4, 2.95, -0.02, 2.955, 0.07, 0.058), cap(0.4, 3.025, 0, 3.035, 0.07, 0.058), cap(0.4, 3.095, 0.05, 3.1, 0.062, 0.05),
+      cap(0.4, 2.93, 0.33, 2.76, 0.07, 0.058),
+    ], [[0.36, 2.99, 0.0, 2.995], [0.36, 3.062, 0.05, 3.068]]);
+  } else {
+    // both hands carry the lamp before the chest
+    sleeve(-0.92, 3.12, -0.44, 2.98); sleeve(0.92, 3.12, 0.44, 2.98);
+    lampAt(0, 2.66);
+    for (const s of [-1, 1]) hand([
+      () => { g.moveTo(s * 0.47, 2.9); g.lineTo(s * 0.47, 3.08); g.quadraticCurveTo(s * 0.3, 3.12, s * 0.15, 3.05); g.lineTo(s * 0.13, 2.97); g.quadraticCurveTo(s * 0.3, 2.93, s * 0.47, 2.9); g.closePath(); },
+      cap(s * 0.32, 2.93, s * 0.25, 2.75, 0.07, 0.058),
+    ], [[s * 0.4, 3.0, s * 0.17, 3.01]]);
+  }
+  // neck
+  P(); g.rect(-0.15, 0.86, 0.3, 0.46); fillR(g, F.flesh);
+  P(); g.rect(0.095, 0.86, 0.055, 0.46); fillR(g, F.shade);
+  if (o.central) {
+    // jewelled collar: gold, with gems and pearls
+    P(); g.moveTo(-0.56, 1.25); g.quadraticCurveTo(0, 1.66, 0.56, 1.25); g.lineTo(0.43, 1.2); g.quadraticCurveTo(0, 1.48, -0.43, 1.2); g.closePath();
+    fillR(g, F.collar); strokeR(g, F.outline, lw);
+    for (let i = 0; i <= 8; i++) {
+      const v = 0.1 + 0.8 * i / 8, x = lerp(-0.495, 0.495, v), y = 1.225 + (1 - (2 * v - 1) ** 2) * 0.19;
+      P(); g.arc(x, y, i % 2 ? 0.026 : 0.045, 0, TAU); fillR(g, i % 2 ? F.pearl : (i % 4 ? F.gemB : F.gemR));
+    }
+  }
+  // face: a long oval, olive shadows, rosy cheeks, pale highlights
+  const oval = () => { P(); g.ellipse(0, 0.56, 0.33, 0.46, 0, 0, TAU); };
+  oval(); fillR(g, F.flesh);
+  g.save(); oval(); g.clip();
+  P(); g.ellipse(0, 0.56, 0.4, 0.55, 0, 0, TAU); g.ellipse(0, 0.5, 0.272, 0.452, 0, 0, TAU); fillR(g, F.shade, 'evenodd');
+  for (const s of [-1, 1]) { P(); g.ellipse(s * 0.165, 0.735, 0.06, 0.038, 0, 0, TAU); fillR(g, F.cheek); }
+  for (const s of [-1, 1]) { P(); g.ellipse(s * 0.15, 0.605, 0.08, 0.02, 0, 0, TAU); fillR(g, F.light); }
+  P(); g.moveTo(0.02, 0.47); g.lineTo(0.025, 0.67); strokeR(g, F.light, lw * 1.1);
+  P(); g.ellipse(0, 0.94, 0.08, 0.026, 0, 0, TAU); fillR(g, F.shade);
+  g.restore();
+  if (o.beard) {
+    P(); g.moveTo(-0.32, 0.62); g.quadraticCurveTo(-0.34, 1.02, 0, 1.16); g.quadraticCurveTo(0.34, 1.02, 0.32, 0.62);
+    g.quadraticCurveTo(0.2, 0.86, 0, 0.8); g.quadraticCurveTo(-0.2, 0.86, -0.32, 0.62); g.closePath(); fillR(g, F.hair);
+    for (const s of [-1, 1]) { P(); g.moveTo(s * 0.2, 0.84); g.quadraticCurveTo(s * 0.18, 1.0, s * 0.06, 1.1); strokeR(g, F.hairL, lw); }
+  } else {
+    P(); g.ellipse(0, 0.56, 0.33, 0.46, 0, 0.12 * Math.PI, 0.88 * Math.PI); strokeR(g, F.line, lw);
+  }
+  // hair cap above the hairline, with strands
+  g.save(); P(); g.ellipse(0, 0.5, 0.45, 0.53, 0, 0, TAU); g.clip();
+  P(); g.moveTo(-1, 0.62); g.lineTo(-0.345, 0.6); g.quadraticCurveTo(-0.31, 0.16, 0, 0.2); g.quadraticCurveTo(0.31, 0.16, 0.345, 0.6); g.lineTo(1, 0.62); g.lineTo(1, -1); g.lineTo(-1, -1); g.closePath();
+  fillR(g, F.hair); g.restore();
+  for (const s of [-1, 1]) {
+    P(); g.moveTo(s * 0.02, 0.02); g.quadraticCurveTo(s * 0.3, 0.06, s * 0.38, 0.42); strokeR(g, F.hairL, lw);
+    P(); g.moveTo(s * 0.05, 0.12); g.quadraticCurveTo(s * 0.28, 0.16, s * 0.33, 0.36); strokeR(g, F.hairL, lw * 0.9);
+    if (!o.beard) { P(); g.moveTo(s * 0.4, 0.62); g.quadraticCurveTo(s * 0.41, 0.92, s * 0.33, 1.12); strokeR(g, F.hairL, lw); }
+  }
+  // the eyes: large almonds that look straight out
+  for (const s of [-1, 1]) {
+    const ex = s * 0.158, ey = 0.505, ew = 0.118;
+    const alm = () => { P(); g.moveTo(ex - ew, ey + 0.004); g.quadraticCurveTo(ex, ey - 0.092, ex + ew, ey + 0.004); g.quadraticCurveTo(ex, ey + 0.07, ex - ew, ey + 0.004); g.closePath(); };
+    alm(); fillR(g, F.eyeW);
+    g.save(); alm(); g.clip(); P(); g.arc(ex + s * 0.006, ey + 0.004, 0.05, 0, TAU); fillR(g, F.iris); g.restore();
+    P(); g.moveTo(ex - ew - 0.006, ey + 0.008); g.quadraticCurveTo(ex, ey - 0.096, ex + ew + 0.006, ey + 0.008); strokeR(g, F.line, lw * 1.3);
+    P(); g.moveTo(ex - ew + 0.02, ey + 0.02); g.quadraticCurveTo(ex, ey + 0.074, ex + ew - 0.02, ey + 0.02); strokeR(g, F.shade, lw * 0.8);
+    P(); g.moveTo(s * 0.03, 0.42); g.quadraticCurveTo(s * 0.16, 0.325, s * 0.305, 0.425); strokeR(g, F.hair, lw * 1.45);
+  }
+  // the long nose, drawn from the brow, and a small closed mouth
+  P(); g.moveTo(-0.035, 0.42); g.quadraticCurveTo(-0.058, 0.56, -0.055, 0.705); strokeR(g, F.line, lw * 1.1);
+  P(); g.moveTo(-0.075, 0.7); g.quadraticCurveTo(-0.01, 0.755, 0.07, 0.705); strokeR(g, F.line, lw);
+  P(); g.moveTo(-0.08, 0.84); g.quadraticCurveTo(-0.035, 0.818, 0, 0.832); g.quadraticCurveTo(0.035, 0.818, 0.08, 0.84); g.quadraticCurveTo(0, 0.86, -0.08, 0.84); fillR(g, F.lip);
+  P(); g.ellipse(0, 0.868, 0.058, 0.022, 0, 0, TAU); fillR(g, F.lip);
+  P(); g.moveTo(-0.07, 0.846); g.quadraticCurveTo(0, 0.856, 0.07, 0.846); strokeR(g, F.line, lw * 0.7);
+  g.restore();
+}
+
+// ── the whole wall, painted as labels ──
+function palm(g, x, crown, len, seed) {
+  const r = rng(seed);
+  g.beginPath(); g.moveTo(x - 7, GROUND + 6); g.quadraticCurveTo(x - 9, (GROUND + crown) / 2, x - 4.5, crown + 6);
+  g.lineTo(x + 4.5, crown + 6); g.quadraticCurveTo(x + 3, (GROUND + crown) / 2, x + 7, GROUND + 6); g.closePath(); fillR(g, G_TRK);
+  for (let y = GROUND - 6, k = 0; y > crown + 14; y -= 13, k++) {
+    const hw = lerp(6.5, 4.2, (GROUND - y) / (GROUND - crown));
+    g.beginPath(); g.moveTo(x - hw, y - 5); g.lineTo(x, y); g.lineTo(x + hw, y - 5); strokeR(g, G_TRD, 2.6);
+  }
+  // crown: fronds that arch out and droop like a fountain, one upright; dates hang beneath
+  const q = (p0, p1, p2, u) => [(1 - u) * (1 - u) * p0[0] + 2 * (1 - u) * u * p1[0] + u * u * p2[0], (1 - u) * (1 - u) * p0[1] + 2 * (1 - u) * u * p1[1] + u * u * p2[1]];
+  const fronds = [[0, 0]];
+  for (let k = 0; k < 4; k++) fronds.push([-1, k], [1, k]);
+  const wk = len / 86;
+  fronds.forEach(([sd, k], i) => {
+    const L = len * (sd ? 1 - k * 0.09 + (r() - 0.5) * 0.08 : 0.5), p0 = [x, crown];
+    const p1 = sd ? [x + sd * L * (0.32 + 0.1 * k), crown - L * (0.52 - 0.17 * k)] : [x + 2, crown - L * 0.6];
+    const p2 = sd ? [x + sd * L * (0.82 + 0.04 * k), crown + L * (-0.1 + 0.3 * k)] : [x + 5, crown - L];
+    const pts = Array.from({ length: 19 }, (_, j) => q(p0, p1, p2, j / 18));
+    const side = (dir) => pts.map(([px, py], j) => {
+      const [ax, ay] = pts[Math.max(0, j - 1)], [bx, by] = pts[Math.min(18, j + 1)], dx = bx - ax, dy = by - ay, d = Math.hypot(dx, dy) || 1;
+      const w = (8.5 * Math.sin(Math.PI * Math.min(1, j / 18 * 1.08 + 0.06)) + 0.8) * wk;
+      return [px - dy / d * w * dir, py + dx / d * w * dir];
+    });
+    g.beginPath(); [...side(1), ...side(-1).reverse()].forEach(([px, py], j) => j ? g.lineTo(px, py) : g.moveTo(px, py)); g.closePath();
+    fillR(g, i % 2 ? G_FRL : G_FRN);
+    g.beginPath(); pts.forEach(([px, py], j) => j ? g.lineTo(px, py) : g.moveTo(px, py)); strokeR(g, G_FRD, 2.4);
+  });
+  for (const sd of [-1, 1]) for (let k = 0; k < 6; k++) {
+    g.beginPath(); g.arc(x + sd * (8 + (k % 2) * 6 + Math.floor(k / 2) * 1.5), crown + 10 + Math.floor(k / 2) * 6.5, 3.3, 0, TAU); fillR(g, G_DATE);
+  }
+}
+function cloud(g, cx, cy, w, h, flip) {
+  const r = (x, y, rx, ry) => { g.moveTo(x + rx, y); g.ellipse(x, y, rx, ry, 0, 0, TAU); };
+  const shape = () => { g.beginPath(); r(cx, cy, w / 2, h / 2); r(cx + flip * w * 0.12, cy - h * 0.38, w * 0.3, h * 0.32); r(cx - flip * w * 0.22, cy + h * 0.1, w * 0.36, h * 0.4); };
+  g.save(); shape(); g.clip();
+  const bands = [G_CR, G_CW, G_CB, G_CW, G_CG, G_CW, G_CR, G_CB];
+  const bh = h * 1.4 / bands.length;
+  bands.forEach((id, i) => { g.beginPath(); g.rect(cx - w, cy - h * 0.7 + i * bh, w * 2, bh + 0.5); fillR(g, id); });
+  g.restore();
+}
+function design(g) {
+  g.setTransform(2, 0, 0, 2, 0, 0);
+  // spandrels: the night-blue vault outside the arch, with gold stars
+  g.fillStyle = lab(G_SP); g.fillRect(0, 0, W, H + 400);
+  const rs = rng(31);
+  for (let j = 0, y = 34; y < GB - 14; y += 37, j++) for (let x = (j % 2) * 37 + 20; x < W; x += 74) {
+    const big = j % 2 === 0, m = big ? 30 : 16, dx = (x - ARCH.cx) / (ARCH.rx + m), dy = (y - ARCH.cy) / (ARCH.ry + m);
+    if (y < ARCH.cy ? dx * dx + dy * dy < 1 : Math.abs(x - ARCH.cx) < ARCH.rx + m) continue;
+    if (x < 16 || x > W - 16) continue;
+    if (big) { star(g, x + (rs() - 0.5) * 5, y + (rs() - 0.5) * 5, 15); fillR(g, G_STAR); }
+    else { g.beginPath(); g.arc(x, y, 3.2, 0, TAU); fillR(g, G_ARP); }
+  }
+  // arch: red rim, jewelled blue band with pearls, white fillet, then the gold
+  archPath(g, 0, GB); fillR(g, G_ARR);
+  archPath(g, 8, GB); fillR(g, G_ARB);
+  along(21, 19).forEach(([x, y], i) => {
+    g.beginPath();
+    if (i % 2) { g.arc(x, y, 5.6, 0, TAU); fillR(g, G_ARP); }
+    else { g.moveTo(x, y - 6); g.lineTo(x + 5, y); g.lineTo(x, y + 6); g.lineTo(x - 5, y); g.closePath(); fillR(g, G_ARG); }
+  });
+  archPath(g, 34, GB); fillR(g, G_ARW);
+  archPath(g, 39, GB); fillR(g, G_GOLD);
+  // ground: green strip with tufts and flowers
+  g.save(); archPath(g, 39, GB); g.clip();
+  g.fillStyle = lab(G_GRN); g.fillRect(0, GROUND, W, GB - GROUND);
+  const rg = rng(57);
+  for (let x = 80; x < W - 60; x += 15 + rg() * 12) {
+    const y = GROUND + 8 + rg() * (GB - GROUND - 20), k = rg();
+    if (k < 0.55) { g.beginPath(); g.moveTo(x - 5, y + 6); g.quadraticCurveTo(x - 2, y, x, y - 5); g.moveTo(x, y - 5); g.quadraticCurveTo(x + 2, y, x + 5, y + 6); strokeR(g, G_GRL, 3); }
+    else { g.beginPath(); g.arc(x, y, 3.6, 0, TAU); fillR(g, k < 0.8 ? G_FLR : G_FLW); }
+  }
+  g.restore();
+  // banded clouds in the gold sky
+  cloud(g, 650, 292, 196, 46, 1); cloud(g, 1270, 292, 196, 46, -1);
+  cloud(g, 770, 196, 118, 30, -1); cloud(g, 1150, 196, 118, 30, 1);
+  // palms between the figures
+  palm(g, 960 - 174, 455, 86, 3); palm(g, 960 + 174, 455, 86, 4);
+  palm(g, 960 - 440, 478, 62, 5); palm(g, 960 + 440, 478, 62, 6);
+  palm(g, 960 - 732, 618, 60, 7); palm(g, 960 + 732, 618, 60, 8);
+  // the procession and the icon (hierarchy of scale)
+  SIDES.forEach((f, i) => figure(g, FIG_S[i], f.cx, f.top, f.u, { beard: f.beard }));
+  figure(g, FIG_C, CENTRAL.cx, CENTRAL.top, CENTRAL.u, { central: true });
+  // lower register: red fillet, pearl band, inscription, red base with gold dentils
+  g.fillStyle = lab(G_BRL); g.fillRect(0, GB, W, 8);
+  g.fillStyle = lab(G_BPB); g.fillRect(0, GB + 8, W, 24);
+  for (let x = 11, i = 0; x < W; x += 22, i++) { g.beginPath(); if (i % 2) { g.arc(x, GB + 20, 6.4, 0, TAU); fillR(g, G_BPP); } else { g.arc(x, GB + 20, 3, 0, TAU); fillR(g, G_BPG); } }
+  g.fillStyle = lab(G_BWL); g.fillRect(0, GB + 32, W, 5);
+  g.fillStyle = lab(G_INS); g.fillRect(0, GB + 37, W, 90);
+  g.fillStyle = lab(G_BWL); g.fillRect(0, GB + 127, W, 5);
+  g.fillStyle = lab(G_BOT); g.fillRect(0, GB + 132, W, H - GB - 132 + 400);
+  for (let x = 20; x < W; x += 40) { g.fillStyle = lab(G_DEN); g.fillRect(x - 7, GB + 146, 14, 14); }
+  // the inscription, laid in gold with a dark red outline course
+  const ty = GB + 83;
+  g.font = '400 80px Forum'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.letterSpacing = '16px';
+  const tw = g.measureText(TEXT).width;
+  g.lineJoin = 'round';
+  g.strokeStyle = lab(G_LOUT); g.lineWidth = 4 + 2 * 2.6 * 1.25; g.strokeText(TEXT, W / 2 + 8, ty);
+  g.fillStyle = lab(G_LET); g.fillText(TEXT, W / 2 + 8, ty); g.strokeStyle = lab(G_LET); g.lineWidth = 4; g.strokeText(TEXT, W / 2 + 8, ty);
+  g.letterSpacing = '0px';
+  for (const s of [-1, 1]) {
+    const x = W / 2 + s * (tw / 2 + 46), y = ty - 3;
+    g.beginPath(); g.moveTo(x, y - 17); g.lineTo(x + 17, y); g.lineTo(x, y + 17); g.lineTo(x - 17, y); g.closePath(); fillR(g, G_LOUT);
+    g.beginPath(); g.moveTo(x, y - 13); g.lineTo(x + 13, y); g.lineTo(x, y + 13); g.lineTo(x - 13, y); g.closePath(); fillR(g, G_LET);
+    g.beginPath(); g.arc(x, y, 4.2, 0, TAU); fillR(g, G_LOUT);
+  }
+  // flame template (below the wall): red skin, orange, yellow, white core
+  const tear = (k, oy) => { g.beginPath(); const x = FT.x, y = FT.y - oy * FT.h, s = FT.h * k;
+    g.moveTo(x, y); g.bezierCurveTo(x + 0.32 * s, y - 0.02 * s, x + 0.26 * s, y - 0.48 * s, x, y - s); g.bezierCurveTo(x - 0.26 * s, y - 0.48 * s, x - 0.32 * s, y - 0.02 * s, x, y); g.closePath(); };
+  g.fillStyle = lab(G_GOLD); g.fillRect(FT.x - 120, FT.y - 240, 240, 270);
+  tear(1, 0); fillR(g, G_FL[0]); tear(0.8, 0.04); fillR(g, G_FL[1]); tear(0.58, 0.06); fillR(g, G_FL[2]); tear(0.33, 0.07); fillR(g, G_FL[3]);
+}
+
+// ── tesserae from the label raster ──
+const LS = 2, LW = W * LS, LH = (H + 300) * LS;
+const CAP = 240000;
+const TX = new Float32Array(CAP), TY = new Float32Array(CAP), TAng = new Float32Array(CAP), TSz = new Float32Array(CAP), TReg = new Uint16Array(CAP);
+let NT = 0;
+const TC = new Float32Array(CAP * 8);                 // quad corners, world units
+let TB;                                                 // bucket index per tile
+const NV = 9;
+
+function edt1d(f, n, d, v, z) {
+  let k = 0; v[0] = 0; z[0] = -1e20; z[1] = 1e20;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+    k++; v[k] = q; z[k] = s; z[k + 1] = 1e20;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; const dq = q - v[k]; d[q] = dq * dq + f[v[k]]; }
+}
+
+function buildTiles() {
+  const lc = mk(LW, LH), g = lc.getContext('2d', { willReadFrequently: true });
+  design(g);
+  const px = g.getImageData(0, 0, LW, LH).data;
+  const N = LW * LH, L = new Int16Array(N);
+  const chkG = REG.map((_, id) => (id * 97 + 13) & 255), chkB = REG.map((_, id) => (id * 53 + 101) & 255);
+  for (let p = 0, q = 0; p < N; p++, q += 4) {
+    const id = px[q] - 1;
+    L[p] = (id >= 0 && id < REG.length && px[q + 1] === chkG[id] && px[q + 2] === chkB[id]) ? id : -1;
+  }
+  // distance (label px) to the nearest edge between labels
+  const D = new Float32Array(N);
+  for (let y = 0; y < LH; y++) for (let x = 0; x < LW; x++) {
+    const p = y * LW + x, id = L[p];
+    const edge = id < 0 || x === 0 || y === 0 || x === LW - 1 || y === LH - 1 || L[p - 1] !== id || L[p + 1] !== id || L[p - LW] !== id || L[p + LW] !== id;
+    D[p] = edge ? 0 : 1e20;
+  }
+  const M = Math.max(LW, LH), f = new Float64Array(M), d = new Float64Array(M), v = new Int32Array(M), z = new Float64Array(M + 1);
+  for (let x = 0; x < LW; x++) { for (let y = 0; y < LH; y++) f[y] = D[y * LW + x]; edt1d(f, LH, d, v, z); for (let y = 0; y < LH; y++) D[y * LW + x] = d[y]; }
+  for (let y = 0; y < LH; y++) { const o = y * LW; for (let x = 0; x < LW; x++) f[x] = D[o + x]; edt1d(f, LW, d, v, z); for (let x = 0; x < LW; x++) D[o + x] = Math.sqrt(d[x]); }
+
+  // spatial hash for spacing checks
+  const CELL = 8, GW = Math.ceil(LW / CELL), GH = Math.ceil(LH / CELL), head = new Int32Array(GW * GH).fill(-1), next = new Int32Array(CAP);
+  const add = (x, y, a, s, id) => {
+    if (NT >= CAP) return;
+    TX[NT] = x; TY[NT] = y; TAng[NT] = a; TSz[NT] = s; TReg[NT] = id;
+    const c = ((y / CELL) | 0) * GW + ((x / CELL) | 0); next[NT] = head[c]; head[c] = NT; NT++;
+  };
+  const crowded = (x, y, id, r) => {
+    const r2 = r * r, c0 = Math.max(0, ((x - r) / CELL) | 0), c1 = Math.min(GW - 1, ((x + r) / CELL) | 0), r0 = Math.max(0, ((y - r) / CELL) | 0), r1 = Math.min(GH - 1, ((y + r) / CELL) | 0);
+    for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) for (let i = head[cy * GW + cx]; i >= 0; i = next[i]) {
+      if (TReg[i] !== id) continue; const dx = TX[i] - x, dy = TY[i] - y; if (dx * dx + dy * dy < r2) return true;
+    }
+    return false;
+  };
+  const SP = REG.map(r => r.s * LS);
+  // 1) courses that follow the edges (opus vermiculatum) — every region, K rows deep
+  for (let y = 1; y < LH - 1; y++) for (let x = 1; x < LW - 1; x++) {
+    const p = y * LW + x, id = L[p]; if (id < 0) continue;
+    const s = SP[id], dd = D[p], k = Math.floor(dd / s); if (k >= REG[id].K) continue;
+    let size = s;
+    if (Math.abs(dd - (k + 0.5) * s) > 0.5) {
+      // narrow strokes never reach s/2 from their edges: put one row of smaller tesserae on the ridge
+      if (k > 0 || dd < 0.24 * s || dd < D[p - 1] || dd < D[p + 1] || dd < D[p - LW] || dd < D[p + LW]) continue;
+      size = 2 * dd + 0.6;
+    }
+    if (crowded(x, y, id, 0.9 * size)) continue;
+    const gx = D[p + 1] - D[p - 1], gy = D[p + LW] - D[p - LW];
+    add(x, y, (gx || gy) ? Math.atan2(gy, gx) + Math.PI / 2 : 0, size, id);
+  }
+  // 2) straight courses where a region is deeper than its K hugging rows (gold ground, vault, bands)
+  const box = REG.map(() => [1e9, 1e9, -1, -1]);
+  for (let y = 0; y < LH; y++) for (let x = 0; x < LW; x++) { const id = L[y * LW + x]; if (id < 0 || REG[id].K >= 99) continue; const b = box[id]; if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y; }
+  REG.forEach((rg, id) => {
+    if (rg.K >= 99 || box[id][2] < 0) return;
+    const s = SP[id], [x0, y0, x1, y1] = box[id], lim = (rg.K + 0.5) * s - 0.5;
+    for (let j = 0, y = y0 + s / 2; y <= y1; y += s, j++) {
+      const shift = (j % 2) * s * 0.5 + (R() - 0.5) * s * 0.3;
+      for (let x = x0 + shift; x <= x1; x += s * (0.97 + R() * 0.06)) {
+        const tx = x + (R() - 0.5) * s * 0.06, ty = y + Math.sin(x * 0.004 + j * 0.7) * s * 0.06;
+        const p = (ty | 0) * LW + (tx | 0); if (L[p] !== id || D[p] < lim) continue;
+        add(tx, ty, (R() - 0.5) * 0.06, s, id);
+      }
+    }
+  });
+  // world units, quad corners, colour buckets
+  TB = new Uint16Array(NT);
+  for (let i = 0; i < NT; i++) {
+    TX[i] /= LS; TY[i] /= LS; TSz[i] /= LS;
+    const s = TSz[i], a = TAng[i], ca = Math.cos(a), sa = Math.sin(a);
+    const hl = s * 0.5 * (0.84 + R() * 0.12), hw = s * 0.5 * (0.84 + R() * 0.08), j = s * 0.06;
+    const cs = [[-hl, -hw], [hl, -hw], [hl, hw], [-hl, hw]];
+    for (let k = 0; k < 4; k++) {
+      const lx = cs[k][0] + (R() - 0.5) * 2 * j, ly = cs[k][1] + (R() - 0.5) * 2 * j;
+      TC[i * 8 + k * 2] = lx * ca - ly * sa; TC[i * 8 + k * 2 + 1] = lx * sa + ly * ca;
+    }
+    let id = TReg[i];
+    if (id === G_GOLD && R() < 0.022) { id = G_SILVER; TReg[i] = id; }
+    TB[i] = id * NV + Math.floor(R() * NV);
+  }
+}
+
+// ── colour buckets, albedo levels, gold list, flame template ──
+const rgb = c => `rgb(${c.map(v => Math.round(clamp(v, 0, 255))).join(',')})`;
+let BUCKET_COL, LEVELS, GOLD, FLAME;
+function buildColours() {
+  BUCKET_COL = [];
+  REG.forEach(rg => {
+    for (let v = 0; v < NV; v++) {
+      const k = 1 + rg.nv * (2 * v / (NV - 1) - 1), w = ((v * 7) % 3 - 1) * 5 * rg.nv * 10;
+      BUCKET_COL.push(rgb([rg.col[0] * k + w * 0.6, rg.col[1] * k, rg.col[2] * k - w * 0.4]));
+    }
+  });
+}
+function quadPath(path, i, ox = 0, oy = 0, k = 1) {
+  const x = TX[i] + ox, y = TY[i] + oy, o = i * 8;
+  path.moveTo(x + TC[o] * k, y + TC[o + 1] * k); path.lineTo(x + TC[o + 2] * k, y + TC[o + 3] * k);
+  path.lineTo(x + TC[o + 4] * k, y + TC[o + 5] * k); path.lineTo(x + TC[o + 6] * k, y + TC[o + 7] * k); path.closePath();
+}
+function buildAlbedo() {
+  // Path2D appends get slow on paths with very many contours: keep every path to ~1500 tiles
+  const paths = BUCKET_COL.map(() => []), shadow = [], hl = [];
+  const chunk = (list, n) => { if (!list.length || list.n >= 1500) { list.push(new Path2D()); list.n = 0; } list.n++; return list[list.length - 1]; };
+  GOLD = []; const flTiles = [];
+  for (let i = 0; i < NT; i++) {
+    const rg = REG[TReg[i]];
+    if (rg.emis) { flTiles.push(i); continue; }
+    if (TY[i] > H + 20) continue;
+    quadPath(chunk(paths[TB[i]]), i); quadPath(chunk(shadow), i, 0.22 * TSz[i] / 4, 0.3 * TSz[i] / 4);
+    // a sliver of light on each tessera's upper-left edge (the glass is cut, not polished)
+    const o = i * 8, x = TX[i], y = TY[i], h = chunk(hl);
+    h.moveTo(x + TC[o + 6], y + TC[o + 7]); h.lineTo(x + TC[o], y + TC[o + 1]); h.lineTo(x + TC[o + 2], y + TC[o + 3]);
+    h.lineTo(x + TC[o + 2] * 0.8, y + TC[o + 3] * 0.8); h.lineTo(x + TC[o] * 0.78, y + TC[o + 1] * 0.78); h.lineTo(x + TC[o + 6] * 0.8, y + TC[o + 7] * 0.8); h.closePath();
+    if (rg.gold) {
+      const tl = rg.tilt; let nx = gauss() * tl, ny = gauss() * tl; const nz = 1; const ln = Math.hypot(nx, ny, nz);
+      GOLD.push([i, nx / ln, ny / ln, nz / ln]);
+    }
+  }
+  // flame template tiles: normalised so the flame is 1 unit tall with its base at (0,0)
+  FLAME = { paths: G_FL.map(() => new Path2D()), bed: new Path2D() };
+  for (const i of flTiles) {
+    const k = G_FL.indexOf(TReg[i]), x = (TX[i] - FT.x) / FT.h, y = (TY[i] - FT.y) / FT.h, o = i * 8, s = 1 / FT.h;
+    const p = FLAME.paths[k];
+    p.moveTo(x + TC[o] * s, y + TC[o + 1] * s); p.lineTo(x + TC[o + 2] * s, y + TC[o + 3] * s); p.lineTo(x + TC[o + 4] * s, y + TC[o + 5] * s); p.lineTo(x + TC[o + 6] * s, y + TC[o + 7] * s); p.closePath();
+  }
+  const b = FLAME.bed; b.moveTo(0, 0.02); b.bezierCurveTo(0.36, 0, 0.29, -0.5, 0, -1.04); b.bezierCurveTo(-0.29, -0.5, -0.36, 0, 0, 0.02); b.closePath();
+  // grain for the glass surfaces
+  const gr = mk(256, 256), gg = gr.getContext('2d'), id = gg.createImageData(256, 256), rn = rng(91);
+  for (let p = 0; p < 256 * 256; p++) { const v = 128 + (rn() - 0.5) * 70; id.data[p * 4] = id.data[p * 4 + 1] = id.data[p * 4 + 2] = v; id.data[p * 4 + 3] = 255; }
+  gg.putImageData(id, 0, 0);
+  // levels of detail along the camera path: each covers only what is seen at its zooms
+  LEVELS = SCALES.map(sc => ({ sc, b: [1e9, 1e9, -1e9, -1e9] }));
+  for (let n = 0; n <= DUR * 30; n++) {
+    const cam = camera(n / 30), L = LEVELS[levelFor(cam.z)], hw = W / 2 / cam.z + 12, hh = H / 2 / cam.z + 12;
+    L.b[0] = Math.min(L.b[0], cam.cx - hw); L.b[1] = Math.min(L.b[1], cam.cy - hh); L.b[2] = Math.max(L.b[2], cam.cx + hw); L.b[3] = Math.max(L.b[3], cam.cy + hh);
+  }
+  for (const L of LEVELS) {
+    if (L.b[2] < L.b[0]) continue;
+    const x0 = Math.max(0, Math.floor(L.b[0])), y0 = Math.max(0, Math.floor(L.b[1])), x1 = Math.min(W, Math.ceil(L.b[2])), y1 = Math.min(H, Math.ceil(L.b[3]));
+    L.x0 = x0; L.y0 = y0;
+    const c = mk(Math.ceil((x1 - x0) * L.sc), Math.ceil((y1 - y0) * L.sc)), g = c.getContext('2d');
+    g.setTransform(L.sc, 0, 0, L.sc, -x0 * L.sc, -y0 * L.sc);
+    g.fillStyle = rgb(C.mortar); g.fillRect(x0, y0, x1 - x0, y1 - y0);
+    g.fillStyle = 'rgba(16,10,6,0.55)'; shadow.forEach(p => g.fill(p));
+    paths.forEach((ps, b) => { g.fillStyle = BUCKET_COL[b]; ps.forEach(p => g.fill(p)); });
+    g.fillStyle = 'rgba(255,248,228,0.12)'; hl.forEach(p => g.fill(p));
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'overlay'; g.globalAlpha = 0.22;
+    g.fillStyle = g.createPattern(gr, 'repeat'); g.fillRect(0, 0, c.width, c.height);
+    g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+    L.canvas = c;
+  }
+}
+const SCALES = [1, 1.5, 2.2, 3.05];                  // albedo resolutions (px per world unit)
+function levelFor(z) { const i = SCALES.findIndex(sc => sc >= z - 1e-6); return i < 0 ? SCALES.length - 1 : i; }
+
+// ── camera: close on the icon's face and lamp, then back through the apse ──
+function camera(t) {
+  const z0 = 3.0, z1 = 2.78, z2 = 1.0, c1 = [960, 352], c2 = [960, 540];
+  if (t < T.pull[0]) return { z: lerp(z0, z1, t / T.pull[0]), cx: c1[0], cy: lerp(345, c1[1], t / T.pull[0]) };
+  const u = smoother(seg(t, T.pull[0], T.pull[1])), z = Math.exp(lerp(Math.log(z1), Math.log(z2), u));
+  const m = (1 / z - 1 / z1) / (1 / z2 - 1 / z1);
+  const zz = z * (1 + 0.022 * sstep(seg(t, T.pull[1], DUR)));        // a last, barely-there push in
+  return { z: zz, cx: lerp(c1[0], c2[0], m), cy: lerp(c1[1], c2[1], m) };
+}
+
+// ── light ──
+const flick = (t, k) => 1 + 0.07 * Math.sin(t * 13.1 + k * 1.7) + 0.045 * Math.sin(t * 23.7 + k * 2.9) + 0.03 * Math.sin(t * 41.3 + k * 0.6);
+function lights(t) {
+  const out = [];
+  LAMPS.forEach((l, k) => {
+    const on = sstep(seg(t, l.t - 0.04, l.t + (k ? 0.45 : 1.4))); if (on <= 0) return;
+    const f = flick(t, k), sway = 0.9 * Math.sin(t * 7.3 + k) + 0.5 * Math.sin(t * 17.9 + k * 2);
+    out.push({ x: l.x + sway, y: l.y - l.h * 0.4, z: 190, I: l.I * Math.sqrt(on) * f, Rr: l.Rr * (0.35 + 0.65 * on) });
+  });
+  const amb = smoother(seg(t, T.amb[0], T.amb[1]));
+  // light from a high window: far away, so its glints drift with the camera rather than the source
+  if (amb > 0) out.push({ x: -700, y: -900, z: 2600, I: 0.5 * amb, Rr: 0 });
+  const sw = seg(t, T.sweep[0], T.sweep[1]);
+  if (sw > 0 && sw < 1) out.push({ x: lerp(-260, W + 260, sstep(sw)), y: 520, z: 1250, I: 1.25 * Math.sin(Math.PI * sw) ** 0.6, Rr: 0, sweep: 1 });
+  return { list: out, amb };
+}
+// glint of each gold tessera: Blinn-Phong with a tight lobe; the tilt of each tile picks its moment
+const GL_LEVELS = 10;
+function glints(t, cam, Ls, sink) {
+  const camZ = 2000 / cam.z, P = 260;
+  for (const [i, nx, ny, nz] of GOLD) {
+    const x = TX[i], y = TY[i];
+    let vx = cam.cx - x, vy = cam.cy - y, vz = camZ; const vl = Math.hypot(vx, vy, vz); vx /= vl; vy /= vl; vz /= vl;
+    let sum = 0;
+    for (const l of Ls) {
+      let lx = l.x - x, ly = l.y - y, lz = l.z; const d = Math.hypot(lx, ly, lz); lx /= d; ly /= d; lz /= d;
+      let hx = lx + vx, hy = ly + vy, hz = lz + vz; const hl = Math.hypot(hx, hy, hz);
+      const c = (nx * hx + ny * hy + nz * hz) / hl; if (c <= 0.97) continue;
+      const fall = l.Rr ? 1 / (1 + (Math.hypot(l.x - x, l.y - y) / (l.Rr * 0.55)) ** 2) : 1;
+      sum += l.I * fall * Math.pow(c, P);
+    }
+    if (sum > 0.04) sink(i, Math.min(1, sum * 1.6));
+  }
+}
+
+// ── frame ──
+const LM = mk(480, 270), lmx = LM.getContext('2d');
+const BL = mk(480, 270), blx = BL.getContext('2d'), BL2 = mk(480, 270), bl2 = BL2.getContext('2d');
+function frame(t) {
+  const cam = camera(t), z = cam.z, Lv = lights(t), Ls = Lv.list;
+  const fade = 1 - sstep(seg(t, T.out[0], T.out[1]));
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.filter = 'none';
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  // albedo
+  const L = LEVELS[levelFor(z)], k = z / L.sc;
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.setTransform(k, 0, 0, k, W / 2 - z * (cam.cx - L.x0), H / 2 - z * (cam.cy - L.y0));
+  ctx.drawImage(L.canvas, 0, 0);
+  // light map (multiply): ambient + warm pools around every lit lamp + the sweep's soft band
+  const sx = x => (W / 2 + z * (x - cam.cx)) / 4, sy = y => (H / 2 + z * (y - cam.cy)) / 4;
+  lmx.globalCompositeOperation = 'source-over';
+  const a = Lv.amb * 0.94 + 0.012;
+  lmx.fillStyle = rgb([255 * a, 238 * a, 212 * a]); lmx.fillRect(0, 0, 480, 270);
+  lmx.globalCompositeOperation = 'lighter';
+  for (const l of Ls) {
+    if (l.Rr) {
+      const r = l.Rr * z / 4, I = Math.min(1.4, l.I) * (1 - Lv.amb * 0.55), gr = lmx.createRadialGradient(sx(l.x), sy(l.y), 0, sx(l.x), sy(l.y), r);
+      gr.addColorStop(0, rgb([255 * I, 226 * I, 172 * I])); gr.addColorStop(0.3, rgb([236 * I, 178 * I, 112 * I]));
+      gr.addColorStop(0.65, rgb([100 * I, 64 * I, 34 * I])); gr.addColorStop(1, 'rgb(0,0,0)');
+      lmx.fillStyle = gr; lmx.fillRect(0, 0, 480, 270);
+    } else if (l.sweep) {
+      const cx = sx(l.x), gr = lmx.createLinearGradient(cx - 90, 0, cx + 90, 0), I = 0.16 * l.I;
+      gr.addColorStop(0, 'rgb(0,0,0)'); gr.addColorStop(0.5, rgb([255 * I, 240 * I, 200 * I])); gr.addColorStop(1, 'rgb(0,0,0)');
+      lmx.fillStyle = gr; lmx.fillRect(0, 0, 480, 270);
+    }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(LM, 0, 0, W, H);
+  // glints (additive), with a small bloom
+  const gp = Array.from({ length: GL_LEVELS }, () => new Path2D());
+  blx.globalCompositeOperation = 'source-over'; blx.fillStyle = '#000'; blx.fillRect(0, 0, 480, 270);
+  blx.globalCompositeOperation = 'lighter';
+  const hw = W / 2 / z + 10, hh = H / 2 / z + 10;
+  glints(t, cam, Ls, (i, v) => {
+    if (Math.abs(TX[i] - cam.cx) > hw || Math.abs(TY[i] - cam.cy) > hh) return;
+    quadPath(gp[Math.min(GL_LEVELS - 1, Math.floor(v * GL_LEVELS))], i, 0, 0, 0.92);
+    if (v > 0.45) { blx.fillStyle = `rgba(255,214,140,${(v - 0.45) * 0.9})`; const r = 0.6 + z * TSz[i] * 0.09; blx.fillRect(sx(TX[i]) - r / 2, sy(TY[i]) - r / 2, r, r); }
+  });
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.setTransform(z, 0, 0, z, W / 2 - z * cam.cx, H / 2 - z * cam.cy);
+  gp.forEach((p, b) => { const v = (b + 0.5) / GL_LEVELS; ctx.fillStyle = `rgba(255,${226 + 20 * v | 0},${150 + 70 * v | 0},${0.85 * v})`; ctx.fill(p); });
+  bl2.globalCompositeOperation = 'copy'; bl2.filter = 'blur(1.3px)'; bl2.drawImage(BL, 0, 0); bl2.filter = 'none';
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(BL2, 0, 0, W, H);
+  // vignette, then the wall fades
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(VIG, 0, 0);
+  if (fade < 1) { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = `rgba(0,0,0,${1 - fade})`; ctx.fillRect(0, 0, W, H); }
+  // flames: emissive tesserae that never see the multiply, then their glow; they go out last
+  const ff = 1 - sstep(seg(t, T.out[1] - 0.3, DUR - 0.02));
+  ctx.globalAlpha = ff;
+  LAMPS.forEach((l, kk) => {
+    const sp = seg(t, l.t - 0.16, l.t), grow = backOut(seg(t, l.t, l.t + 0.38), 2.6);
+    const X = W / 2 + z * (l.x - cam.cx), Y = H / 2 + z * (l.y - cam.cy);
+    if (sp > 0 && grow <= 0) {                                    // the spark before the flame
+      const r = z * l.h * 0.25 * Math.sin(Math.PI * sp), gr = ctx.createRadialGradient(X, Y - z * 3, 0, X, Y - z * 3, Math.max(1, r));
+      gr.addColorStop(0, 'rgba(255,240,200,0.95)'); gr.addColorStop(1, 'rgba(255,140,40,0)');
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = gr; ctx.fillRect(X - r, Y - z * 3 - r, 2 * r, 2 * r);
+    }
+    if (grow <= 0) return;
+    const f = flick(t, kk), hgt = l.h * grow * (0.94 + 0.06 * f), sk = 0.08 * Math.sin(t * 5.1 + kk * 2.3) + 0.05 * Math.sin(t * 11.7 + kk);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.setTransform(z * hgt, 0, z * hgt * sk, z * hgt, X, Y);
+    ctx.fillStyle = 'rgba(40,18,8,0.9)'; ctx.fill(FLAME.bed);
+    const br = 0.92 + 0.12 * (f - 1) / 0.15;
+    const cols = [C.fR, C.fO, C.fY, C.fW];
+    FLAME.paths.forEach((p, i) => { ctx.fillStyle = rgb(cols[i].map(c => c * br)); ctx.fill(p); });
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'lighter';
+    const gy = Y - z * hgt * 0.45, r = z * l.h * 2.6, gr = ctx.createRadialGradient(X, gy, 0, X, gy, r), I = 0.32 * grow * f;
+    gr.addColorStop(0, `rgba(255,190,110,${I})`); gr.addColorStop(0.25, `rgba(255,140,60,${I * 0.45})`); gr.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = gr; ctx.fillRect(X - r, gy - r, 2 * r, 2 * r);
+  });
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+}
+let VIG;
+function buildVignette() {
+  VIG = mk(W, H); const g = VIG.getContext('2d'), gr = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.05);
+  gr.addColorStop(0, '#fff'); gr.addColorStop(1, 'rgb(150,140,130)'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+}
+
+window.draw = ({ t }) => { frame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => {
+  const ev = [];
+  LAMPS.forEach((l, i) => ev.push({ k: 'ignite', t: l.t - 0.12, v: i ? 0 : 1, pan: l.pan }));
+  ev.push({ k: 'pull', t: T.pull[0], d: T.pull[1] - T.pull[0] }, { k: 'sweep', t: T.sweep[0], d: T.sweep[1] - T.sweep[0] },
+    { k: 'title', t: lerp(T.sweep[0], T.sweep[1], 0.5) }, { k: 'close', t: T.out[0] - 0.2 });
+  // shimmer: how many strong glints each frame, and where they sit left to right
+  for (let n = 0; n < DUR * 30; n++) {
+    const t = n / 30, cam = camera(t); let c = 0, xs = 0;
+    glints(t, cam, lights(t).list, (i, v) => { if (v > 0.5 && Math.abs(TX[i] - cam.cx) < W / 2 / cam.z && Math.abs(TY[i] - cam.cy) < H / 2 / cam.z) { c++; xs += (TX[i] - cam.cx) * cam.z / (W / 2); } });
+    if (c) ev.push({ k: 'glint', t, v: c, pan: clamp(xs / c, -1, 1) });
+  }
+  return ev;
+};
+window.ready = (async () => {
+  await document.fonts.load('400 80px Forum'); await document.fonts.ready;
+  buildTiles(); buildColours(); buildAlbedo(); buildVignette();
+  window.NT = NT;
+})();
+</script>
+</body></html>
