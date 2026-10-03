@@ -109,7 +109,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [isometric](styles/isometric), [neo-brutalism](styles/neo-brutalism) |
 | [Space Mono](https://fonts.google.com/specimen/Space+Mono) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [risograph](styles/risograph) |
 | [Special Elite](https://fonts.google.com/specimen/Special+Elite) | [Apache 2.0](licenses/Apache-2.0.txt) | [map-documentary](styles/map-documentary) |
-| [Stardos Stencil](https://fonts.google.com/specimen/Stardos+Stencil) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [chinese-papercut](styles/chinese-papercut) |
+| [Stardos Stencil](https://fonts.google.com/specimen/Stardos+Stencil) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [chinese-papercut](styles/chinese-papercut), [cubism](styles/cubism) |
 | [Tiny5](https://fonts.google.com/specimen/Tiny5) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [point-and-click](styles/point-and-click) |
 | [Titan One](https://fonts.google.com/specimen/Titan+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [absurd-webcomic](styles/absurd-webcomic), [flash-cartoon](styles/flash-cartoon), [golden-age-comic](styles/golden-age-comic) |
 | [Unbounded](https://fonts.google.com/specimen/Unbounded) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [particles](styles/particles) |
