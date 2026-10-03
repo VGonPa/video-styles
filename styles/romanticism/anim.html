@@ -1,0 +1,1116 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── romanticism · the watcher on the headland ──────────────────────────────────────────────────
+// A storm painted in Goya's darks: three great cloud masses with bone-black bellies, their undersides
+// caught by a sour ochre break low on the horizon, dirty bone for the foam. Close on a lantern-bearer at
+// the edge of a sea cliff → the camera pulls back until the figure is tiny under an enormous sky (the
+// Sublime) while a swell bursts against the cliff foot → the watcher raises the lantern, the sky
+// darkens, lightning strikes the sea → a thin crack of light opens along the belly of the darkest cloud
+// and the cloud deck is torn back from it: open sky goes first, the masses last, their edges catching
+// fire, the light spilling down past the low bank into the fog and onto the sea (a glitter path, a
+// foundering ship); a small wave breaks; the lantern is lowered → the movement's name is set letter by
+// letter in the dark sky → a slow push toward the light.
+// Every painted surface is a procedural colour field laid down once, coarse to fine, with seeded
+// bristle strokes that follow the cloud forms. The tear is a stack of precomputed masks built from
+// strokes, each with the moment it opens. Frames composite those canvases plus a few hundred sprites
+// and strokes; each frame depends on t alone.
+const W = 1920, H = 1080, DUR = 10, TAU = Math.PI * 2;
+const PS = 1.5;   // painted layers are rasterised above frame resolution so the opening close-up keeps its brushwork
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+
+// ── numbers ──
+const cl = (v, a = 0, b = 1) => (v < a ? a : v > b ? b : v);
+const mix = (a, b, k) => a + (b - a) * k;
+const win = (t, a, b) => cl((t - a) / (b - a));
+const smooth = k => { k = cl(k); return k * k * (3 - 2 * k); };
+const inOut = k => { k = cl(k); return k < 0.5 ? 4 * k * k * k : 1 - Math.pow(2 - 2 * k, 3) / 2; };
+const easeOut = k => 1 - Math.pow(1 - cl(k), 3);
+// fast start, a little past 1, then settles back (the overshoot half of anticipation)
+const settle = (k, s = 1.6) => { const d = cl(k) - 1; return 1 + (s + 1) * d * d * d + s * d * d; };
+function xorshift(seed) {
+  let s = (seed * 2654435761) >>> 0 || 1;
+  return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+}
+const layer = (w, h) => { const c = document.createElement('canvas'); c.width = Math.ceil(w); c.height = Math.ceil(h); return c; };
+
+// ── value noise ──
+const LAT = (() => { const r = xorshift(166), v = new Float32Array(65536); for (let i = 0; i < v.length; i++) v[i] = r(); return v; })();
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+  const a = xi & 255, b = yi & 255, a1 = (a + 1) & 255, b1 = (b + 1) & 255;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const p = LAT[b * 256 + a], q = LAT[b * 256 + a1], r = LAT[b1 * 256 + a], s = LAT[b1 * 256 + a1];
+  const top = p + (q - p) * ux, bot = r + (s - r) * ux;
+  return top + (bot - top) * uy;
+}
+function fbm(x, y, oct = 5) {
+  let sum = 0, amp = 0.5, f = 1, tot = 0;
+  for (let i = 0; i < oct; i++) { sum += amp * vnoise(x * f + i * 19.7, y * f - i * 7.3); tot += amp; amp *= 0.5; f *= 2.02; }
+  return sum / tot;
+}
+
+// ── palette: the Black Paintings' earths, and the light that breaks them ──
+const C = {
+  black: [7, 6, 5], umber: [30, 24, 17], bistre: [49, 40, 27], olive: [66, 63, 45], ochre: [136, 113, 50],
+  bone: [196, 183, 146], pale: [224, 212, 178], cream: [240, 228, 192], white: [255, 247, 226], gold: [212, 170, 92],
+  amber: [140, 102, 52], slate: [30, 35, 30], deep: [12, 15, 12], foam: [206, 199, 174], cold: [196, 202, 204],
+};
+const rgb = (c, a = 1) => (a >= 1 ? `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})` : `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a.toFixed(3)})`);
+const mixC = (a, b, k) => [mix(a[0], b[0], k), mix(a[1], b[1], k), mix(a[2], b[2], k)];
+function ramp(stops, k) {
+  k = cl(k);
+  for (let i = 1; i < stops.length; i++) if (k <= stops[i][0]) {
+    const [k0, c0] = stops[i - 1], [k1, c1] = stops[i];
+    return mixC(c0, c1, (k - k0) / (k1 - k0));
+  }
+  return stops[stops.length - 1][1];
+}
+// a bristle carries a little more white or a little more black than the load it came from
+const tint = (c, k) => (k >= 0 ? mixC(c, C.bone, k) : mixC(c, C.black, -k));
+const SKY_RAMP = [[0, C.black], [0.16, C.umber], [0.32, C.bistre], [0.48, C.olive], [0.66, C.ochre], [0.84, C.bone], [1, C.pale]];
+const LIT_RAMP = [[0, C.bistre], [0.22, [124, 106, 74]], [0.42, C.amber], [0.6, C.gold], [0.8, C.cream], [1, C.white]];
+const LIGHT_RAMP = [[0, C.umber], [0.16, C.bistre], [0.32, C.amber], [0.5, C.gold], [0.72, C.cream], [1, C.white]];
+const SEA_RAMP = [[0, C.black], [0.14, C.deep], [0.3, C.slate], [0.48, [62, 63, 48]], [0.68, [120, 114, 88]], [1, C.bone]];
+const ROCK_RAMP = [[0, C.black], [0.2, C.umber], [0.4, C.bistre], [0.62, [100, 82, 46]], [1, C.bone]];
+
+// ── the brush ──
+// One loaded stroke: a curved body of paint, then bristles that drag lighter and darker pigment and
+// lift off raggedly at both ends. `bias` bows every stroke the same way (strokes laid along an arc).
+// Always consumes the same number of random draws for a given width.
+function brush(g, R, x, y, ang, len, wid, col, alpha = 0.9, bend = 0.22, bias = 0) {
+  const ca = Math.cos(ang), sa = Math.sin(ang), nx = -sa, ny = ca;
+  const b = ((R() - 0.5) * 2 * bend + bias) * len;
+  const x0 = x - ca * len / 2, y0 = y - sa * len / 2, x1 = x + ca * len / 2, y1 = y + sa * len / 2;
+  const mx = x + nx * b, my = y + ny * b;
+  g.lineCap = 'round';
+  g.globalAlpha = alpha * 0.8; g.strokeStyle = rgb(col); g.lineWidth = wid;
+  g.beginPath(); g.moveTo(x0, y0); g.quadraticCurveTo(mx, my, x1, y1); g.stroke();
+  const n = 3 + Math.min(7, wid / 5 | 0);
+  g.lineCap = 'butt';
+  for (let i = 0; i < n; i++) {
+    const o = ((i + 0.5) / n - 0.5) * wid * 0.95, u0 = R() * 0.2, u1 = 1 - R() * 0.25, um = (u0 + u1) / 2;
+    const at = u => { const v = 1 - u; return [v * v * x0 + 2 * v * u * mx + u * u * x1 + nx * o, v * v * y0 + 2 * v * u * my + u * u * y1 + ny * o]; };
+    const p = at(u0), q = at(u1), m = at(um);
+    g.globalAlpha = alpha * (0.2 + R() * 0.5);
+    g.strokeStyle = rgb(tint(col, (R() - 0.5) * 0.26));
+    g.lineWidth = Math.max(0.7, wid / n * (0.45 + R() * 0.7));
+    g.beginPath(); g.moveTo(p[0], p[1]); g.quadraticCurveTo(2 * m[0] - (p[0] + q[0]) / 2, 2 * m[1] - (p[1] + q[1]) / 2, q[0], q[1]); g.stroke();
+  }
+}
+
+// Lays a smooth version of a colour field first, so gaps between strokes show paint, not canvas.
+function underpaint(cvs, rect, colour, inside, step = 8) {
+  const w = Math.ceil(rect.w / step) + 1, h = Math.ceil(rect.h / step) + 1;
+  const sm = layer(w, h), sg = sm.getContext('2d'), img = sg.createImageData(w, h);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+    const x = rect.x + i * step, y = rect.y + j * step;
+    if (inside && !inside(x, y)) continue;
+    const c = colour(x, y, 0), o = (j * w + i) * 4;
+    img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+  }
+  sg.putImageData(img, 0, 0);
+  const g = cvs.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.imageSmoothingQuality = 'high';
+  g.drawImage(sm, -step / 2 * rect.ps, -step / 2 * rect.ps, w * step * rect.ps, h * step * rect.ps);
+}
+
+// Covers a layer with strokes, coarse to fine. Field functions work in scene units (frame pixels at
+// zoom 1); the canvas holds `rect` at rect.ps× resolution. A pass can keep its strokes to some places.
+function paint(cvs, rect, f) {
+  const g = cvs.getContext('2d'), R = xorshift(f.seed);
+  g.setTransform(rect.ps, 0, 0, rect.ps, -rect.x * rect.ps, -rect.y * rect.ps);
+  for (const p of f.passes) for (let i = 0; i < p.n; i++) {
+    const x = rect.x + R() * rect.w, y = rect.y + R() * rect.h, j = R() * 2 - 1, aj = (R() - 0.5) * p.jit, lk = R(), wk = R();
+    if (f.inside && !f.inside(x, y)) continue;
+    if (p.keep && !p.keep(x, y)) continue;
+    const s = f.size ? f.size(x, y) : 1, len = mix(p.len[0], p.len[1], lk) * s;
+    brush(g, R, x, y, f.angle(x, y) + aj, len, mix(p.wid[0], p.wid[1], wk) * s,
+      f.colour(x, y, j), p.alpha ?? 0.9, p.bend ?? 0.22, f.curve ? f.curve(x, y) * len : 0);
+  }
+  g.globalAlpha = 1;
+}
+
+// ── the scene, in frame pixels at zoom 1 ──
+const HZ = 772;                       // horizon: the sky fills more than 70 % of the wide frame
+const SUN = { x: 1400, y: 338 };      // where the storm tears open
+const FIG = { x: 598, y: 800 };       // the watcher's back foot, on the ledge
+const FS = 1.24;                      // the watcher is ~97 units tall: ~120 px at the widest framing
+// the headland's skyline, left to right: the ledge, the cliff edge, the sea face, the foot running into the water
+const CLIFF = [[-130, 797], [-70, 791], [-20, 788], [30, 795], [80, 792], [130, 800], [180, 803], [232, 807], [280, 810], [326, 805],
+  [370, 808], [412, 803], [450, 803], [478, 795], [500, 791], [522, 798], [560, 799], [600, 800], [636, 801], [664, 807], [686, 820],
+  [697, 843], [706, 874], [718, 903], [736, 928], [762, 944], [796, 956], [836, 971], [884, 993], [944, 1024], [1012, 1061], [1084, 1102], [1150, 1144]];
+const CLIFF_PATH = (() => { const p = new Path2D(); p.moveTo(-130, 1144); for (const [x, y] of CLIFF) p.lineTo(x, y); p.closePath(); return p; })();
+function cliffTop(x) {
+  if (x <= CLIFF[0][0]) return CLIFF[0][1];
+  for (let i = 1; i < CLIFF.length; i++) if (x <= CLIFF[i][0]) {
+    const [x0, y0] = CLIFF[i - 1], [x1, y1] = CLIFF[i];
+    return mix(y0, y1, (x - x0) / (x1 - x0));
+  }
+  return 1e9;
+}
+const SKY_RECT = { x: -170, y: -130, w: 2260, h: 1000, ps: PS };
+const SCUD_RECT = { x: -560, y: -130, w: 3040, h: 760, ps: 1 };
+const LIGHT_RECT = { x: 300, y: -170, w: 1950, h: 1000, ps: PS };
+const SEA_RECT = { x: -70, y: HZ - 80, w: W + 140, h: H - HZ + 160, ps: PS };
+const ROCK_RECT = { x: -140, y: 775, w: 1300, h: 380, ps: 2 };
+
+// ── the vortex's own frame: centred on the tear, tilted, squashed ──
+const TILT = -0.2, SQ = 0.66, CT = Math.cos(TILT), ST = Math.sin(TILT);
+function vloc(x, y) { const dx = x - SUN.x, dy = y - SUN.y; return [dx * CT + dy * ST, (-dx * ST + dy * CT) / SQ]; }
+function vworld(u, v) { v *= SQ; return [SUN.x + u * CT - v * ST, SUN.y + u * ST + v * CT]; }
+function vdir(a) { const ux = Math.cos(a), uy = Math.sin(a) * SQ; return Math.atan2(ux * ST + uy * CT, ux * CT - uy * ST); }
+const SPILL = 1.98;   // the side the light pours out of, in the tear's frame: down toward the sea, a little toward the watcher
+
+// ── sky: three great cloud masses with bone-black bellies; their undersides catch the horizon light ──
+const MASSES = [
+  { x: 360, y: 90, rx: 700, ry: 270, rot: 0.08 },     // over the upper left, behind the title
+  { x: 1440, y: 200, rx: 640, ry: 150, rot: TILT },  // the belly the light tears along its lower edge
+  { x: 640, y: 630, rx: 560, ry: 95, rot: -0.04 },   // a low bank over the sea, ending where the light falls to the water
+  { x: 1920, y: 560, rx: 380, ry: 190, rot: -0.6 },  // a dark shoulder of cloud biting into the far side of the gap
+];
+function massField(x, y) {
+  let m = 0;
+  for (let i = 0; i < MASSES.length; i++) {
+    const M = MASSES[i], c = Math.cos(M.rot), s = Math.sin(M.rot), dx = x - M.x, dy = y - M.y;
+    const a = (dx * c + dy * s) / M.rx, b = (-dx * s + dy * c) / M.ry;
+    const d = Math.hypot(a, b) + 0.45 * (fbm(x / 240 + i * 17, y / 170 - i * 5, 4) - 0.5);
+    m = Math.max(m, smooth((1 - d) / 0.4));
+  }
+  return m;
+}
+function cloud(x, y) {   // smaller billows inside the masses and the gaps
+  const u = x / 420, v = y / 240;
+  const wx = fbm(u * 0.9 + 3.1, v * 0.9 - 1.7, 3), wy = fbm(u * 0.9 - 5.2, v * 0.9 + 2.3, 3);
+  return cl((fbm(u + 1.7 * wx, v + 1.3 * wy, 4) - 0.3) / 0.4);
+}
+function skyColour(x, y, j) {
+  const h = cl((y + 130) / (HZ + 130)), m = massField(x, y), d = cloud(x, y);
+  const under = cl((m - massField(x, y + 34)) * 3), over = cl((m - massField(x, y - 34)) * 3);
+  const band = Math.exp(-(((HZ - 60 - y) / 95) ** 2)), brk = cl((fbm(x / 340 + 2, y / 90, 3) - 0.3) * 2.5);
+  const behind = Math.exp(-(((x - 650) / 280) ** 2) - (((y - (HZ - 95)) / 80) ** 2));   // a break in the cloud behind the watcher
+  let v = mix(0.17 + 0.2 * h - 0.08 * d, 0.004 + 0.05 * (1 - m) + 0.03 * d, m);
+  v += (0.42 * band * brk + 0.22 * behind) * (1 - 0.7 * m);
+  v += 0.55 * under * (0.35 + 0.65 * h) * (0.6 + 0.4 * d) + 0.1 * over + 0.03 * j;
+  return ramp(SKY_RAMP, v);
+}
+// the same clouds struck from behind by the breaking light: edges that face the tear catch fire
+function litColour(x, y, j) {
+  const [u, v] = vloc(x, y), r = Math.hypot(u, v) + 1, dx = (SUN.x - x) / r, dy = (SUN.y - y) / r;
+  const d = cloud(x, y), rim = cl((d - cloud(x + 24 * dx, y + 24 * dy)) * 5);
+  return ramp(LIT_RAMP, 0.06 + 0.26 * Math.exp(-r / 380) + 0.62 * rim + 0.1 * (1 - d) + 0.15 * j);
+}
+// strokes have no head or tail, so directions are blended as doubled angles; around the tear they fan
+// outward (cloud pushed back), and nothing stands more than ~30° off the horizontal
+function skyAngle(x, y) {
+  const e = 8, mx = massField(x + e, y) - massField(x - e, y), my = massField(x, y + e) - massField(x, y - e);
+  const gx = cloud(x + e, y) - cloud(x - e, y), gy = cloud(x, y + e) - cloud(x, y - e);
+  const form = Math.atan2(mx, -my), billow = Math.atan2(gx, -gy);
+  const wind = -0.12 + 0.5 * (fbm(x / 500 + 9, y / 500, 2) - 0.5);
+  const fm = cl(Math.hypot(mx, my) * 10), gb = 0.5 * cl(Math.hypot(gx, gy) * 10) * (1 - fm), wr = 1 - fm - gb;
+  const out = Math.atan2(y - SUN.y, x - SUN.x), ko = 0.45 * Math.exp(-Math.hypot(x - SUN.x, (y - SUN.y) * 1.6) / 260);
+  const vx = (1 - ko) * (fm * Math.cos(2 * form) + gb * Math.cos(2 * billow) + wr * Math.cos(2 * wind)) + ko * Math.cos(2 * out);
+  const vy = (1 - ko) * (fm * Math.sin(2 * form) + gb * Math.sin(2 * billow) + wr * Math.sin(2 * wind)) + ko * Math.sin(2 * out);
+  return cl(Math.atan2(vy, vx) / 2, -0.55, 0.55);
+}
+const nearEdge = (x, y) => { const m = massField(x, y); return (m > 0.05 && m < 0.95) || y > HZ - 190; };
+
+// ── the light behind the storm ──
+// A soft field (a small white-hot core, gold, amber, reaching furthest down toward the sea) under long
+// translucent sweeps that follow the sky's flow. The crack line itself burns cream, so the first sliver
+// of the tear is hot.
+const crackV = u => 5 * Math.sin(u / 140 + 0.6) + 3 * Math.sin(u / 23 + 2.1) + 12 * (fbm(u / 110 + 5, 0.5, 3) - 0.5);
+function lightColour(x, y, j) {
+  const [u, v] = vloc(x, y), th = Math.atan2(v, u), r = Math.hypot(u * 0.8, v);
+  const re = r / (1 + 1.3 * Math.max(0, Math.cos(th - SPILL)) ** 2);
+  const crack = Math.exp(-(((v - crackV(u)) / 10) ** 2)) * cl(1 - Math.abs(u) / 420);
+  return ramp(LIGHT_RAMP, 0.07 + 0.95 * Math.exp(-re / 160) + 0.27 * Math.exp(-re / 450) + 0.3 * crack + 0.05 * j);
+}
+// ── sea: swells grow toward us; crests break pale ──
+function seaColour(x, y, j) {
+  const d = cl((y - HZ) / (H - HZ)), p = 0.25 + 1.6 * d;
+  const swell = fbm(x / (150 * p) + 4, (y - HZ) / (22 * p), 4);
+  const v = mix(0.42, 0.1, Math.pow(d, 0.5)) + (swell - 0.5) * 0.42 + 0.035 * j;
+  const cap = cl((swell - 0.68) * 7) * (0.4 + 0.5 * d);
+  return mixC(ramp(SEA_RAMP, v), C.foam, cap * 0.6);
+}
+const seaAngle = (x, y) => -0.05 + 0.3 * (fbm(x / 300, y / 60, 2) - 0.5);
+const seaSize = (x, y) => 0.3 + 1.25 * cl((y - HZ) / (H - HZ));
+// ── rock: chunky facets, the skyline catching what light there is, the sea face in its own shadow ──
+function rockColour(variant) {
+  return (x, y, j) => {
+    const rim = Math.exp(-(y - cliffTop(x)) / 16), face = cl((x - 650) / 60) * cl((970 - y) / 140);
+    const f = fbm(x / 80 + 11, y / 60 - 4, 3), plane = Math.floor(f * 5) / 5, grain = fbm(x / 18, y / 18, 2);
+    let c = ramp(ROCK_RAMP, 0.012 + 0.12 * plane + 0.06 * (grain - 0.5) + 0.03 * j + 0.16 * rim - 0.05 * face);
+    if (variant === 'warm') c = mixC(c, mixC(C.amber, C.gold, rim), cl(0.6 * rim * rim + 0.12 * plane * Math.max(0, Math.cos(f * 9)) + 0.2 * face));
+    return c;
+  };
+}
+const rockAngle = (x, y) => -0.9 + Math.floor(fbm(x / 90 - 3, y / 90 + 8, 2) * 6) * 0.55;
+
+let SKY, SKY_LIT, SCUD, LIGHT, RAYS, SPILLC, FOGLIT, CORE, SEA, GLIT, ROCK, ROCK_WARM, FOGS, WEAVE, VIG, PUFF, DABS, SCR, FIGC, PLUMEC, TXTPAT, STAGES, HALOS;
+const mkLayer = r => layer(r.w * r.ps, r.h * r.ps);
+
+function buildSky() {
+  const passes = [
+    { n: 520, len: [140, 320], wid: [40, 110], jit: 0.22, bend: 0.25 },
+    { n: 1400, len: [60, 160], wid: [16, 40], jit: 0.2 },
+    { n: 1700, len: [24, 70], wid: [5, 12], jit: 0.16, alpha: 0.75, keep: nearEdge }];
+  SKY = mkLayer(SKY_RECT);
+  underpaint(SKY, SKY_RECT, skyColour);
+  paint(SKY, SKY_RECT, { seed: 11, colour: skyColour, angle: skyAngle, passes });
+  // identical strokes (same seed, same widths), lit: shown only around the tear
+  SKY_LIT = mkLayer(SKY_RECT);
+  underpaint(SKY_LIT, SKY_RECT, (x, y) => mixC(skyColour(x, y, 0), litColour(x, y, -1), 0.5));
+  paint(SKY_LIT, SKY_RECT, { seed: 11, colour: litColour, angle: skyAngle, passes });
+  // broad scud fragments racing low across the sky (kept where a noise field allows, so they come in rags)
+  SCUD = mkLayer(SCUD_RECT);
+  const scudR = xorshift(516);
+  paint(SCUD, SCUD_RECT, { seed: 515,
+    colour: (x, y, j) => ramp(SKY_RAMP, 0.02 + 0.07 * cl((y + 130) / 700) + 0.03 * j),
+    angle: (x, y) => -0.08 + 0.4 * (fbm(x / 300, y / 200, 2) - 0.5),
+    inside: (x, y) => scudR() < cl((fbm(x / 420 + 7, y / 120 - 2, 4) - 0.52) * 7) * 0.8,
+    passes: [{ n: 1100, len: [150, 330], wid: [12, 30], jit: 0.2, alpha: 0.3, bend: 0.3 }] });
+}
+
+// A long stroke carried along the sky's flow from (x, y) for `len` px: a translucent tapered body, then
+// bristle streaks dragged along it.
+function flowLine(x, y, len) {
+  const P = [[x, y]]; let a0 = null;
+  for (let s = 0; s < len; s += 12) {
+    let a = skyAngle(x, y);
+    if (a0 !== null && Math.cos(a - a0) < 0) a += Math.PI;
+    a0 = a; x += Math.cos(a) * 12; y += Math.sin(a) * 12; P.push([x, y]);
+  }
+  return P;
+}
+function sweep(g, R, P, wid, col, alpha) {
+  const n = P.length - 1, Nm = [];
+  for (let i = 0; i <= n; i++) {
+    const a = P[Math.max(0, i - 1)], b = P[Math.min(n, i + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    Nm.push([-(b[1] - a[1]) / l, (b[0] - a[0]) / l]);
+  }
+  const wAt = u => wid * Math.pow(Math.sin(Math.PI * cl(u)), 0.5);
+  g.globalAlpha = alpha * 0.7; g.fillStyle = rgb(col);
+  g.beginPath();
+  for (let i = 0; i <= n; i++) { const w = wAt(i / n) / 2; g.lineTo(P[i][0] + Nm[i][0] * w, P[i][1] + Nm[i][1] * w); }
+  for (let i = n; i >= 0; i--) { const w = wAt(i / n) / 2; g.lineTo(P[i][0] - Nm[i][0] * w, P[i][1] - Nm[i][1] * w); }
+  g.closePath(); g.fill();
+  const k = 4 + Math.min(8, wid / 8 | 0);
+  g.lineCap = 'butt'; g.lineJoin = 'round';
+  for (let b = 0; b < k; b++) {
+    const o = ((b + 0.5) / k - 0.5) * 0.9, i0 = Math.floor(R() * n * 0.3), i1 = n - Math.floor(R() * n * 0.3);
+    g.globalAlpha = alpha * (0.3 + R() * 0.7); g.strokeStyle = rgb(tint(col, (R() - 0.5) * 0.3));
+    g.lineWidth = Math.max(0.8, wid / k * (0.4 + R() * 0.6));
+    g.beginPath();
+    for (let i = i0; i <= i1; i++) { const w = wAt(i / n) * o; g.lineTo(P[i][0] + Nm[i][0] * w, P[i][1] + Nm[i][1] * w); }
+    g.stroke();
+  }
+}
+function buildLight() {
+  LIGHT = mkLayer(LIGHT_RECT);
+  underpaint(LIGHT, LIGHT_RECT, lightColour);
+  paint(LIGHT, LIGHT_RECT, { seed: 23, colour: lightColour, angle: skyAngle, passes: [
+    { n: 700, len: [120, 300], wid: [14, 36], jit: 0.14, bend: 0.12, alpha: 0.5 }] });
+  const g = LIGHT.getContext('2d'), R = xorshift(24);
+  g.setTransform(PS, 0, 0, PS, -LIGHT_RECT.x * PS, -LIGHT_RECT.y * PS);
+  // long translucent sweeps and pale veils carried outward along the flow
+  for (let i = 0; i < 130; i++) {
+    const x = SUN.x + (R() - 0.6) * 1100, y = SUN.y + (R() - 0.35) * 520, len = 300 + R() * 600, wid = 20 + R() * 60, k = R(), tn = R(), al = R();
+    const base = lightColour(x, y, 0), col = k < 0.15 ? mixC(base, C.pale, 0.4) : tint(base, (tn - 0.45) * 0.5);
+    sweep(g, R, flowLine(x, y, len), wid, col, 0.1 + al * 0.14);
+  }
+  // thin dark veils of cloud left drifting across the light, away from the side it pours out of
+  for (let i = 0; i < 64; i++) {
+    const x = SUN.x + (R() - 0.5) * 1100, y = SUN.y + (R() - 0.45) * 480, len = 250 + R() * 450, wid = 14 + R() * 40, tn = R(), al = R();
+    const [u, v] = vloc(x, y);
+    if (Math.cos(Math.atan2(v, u) - SPILL) > 0.75 || Math.hypot(u, v) < 230) continue;
+    sweep(g, R, flowLine(x, y, len), wid, tint(C.bistre, (tn - 0.6) * 0.6), 0.16 + al * 0.2);
+  }
+  // cream streaks dragged through the core, along the wind
+  for (let i = 0; i < 6; i++) {
+    const x = SUN.x + (R() - 0.5) * 120, y = SUN.y + (R() - 0.5) * 50, aj = (R() - 0.5) * 0.3, len = 120 + R() * 160, wd = 10 + R() * 14, c = R(), al = R();
+    brush(g, R, x, y, TILT * 0.6 + aj, len, wd, c < 0.5 ? C.white : C.cream, 0.22 + al * 0.2, 0.12);
+  }
+  // crepuscular rays fanning down from the tear, streaked so they read as dragged paint
+  RAYS = mkLayer(LIGHT_RECT);
+  const q = RAYS.getContext('2d'), Q = xorshift(404);
+  q.setTransform(PS, 0, 0, PS, -LIGHT_RECT.x * PS, -LIGHT_RECT.y * PS);
+  for (let i = 0; i < 240; i++) {
+    const a = mix(0.7, Math.PI - 0.5, Q()), r = 240 + Q() * 420, len = 80 + Q() * 200;
+    brush(q, Q, SUN.x + Math.cos(a) * r, SUN.y + Math.sin(a) * r, a, len, 3 + Q() * 10, mixC(C.gold, C.cream, Q()), 0.04 + Q() * 0.06, 0.03);
+  }
+  q.setTransform(PS, 0, 0, PS * 0.78, (SUN.x - LIGHT_RECT.x) * PS, (SUN.y - LIGHT_RECT.y) * PS);
+  let gr = q.createRadialGradient(0, 0, 420, 0, 0, 640);
+  gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  q.globalCompositeOperation = 'destination-in'; q.globalAlpha = 1; q.fillStyle = gr; q.fillRect(-3000, -3000, 6000, 6000);
+  q.globalCompositeOperation = 'source-over';
+  // light pouring from the open side of the tear down onto the fog and the sea
+  SPILLC = mkLayer(LIGHT_RECT);
+  const s = SPILLC.getContext('2d'), S = xorshift(405);
+  s.setTransform(PS, 0, 0, PS, -LIGHT_RECT.x * PS, -LIGHT_RECT.y * PS);
+  for (let i = 0; i < 170; i++) {
+    const x0 = 1100 + S() * 380, y0 = 420 + S() * 130, len = 200 + S() * 260, ang = Math.PI / 2 + 0.38 + (S() - 0.5) * 0.3, wd = 8 + S() * 26, c = S(), al = S();
+    brush(s, S, x0 + Math.cos(ang) * len / 2, y0 + Math.sin(ang) * len / 2, ang, len, wd, mixC(C.gold, C.cream, c), 0.05 + al * 0.08, 0.06);
+  }
+  s.setTransform(PS, 0, 0, PS, -LIGHT_RECT.x * PS, -LIGHT_RECT.y * PS);
+  gr = s.createLinearGradient(0, 430, 0, HZ + 40);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.2, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  s.globalCompositeOperation = 'destination-in'; s.globalAlpha = 1; s.fillStyle = gr; s.fillRect(LIGHT_RECT.x, LIGHT_RECT.y, LIGHT_RECT.w, LIGHT_RECT.h);
+  s.globalCompositeOperation = 'source-over'; s.setTransform(1, 0, 0, 1, 0, 0);
+  // the white-hot core of the tear: a streak of white and cream dragged along the wind, feathered out
+  CORE = layer(420, 180);
+  const cg = CORE.getContext('2d'), K = xorshift(407);
+  for (let i = 0; i < 46; i++) {
+    const u = K() - 0.5, x = 210 + u * 220, y = 90 + (K() - 0.5) * 50 * (1 - Math.abs(u)), aj = (K() - 0.5) * 0.18, len = 70 + K() * 170, wd = 6 + K() * 16, c = K(), al = K();
+    brush(cg, K, x, y, aj, len, wd, c < 0.6 ? C.white : C.cream, 0.5 + al * 0.5, 0.1);
+  }
+  cg.setTransform(1, 0, 0, 0.42, 210, 90);
+  gr = cg.createRadialGradient(0, 0, 0, 0, 0, 210);
+  gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.4, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  cg.globalCompositeOperation = 'destination-in'; cg.globalAlpha = 1; cg.fillStyle = gr; cg.fillRect(-210, -215, 420, 430);
+  cg.globalCompositeOperation = 'source-over'; cg.setTransform(1, 0, 0, 1, 0, 0);
+  // where that light lands, the horizon fog glows (horizontal scumbles)
+  FOGLIT = layer(1000, 160);
+  const fg = FOGLIT.getContext('2d'), F = xorshift(406);
+  for (let i = 0; i < 160; i++) {
+    const u = F() - 0.5, x = 500 + u * 900, y = 80 + (F() - 0.5) * 70 * (1 - Math.abs(u) * 1.4), len = 60 + F() * 180, wd = 6 + F() * 16, c = F(), al = F();
+    brush(fg, F, x, y, (F() - 0.5) * 0.12, len, wd, mixC(C.gold, C.cream, c), (0.05 + al * 0.08) * (1 - Math.abs(u) * 1.6), 0.1);
+  }
+}
+
+// ── the tear: when (0…PMAX of the opening) each point of the cloud deck is torn away ──
+// First a thin crack on the belly of the darkest cloud, thick in the middle and tapering; then the deck
+// is pulled back from it: open sky first and the cloud masses last, furthest down toward the sea and
+// least up into the belly above. Strokes laid like the sky's own are sorted by that moment and
+// accumulated into NST mask stages; a frame blends two neighbouring stages, so the gap grows stroke by
+// stroke and its edge is always cloud.
+const MS = 0.6, HS = 0.25, NST = 40, PMAX = 1.5;
+function openTime(x, y, n) {
+  const [u, v] = vloc(x, y), r = Math.hypot(u, v), th = Math.atan2(v, u), dv = Math.abs(v - crackV(u));
+  let tc = 9;
+  for (let p = 0.004; p <= 0.5; p += 0.004) {
+    const Lc = 240 * smooth(p / 0.12) + 200 * smooth((p - 0.1) / 0.25), wc = 2 + 40 * p;
+    if (Math.abs(u) < Lc && dv < wc * Math.sqrt(1 - (u / Lc) ** 2)) { tc = p; break; }
+  }
+  const lobe = Math.max(0, Math.cos(th - SPILL)) ** 4, up = Math.max(0, -Math.sin(th));
+  const re = r * (1 + 0.6 * up) / (1 + 1.5 * lobe);
+  const far = 3 * Math.max(0, (Math.hypot(x - SUN.x, (y - SUN.y) * 1.25) - 860) / 260) ** 2;   // nothing opens near the layer's edges
+  const tf = 0.06 + re / 400 + 0.45 * massField(x, y) + 0.3 * (fbm(x / 260 + 3, y / 180 - 2, 3) - 0.5) + 0.14 * (fbm(x / 80 - 4, y / 60 + 9, 2) - 0.5) + 0.04 * n + far;
+  return Math.min(tc, tf);
+}
+function buildStages() {
+  const R = xorshift(4401), list = [];
+  for (let i = 0; i < 9800; i++) {
+    let x, y;
+    if (i % 5 === 0) { const u = (R() * 2 - 1) * 460, v = crackV(u) + (R() - 0.5) * 2 * (6 + 50 * R()); [x, y] = vworld(u, v); }
+    else { x = LIGHT_RECT.x + R() * LIGHT_RECT.w; y = LIGHT_RECT.y + R() * LIGHT_RECT.h; }
+    const n = R() * 2 - 1, ja = (R() - 0.5) * 0.3, jl = 0.7 + 0.6 * R(), jw = 0.7 + 0.6 * R(), T = openTime(x, y, n);
+    if (T > PMAX) continue;
+    const [u, v] = vloc(x, y), crack = T < 0.2 && Math.abs(v - crackV(u)) < 40, k = smooth(T / 0.6);
+    const ang = crack ? vdir(Math.atan2(crackV(u + 4) - crackV(u - 4), 8)) + ja * 0.3 : skyAngle(x, y) + ja;
+    const len = crack ? 26 * jl : mix(40, 180, k) * jl, wid = crack ? 3 * jw : mix(8, 50, k) * jw;
+    list.push({ x, y, T, ang, len, wid, a: 0.5 });
+    // a broader stroke follows once the edge has passed, so the inside fills solid
+    list.push({ x, y, T: T + 0.16, ang, len: len * 1.4, wid: wid * 2.2 + 8, a: 0.85 });
+  }
+  list.sort((a, b) => a.T - b.T);
+  const rect = LIGHT_RECT, run = layer(rect.w * MS, rect.h * MS), g = run.getContext('2d'), B = xorshift(4402);
+  g.setTransform(MS, 0, 0, MS, -rect.x * MS, -rect.y * MS);
+  STAGES = []; HALOS = [];
+  let i = 0;
+  for (let k = 0; k <= NST; k++) {
+    const p = k * PMAX / NST;
+    while (i < list.length && list[i].T <= p) { const s = list[i++]; brush(g, B, s.x, s.y, s.ang, s.len, s.wid, [255, 255, 255], s.a, 0.15); }
+    const st = layer(run.width, run.height); st.getContext('2d').drawImage(run, 0, 0); STAGES.push(st);
+    // the same mask, blurred wide: light caught by the cloud around the gap, falling off over ~200 px
+    const hl = layer(run.width * HS / MS, run.height * HS / MS), hg = hl.getContext('2d');
+    hg.filter = 'blur(20px)'; hg.drawImage(st, 0, 0, hl.width, hl.height); HALOS.push(hl);
+  }
+}
+// draws the mask of the opening at stage p (sky space) into g
+function stageAt(g, p, v, dx, op, set = STAGES, sc = MS) {
+  const s = cl(p / PMAX) * NST, k = Math.min(NST, Math.floor(s)), f = s - k;
+  g.globalCompositeOperation = op; g.globalAlpha = 1;
+  g.setTransform(v.z / sc, 0, 0, v.z / sc, v.ox + (LIGHT_RECT.x + dx) * v.z, v.oy + LIGHT_RECT.y * v.z);
+  g.drawImage(set[k], 0, 0);
+  if (k < NST && f > 0.004) { g.globalAlpha = f; g.drawImage(set[k + 1], 0, 0); }
+  g.globalAlpha = 1;
+}
+
+function buildSea() {
+  SEA = mkLayer(SEA_RECT);
+  const g = SEA.getContext('2d');
+  underpaint(SEA, SEA_RECT, seaColour, (x, y) => y >= HZ - 2);
+  g.save(); g.setTransform(PS, 0, 0, PS, -SEA_RECT.x * PS, -SEA_RECT.y * PS);
+  g.beginPath(); g.rect(SEA_RECT.x, HZ, SEA_RECT.w, SEA_RECT.h); g.clip();
+  paint(SEA, SEA_RECT, { seed: 37, colour: seaColour, angle: seaAngle, size: seaSize, inside: (x, y) => y > HZ, passes: [
+    { n: 1800, len: [80, 170], wid: [10, 22], jit: 0.12, bend: 0.12 },
+    { n: 3200, len: [30, 80], wid: [4, 10], jit: 0.12, bend: 0.15 }] });
+  g.restore();
+  // a far sea stack on the horizon, for scale: brushed, its foot lost in spray
+  const R = xorshift(41), stack = [];
+  for (const [x, y] of [[1646, 3], [1653, -10], [1657, -22], [1664, -31], [1668, -42], [1675, -48], [1681, -52], [1686, -47], [1690, -44],
+    [1695, -36], [1699, -30], [1706, -19], [1712, -9], [1721, 3]]) stack.push([x + (R() - 0.5) * 3, HZ + y + (R() - 0.5) * 3]);
+  g.save(); g.setTransform(PS, 0, 0, PS, -SEA_RECT.x * PS, -SEA_RECT.y * PS);
+  g.beginPath(); stack.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath();
+  g.fillStyle = rgb(mixC(C.black, C.umber, 0.45)); g.fill();
+  g.save(); g.clip();
+  for (let i = 0; i < 46; i++) brush(g, R, 1650 + R() * 70, HZ - 52 + R() * 56, 1.1 + (R() - 0.5) * 0.8, 8 + R() * 14, 2 + R() * 4, mixC(C.black, C.umber, 0.3 + R() * 0.6), 0.8, 0.25);
+  g.restore();
+  for (let i = 1; i < stack.length; i++) {   // the outline broken by strokes that follow it
+    const [x0, y0] = stack[i - 1], [x1, y1] = stack[i];
+    brush(g, R, (x0 + x1) / 2, (y0 + y1) / 2, Math.atan2(y1 - y0, x1 - x0), 6 + R() * 6, 1.5 + R() * 2, mixC(C.black, C.umber, 0.5 + R() * 0.5), 0.7, 0.3);
+  }
+  const mist = g.createLinearGradient(0, HZ - 22, 0, HZ + 4);
+  mist.addColorStop(0, 'rgba(124,121,102,0)'); mist.addColorStop(1, 'rgba(124,121,102,0.85)');
+  g.fillStyle = mist; g.fillRect(1630, HZ - 22, 110, 26);
+  g.restore();
+  // the glitter path the light will lay on the water (its own layer, added once the sky opens)
+  GLIT = mkLayer(SEA_RECT);
+  const q = GLIT.getContext('2d'), Q = xorshift(512);
+  q.setTransform(PS, 0, 0, PS, -SEA_RECT.x * PS, -SEA_RECT.y * PS);
+  for (let i = 0; i < 2200; i++) {
+    const d = Math.pow(Q(), 1.25), y = HZ + 2 + d * (H - HZ + 60), spread = 36 + 440 * d;
+    const x = SUN.x - 110 + (Q() + Q() + Q() - 1.5) * spread * 0.9, s = 0.25 + 1.3 * d;
+    brush(q, Q, x, y, (Q() - 0.5) * 0.1, (14 + Q() * 40) * s, (1.4 + Q() * 4) * s, mixC(C.gold, C.white, Q() * 0.7), 0.3 + Q() * 0.5, 0.1);
+  }
+}
+function buildRock() {
+  const one = variant => {
+    const cvs = mkLayer(ROCK_RECT), g = cvs.getContext('2d'), col = rockColour(variant), ps = ROCK_RECT.ps;
+    g.save(); g.setTransform(ps, 0, 0, ps, -ROCK_RECT.x * ps, -ROCK_RECT.y * ps); g.clip(CLIFF_PATH);
+    underpaint(cvs, ROCK_RECT, col, (x, y) => y > cliffTop(x) - 12);
+    paint(cvs, ROCK_RECT, { seed: 902, colour: col, angle: rockAngle, inside: (x, y) => y > cliffTop(x) - 4, passes: [
+      { n: 1000, len: [40, 110], wid: [14, 30], jit: 0.3 },
+      { n: 2000, len: [16, 50], wid: [4, 12], jit: 0.35 }] });
+    g.restore();
+    // the skyline itself, broken by strokes that follow it (unclipped, so the edge stays ragged)
+    const R = xorshift(903);
+    g.setTransform(ps, 0, 0, ps, -ROCK_RECT.x * ps, -ROCK_RECT.y * ps);
+    for (let i = 1; i < CLIFF.length; i++) {
+      const [x0, y0] = CLIFF[i - 1], [x1, y1] = CLIFF[i], L = Math.hypot(x1 - x0, y1 - y0), a = Math.atan2(y1 - y0, x1 - x0);
+      for (let s = 0; s < L; s += 8) {
+        const k = s / L, x = mix(x0, x1, k), y = mix(y0, y1, k) + 2 + R() * 3, aj = (R() - 0.5) * 0.3, len = 12 + R() * 22, wd = 3 + R() * 4, j = R() * 2 - 1;
+        brush(g, R, x, y, a + aj, len, wd, col(x, y + 5, j), 0.85, 0.2);
+      }
+    }
+    return cvs;
+  };
+  ROCK = one('base'); ROCK_WARM = one('warm');
+}
+// ── fog: soft banks with lumpy tops and gaps between them, scumbled over with loose strokes ──
+function fogBank(w, h, seed, col) {
+  const c = layer(w, h), g = c.getContext('2d'), R = xorshift(seed);
+  const top = x => h * (0.16 + 0.42 * fbm(x / 210 + seed * 0.37, 0.3, 3));
+  const dens = x => cl((fbm(x / 330 - seed * 0.21, 1.7, 3) - 0.3) * 2.8);
+  for (let i = 0; i < 460; i++) {
+    const x = R() * w, u = R(), rr = 24 + R() * 62, keep = R();
+    if (keep > dens(x)) continue;
+    const y = top(x) + rr * 0.55 + u * (h - top(x)) * 0.6;
+    const gr = g.createRadialGradient(x, y, 0, x, y, rr);
+    gr.addColorStop(0, rgb(col, 0.14)); gr.addColorStop(0.6, rgb(col, 0.07)); gr.addColorStop(1, rgb(col, 0));
+    g.fillStyle = gr; g.fillRect(x - rr, y - rr, 2 * rr, 2 * rr);
+  }
+  for (let i = 0; i < 240; i++) {
+    const x = R() * w, y = top(x) + 12 + R() * (h - top(x)) * 0.6, keep = R(), ang = (R() - 0.5) * 0.6, len = 36 + R() * 110, wd = 5 + R() * 12, tn = (R() - 0.4) * 0.3, al = 0.04 + R() * 0.07;
+    if (keep > dens(x) * 0.9) continue;
+    brush(g, R, x, y, ang, len, wd, tint(col, tn), al, 0.45);
+  }
+  g.globalCompositeOperation = 'destination-in';
+  let gr = g.createLinearGradient(0, 0, 0, h);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.14, '#000'); gr.addColorStop(0.7, '#000'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  gr = g.createLinearGradient(0, 0, w, 0);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.14, '#000'); gr.addColorStop(0.86, '#000'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  g.globalCompositeOperation = 'source-over';
+  return c;
+}
+function buildFog() {
+  const COLD = [124, 121, 102], WARM = [196, 154, 88];
+  FOGS = [
+    { x: 80, y: HZ - 72, w: 1500, h: 130, d: 0.82, speed: 11, seed: 71, alpha: 0.55, zone: 'far' },
+    { x: 1150, y: HZ - 62, w: 1100, h: 110, d: 0.82, speed: 15, seed: 72, alpha: 0.6, zone: 'far' },
+    { x: 560, y: 885, w: 1300, h: 170, d: 1, speed: 24, seed: 73, alpha: 0.75, zone: 'mid' },
+    { x: -300, y: 960, w: 1100, h: 150, d: 1, speed: 18, seed: 74, alpha: 0.55, zone: 'near' },
+  ].map(f => ({ ...f, rect: { x: f.x, y: f.y, w: f.w, h: f.h, ps: 1 }, cold: fogBank(f.w, f.h, f.seed, COLD), warm: fogBank(f.w, f.h, f.seed, WARM) }));
+}
+function buildSprites() {
+  SCR = layer(W, H);
+  FIGC = layer(480, 480);
+  PLUMEC = layer(780, 780);
+  // spray dabs: a soft round load of foam with a few bristle drags through it (drawn along the motion)
+  DABS = [0, 1, 2, 3, 4, 5].map(i => {
+    const c = layer(80, 80), d = c.getContext('2d'), R = xorshift(600 + i);
+    const rg = d.createRadialGradient(40, 40, 0, 40, 40, 40);
+    rg.addColorStop(0, rgb(C.foam, 0.42)); rg.addColorStop(0.45, rgb(C.foam, 0.16)); rg.addColorStop(1, rgb(C.foam, 0));
+    d.fillStyle = rg; d.fillRect(0, 0, 80, 80);
+    for (let k = 0; k < 12; k++) { const a = R() * TAU, r = R() * 12; brush(d, R, 40 + Math.cos(a) * r, 40 + Math.sin(a) * r, (R() - 0.5) * 0.7, 22 + R() * 28, 3 + R() * 6, tint(C.foam, (R() - 0.3) * 0.5), 0.35 + R() * 0.4, 0.35); }
+    return c;
+  });
+  // a puff of sea-smoke: soft core, scumbled edge
+  PUFF = layer(160, 160); const pg = PUFF.getContext('2d'), P = xorshift(62);
+  const pr = pg.createRadialGradient(80, 80, 0, 80, 80, 78);
+  pr.addColorStop(0, 'rgba(206,199,174,0.7)'); pr.addColorStop(0.5, 'rgba(206,199,174,0.3)'); pr.addColorStop(1, 'rgba(206,199,174,0)');
+  pg.fillStyle = pr; pg.fillRect(0, 0, 160, 160);
+  for (let i = 0; i < 30; i++) { const a = P() * TAU, r = P() * 50; brush(pg, P, 80 + Math.cos(a) * r, 80 + Math.sin(a) * r, a + 1.6, 20 + P() * 30, 3 + P() * 6, C.foam, 0.12 + P() * 0.15, 0.4); }
+  // each crash: a few broad sheets of white flung fanning up the cliff face, droplets falling back,
+  // and translucent veils of mist the wind drags inland
+  for (const c of CRASHES) {
+    const R = xorshift(c.seed);
+    c.sheets = [];   // the broad strokes that carry the burst up the face
+    for (let i = 0; i < c.n; i++) c.sheets.push({ v: ((i + 0.5) / c.n - 0.5) * 1.6, wid: (26 + 14 * R()) * c.s, reach: 0.75 + 0.2 * R(), aj: (R() - 0.5) * 0.12, seed: c.seed * 100 + i });
+    c.dabs = [];     // loaded dabs of foam filling the plume, which widens toward its top and breaks up there
+    for (let i = 0; i < 40; i++) c.dabs.push({ u: Math.pow(R(), 0.75), v: R() * 2 - 1, len: (36 + R() * 36) * c.s, wid: (5 + R() * 5) * c.s, aj: (R() - 0.5) * 0.5, tone: (R() - 0.55) * 0.6, a: 0.25 + 0.6 * R(), seed: c.seed * 1000 + i });
+    c.drips = [];    // droplets scattered off the top
+    for (let i = 0; i < 22; i++) c.drips.push({ u: 0.7 + 0.32 * R(), v: (R() * 2 - 1) * 1.4, r: (1.2 + 2.8 * R() * R()) * c.s, del: R() * 0.1 });
+    c.breaks = [];   // dry gaps dragged through the column, so it is never one smooth mass
+    for (let i = 0; i < 4; i++) c.breaks.push({ v: (R() - 0.5) * 1.2, u0: 0.1 + 0.3 * R(), u1: 0.5 + 0.4 * R(), wid: (3 + 4 * R()) * c.s, seed: c.seed * 77 + i });
+    c.drops = [];
+    for (let i = 0; i < 12; i++) {
+      const ang = -Math.PI / 2 - 0.25 + (R() - 0.5) * 0.9, sp = Math.sqrt(2 * SPRAY_G * c.h * (0.4 + 0.5 * R())) * 1.15;
+      c.drops.push({ x0: c.x + (R() - 0.5) * 30 * c.s, y0: c.y - R() * 10, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, del: 0.05 + R() * 0.12, life: 0.55 + 0.3 * R(), r: (1.5 + 4.5 * R() * R()) * c.s });
+    }
+    c.mist = [];
+    for (let i = 0; i < 4; i++) {
+      c.mist.push({ x: c.x - R() * 40 * c.s, y: c.y - (30 + R() * c.h * 0.55), len: (90 + R() * 90) * c.s, wid: (16 + R() * 20) * c.s,
+        del: 0.15 + R() * 0.3, speed: (70 + R() * 70) * c.s, al: 0.12 + R() * 0.08, seed: c.seed * 50 + i });
+    }
+  }
+  // the title's paint: bone, dragged with ochre and pale
+  const T = layer(512, 160), tg = T.getContext('2d'), TR = xorshift(88);
+  tg.fillStyle = rgb([214, 200, 164]); tg.fillRect(0, 0, 512, 160);
+  for (let i = 0; i < 260; i++) brush(tg, TR, TR() * 512, TR() * 160, -0.05 + (TR() - 0.5) * 0.2, 40 + TR() * 120, 2 + TR() * 6, TR() < 0.5 ? C.ochre : C.pale, 0.18 + TR() * 0.25, 0.1);
+  TXTPAT = ctx.createPattern(T, 'repeat');
+}
+function buildSurface() {
+  // canvas weave under the varnish: static, so it costs nothing to encode
+  WEAVE = layer(W, H);
+  const g = WEAVE.getContext('2d'), img = g.createImageData(W, H), R = xorshift(77);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const o = (y * W + x) * 4, thread = Math.sin(x * 1.9) * 0.5 + Math.sin(y * 1.9 + Math.sin(x * 0.07)) * 0.5;
+    img.data[o] = img.data[o + 1] = img.data[o + 2] = 128 + thread * 14 + (R() - 0.5) * 22; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  VIG = layer(W, H);
+  const v = VIG.getContext('2d'), gr = v.createRadialGradient(W * 0.55, H * 0.5, H * 0.28, W * 0.5, H * 0.5, H * 1.05);
+  gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.55, '#e4ddd0'); gr.addColorStop(1, '#3a332a');
+  v.fillStyle = gr; v.fillRect(0, 0, W, H);
+}
+
+// ── timing ──
+// each crash: when, where it hits the cliff foot, its scale, how high its sheets climb, how many
+const CRASHES = [{ t: 1.7, x: 772, y: 950, s: 1, h: 135, n: 5, seed: 31 }, { t: 4.85, x: 780, y: 953, s: 0.75, h: 100, n: 4, seed: 77 }];
+const FLASHES = [[0.95, 0.22, 0.2], [3.62, 1, 0.13], [3.79, 0.5, 0.06], [3.88, 0.8, 0.1]];
+const flash = t => FLASHES.reduce((m, [t0, a, d]) => (t >= t0 ? Math.max(m, a * Math.exp(-(t - t0) / d)) : m), 0);
+const gloom = t => (t < 3.62 ? 0.3 * smooth(win(t, 3.2, 3.6)) : 0);          // the sky holds its breath
+const wind = t => 1 - 0.55 * smooth(win(t, 5.0, 7.5));
+const lightK = t => smooth(win(t, 4.7, 6.9));
+const glowK = t => smooth(win(t, 4.05, 4.6));                                  // the cloud around the crack catching light
+// the crack (0 → 0.15) widens over 0.6 s, then the deck tears back (→ 1) with a small overshoot
+const openP = t => 0.15 * smooth(win(t, 4.0, 4.6)) + 0.85 * settle(win(t, 4.55, 7.0), 1.2);
+const raise = t => settle(win(t, 2.3, 3.1), 1.2) - 0.85 * inOut(win(t, 5.7, 6.8));
+const lamp = t => (0.86 + 0.14 * Math.sin(t * 23) * Math.sin(t * 7.3 + 1)) * (1 - 0.6 * smooth(win(t, 5.8, 7.2)));
+const ring = (t, t0, a) => (t < t0 ? 0 : a * Math.sin((t - t0) * 9) * Math.exp(-(t - t0) * 2.2));
+const swing = t => 0.06 * Math.sin(3.1 * t) * wind(t) + ring(t, 2.55, 0.5) + ring(t, 3.05, -0.25) + ring(t, 6.0, 0.3);
+const skyDrift = t => -10 * t;
+
+function camera(t) {
+  const k = inOut(win(t, 0.3, 5.0)), late = smooth(win(t, 5.8, 10));
+  const z = mix(2.1, 1, k) + 0.05 * late;
+  const fx = mix(FIG.x + 160, W / 2, k) + 60 * late, fy = mix(FIG.y - 50, H / 2, k) - 14 * late;
+  const hw = W / 2 / z, hh = H / 2 / z;
+  return { z, fx: cl(fx, hw, W - hw), fy: cl(fy, hh, H - hh) };
+}
+// far layers zoom less than near ones: the pull-back becomes a dolly with depth
+function view(cam, d) { const z = 1 + (cam.z - 1) * d; return { z, ox: W / 2 - cam.fx * z, oy: H / 2 - cam.fy * z }; }
+function blit(img, rect, v, alpha = 1, op = 'source-over', dx = 0) {
+  if (alpha <= 0.002) return;
+  ctx.globalAlpha = alpha; ctx.globalCompositeOperation = op;
+  ctx.setTransform(v.z / rect.ps, 0, 0, v.z / rect.ps, v.ox + (rect.x + dx) * v.z, v.oy + rect.y * v.z);
+  ctx.drawImage(img, 0, 0);
+  reset();
+}
+function reset() { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+const toScene = (g, v, dx = 0) => g.setTransform(v.z, 0, 0, v.z, v.ox + dx * v.z, v.oy);
+function clearScr() { const g = SCR.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.clearRect(0, 0, W, H); return g; }
+
+// ── the tear in the sky ──
+// The crack shows first; the glow then spreads from it onto the cloud strokes around (cut from the lit
+// copy of the sky through a wide blurred mask, so it falls off softly with no edge line). The gap opens
+// on the light; lit cloud drifts over its inner edge.
+function drawOpening(t, v, dx) {
+  const p = openP(t), ga = glowK(t) * smooth(p / 0.05);
+  if (p <= 0) return;
+  let g;
+  const fill = img => {   // keep `img` (a sky-space layer) only where SCR holds the mask
+    g.globalCompositeOperation = 'source-in'; g.globalAlpha = 1;
+    g.setTransform(v.z / PS, 0, 0, v.z / PS, v.ox + (img === LIGHT ? LIGHT_RECT.x : SKY_RECT.x) * v.z + dx * v.z, v.oy + (img === LIGHT ? LIGHT_RECT.y : SKY_RECT.y) * v.z);
+    g.drawImage(img, 0, 0); g.setTransform(1, 0, 0, 1, 0, 0);
+  };
+  if (ga > 0.005) {
+    g = clearScr(); stageAt(g, p + 0.1, v, dx, 'source-over', HALOS, HS); stageAt(g, p, v, dx, 'destination-out');
+    fill(SKY_LIT); ctx.globalAlpha = ga; ctx.drawImage(SCR, 0, 0); reset();
+  }
+  g = clearScr(); stageAt(g, p, v, dx, 'source-over');
+  fill(LIGHT); ctx.drawImage(SCR, 0, 0);
+  g = clearScr(); stageAt(g, p, v, dx, 'source-over'); stageAt(g, p - 0.12, v, dx, 'destination-out');
+  fill(SKY_LIT); ctx.globalAlpha = 0.35; ctx.drawImage(SCR, 0, 0);
+  reset();
+}
+
+// ── lightning: a forked path, midpoint-displaced once, painted as a tapered stroke ──
+const BOLT = (() => {
+  const R = xorshift(1813);
+  const split = (a, b, depth, rough, out) => {
+    if (!depth) { out.push(b); return; }
+    const m = [(a[0] + b[0]) / 2 + (R() - 0.5) * rough, (a[1] + b[1]) / 2 + (R() - 0.5) * rough * 0.25];
+    split(a, m, depth - 1, rough / 2, out); split(m, b, depth - 1, rough / 2, out);
+  };
+  const main = [[1120, 120]]; split([1120, 120], [1238, HZ + 2], 6, 260, main);
+  const branches = [14, 25, 38].map(i => { const s = main[i], br = [s]; split(s, [s[0] + (R() - 0.3) * 260, s[1] + 120 + R() * 140], 4, 90, br); return br; });
+  return [main, ...branches];
+})();
+function ribbon(g, pts, w0, w1, R) {   // a filled stroke along a polyline, w0 wide at the start tapering to w1, slightly ragged
+  const n = pts.length, A = [], B = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const nx = -(b[1] - a[1]) / l, ny = (b[0] - a[0]) / l, w = mix(w0, w1, i / (n - 1)) * (0.7 + 0.6 * R()) / 2;
+    A.push([pts[i][0] + nx * w, pts[i][1] + ny * w]); B.push([pts[i][0] - nx * w, pts[i][1] - ny * w]);
+  }
+  g.beginPath(); A.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  for (let i = n - 1; i >= 0; i--) g.lineTo(B[i][0], B[i][1]);
+  g.closePath(); g.fill();
+}
+function drawBolt(v, dx, f) {
+  toScene(ctx, v, dx); ctx.globalCompositeOperation = 'lighter'; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  BOLT.forEach((pts, i) => {
+    const w = i ? 0.45 : 1;
+    for (const [lw, al] of [[46, 0.05], [20, 0.09], [9, 0.16]]) {
+      ctx.lineWidth = lw * w; ctx.strokeStyle = rgb(C.cold, al * f); ctx.beginPath();
+      pts.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
+    }
+  });
+  const R = xorshift(1814);
+  ctx.fillStyle = rgb(C.white, 0.95 * f);
+  BOLT.forEach((pts, i) => ribbon(ctx, pts, i ? 2.8 : 6.5, i ? 0.4 : 1, R));
+  reset();
+}
+// the flash lights the cloud bellies around the strike from inside; the foreground stays black
+function drawFlash(v, dx, f) {
+  const g = clearScr(), cx = v.ox + (1170 + dx) * v.z, cy = v.oy + 260 * v.z, r = 780 * v.z;
+  g.setTransform(v.z / SKY_RECT.ps, 0, 0, v.z / SKY_RECT.ps, v.ox + (SKY_RECT.x + dx) * v.z, v.oy + SKY_RECT.y * v.z);
+  g.drawImage(SKY, 0, 0); g.setTransform(1, 0, 0, 1, 0, 0);
+  const gr = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+  gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.5, 'rgba(0,0,0,0.6)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.globalCompositeOperation = 'destination-in'; g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.85 * f; ctx.drawImage(SCR, 0, 0); ctx.drawImage(SCR, 0, 0);
+  const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  cg.addColorStop(0, rgb(C.cold, 0.32)); cg.addColorStop(1, rgb(C.cold, 0));
+  ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = f; ctx.fillStyle = cg; ctx.fillRect(0, 0, W, v.oy + HZ * v.z);
+  reset();
+}
+
+// ── the sea in motion: foam gathers in clusters on the crest lines, small and dense far off ──
+const CRESTS = [[0.05, 70], [0.15, 58], [0.33, 44], [0.6, 30], [0.9, 18]];   // how far down the sea each crest line runs, and its caps
+const CAPS = (() => {
+  const R = xorshift(2025), a = [];
+  CRESTS.forEach(([d0, n], row) => { for (let k = 0; k < n; k++) a.push({ row, d: d0 + (R() - 0.5) * 0.015, x: R() * 2000, q: R(), ph: R(), per: 1.6 + R() * 2.2, j: R(), yj: R() - 0.5, aj: R() - 0.5, sk: R() }); });
+  return a;
+})();
+function drawCaps(t, v, lk) {
+  toScene(ctx, v); ctx.lineCap = 'round'; ctx.strokeStyle = rgb(mixC(C.foam, C.gold, lk * 0.45));
+  const w = 0.6 + 0.4 * wind(t);
+  for (const c of CAPS) {
+    const cluster = cl((fbm(c.x / (160 + 300 * c.d) + c.row * 3.1, c.row * 0.7 + t * 0.12, 2) - 0.44) * 4);
+    if (cluster <= 0 || c.sk < 0.35) continue;
+    const x = -40 + ((((c.x - (14 + 26 * c.d) * t * w) % 2000) + 2000) % 2000), lam = 40 + 150 * c.d, amp = 2 + 7 * c.d;
+    const phase = x / lam + c.row * 1.7 + t * 0.9, y = HZ + 4 + c.d * (H - HZ + 30) + amp * Math.sin(phase) + c.yj * (3 + 20 * c.d);
+    const life = (t / c.per + c.ph) % 1, a = Math.sin(Math.PI * life) ** 2 * cluster * (0.5 + 0.5 * c.sk);
+    const len = mix(8, 60, c.q * c.q) * (0.35 + 0.65 * c.d) * (0.6 + 0.6 * life), s = 0.3 + 1.5 * c.d;
+    const sl = Math.atan(amp / lam * Math.cos(phase)) + c.aj * 0.45, ca = Math.cos(sl), sa = Math.sin(sl);
+    for (const [al, wd, lf] of [[0.22, (2 + 5 * c.d) * (0.7 + 0.6 * c.j), 1], [0.6, (0.8 + 2 * c.d) * (0.7 + 0.6 * c.j), 0.75]]) {
+      const hl = len * lf / 2;
+      ctx.globalAlpha = al * a; ctx.lineWidth = wd;
+      ctx.beginPath(); ctx.moveTo(x - ca * hl, y - sa * hl); ctx.quadraticCurveTo(x, y - 2 * s, x + ca * hl, y + sa * hl); ctx.stroke();
+    }
+  }
+  reset();
+}
+// the swell rolling in toward the cliff foot: a shadowed face under a pale curling lip
+function drawSwell(t, c) {
+  const k = win(t, c.t - 0.8, c.t + 0.05); if (k <= 0 || k >= 1) return;
+  const e = inOut(k), R = xorshift(c.seed + 5);
+  const cx = c.x + 320 * (1 - e) + 50, cy = c.y + 4 - 14 * e * c.s, len = (170 + 110 * e) * c.s, rise = (8 + 30 * e) * c.s;
+  for (let i = 0; i < 26; i++) {
+    const u = R() - 0.5, x = cx + u * len, crest = cy - rise * Math.cos(u * Math.PI), j = R(), l1 = 34 + R() * 50, w1 = 7 + R() * 9, l2 = 10 + R() * 24, w2 = 1.5 + R() * 3.5, tone = R(), keep = R();
+    brush(ctx, R, x, crest + 9 * c.s + j * 6, -0.1 + u * 0.4, l1, w1, mixC(C.deep, C.slate, 0.3 + 0.4 * j), 0.45, 0.15);
+    if (keep < 0.7) brush(ctx, R, x, crest - 1 + j * 3, -0.12 + u * 0.5, l2, w2, mixC(C.foam, C.olive, tone * 0.5), (0.2 + 0.55 * e) * (0.5 + 0.5 * j), 0.2);
+  }
+  // spindrift torn back off the crest by the wind
+  for (let i = 0; i < 7; i++) {
+    const u = R() - 0.5, x = cx + u * len * 0.8 - 14 * e, y = cy - rise * Math.cos(u * Math.PI) - 6 - R() * 10 * e, s = (12 + R() * 14) * c.s;
+    ctx.globalAlpha = 0.3 * e; ctx.drawImage(DABS[i % DABS.length], x - s, y - s * 0.35, 2 * s, 0.7 * s);
+  }
+  ctx.globalAlpha = 1;
+}
+// the burst against the cliff: a few broad sheets of white fan up the face and fall back, droplets
+// streak and drop, foam slides out on the water, and the wind drags veils of mist inland.
+const SPRAY_G = 1700, SPRAY_K = 0.8, SPRAY_WX = -320;
+// a dry stroke of foam: a faint body and bristles that converge into thin tails at both ends
+function dryMark(g, R, P, wid, col, al) {
+  const n = P.length - 1, Nm = [];
+  for (let i = 0; i <= n; i++) {
+    const a = P[Math.max(0, i - 1)], b = P[Math.min(n, i + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    Nm.push([-(b[1] - a[1]) / l, (b[0] - a[0]) / l]);
+  }
+  const wAt = u => wid * Math.pow(Math.sin(Math.PI * cl(u)), 0.9);
+  g.globalAlpha = al * 0.3; g.fillStyle = rgb(col);
+  g.beginPath();
+  for (let i = 0; i <= n; i++) { const w = wAt(i / n) / 2; g.lineTo(P[i][0] + Nm[i][0] * w, P[i][1] + Nm[i][1] * w); }
+  for (let i = n; i >= 0; i--) { const w = wAt(i / n) / 2; g.lineTo(P[i][0] - Nm[i][0] * w, P[i][1] - Nm[i][1] * w); }
+  g.closePath(); g.fill();
+  g.lineCap = 'butt'; g.lineJoin = 'round';
+  for (let b = 0; b < 7; b++) {
+    const o = ((b + 0.5) / 7 - 0.5) * 0.9, i0 = Math.floor(R() * n * 0.3), i1 = n - Math.floor(R() * n * 0.3);
+    g.globalAlpha = al * (0.4 + 0.5 * R()); g.strokeStyle = rgb(tint(col, (R() - 0.4) * 0.4));
+    g.lineWidth = Math.max(0.8, wid / 7 * (0.7 + 0.8 * R()));
+    g.beginPath();
+    for (let i = i0; i <= i1; i++) { const w = wAt(i / n) * o; g.lineTo(P[i][0] + Nm[i][0] * w, P[i][1] + Nm[i][1] * w); }
+    g.stroke();
+  }
+}
+function sprayAt(d, a) {
+  const e = Math.exp(-SPRAY_K * a), q = (1 - e) / SPRAY_K;
+  return [d.x0 + d.vx * q + 0.5 * SPRAY_WX * a * a, d.y0 + d.vy * q + 0.5 * SPRAY_G * a * a];
+}
+function drawSpray(t, c, v) {
+  const age = t - c.t; if (age < 0 || age > 2.4) return;
+  // a few short straight foam streaks out on the water by the cliff foot
+  const fk = easeOut(age / 0.5), ff = 1 - smooth(win(age, 0.35, 1.5));
+  if (ff > 0) {
+    const R = xorshift(c.seed + 9);
+    let off = 4;
+    for (let i = 0; i < 6; i++) {
+      const skip = R(), lift = (8 + R() * 20) * c.s, len = (14 + R() * 36) * c.s * (0.7 + 0.3 * fk), wd = (1.5 + 3.5 * R()) * c.s, aj = (R() - 0.5) * 0.4, al = R();
+      off += 16 + R() * 40;
+      if (skip < 0.3) continue;
+      const x = c.x + off * c.s * (0.5 + 0.5 * fk);
+      brush(ctx, R, x, cliffTop(x) - lift, 0.1 + aj, len, wd, C.foam, (0.35 + 0.3 * al) * ff * Math.min(1, age / 0.06), 0.02);
+    }
+  }
+  // veils of mist stretched and dragged inland by the wind: dry-brush scumbles, not puffs
+  for (const m of c.mist) {
+    const a = age - m.del; if (a <= 0) continue;
+    const al = m.al * Math.min(1, a / 0.2) * (1 - smooth(a / 1.7)); if (al <= 0.003) continue;
+    const R = xorshift(m.seed), x = m.x - m.speed * a, y = m.y - 12 * a, len = m.len * (1 + 1.2 * a);
+    for (let k = 0; k < 5; k++) {
+      const oy = (R() - 0.5) * m.wid * 1.4, ox = (R() - 0.5) * len * 0.4, l = len * (0.35 + 0.5 * R()), w = 2 + R() * m.wid * 0.25, aa = al * (0.4 + 0.7 * R()), aj = (R() - 0.5) * 0.24;
+      brush(ctx, R, x + ox, y + oy, -0.04 + aj, l, w, C.foam, aa, 0.2);
+    }
+  }
+  // the plume: it climbs the face in a third of a second, fans out, then falls back and dissolves.
+  // Painted with bristled strokes into its own canvas, then laid on slightly softened, like wet paint.
+  if (age < 0.8) {
+    const Hc = c.h * easeOut(age / 0.35), fall = 450 * Math.max(0, age - 0.35) ** 2, lean = -50 * c.s;
+    const fade = 1 - smooth((age - 0.33) / 0.4), at = (u, w) => [c.x - 8 * c.s + w * (14 + 70 * u) * c.s + lean * u * u, c.y - Hc * u + fall * u];
+    const g = PLUMEC.getContext('2d'), px = v.ox + c.x * v.z - 390, py = v.oy + c.y * v.z - 700;
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.clearRect(0, 0, 780, 780);
+    g.setTransform(v.z, 0, 0, v.z, v.ox - px, v.oy - py);
+    // every mark is tapered at both ends into dry bristle tails (no round caps)
+    const mark = (seed, x, y, ang, len, wid, col, al, curl) => {
+      const P = [];
+      for (let k = 0; k <= 8; k++) { const u = k / 8 - 0.5, bow = curl * len * (0.25 - u * u); P.push([x + Math.cos(ang) * len * u - Math.sin(ang) * bow, y + Math.sin(ang) * len * u + Math.cos(ang) * bow]); }
+      dryMark(g, xorshift(seed), P, wid, col, al);
+    };
+    const line = (u0, w0, u1, w1) => { const P = []; for (let k = 0; k <= 8; k++) { const k8 = k / 8; P.push(at(mix(u0, u1, k8), mix(w0, w1, k8))); } return P; };
+    for (const d of c.sheets) dryMark(g, xorshift(d.seed), line(0.04, d.v * 0.35, d.reach * 0.9, d.v), d.wid * 0.75, C.foam, 0.5 * Math.min(1, age / 0.04));
+    for (const d of c.dabs) {
+      if (age < d.u * 0.22) continue;   // higher dabs arrive as the plume reaches them
+      const top = d.u > 0.62, [x, y] = at(d.u, d.v * (top ? 1.35 : 1)), ang = -Math.PI / 2 + d.v * 0.55 * d.u + d.aj, al = d.a * Math.min(1, (age - d.u * 0.22) / 0.05);
+      mark(d.seed, x, y, ang, d.len * (top ? 0.6 : 0.9 + 0.3 * d.u), d.wid * (top ? 0.7 : 0.9 + 0.4 * d.u), tint(C.foam, d.tone), al, 0.3 * d.v);
+    }
+    g.globalCompositeOperation = 'destination-out';
+    for (const d of c.breaks) dryMark(g, xorshift(d.seed), line(d.u0, d.v, d.u1, d.v * 1.1), d.wid, C.black, 0.6);
+    g.globalCompositeOperation = 'source-over';
+    g.fillStyle = rgb(C.foam);
+    for (const d of c.drips) {
+      if (age < 0.15 + d.del) continue;
+      const [x, y] = at(d.u, d.v);
+      g.globalAlpha = 0.75 * Math.min(1, (age - 0.15 - d.del) / 0.05);
+      g.beginPath(); g.arc(x, y + 300 * Math.max(0, age - 0.3) ** 2, d.r, 0, TAU); g.fill();
+    }
+    g.globalAlpha = 1; g.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = fade; ctx.filter = `blur(${(0.8 * v.z).toFixed(2)}px)`;
+    ctx.drawImage(PLUMEC, px, py); ctx.restore();
+  }
+  ctx.lineCap = 'round'; ctx.strokeStyle = rgb(C.foam);
+  for (const d of c.drops) {
+    const a = age - d.del; if (a <= 0 || a >= d.life) continue;
+    const [x1, y1] = sprayAt(d, a), [x0, y0] = sprayAt(d, Math.max(0, a - 0.035));
+    ctx.globalAlpha = 0.7 * (1 - a / d.life); ctx.lineWidth = d.r;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+// a ship in distress on the horizon: heeled over, sails in rags, its waterline lost in spray
+function drawShip(t, v, lk) {
+  toScene(ctx, v); ctx.translate(1290, HZ + 3 + Math.sin(t * 1.4) * 1); ctx.rotate(0.2 + 0.06 * Math.sin(t * 1.1 + 0.4)); ctx.scale(0.62, 0.62);
+  const ink = rgb(mixC([34, 29, 22], [10, 8, 6], lk));
+  ctx.globalAlpha = 0.86; ctx.fillStyle = ink; ctx.strokeStyle = ink; ctx.lineCap = 'round';
+  const poly = pts => { ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.fill(); };
+  poly([[-31, -9], [-24, -6], [22, -7], [33, -13], [26, 1], [14, 4], [-20, 4], [-28, -1]]);                       // hull, bow raised
+  ctx.lineWidth = 1.9; ctx.beginPath(); ctx.moveTo(-8, -6); ctx.lineTo(-9, -54); ctx.moveTo(12, -7); ctx.lineTo(11, -45); ctx.moveTo(-23, -6); ctx.lineTo(-24, -24); ctx.stroke();
+  ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(-9, -54); ctx.lineTo(33, -13); ctx.moveTo(-9, -54); ctx.lineTo(-31, -9); ctx.moveTo(11, -45); ctx.lineTo(30, -11); ctx.stroke();
+  poly([[-20, -42], [3, -42], [4, -33], [0, -31], [2, -26], [-3, -23], [-7, -27], [-12, -24], [-19, -27]]);        // main course, torn
+  poly([[-16, -53], [-2, -53], [-3, -47], [-7, -48], [-10, -45], [-15, -47]]);                                       // main topsail
+  poly([[3, -37], [21, -37], [22, -30], [18, -28], [19, -23], [14, -21], [9, -25], [4, -22]]);                       // fore course
+  poly([[11, -45], [19, -44 + 2 * Math.sin(t * 9)], [14, -41]]);                                                     // a rag of the fore topsail, flogging
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  toScene(ctx, v); ctx.globalAlpha = 0.55; ctx.drawImage(PUFF, 1225, HZ - 9, 130, 22);
+  reset();
+}
+
+// ── the watcher: a lantern-bearer in a greatcoat and a wide-brimmed hat, staff in the far hand ──
+// Drawn in units (soles at 0, hat crown at -97, facing the sea on the right), dark, then lit by the
+// lantern and, on the edges that face it, the breaking light.
+const FIG_ORIGIN = [160, 330];   // where the back foot sits inside FIGC, in device pixels
+function watcherShape(g, t) {
+  const w = wind(t), rs = raise(t), gust = Math.sin(t * 7.3) * 0.6 + Math.sin(t * 11.9 + 1.3) * 0.4;
+  const lean = 0.035 + 0.01 * gust * w, cL = Math.cos(lean), sL = Math.sin(lean);
+  const rot = (x, y) => [x * cL - y * sL, x * sL + y * cL];
+  const line = (pts, wd) => { g.lineWidth = wd; g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke(); };
+  const hand = (x, y, r, a) => {
+    g.beginPath(); g.ellipse(x, y, r * 1.15, r * 0.85, a, 0, TAU); g.fill();
+    g.beginPath(); g.ellipse(x + Math.cos(a - 1.3) * r, y + Math.sin(a - 1.3) * r, r * 0.55, r * 0.3, a - 1.3, 0, TAU); g.fill();   // thumb
+  };
+  const boot = (x, y) => { g.beginPath(); g.moveTo(x - 2.6, y); g.lineTo(x - 2.4, y - 3.4); g.lineTo(x + 1.4, y - 3.2); g.quadraticCurveTo(x + 5.6, y - 2.2, x + 5.4, y); g.closePath(); g.fill(); };
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  g.save(); g.rotate(lean);   // leaning into the wind off the sea
+  // staff planted well ahead; the far arm reaches forward to grip it
+  line([[25.5, 0], [21.4, -74]], 1.5);
+  g.beginPath(); g.arc(21.4, -74, 1.1, 0, TAU); g.fill();
+  line([[-0.5, -71], [8.5, -60]], 3.6); line([[8.5, -60], [21.2, -61.4]], 3.0);
+  hand(21.9, -61.4, 1.6, 0.1);
+  // legs: back leg straight and braced, front knee bent (~160°) with the foot forward
+  line([[-1.5, -40], [-5, -3]], 4.8);
+  boot(-4.8, 0);
+  line([[2.5, -40], [10.5, -21]], 5); line([[10.5, -21], [9.5, -3]], 4.2);
+  boot(9.7, 0);
+  // greatcoat, its back hem streaming out in the wind, frayed into a few dry-brush flicks
+  const flap = (5 + 3.5 * gust) * w, hx0 = -13 - flap * 1.4, hy0 = -33 + 2 * gust * w;
+  g.beginPath(); g.moveTo(-2.8, -80);
+  g.quadraticCurveTo(-6.3, -77.5, -6.4, -71);
+  g.quadraticCurveTo(-6.8, -58, -8 - flap * 0.4, -48);
+  g.quadraticCurveTo(-10 - flap, -40, hx0, hy0);
+  g.lineTo(-7 - flap * 0.6, -35);
+  g.quadraticCurveTo(0, -36.5, 8.5, -35.5);
+  g.quadraticCurveTo(7.8, -50, 6.8, -60);
+  g.quadraticCurveTo(7.6, -70, 5.2, -76);
+  g.quadraticCurveTo(3.8, -80.5, 2.6, -80.5);
+  g.closePath(); g.fill();
+  for (const [ox, oy, l, a] of [[0, 0, 5, 2.95], [1.8, -1.4, 4, 2.75], [3.4, 0.8, 3.2, 3.15]]) {
+    const ang = a + 0.18 * Math.sin(t * 8 + ox) * w, x0 = hx0 + ox, y0 = hy0 + oy;
+    g.beginPath(); g.moveTo(x0, y0 - 0.55); g.lineTo(x0 + Math.cos(ang) * l * w, y0 + Math.sin(ang) * l * w); g.lineTo(x0, y0 + 0.55); g.closePath(); g.fill();
+  }
+  // a scarf end streaming from the collar: a tapered ribbon that curls in the wind
+  {
+    const P = []; let x = -2.2, y = -79.6;
+    for (let i = 0; i <= 10; i++) {
+      const u = i / 10, a = Math.PI - 0.3 + 0.35 * u + 0.75 * u * Math.sin(t * 8 - u * 5) * (0.4 + 0.6 * w);
+      P.push([x, y, 1.6 * (1 - u) + 0.2]); x += Math.cos(a) * 1.7; y += Math.sin(a) * 1.7;
+    }
+    g.beginPath();
+    P.forEach(([x, y, h], i) => { const [a, b] = P[Math.min(10, i + 1)], [c, d] = P[Math.max(0, i - 1)], l = Math.hypot(a - c, b - d) || 1; g.lineTo(x - (b - d) / l * h, y + (a - c) / l * h); });
+    for (let i = 10; i >= 0; i--) { const [x, y, h] = P[i], [a, b] = P[Math.min(10, i + 1)], [c, d] = P[Math.max(0, i - 1)], l = Math.hypot(a - c, b - d) || 1; g.lineTo(x + (b - d) / l * h, y - (a - c) / l * h); }
+    g.closePath(); g.fill();
+  }
+  // neck
+  g.beginPath(); g.moveTo(-1.6, -79); g.lineTo(-1.8, -82.6); g.lineTo(2.6, -82.6); g.lineTo(2.8, -79.5); g.closePath(); g.fill();
+  // head in profile, facing the sea: skull, brow, nose, lips, chin
+  g.beginPath(); g.moveTo(-2.2, -82.4);
+  g.quadraticCurveTo(-4.4, -85.5, -3.9, -88.6); g.quadraticCurveTo(-2.6, -92.4, 1.2, -92.4); g.quadraticCurveTo(4.0, -92.0, 4.6, -89.4);
+  g.lineTo(4.9, -88.4); g.lineTo(4.6, -87.6); g.lineTo(6.3, -85.7); g.lineTo(4.9, -85.1);
+  g.lineTo(5.2, -84.3); g.lineTo(4.8, -83.7); g.quadraticCurveTo(5.4, -82.6, 4.6, -81.9); g.quadraticCurveTo(3.4, -81.0, 2.4, -81.4);
+  g.closePath(); g.fill();
+  // wide-brimmed hat: a brim that dips at the front, a low dented crown
+  g.beginPath(); g.moveTo(-7.2, -89.6); g.quadraticCurveTo(0.5, -92.2, 9.2, -90.2); g.quadraticCurveTo(9.6, -89.4, 8.8, -89.2); g.quadraticCurveTo(0.5, -90.6, -6.8, -88.6); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(-4.4, -90.6); g.quadraticCurveTo(-4.6, -96.6, -0.2, -97.2); g.quadraticCurveTo(2.0, -96.2, 3.4, -97.0); g.quadraticCurveTo(5.0, -95.6, 4.8, -90.8); g.closePath(); g.fill();
+  // near arm: shoulder well below the chin, elbow bent, fist closed on the lantern's bail
+  const a1 = mix(1.32, -0.08, rs), a2 = mix(0.85, -0.62, rs);   // at rest the lantern is held clear of the coat and the staff
+  const sx = 1.2, sy = -71.5, ex = sx + 14 * Math.cos(a1), ey = sy + 14 * Math.sin(a1), hx = ex + 12.5 * Math.cos(a2), hy = ey + 12.5 * Math.sin(a2);
+  g.beginPath(); g.arc(sx, sy + 0.4, 3.3, 0, TAU); g.fill();
+  line([[sx, sy], [ex, ey]], 4.3); line([[ex, ey], [hx, hy]], 3.4);
+  g.save(); g.translate(hx, hy); g.rotate(a2);
+  g.beginPath(); g.ellipse(0.9, 0.1, 2.1, 1.75, 0, 0, TAU); g.fill();   // the fist
+  g.restore();
+  const sw = swing(t), px = hx + Math.cos(a2) * 1.1, py = hy + Math.sin(a2) * 1.1 + 1.3;
+  g.save(); g.translate(px, py); g.rotate(sw);
+  g.lineWidth = 1.0; g.beginPath(); g.moveTo(-2.1, 3.5); g.quadraticCurveTo(0, -1.6, 2.1, 3.5); g.stroke();   // the bail under the fist
+  g.beginPath(); g.moveTo(-2.5, 3.7); g.lineTo(0, 2.0); g.lineTo(2.5, 3.7); g.closePath(); g.fill();
+  g.fillRect(-2.5, 3.6, 5, 0.9); g.fillRect(-2.5, 9.1, 5, 1.1); g.fillRect(-2.5, 4.5, 0.6, 4.6); g.fillRect(1.9, 4.5, 0.6, 4.6);
+  const glass = g.getTransform();
+  g.restore(); g.restore();
+  const L = rot(px - Math.sin(sw) * 6.8, py + Math.cos(sw) * 6.8);
+  return { lx: L[0], ly: L[1], glass };
+}
+function drawWatcher(t, v, lk) {
+  const g = FIGC.getContext('2d'), z = v.z * FS, ink = '#0e0b09';
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.clearRect(0, 0, 480, 480);
+  g.setTransform(z, 0, 0, z, FIG_ORIGIN[0], FIG_ORIGIN[1]);
+  g.fillStyle = ink; g.strokeStyle = ink;
+  const L = watcherShape(g, t), I = lamp(t);
+  // rim light: the figure minus itself shifted away from the light leaves a lit edge, only on the
+  // edges that face the light (the shift is whole pixels or more, so anti-aliased back edges stay dark)
+  if (lk > 0.01) {
+    const s = SCR.getContext('2d'), k = Math.max(1, Math.sqrt(z));
+    s.setTransform(1, 0, 0, 1, 0, 0); s.globalCompositeOperation = 'source-over'; s.globalAlpha = 1; s.clearRect(0, 0, 480, 480);
+    s.drawImage(FIGC, 0, 0); s.globalCompositeOperation = 'destination-out'; s.drawImage(FIGC, -1.6 * k, 1.1 * k);
+    s.globalCompositeOperation = 'source-in'; s.fillStyle = rgb(C.gold); s.fillRect(0, 0, 480, 480);
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-atop'; g.globalAlpha = 0.7 * lk; g.drawImage(SCR, 0, 0, 480, 480, 0, 0, 480, 480);
+    g.globalAlpha = 1; s.globalCompositeOperation = 'source-over';
+  }
+  // the lantern lights the hand, the arm and, when raised, the face
+  g.setTransform(z, 0, 0, z, FIG_ORIGIN[0], FIG_ORIGIN[1]);
+  g.globalCompositeOperation = 'source-atop';
+  const gr = g.createRadialGradient(L.lx, L.ly, 0, L.lx, L.ly, 30);
+  gr.addColorStop(0, `rgba(255,178,90,${(0.85 * I).toFixed(3)})`); gr.addColorStop(0.45, `rgba(214,120,50,${(0.3 * I).toFixed(3)})`); gr.addColorStop(1, 'rgba(160,80,30,0)');
+  g.fillStyle = gr; g.fillRect(-70, -140, 160, 160);
+  g.globalCompositeOperation = 'source-over';
+  // the glass itself
+  g.setTransform(L.glass);
+  g.fillStyle = `rgb(255,${(196 + 40 * I) | 0},${(110 + 60 * I) | 0})`; g.fillRect(-1.9, 4.5, 3.8, 4.6);
+  g.fillStyle = ink; g.fillRect(-0.3, 4.5, 0.6, 4.6);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(FIGC, v.ox + FIG.x * v.z - FIG_ORIGIN[0], v.oy + FIG.y * v.z - FIG_ORIGIN[1]);
+  return { x: v.ox + (FIG.x + L.lx * FS) * v.z, y: v.oy + (FIG.y + L.ly * FS) * v.z, I };
+}
+function drawLanternGlow(p, z) {
+  const r = 80 * z * (0.6 + 0.4 * p.I);
+  const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+  gr.addColorStop(0, `rgba(255,214,140,${(0.75 * p.I).toFixed(3)})`); gr.addColorStop(0.12, `rgba(255,160,70,${(0.36 * p.I).toFixed(3)})`); gr.addColorStop(1, 'rgba(200,90,30,0)');
+  ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = gr; ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r); reset();
+}
+
+const RAIN = (() => { const R = xorshift(7), a = []; for (let i = 0; i < 230; i++) a.push({ x: R() * (W + 400), y: R() * (H + 200), sp: 1300 + 700 * R(), len: 40 + 60 * R(), al: 0.05 + 0.11 * R(), wd: 0.8 + 1.4 * R() }); return a; })();
+function drawRain(t, k) {
+  if (k <= 0) return;
+  const n = Math.hypot(0.3, 1), dx = -0.3 / n, dy = 1 / n;
+  ctx.lineCap = 'round'; ctx.strokeStyle = rgb(C.bone);
+  for (const d of RAIN) {
+    const s = d.sp * t, x = (((d.x + dx * s) % (W + 400)) + W + 400) % (W + 400) - 200, y = (((d.y + dy * s) % (H + 200)) + H + 200) % (H + 200) - 100;
+    ctx.globalAlpha = d.al * k; ctx.lineWidth = d.wd;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - dx * d.len, y - dy * d.len); ctx.stroke();
+  }
+  reset();
+}
+
+// ── the title ──
+const TITLE = 'ROMANTICISM', SUB = 'Europe, 1800–1850';
+const TX = 132, TY = 206, TRACK = 15;
+function drawTitle(t) {
+  if (t < 6.5) return;
+  ctx.font = '400 84px "Playfair Display"'; ctx.textBaseline = 'alphabetic';
+  let x = TX;
+  for (let i = 0; i < TITLE.length; i++) {
+    const ch = TITLE[i], cw = ctx.measureText(ch).width, t0 = 6.55 + i * 0.075, k = win(t, t0, t0 + 0.65);
+    if (k > 0) {
+      ctx.globalAlpha = smooth(k * 1.6);
+      ctx.shadowColor = 'rgba(8,6,4,0.85)'; ctx.shadowBlur = 24;
+      ctx.fillStyle = TXTPAT; ctx.fillText(ch, x, TY + (1 - settle(k, 1.5)) * 22);
+    }
+    x += cw + TRACK;
+  }
+  ctx.shadowBlur = 0; ctx.shadowColor = 'transparent';
+  const full = x - TRACK - TX, rk = easeOut(win(t, 7.1, 7.9));
+  if (rk > 0) {
+    const R = xorshift(99), len = full * rk;
+    brush(ctx, R, TX + len / 2, TY + 30, 0.004, len, 4, C.ochre, 0.8, 0.02);
+  }
+  const sk = win(t, 7.35, 8.15);
+  if (sk > 0) {
+    ctx.font = 'italic 400 34px "Playfair Display"'; ctx.globalAlpha = 0.9 * smooth(sk);
+    ctx.shadowColor = 'rgba(8,6,4,0.85)'; ctx.shadowBlur = 16; ctx.fillStyle = rgb([214, 200, 166]);
+    ctx.fillText(SUB, TX + 2 + (1 - easeOut(sk)) * 18, TY + 82);
+    ctx.shadowBlur = 0; ctx.shadowColor = 'transparent';
+  }
+  reset();
+}
+
+function frame(t) {
+  const cam = camera(t), f = flash(t), lk = lightK(t), dx = skyDrift(t);
+  const vSky = view(cam, 0.6), vScud = view(cam, 0.7), vSea = view(cam, 0.85), vNear = view(cam, 1);
+  reset(); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  blit(SKY, SKY_RECT, vSky, 1, 'source-over', dx);
+  if (f > 0.01) drawFlash(vSky, dx, f);
+  blit(SCUD, SCUD_RECT, vScud, 1 - 0.6 * lk, 'source-over', -48 * t);
+  drawOpening(t, vSky, dx);
+  if (f > 0.3) drawBolt(vSky, dx, f);
+  blit(RAYS, LIGHT_RECT, vSky, 0.55 * smooth(win(t, 5.3, 7.3)), 'screen', dx);
+  blit(SEA, SEA_RECT, vSea);
+  blit(GLIT, SEA_RECT, vSea, lk * (0.82 + 0.18 * Math.sin(t * 9)), 'lighter');
+  drawCaps(t, vSea, lk);
+  drawShip(t, vSea, lk);
+  const fog = zone => { for (const fg of FOGS) if (fg.zone === zone) {
+    const v = view(cam, fg.d);
+    blit(fg.cold, fg.rect, v, fg.alpha * (1 - lk), 'source-over', -fg.speed * t);
+    blit(fg.warm, fg.rect, v, fg.alpha * lk, 'source-over', -fg.speed * t);
+  } };
+  fog('far');
+  const sp = smooth(win(t, 5.0, 7.0));
+  if (sp > 0) {
+    blit(SPILLC, LIGHT_RECT, vSky, 0.75 * sp, 'screen', dx);
+    blit(FOGLIT, { x: SUN.x - 640, y: HZ - 100, w: 1000, h: 160, ps: 1 }, view(cam, 0.82), 0.9 * sp, 'screen');
+  }
+  toScene(ctx, vNear); for (const c of CRASHES) drawSwell(t, c); reset();
+  fog('mid');
+  blit(ROCK, ROCK_RECT, vNear);
+  blit(ROCK_WARM, ROCK_RECT, vNear, 0.7 * lk);
+  const lantern = drawWatcher(t, vNear, lk);
+  drawLanternGlow(lantern, vNear.z);
+  toScene(ctx, vNear); for (const c of CRASHES) drawSpray(t, c, vNear); reset();
+  fog('near');
+  drawRain(t, 1 - smooth(win(t, 5.0, 6.6)));
+  const gl = gloom(t);
+  if (gl > 0) { ctx.fillStyle = rgb(C.black, gl); ctx.fillRect(0, 0, W, H); }
+  if (lk > 0) {   // the light warms what it reaches, most near the tear
+    const sx = vSky.ox + (SUN.x + dx) * vSky.z, sy = vSky.oy + SUN.y * vSky.z, gr = ctx.createRadialGradient(sx, sy, 0, sx, sy, 1300);
+    gr.addColorStop(0, rgb(C.gold, 0.26 * lk)); gr.addColorStop(0.5, rgb(C.amber, 0.12 * lk)); gr.addColorStop(1, rgb(C.amber, 0.03 * lk));
+    ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H); reset();
+  }
+  ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.13; ctx.drawImage(WEAVE, 0, 0); reset();
+  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(VIG, 0, 0); reset();
+  const ck = smooth(win(t, 4.3, 5.4));
+  if (ck > 0) {   // the white-hot core, laid on above the varnish so it is the brightest thing in the film
+    const sx = vSky.ox + (SUN.x + dx) * vSky.z, sy = vSky.oy + SUN.y * vSky.z;
+    ctx.setTransform(vSky.z, 0, 0, vSky.z, sx, sy); ctx.rotate(TILT * 0.8);
+    ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = ck; ctx.drawImage(CORE, -210, -90); ctx.drawImage(CORE, -150, -64, 300, 128); reset();
+  }
+  drawTitle(t);
+  const dark = Math.max(1 - smooth(win(t, 0, 0.8)), smooth(win(t, 9.25, 10)));
+  if (dark > 0) { ctx.fillStyle = rgb(C.black, dark); ctx.fillRect(0, 0, W, H); }
+}
+
+window.draw = ({ t }) => { frame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => {
+  const pan = (x, t) => { const cam = camera(t), v = view(cam, 1); return +cl((v.ox + x * v.z) / W * 2 - 1, -1, 1).toFixed(3); };
+  const ev = [{ k: 'storm', t: 0, d: DUR }];
+  for (const c of CRASHES) ev.push({ k: 'swell', t: c.t - 0.8, v: c.s, pan: pan(c.x, c.t) }, { k: 'crash', t: c.t, v: c.s, pan: pan(c.x, c.t) });
+  ev.push({ k: 'raise', t: 2.3 }, { k: 'gloom', t: 3.2 });
+  for (const [t0, a] of FLASHES) ev.push({ k: 'strike', t: t0, v: a, pan: pan(1200, t0) });
+  ev.push({ k: 'thunder', t: 3.68, pan: pan(1200, 3.68) }, { k: 'tear', t: 4.0, d: 0.65 }, { k: 'break', t: 4.55, d: 2.55 },
+    { k: 'lower', t: 5.7 }, { k: 'title', t: 6.55, n: TITLE.length, step: 0.075 }, { k: 'subtitle', t: 7.35 }, { k: 'close', t: 9.25 });
+  return ev;
+};
+window.ready = (async () => {
+  await Promise.all(['400 84px "Playfair Display"', 'italic 400 34px "Playfair Display"'].map(f => document.fonts.load(f)));
+  await document.fonts.ready;
+  buildSprites(); buildSky(); buildLight(); buildStages(); buildSea(); buildRock(); buildFog(); buildSurface();
+})();
+</script>
+</body></html>
