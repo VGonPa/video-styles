@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── dada · cut-up photomontage on newsprint ────────────────────────────────────────────────────────
+// A tidy front page, THE ORDERLY GAZETTE: "ALL IS IN ORDER" over a gear, a bowler hat, a soap ad and
+// an optician's eye. Giant halftone scissors slide in and cut it twice; the page falls apart and its
+// pictures and words stay behind as cut-outs. They are pasted back wrong: the headline at fighting
+// angles, the gear, eye and hat assembled into one machine head, "BUY" from the soap ad pasted onto
+// "NOTHING". The scissors return to snip the D out of ORDER, the letters shuffle and a red R drops in:
+// ALL IS IN ERROR. The head tips its hat, a red DADA stamp lands, and the film fades out.
+// Pictures are greyscale drawings screened into dots on one 45° grid anchored to the page, so a
+// cut-out lines up dot for dot with the page it came from. Everything is drawn from t alone.
+const W = 1920, H = 1080, DUR = 10.0;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = u => 1 - Math.pow(1 - u, 3), eIn = u => u * u * u;
+const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eBack = (u, s = 1.7) => 1 + (s + 1) * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2);
+const deg = d => d * Math.PI / 180;
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; };
+
+const F = { frak: '"UnifrakturMaguntia"', play: '"Playfair Display"', old: '"Old Standard TT"', anton: '"Anton"', slab: '"Alfa Slab One"', arch: '"Archivo Black"' };
+const C = { news: '#e4dcc5', ink: '#151211', red: '#c8371f', gloss: '#ebe7dd', ground: '#2e2a26' };
+
+// ── page: placed at (PX, PY) in world pixels, 1 page unit = 1 px ──
+const PX = 60, PY = 12, PW = 1800, PH = 1180;
+const HT = 7;                                                  // halftone cell, page units
+const SNAP = 2.6;                                              // the page falls apart
+
+// ── texture helpers ──
+function grain(g, w, h, amt, seed) {
+  const id = g.getImageData(0, 0, w, h), d = id.data, r = rng(seed);
+  for (let i = 0; i < d.length; i += 4) { const n = (r() - 0.5) * amt; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+  g.putImageData(id, 0, 0);
+}
+function fibers(g, w, h, r, density, alpha = 1) {
+  g.lineCap = 'round';
+  for (let i = 0, n = w * h / density; i < n; i++) {
+    const x = r() * w, y = r() * h, a = r() * Math.PI, l = 3 + r() * 10;
+    g.strokeStyle = r() < 0.55 ? `rgba(95,72,40,${(0.05 + 0.07 * r()) * alpha})` : `rgba(255,252,240,${0.12 * alpha})`;
+    g.lineWidth = 0.5 + r() * 0.7; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+  }
+}
+function blotches(g, w, h, r, n, a0) {
+  for (let i = 0; i < n; i++) {
+    const x = r() * w, y = r() * h, rad = 60 + r() * 260, a = a0 * r(), dark = r() < 0.6;
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, dark ? `rgba(125,92,45,${a})` : `rgba(255,250,236,${a})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+}
+// ink speckle: knocked out of every printed layer so type and dots look pressed, not drawn
+let SPECK;
+function buildSpeckle() {
+  const S = 256, c = mk(S, S), g = c.getContext('2d'), r = rng(5);
+  for (let i = 0; i < 1000; i++) { g.fillStyle = `rgba(0,0,0,${0.15 + 0.4 * r()})`; g.beginPath(); g.arc(r() * S, r() * S, 0.3 + r() * 1.0, 0, 7); g.fill(); }
+  for (let i = 0; i < 30; i++) { g.fillStyle = `rgba(0,0,0,${0.04 + 0.07 * r()})`; g.beginPath(); g.arc(r() * S, r() * S, 2 + r() * 4, 0, 7); g.fill(); }
+  SPECK = c;
+}
+function knock(g, w, h, R) {
+  const p = g.createPattern(SPECK, 'repeat'); p.setTransform(new DOMMatrix().scale(Math.sqrt(R) * 0.8));
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-out'; g.fillStyle = p; g.fillRect(0, 0, w, h); g.restore();
+}
+
+// ── halftone: dots on a 45° screen anchored at the origin of the picture's coordinate space ──
+// gray: greyscale picture covering [x0, x0+w) × [y0, y0+h). Returns flat [x, y, r, ...] in those coords.
+function screenDots(gray, x0, y0, cell = HT, seed = 7, gain = 1.22) {
+  const w = gray.width, h = gray.height, s = mk(w, h), sg = s.getContext('2d');
+  sg.filter = `blur(${cell * 0.28}px)`; sg.drawImage(gray, 0, 0);
+  const d = sg.getImageData(0, 0, w, h).data, r = rng(seed);
+  const ux = Math.SQRT1_2 * cell, uy = Math.SQRT1_2 * cell, vx = -uy, vy = ux, c2 = cell * cell;
+  let i0 = 1e9, i1 = -1e9, j0 = 1e9, j1 = -1e9;
+  for (const [px, py] of [[x0, y0], [x0 + w, y0], [x0, y0 + h], [x0 + w, y0 + h]]) {
+    const i = (px * ux + py * uy) / c2, j = (px * vx + py * vy) / c2;
+    i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j);
+  }
+  const out = [];
+  for (let i = Math.floor(i0); i <= Math.ceil(i1); i++) for (let j = Math.floor(j0); j <= Math.ceil(j1); j++) {
+    const px = i * ux + j * vx, py = i * uy + j * vy, lx = px - x0, ly = py - y0;
+    if (lx < 0 || ly < 0 || lx >= w || ly >= h) continue;
+    const k = ((ly | 0) * w + (lx | 0)) * 4, a = d[k + 3] / 255;
+    if (a < 0.05) continue;
+    const dark = (1 - (d[k] * 0.3 + d[k + 1] * 0.59 + d[k + 2] * 0.11) / 255) * a;
+    if (dark < 0.035) continue;
+    out.push(px, py, cell * 0.5 * Math.sqrt(dark) * gain * (0.93 + 0.14 * r()));
+  }
+  return out;
+}
+function drawDots(g, dots, color, dx = 0, dy = 0) {
+  g.fillStyle = color; g.beginPath();
+  for (let i = 0; i < dots.length; i += 3) { const x = dots[i] + dx, y = dots[i + 1] + dy; g.moveTo(x + dots[i + 2], y); g.arc(x, y, dots[i + 2], 0, 6.2832); }
+  g.fill();
+}
+// greyscale picture of a page-space box, drawn by fn(g) in page coordinates
+function grayBox(box, fn) { const c = mk(box.w, box.h), g = c.getContext('2d'); g.translate(-box.x, -box.y); fn(g); return c; }
+// grow a silhouette by m px (union of shifted copies), filled with colour
+function dilate(sil, m, color = '#000') {
+  const c = mk(sil.width, sil.height), g = c.getContext('2d');
+  for (let k = 0; k < 20; k++) { const a = k / 20 * Math.PI * 2; g.drawImage(sil, Math.cos(a) * m, Math.sin(a) * m); }
+  g.drawImage(sil, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = color; g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+function shadowOf(sprite, blur) {
+  const pad = Math.ceil(blur * 2.5), c = mk(sprite.width + pad * 2, sprite.height + pad * 2), g = c.getContext('2d');
+  g.filter = `blur(${blur}px)`; g.drawImage(sprite, pad, pad); g.filter = 'none';
+  g.globalCompositeOperation = 'source-in'; g.fillStyle = 'rgb(18,10,4)'; g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+
+// ── the pictures (greyscale, page coordinates) ──
+const GEAR = { box: { x: 58, y: 600, w: 414, h: 296 }, cx: 265, cy: 748, R: 118, n: 14, depth: 19, Ri: 80, Rh: 34 };
+const HAT = { box: { x: 518, y: 558, w: 626, h: 396 }, cx: 830, cy: 760 };
+const EYE = { box: { x: 1486, y: 868, w: 250, h: 156 }, cx: 1611, cy: 948 };
+
+function gearOutline(g, cx, cy, R, n, depth) {
+  const p = 2 * Math.PI / n, Rr = R - depth;
+  for (let k = 0; k < n; k++) {
+    const a = k * p;
+    g.arc(cx, cy, Rr, a - 0.5 * p, a - 0.25 * p); g.arc(cx, cy, R, a - 0.14 * p, a + 0.14 * p); g.arc(cx, cy, Rr, a + 0.25 * p, a + 0.5 * p);
+  }
+  g.closePath();
+}
+function gearWindows(g, cx, cy) {
+  const { Ri, Rh } = GEAR, n = 5, half = deg(9);
+  for (let k = 0; k < n; k++) {
+    const a0 = k * 2 * Math.PI / n + half + deg(-90), a1 = (k + 1) * 2 * Math.PI / n - half + deg(-90);
+    g.moveTo(cx + Math.cos(a0) * (Rh + 12), cy + Math.sin(a0) * (Rh + 12));
+    g.arc(cx, cy, Ri, a0 + deg(3), a1 - deg(3)); g.arc(cx, cy, Rh + 12, a1, a0, true); g.closePath();
+  }
+  g.moveTo(cx + 11, cy); g.arc(cx, cy, 11, 0, Math.PI * 2);
+}
+function gearShape(g) { const { cx, cy, R, n, depth } = GEAR; g.beginPath(); gearOutline(g, cx, cy, R, n, depth); gearWindows(g, cx, cy); g.fill('evenodd'); }
+function gearPhoto(g) {
+  const { box, cx, cy, R, n, depth, Ri, Rh } = GEAR;
+  const bg = g.createRadialGradient(cx - 60, cy - 50, 20, cx, cy, 300); bg.addColorStop(0, '#7a7a7a'); bg.addColorStop(1, '#1e1e1e');
+  g.fillStyle = bg; g.fillRect(box.x, box.y, box.w, box.h);
+  g.save(); g.filter = 'blur(10px)'; g.fillStyle = 'rgba(0,0,0,0.75)'; g.translate(14, 18); gearShape(g); g.restore();
+  const body = g.createLinearGradient(cx - R, cy - R, cx + R, cy + R); body.addColorStop(0, '#f2f2f2'); body.addColorStop(0.55, '#a9a9a9'); body.addColorStop(1, '#5b5b5b');
+  g.fillStyle = body; gearShape(g);
+  g.save(); g.beginPath(); gearOutline(g, cx, cy, R, n, depth); gearWindows(g, cx, cy); g.clip('evenodd');
+  // rim and hub bevels catch the light top-left and fall into shadow bottom-right
+  for (const [r0, wd] of [[R - depth - 3, 7], [Ri + 2, 5], [Rh + 2, 6]]) {
+    const gl = g.createLinearGradient(cx - r0, cy - r0, cx + r0, cy + r0); gl.addColorStop(0, '#ffffff'); gl.addColorStop(0.5, '#8d8d8d'); gl.addColorStop(1, '#2e2e2e');
+    g.strokeStyle = gl; g.lineWidth = wd; g.beginPath(); g.arc(cx, cy, r0, 0, Math.PI * 2); g.stroke();
+  }
+  const hub = g.createRadialGradient(cx - 12, cy - 12, 2, cx, cy, Rh + 8); hub.addColorStop(0, '#f4f4f4'); hub.addColorStop(1, '#6a6a6a');
+  g.fillStyle = hub; g.beginPath(); g.arc(cx, cy, Rh + 8, 0, Math.PI * 2); g.arc(cx, cy, 11, 0, Math.PI * 2, true); g.fill();
+  g.strokeStyle = 'rgba(30,30,30,0.7)'; g.lineWidth = 3; g.beginPath(); gearWindows(g, cx, cy); g.stroke();
+  for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3 + 0.3; g.fillStyle = '#3a3a3a'; g.beginPath(); g.arc(cx + Math.cos(a) * (Rh - 4), cy + Math.sin(a) * (Rh - 4), 3.2, 0, 7); g.fill(); }
+  g.restore();
+  g.strokeStyle = 'rgba(25,25,25,0.8)'; g.lineWidth = 2; g.beginPath(); gearOutline(g, cx, cy, R, n, depth); g.stroke();
+}
+
+function hatCrown(g) {
+  const { cx } = HAT;
+  g.beginPath(); g.moveTo(cx - 146, 822);
+  g.bezierCurveTo(cx - 160, 700, cx - 110, 618, cx, 616);
+  g.bezierCurveTo(cx + 110, 618, cx + 160, 700, cx + 146, 822);
+  g.closePath();
+}
+function hatShape(g) { g.beginPath(); g.ellipse(HAT.cx, 830, 212, 54, 0, 0, Math.PI * 2); g.fill(); hatCrown(g); g.fill(); }
+function hatPhoto(g) {
+  const { box, cx } = HAT;
+  const bg = g.createLinearGradient(0, box.y, 0, box.y + box.h); bg.addColorStop(0, '#dedede'); bg.addColorStop(1, '#9a9a9a');
+  g.fillStyle = bg; g.fillRect(box.x, box.y, box.w, box.h);
+  g.save(); g.filter = 'blur(16px)'; g.fillStyle = 'rgba(0,0,0,0.55)'; g.beginPath(); g.ellipse(cx + 30, 880, 240, 34, 0, 0, Math.PI * 2); g.fill(); g.restore();
+  // brim, seen from just above: felt top surface, rolled edge
+  const br = g.createLinearGradient(cx - 212, 0, cx + 212, 0); br.addColorStop(0, '#3a3a3a'); br.addColorStop(0.35, '#1a1a1a'); br.addColorStop(1, '#101010');
+  g.fillStyle = br; g.beginPath(); g.ellipse(cx, 830, 212, 54, 0, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#4c4c4c'; g.lineWidth = 6; g.beginPath(); g.ellipse(cx, 832, 206, 49, 0, deg(10), deg(170)); g.stroke();
+  // crown
+  const cr = g.createRadialGradient(cx - 62, 680, 10, cx - 20, 720, 210); cr.addColorStop(0, '#8a8a8a'); cr.addColorStop(0.35, '#3e3e3e'); cr.addColorStop(1, '#0e0e0e');
+  g.fillStyle = cr; hatCrown(g); g.fill();
+  // ribbon band with a small bow on the left
+  g.save(); hatCrown(g); g.clip();
+  g.fillStyle = '#0b0b0b'; g.beginPath(); g.ellipse(cx, 812, 160, 30, 0, Math.PI, 0); g.lineTo(cx + 160, 832); g.ellipse(cx, 832, 160, 30, 0, 0, Math.PI, false); g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(150,150,150,0.55)'; g.lineWidth = 2.5; g.beginPath(); g.ellipse(cx, 784, 150, 26, 0, deg(200), deg(330)); g.stroke();
+  g.restore();
+  g.fillStyle = '#121212'; g.beginPath(); g.ellipse(cx - 118, 806, 16, 11, -0.4, 0, 7); g.fill();
+  g.strokeStyle = '#555'; g.lineWidth = 2; g.beginPath(); g.ellipse(cx - 118, 806, 12, 7, -0.4, deg(200), deg(320)); g.stroke();
+  // near lip of the brim, lit
+  const lip = g.createLinearGradient(0, 850, 0, 884); lip.addColorStop(0, '#2a2a2a'); lip.addColorStop(1, '#6a6a6a');
+  g.strokeStyle = lip; g.lineWidth = 9; g.beginPath(); g.ellipse(cx, 830, 207, 50, 0, deg(20), deg(160)); g.stroke();
+}
+
+// eye: local coordinates around (EYE.cx, EYE.cy); opening is the almond between the lids
+function eyeOpening(g, ox = EYE.cx, oy = EYE.cy) {
+  g.moveTo(ox - 92, oy + 2);
+  g.bezierCurveTo(ox - 40, oy - 50, ox + 38, oy - 52, ox + 94, oy - 4);
+  g.bezierCurveTo(ox + 44, oy + 36, ox - 36, oy + 40, ox - 92, oy + 2);
+  g.closePath();
+}
+function eyeContour(g, ox = EYE.cx, oy = EYE.cy) { g.ellipse(ox, oy - 10, 124, 74, 0, 0, Math.PI * 2); }
+function eyeBaseGray(g) {
+  const { cx, cy, box } = EYE;
+  const sk = g.createRadialGradient(cx - 20, cy - 30, 10, cx, cy, 170); sk.addColorStop(0, '#d2c9c0'); sk.addColorStop(1, '#8f857c');
+  g.fillStyle = sk; g.fillRect(box.x, box.y, box.w, box.h);
+  // brow
+  const r = rng(77);
+  g.lineCap = 'round';
+  for (let i = 0; i < 90; i++) {
+    const u = r(), x = cx - 98 + u * 186, y = cy - 58 - Math.sin(u * Math.PI) * 14 + (r() - 0.5) * 10;
+    g.strokeStyle = `rgba(40,34,30,${0.5 + 0.4 * r()})`; g.lineWidth = 2 + r() * 2.2 * Math.sin(u * Math.PI + 0.3);
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + 14 + r() * 8, y - 3 - r() * 4); g.stroke();
+  }
+  // lid crease and its shadow
+  g.save(); g.filter = 'blur(6px)'; g.strokeStyle = 'rgba(70,60,52,0.6)'; g.lineWidth = 10;
+  g.beginPath(); g.moveTo(cx - 92, cy - 4); g.bezierCurveTo(cx - 40, cy - 62, cx + 40, cy - 64, cx + 96, cy - 10); g.stroke(); g.restore();
+  g.strokeStyle = '#5c5048'; g.lineWidth = 3; g.beginPath(); g.moveTo(cx - 88, cy - 8); g.bezierCurveTo(cx - 40, cy - 60, cx + 40, cy - 62, cx + 92, cy - 12); g.stroke();
+  // white of the eye, shaded into the corners
+  g.save(); g.beginPath(); eyeOpening(g); g.clip();
+  const sc = g.createRadialGradient(cx, cy - 6, 14, cx, cy, 110); sc.addColorStop(0, '#f7f7f7'); sc.addColorStop(0.7, '#d6d6d6'); sc.addColorStop(1, '#8e8e8e');
+  g.fillStyle = sc; g.fillRect(cx - 100, cy - 60, 200, 110);
+  const top = g.createLinearGradient(0, cy - 50, 0, cy - 14); top.addColorStop(0, 'rgba(60,60,60,0.75)'); top.addColorStop(1, 'rgba(60,60,60,0)');
+  g.fillStyle = top; g.fillRect(cx - 100, cy - 60, 200, 50);
+  g.restore();
+  // lower lid
+  g.strokeStyle = '#7a6d64'; g.lineWidth = 3; g.beginPath(); g.moveTo(cx - 90, cy + 4); g.bezierCurveTo(cx - 36, cy + 42, cx + 44, cy + 38, cx + 94, cy - 2); g.stroke();
+  // upper lashes, outside the opening
+  g.strokeStyle = '#141414';
+  for (let i = 0; i <= 22; i++) {
+    const u = i / 22, x = cx - 86 + u * 176, y = cy + 2 - Math.sin(u * Math.PI) * 44 - u * 4;
+    g.lineWidth = 2.6; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 4 + u * 8, y - 9, x + 9 + u * 12, y - 14 + u * 2); g.stroke();
+  }
+  g.lineWidth = 5; g.beginPath(); g.moveTo(cx - 92, cy + 2); g.bezierCurveTo(cx - 40, cy - 50, cx + 38, cy - 52, cx + 94, cy - 4); g.stroke();
+}
+const IRIS = { r: 32, dy: -6 };
+function irisGray(g) {
+  const { cx, cy } = EYE, x = cx, y = cy + IRIS.dy, r = rng(88);
+  const ir = g.createRadialGradient(x, y, 6, x, y, IRIS.r); ir.addColorStop(0, '#9d9d9d'); ir.addColorStop(0.7, '#6c6c6c'); ir.addColorStop(1, '#2c2c2c');
+  g.fillStyle = ir; g.beginPath(); g.arc(x, y, IRIS.r, 0, 7); g.fill();
+  g.lineWidth = 1.6;
+  for (let i = 0; i < 46; i++) { const a = i / 46 * Math.PI * 2 + r() * 0.08; g.strokeStyle = `rgba(35,35,35,${0.25 + 0.35 * r()})`; g.beginPath(); g.moveTo(x + Math.cos(a) * 14, y + Math.sin(a) * 14); g.lineTo(x + Math.cos(a) * (IRIS.r - 3), y + Math.sin(a) * (IRIS.r - 3)); g.stroke(); }
+  g.strokeStyle = '#1c1c1c'; g.lineWidth = 3.5; g.beginPath(); g.arc(x, y, IRIS.r - 1.5, 0, 7); g.stroke();
+  g.fillStyle = '#080808'; g.beginPath(); g.arc(x, y, 13, 0, 7); g.fill();
+  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(x - 10, y - 12, 6.5, 0, 7); g.fill(); g.beginPath(); g.arc(x + 9, y + 7, 2.5, 0, 7); g.fill();
+}
+// upper lid: a skin flap whose lower edge carries the lash line; drawn closed, slid up when open
+const LID = { h: 96 };
+function lidPath(g) {
+  const { cx, cy } = EYE;
+  g.beginPath(); g.moveTo(cx - 110, cy - 70); g.lineTo(cx + 110, cy - 70); g.lineTo(cx + 110, cy + 4);
+  g.bezierCurveTo(cx + 44, cy + 40, cx - 36, cy + 44, cx - 110, cy + 8); g.closePath();
+}
+function lidGray(g) {
+  const { cx, cy } = EYE;
+  const sk = g.createLinearGradient(0, cy - 60, 0, cy + 40); sk.addColorStop(0, '#b9afa6'); sk.addColorStop(1, '#988d84');
+  g.fillStyle = sk; lidPath(g); g.fill();
+  g.strokeStyle = '#141414'; g.lineWidth = 5; g.beginPath(); g.moveTo(cx - 92, cy + 4); g.bezierCurveTo(cx - 36, cy + 40, cx + 44, cy + 36, cx + 94, cy - 2); g.stroke();
+}
+
+// ── giant scissors: two halves on a pivot at the origin, blades along +x (blade length SL) ──
+const SK = 1.32, SL = 470 * SK, SMARGIN = 9;   // SL: blade length in world px
+function scissorHalfGray(g, sign) {
+  g.save(); g.scale(1, sign);
+  // blade (above the axis for sign = 1)
+  const bl = g.createLinearGradient(0, 2, 0, -50); bl.addColorStop(0, '#ffffff'); bl.addColorStop(0.14, '#cdcdcd'); bl.addColorStop(0.34, '#333333'); bl.addColorStop(0.6, '#767676'); bl.addColorStop(1, '#c6c6c6');
+  g.fillStyle = bl; g.beginPath(); g.moveTo(-30, 6); g.lineTo(470, 1); g.quadraticCurveTo(400, -18, 300, -30); g.quadraticCurveTo(140, -46, 30, -50); g.quadraticCurveTo(-20, -50, -36, -24); g.closePath(); g.fill();
+  const dk = g.createLinearGradient(-40, 0, 200, 0); dk.addColorStop(0, 'rgba(20,20,20,0.55)'); dk.addColorStop(1, 'rgba(20,20,20,0)'); g.fillStyle = dk; g.fill();
+  g.strokeStyle = 'rgba(30,30,30,0.6)'; g.lineWidth = 2; g.stroke();
+  // shank down to the handle ring
+  const sh = g.createLinearGradient(-40, 0, -150, 60); sh.addColorStop(0, '#5a5a5a'); sh.addColorStop(1, '#1e1e1e');
+  g.fillStyle = sh; g.beginPath(); g.moveTo(-6, 18); g.lineTo(-40, -22); g.quadraticCurveTo(-110, 6, -150, 36); g.lineTo(-128, 70); g.quadraticCurveTo(-80, 40, -6, 18); g.closePath(); g.fill();
+  // handle ring: black lacquer with a highlight along the top
+  g.save(); g.translate(-218, 62); g.rotate(deg(10));
+  g.beginPath(); g.ellipse(0, 0, 96, 62, 0, 0, Math.PI * 2); g.ellipse(0, 0, 64, 34, 0, 0, Math.PI * 2, true);
+  const rg = g.createRadialGradient(-30, -30, 10, 0, 0, 100); rg.addColorStop(0, '#6a6a6a'); rg.addColorStop(0.5, '#262626'); rg.addColorStop(1, '#0c0c0c');
+  g.fillStyle = rg; g.fill('evenodd');
+  g.strokeStyle = 'rgba(200,200,200,0.7)'; g.lineWidth = 5; g.beginPath(); g.ellipse(0, 0, 82, 49, 0, deg(200), deg(300)); g.stroke();
+  g.restore();
+  // pivot boss
+  const bo = g.createRadialGradient(-8, -8, 2, 0, 0, 34); bo.addColorStop(0, '#f0f0f0'); bo.addColorStop(1, '#5c5c5c');
+  g.fillStyle = bo; g.beginPath(); g.arc(0, 0, 32, 0, 7); g.fill();
+  g.restore();
+}
+function scissorScrew(g) {
+  const s = g.createRadialGradient(-5, -5, 1, 0, 0, 15); s.addColorStop(0, '#fafafa'); s.addColorStop(1, '#7a7a7a');
+  g.fillStyle = s; g.beginPath(); g.arc(0, 0, 14, 0, 7); g.fill();
+  g.strokeStyle = '#2a2a2a'; g.lineWidth = 3.5; g.beginPath(); g.moveTo(-9, 5); g.lineTo(9, -5); g.stroke();
+}
+let SCI;   // { up, dn: { sprite, shadow, ox, oy } }
+function buildScissors() {
+  const BW = Math.ceil(860 * SK), BH = Math.ceil(320 * SK), ox = 350 * SK, oy = 160 * SK, mk2 = sign => {
+    const sil = mk(BW, BH), sg = sil.getContext('2d'); sg.translate(ox, oy); sg.scale(SK, SK); scissorHalfGray(sg, sign); if (sign > 0) scissorScrew(sg);
+    const mask = dilate(sil, SMARGIN);
+    // photo: the steel on a pale studio ground, cut close around its edge
+    const ph = mk(BW, BH), pg = ph.getContext('2d'); pg.drawImage(mask, 0, 0); pg.globalCompositeOperation = 'source-in';
+    const bg = pg.createLinearGradient(0, 0, BW, BH); bg.addColorStop(0, '#d8d8d8'); bg.addColorStop(1, '#b4b4b4'); pg.fillStyle = bg; pg.fillRect(0, 0, BW, BH);
+    pg.globalCompositeOperation = 'source-over'; pg.drawImage(sil, 0, 0);
+    const dots = screenDots(ph, 0, 0, 9, sign > 0 ? 21 : 22, 1.2);
+    const sp = mk(BW, BH), g = sp.getContext('2d');
+    g.drawImage(mask, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = C.gloss; g.fillRect(0, 0, BW, BH);
+    g.globalCompositeOperation = 'source-atop'; drawDots(g, dots, C.ink);
+    return { sprite: sp, shadow: shadowOf(sp, 12), ox, oy };
+  };
+  SCI = { up: mk2(1), dn: mk2(-1) };
+}
+
+// ── the front page ──
+// OPS draw the page's ink in page units; they run once for the page and again, at higher
+// resolution, for every cut-out sprite, so type stays sharp when a word is enlarged.
+const OPS = [];
+const L = {};                          // measured layout: word rects, rules, columns
+let PAPER, PAGE, PAGEH;
+const COPY = 'By order of the Ministry of Common Sense, citizens are reminded that the present arrangement of things is final, complete and entirely satisfactory. Trains will arrive in the order printed. Clocks will agree with one another. Umbrellas are to be carried closed except in rain. Hats will be worn upon heads and nowhere else. Soup will be served before pudding and never after. The Ministry is pleased to report that every chair in the nation is at present the right way up, that all sentences end where they should, and that nothing whatsoever is out of place. Questions may be put to the Ministry in writing, in triplicate, in ink. Any citizen observing disorder is asked to remain calm and to file it alphabetically. ';
+function column(g, x, y, w, maxY, start, size = 16, lh = 19.5) {
+  g.font = `400 ${size}px ${F.old}`; g.textAlign = 'left';
+  const words = (COPY + COPY + COPY).split(' ').slice(start).filter(Boolean), sp = g.measureText(' ').width;
+  let i = 0;
+  for (let yy = y; yy <= maxY && i < words.length; yy += lh) {
+    const line = []; let lw = 0;
+    while (i < words.length) { const ww = g.measureText(words[i]).width; if (line.length && lw + sp + ww > w) break; line.push([words[i], ww]); lw += (line.length > 1 ? sp : 0) + ww; i++; }
+    const gap = line.length > 1 ? sp + (w - lw) / (line.length - 1) : sp;
+    let xx = x; for (const [wd, ww] of line) { g.fillText(wd, xx, yy); xx += ww + gap; }
+  }
+}
+function rule(g, x, y, w, h) { g.fillRect(x, y, w, h); }
+function box(g, x, y, w, h, lw) { g.lineWidth = lw; g.strokeRect(x + lw / 2, y + lw / 2, w - lw, h - lw); }
+function wordRect(g, font, text, prefix, x0, base, pad = 10) {
+  g.font = font; const m = g.measureText(text), x = x0 + g.measureText(prefix).width;
+  return { x: x - pad, y: base - m.actualBoundingBoxAscent - pad, w: m.width + pad * 2, h: m.actualBoundingBoxAscent + m.actualBoundingBoxDescent + pad * 2, base, text, font };
+}
+function layoutPage() {
+  const g = ctx;
+  // headline, set to the full measure
+  g.font = `900 100px ${F.play}`; const hs = Math.floor(100 * 1630 / g.measureText('ALL IS IN ORDER').width);
+  const hf = `900 ${hs}px ${F.play}`; g.font = hf; const hw = g.measureText('ALL IS IN ORDER').width, hx = (PW - hw) / 2, hb = 404;
+  Object.assign(L, { hs, hf, hb, hx });
+  L.ALL = wordRect(g, hf, 'ALL', '', hx, hb); L.IS = wordRect(g, hf, 'IS', 'ALL ', hx, hb);
+  L.IN = wordRect(g, hf, 'IN', 'ALL IS ', hx, hb); L.ORDER = wordRect(g, hf, 'ORDER', 'ALL IS IN ', hx, hb);
+  // ORDER letter by letter (for the reshuffle), cut midway between glyphs
+  g.font = hf; const ox = hx + g.measureText('ALL IS IN ').width, edges = [];
+  for (let i = 0; i <= 5; i++) edges.push(ox + g.measureText('ORDER'.slice(0, i)).width);
+  L.letters = [...'ORDER'].map((ch, i) => {
+    const x0 = i === 0 ? L.ORDER.x : edges[i] - 2, x1 = i === 4 ? L.ORDER.x + L.ORDER.w : edges[i + 1] + 2;
+    return { ch, x: x0, y: L.ORDER.y, w: x1 - x0, h: L.ORDER.h };
+  });
+  // deck
+  const deck = 'MINISTRY OF COMMON SENSE REPORTS NOTHING UNUSUAL';
+  g.font = `400 100px ${F.anton}`; const ds = Math.floor(100 * 1500 / g.measureText(deck).width), df = `400 ${ds}px ${F.anton}`;
+  g.font = df; L.deck = { f: df, x: (PW - g.measureText(deck).width) / 2, b: 488, text: deck };
+  L.NOTHING = wordRect(g, df, 'NOTHING', 'MINISTRY OF COMMON SENSE REPORTS ', L.deck.x, L.deck.b, 8);
+  // soap ad
+  g.font = `400 100px ${F.slab}`; const as = Math.floor(100 * 500 / g.measureText('BUY SOAP').width), af = `400 ${as}px ${F.slab}`;
+  g.font = af; L.ad = { f: af, x: 1180 + (570 - g.measureText('BUY SOAP').width) / 2, b: 700 };
+  L.BUY = wordRect(g, af, 'BUY', '', L.ad.x, L.ad.b, 9);
+  L.PRICE = { x: 1546, y: 38, w: 210, h: 108 };
+
+  // ── ink operations ──
+  OPS.push(g => {
+    g.fillStyle = C.ink; g.strokeStyle = C.ink; g.textBaseline = 'alphabetic';
+    // masthead and ears
+    g.textAlign = 'center'; g.font = `400 126px ${F.frak}`; g.fillText('The Orderly Gazette', PW / 2, 142);
+    box(g, 44, 38, 210, 108, 2); box(g, L.PRICE.x, L.PRICE.y, L.PRICE.w, L.PRICE.h, 2);
+    g.font = `700 15px ${F.old}`; g.letterSpacing = '3px'; g.fillText('WEATHER', 151, 68); g.fillText('PRICE', 1653, 68); g.letterSpacing = '0px';
+    g.font = `italic 400 18px ${F.old}`; g.fillText('Sensible, with', 149, 96); g.fillText('occasional order.', 149, 120);
+    g.font = `700 24px ${F.old}`; g.fillText('ONE PENNY', 1651, 102); g.font = `italic 400 16px ${F.old}`; g.fillText('Morning Edition', 1651, 128);
+    // dateline between rules
+    rule(g, 44, 166, PW - 88, 4); rule(g, 44, 174, PW - 88, 1.5);
+    g.font = `700 16px ${F.old}`; g.letterSpacing = '2px';
+    g.textAlign = 'left'; g.fillText('VOL. I — No. 1', 48, 199); g.textAlign = 'center'; g.fillText('MONDAY, THE FIRST OF THE MONTH', PW / 2, 199);
+    g.textAlign = 'right'; g.fillText('ESTABLISHED IN GOOD SENSE', PW - 48, 199); g.letterSpacing = '0px';
+    rule(g, 44, 210, PW - 88, 1.5); rule(g, 44, 215, PW - 88, 4);
+    // headline and deck
+    g.textAlign = 'left'; g.font = L.hf; g.fillText('ALL IS IN ORDER', L.hx, L.hb);
+    g.font = L.deck.f; g.fillText(L.deck.text, L.deck.x, L.deck.b);
+    rule(g, 44, 512, PW - 88, 2);
+    // column A: the gear
+    g.font = `700 25px ${F.old}`; g.textAlign = 'center'; g.letterSpacing = '1px'; g.fillText('NEW GEAR FOR THE NATION', 265, 584); g.letterSpacing = '0px';
+    box(g, GEAR.box.x - 3, GEAR.box.y - 3, GEAR.box.w + 6, GEAR.box.h + 6, 1.5);
+    g.font = `italic 400 16px ${F.old}`; g.fillText('The national gear, photographed at rest.', 265, 920);
+    column(g, 50, 948, 430, 1170, 0);
+    rule(g, 494, 532, 1.5, 640);
+    // column B: the hat
+    box(g, HAT.box.x - 3, HAT.box.y - 3, HAT.box.w + 6, HAT.box.h + 6, 1.5);
+    g.font = `italic 400 17px ${F.old}`; g.fillText('Hats to remain regulation size, says Ministry.', HAT.cx, 980);
+    column(g, 516, 1006, 630, 1170, 41);
+    rule(g, 1164, 532, 1.5, 640);
+    // column C: soap ad (red) and the optician
+    box(g, 1180, 548, 576, 290, 4); box(g, 1188, 556, 560, 274, 1.5);
+    g.fillStyle = C.red; g.textAlign = 'left'; g.font = L.ad.f; g.fillText('BUY SOAP', L.ad.x, L.ad.b);
+    g.fillStyle = C.ink; g.textAlign = 'center'; g.font = `italic 400 34px ${F.old}`; g.fillText('for clean thinking', 1468, 760);
+    g.font = `700 17px ${F.old}`; g.letterSpacing = '3px'; g.fillText('ONE PENNY THE CAKE', 1468, 800); g.letterSpacing = '0px';
+    box(g, 1180, 852, 576, 196, 2);
+    g.textAlign = 'left'; g.font = `400 40px ${F.anton}`; g.fillText('SEE THINGS', 1250, 914); g.fillText('AS THEY ARE', 1250, 962);
+    g.font = `italic 400 17px ${F.old}`; g.fillText('Optician, second floor.', 1250, 996); g.fillText('Please ring twice.', 1250, 1020);
+    box(g, EYE.box.x - 3, EYE.box.y - 3, EYE.box.w + 6, EYE.box.h + 6, 1.5);
+  });
+}
+
+// pictures for the page: dots on the page screen
+const DOTS = {};
+function buildPictures() {
+  DOTS.gear = screenDots(grayBox(GEAR.box, gearPhoto), GEAR.box.x, GEAR.box.y, HT, 31);
+  DOTS.hat = screenDots(grayBox(HAT.box, hatPhoto), HAT.box.x, HAT.box.y, HT, 32);
+  DOTS.eye = screenDots(grayBox(EYE.box, eyeBaseGray), EYE.box.x, EYE.box.y, HT, 33);
+  const ib = { x: EYE.cx - 40, y: EYE.cy + IRIS.dy - 40, w: 80, h: 80 };
+  DOTS.iris = screenDots(grayBox(ib, irisGray), ib.x, ib.y, HT * 0.8, 34);
+  const lb = { x: EYE.cx - 112, y: EYE.cy - 72, w: 224, h: 118 };
+  DOTS.lid = screenDots(grayBox(lb, lidGray), lb.x, lb.y, HT, 35);
+  OPS.push(g => { drawDots(g, DOTS.gear, C.ink); drawDots(g, DOTS.hat, C.ink); drawDots(g, DOTS.eye, C.ink); drawDots(g, DOTS.iris, C.ink); });
+}
+
+function buildPage() {
+  PAPER = mk(PW, PH); const g = PAPER.getContext('2d'), r = rng(11);
+  g.fillStyle = C.news; g.fillRect(0, 0, PW, PH);
+  blotches(g, PW, PH, r, 46, 0.07);
+  const v = g.createRadialGradient(PW / 2, PH / 2, PH * 0.35, PW / 2, PH / 2, PW * 0.72); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(140,100,45,0.2)');
+  g.fillStyle = v; g.fillRect(0, 0, PW, PH);
+  fibers(g, PW, PH, r, 700); grain(g, PW, PH, 12, 12);
+  const ink = mk(PW, PH), ig = ink.getContext('2d'); for (const op of OPS) op(ig); knock(ig, PW, PH, 1);
+  PAGE = mk(PW, PH); const pg = PAGE.getContext('2d'); pg.drawImage(PAPER, 0, 0); pg.globalAlpha = 0.94; pg.drawImage(ink, 0, 0);
+}
+
+// ── cut-outs ──
+// sprite: paper + ink re-rendered at resolution R for a page-space rect, cut by mask(g) (page coords)
+function cutSprite(rect, R, mask, ops = OPS, inkAlpha = 0.94) {
+  const cw = Math.ceil(rect.w * R), ch = Math.ceil(rect.h * R), c = mk(cw, ch), g = c.getContext('2d');
+  g.imageSmoothingQuality = 'high'; g.drawImage(PAPER, rect.x, rect.y, rect.w, rect.h, 0, 0, cw, ch);
+  const ink = mk(cw, ch), ig = ink.getContext('2d'); ig.setTransform(R, 0, 0, R, -rect.x * R, -rect.y * R);
+  for (const op of ops) op(ig); knock(ig, cw, ch, R);
+  g.globalAlpha = inkAlpha; g.drawImage(ink, 0, 0); g.globalAlpha = 1;
+  g.globalCompositeOperation = 'destination-in'; g.setTransform(R, 0, 0, R, -rect.x * R, -rect.y * R); g.fillStyle = '#000'; mask(g);
+  return c;
+}
+// a scissor-cut quad around a rect: straight sides, slightly skewed corners
+function quad(rect, seed, j = 5) {
+  const r = rng(seed), q = (x, y) => [x + (r() - 0.5) * j * 2, y + (r() - 0.5) * j * 2];
+  return [q(rect.x, rect.y), q(rect.x + rect.w, rect.y), q(rect.x + rect.w, rect.y + rect.h), q(rect.x, rect.y + rect.h)];
+}
+const polyPath = (g, pts) => { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); };
+function makeItem(id, rect, R, maskFn, extra = {}) {
+  const sprite = cutSprite(rect, R, maskFn, extra.ops);
+  return Object.assign({ id, rect, R, sprite, shadow: shadowOf(sprite, 5 * R), cx: rect.x + rect.w / 2, cy: rect.y + rect.h / 2, maskFn }, extra);
+}
+// silhouette mask grown by m page units
+function silMask(box, shapeFn, m, R) {
+  const s = mk(box.w * R, box.h * R), sg = s.getContext('2d'); sg.setTransform(R, 0, 0, R, -box.x * R, -box.y * R); sg.fillStyle = '#000'; shapeFn(sg);
+  const d = dilate(s, m * R), f = g => { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(d, 0, 0); g.restore(); };
+  f.page = g => g.drawImage(d, box.x, box.y, box.w, box.h);
+  return f;
+}
+
+// flights: [id, launch time, duration, final pose { x, y, r (deg), s }]
+const FLY = {
+  ALL: [2.86, 0.36, { x: 336, y: 238, r: -10, s: 1.32 }],
+  IS: [3.06, 0.32, { x: 716, y: 330, r: 16, s: 0.86 }],
+  IN: [3.24, 0.32, { x: 918, y: 210, r: -24, s: 1.02 }],
+  ORDER: [3.44, 0.4, { x: 1392, y: 318, r: 4, s: 1.12 }],
+  gear: [3.86, 0.44, { x: 446, y: 772, r: 0, s: 1.82 }],
+  eye: [4.22, 0.4, { x: 446, y: 772, r: -4, s: 1.32 }],
+  hat: [4.58, 0.42, { x: 452, y: 498, r: -9, s: 1.0 }],
+  BUY: [4.98, 0.36, { x: 1092, y: 826, r: -12, s: 2.05 }],
+  NOTHING: [5.28, 0.38, { x: 1512, y: 872, r: 6, s: 2.55 }],
+};
+const PRICE_DROP = 2.98;
+let ITEMS = {}, LET = [], REDR, PIECES = [], STAMP;
+
+function buildItems() {
+  const words = ['ALL', 'IS', 'IN', 'BUY', 'NOTHING'];
+  words.forEach((w, k) => {
+    const rect = L[w], q = quad(rect, 100 + k), R = Math.max(1.2, FLY[w][2].s * 1.15);
+    ITEMS[w] = makeItem(w, rect, R, g => { polyPath(g, q); g.fill(); }, { quad: q });
+  });
+  // ORDER: five letter strips cut on straight lines between the glyphs
+  const Rl = 1.4;
+  LET = L.letters.map((lt, i) => {
+    const q = quad(lt, 120 + i, 3);
+    if (i > 0) { q[0][0] = lt.x; q[3][0] = lt.x; } if (i < 4) { q[1][0] = lt.x + lt.w; q[2][0] = lt.x + lt.w; }
+    const it = makeItem('L' + i, lt, Rl, g => { polyPath(g, q); g.fill(); }, { quad: q }); it.i = i; return it;
+  });
+  ITEMS.ORDER = { id: 'ORDER', cx: L.ORDER.x + L.ORDER.w / 2, cy: L.ORDER.y + L.ORDER.h / 2 };
+  // pictures, cut close around the object (a few dots of their studio ground left on)
+  const gm = silMask(GEAR.box, gearShape, 5, 2.1);
+  ITEMS.gear = makeItem('gear', GEAR.box, 2.1, gm, { ops: [g => drawDots(g, DOTS.gear, C.ink)] });
+  ITEMS.gear.cx = GEAR.cx; ITEMS.gear.cy = GEAR.cy;
+  const hm = silMask(HAT.box, hatShape, 6, 1.25);
+  ITEMS.hat = makeItem('hat', HAT.box, 1.25, hm, { ops: [g => drawDots(g, DOTS.hat, C.ink)] });
+  ITEMS.hat.cx = HAT.cx; ITEMS.hat.cy = 750;
+  const em = g => { g.beginPath(); eyeContour(g); g.fill(); };
+  ITEMS.eye = makeItem('eye', EYE.box, 1.6, em, { ops: [g => drawDots(g, DOTS.eye, C.ink)] });
+  ITEMS.eye.cx = EYE.cx; ITEMS.eye.cy = EYE.cy;
+  const ib = { x: EYE.cx - 40, y: EYE.cy + IRIS.dy - 40, w: 80, h: 80 };
+  ITEMS.iris = cutSprite(ib, 1.6, g => { g.beginPath(); g.arc(EYE.cx, EYE.cy + IRIS.dy, IRIS.r + 3, 0, 7); g.fill(); }, [g => drawDots(g, DOTS.iris, C.ink)]);
+  const lb = { x: EYE.cx - 112, y: EYE.cy - 72, w: 224, h: 118 };
+  ITEMS.lid = cutSprite(lb, 1.6, g => { lidPath(g); g.fill(); }, [g => drawDots(g, DOTS.lid, C.ink)]);
+  ITEMS.PRICE = makeItem('PRICE', L.PRICE, 1, g => { polyPath(g, quad(L.PRICE, 140, 4)); g.fill(); });
+  // the red R that is not from this page: wood type on a scrap of another sheet
+  const rr = { x: 0, y: 0, w: 150, h: 170 };
+  const rc = mk(rr.w * 1.6, rr.h * 1.6), rg = rc.getContext('2d'); rg.scale(1.6, 1.6);
+  rg.drawImage(PAPER, 300, 900, rr.w, rr.h, 0, 0, rr.w, rr.h);
+  const ri = mk(rc.width, rc.height), rig = ri.getContext('2d'); rig.scale(1.6, 1.6); rig.fillStyle = C.red; rig.font = `400 ${Math.round(L.hs * 1.02)}px ${F.slab}`; rig.textAlign = 'center'; rig.fillText('R', rr.w / 2, rr.h - 30); knock(rig, rc.width, rc.height, 1.6);
+  rg.setTransform(1, 0, 0, 1, 0, 0); rg.globalAlpha = 0.95; rg.drawImage(ri, 0, 0); rg.globalAlpha = 1;
+  rg.globalCompositeOperation = 'destination-in'; rg.scale(1.6, 1.6); polyPath(rg, quad({ x: 8, y: 8, w: rr.w - 16, h: rr.h - 16 }, 150, 4)); rg.fill();
+  REDR = { sprite: rc, shadow: shadowOf(rc, 8), R: 1.6, w: rr.w, h: rr.h };
+  // the page with the cut-outs removed, for the pieces left behind
+  PAGEH = mk(PW, PH); const ph = PAGEH.getContext('2d'); ph.drawImage(PAGE, 0, 0); ph.globalCompositeOperation = 'destination-out'; ph.fillStyle = '#000';
+  for (const w of words) { polyPath(ph, ITEMS[w].quad); ph.fill(); }
+  for (const lt of LET) { polyPath(ph, lt.quad); ph.fill(); }
+  polyPath(ph, quad(L.PRICE, 140, 4)); ph.fill();
+  gm.page(ph); hm.page(ph);
+  ph.beginPath(); eyeContour(ph); ph.fill();
+}
+
+// ── the cuts: scissors path in world space, the page split into pieces ──
+let CUT1, CUT2;
+function lineThrough(p, q, y0, y1) { const k = (q[0] - p[0]) / (q[1] - p[1]); return [[p[0] + (y0 - p[1]) * k, y0], [p[0] + (y1 - p[1]) * k, y1]]; }
+function splitPoly(poly, a, b) {
+  const side = p => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]), A = [], B = [];
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length], sp = side(p), sq = side(q);
+    if (sp >= 0) A.push(p); if (sp <= 0) B.push(p);
+    if ((sp > 0 && sq < 0) || (sp < 0 && sq > 0)) { const u = sp / (sp - sq), x = [lerp(p[0], q[0], u), lerp(p[1], q[1], u)]; A.push(x); B.push(x); }
+  }
+  return [A, B].filter(P => P.length >= 3);
+}
+const centroid = P => P.reduce((s, p) => [s[0] + p[0] / P.length, s[1] + p[1] / P.length], [0, 0]);
+function buildCuts() {
+  // cut 1 runs right to left under the deck; cut 2 drops through the gap between IN and ORDER and the gutter
+  const a1 = [1834, 548], b1 = [-24, 518];
+  const gx = (L.IN.x + L.IN.w + L.ORDER.x) / 2, gy = L.hb - L.hs * 0.35;
+  const [a2, b2] = lineThrough([gx, gy], [1164, 800], -14, PH + 10);
+  const W2 = p => [p[0] + PX, p[1] + PY];
+  CUT1 = { a: W2(a1), b: W2(b1) }; CUT2 = { a: W2(a2), b: W2(b2) };
+  for (const c of [CUT1, CUT2]) { c.len = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]); c.d = [(c.b[0] - c.a[0]) / c.len, (c.b[1] - c.a[1]) / c.len]; c.ang = Math.atan2(c.d[1], c.d[0]); }
+  // pieces (page coords): split by both cuts, then a few unseen cuts that open at the snap
+  let P = [[[0, 0], [PW, 0], [PW, PH], [0, PH]]];
+  const cut = (a, b, filter = () => true) => { P = P.flatMap(pc => filter(pc) ? splitPoly(pc, a, b) : [pc]); };
+  cut(a1, b1); cut(a2, b2);
+  const below = pc => centroid(pc)[1] > 560, above = pc => !below(pc);
+  cut([492, 520], [508, PH], below);
+  cut([(L.ALL.x + L.ALL.w + L.IS.x) / 2 + 40, 0], [(L.ALL.x + L.ALL.w + L.IS.x) / 2 - 30, 530], above);
+  cut([1170, 846], [PW, 866], pc => below(pc) && centroid(pc)[0] > 1170);
+  const r = rng(404);
+  PIECES = P.map((poly, k) => {
+    const [cx, cy] = centroid(poly), dx = cx - PW / 2, dy = cy - PH * 0.45, dl = Math.hypot(dx, dy) || 1;
+    return { poly, cx, cy, dir: [dx / dl, dy / dl], spin: (r() < 0.5 ? -1 : 1) * (14 + r() * 24), delay: r() * 0.08, pop: 26 + r() * 30 };
+  });
+  // two pieces stay as debris at the edges
+  const pick = (x, y) => PIECES.find(pc => { let ins = false; const p = pc.poly; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > y) !== (p[j][1] > y) && x < (p[j][0] - p[i][0]) * (y - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) ins = !ins; return ins; });
+  const br = pick(1700, 1000);
+  if (br) Object.assign(br, { stay: { dx: 120, dy: -318, r: -5 } });
+}
+
+// scissors at time t: pivot (world), direction, opening angle (rad), and the cut lengths so far
+const OPEN = deg(38), SHUT = deg(2.5);
+function snipPhase(t, t0, n, per, close, s0, adv) {
+  // n snips from t0, each: close (fast) then open while advancing; returns { s, th, closes }
+  if (t < t0) return { s: s0, th: OPEN };
+  const k = Math.min(n - 1, Math.floor((t - t0) / per)), tk = t0 + k * per, u = t - tk;
+  if (t >= t0 + n * per) return { s: s0 + n * adv, th: SHUT, done: true };
+  if (u < close) return { s: s0 + k * adv + 18 * eIn(u / close), th: lerp(OPEN, SHUT, eIn(u / close)) };
+  const v = eInOut((u - close) / (per - close));
+  return { s: s0 + k * adv + 18 + (adv - 18) * v, th: k === n - 1 ? SHUT : lerp(SHUT, OPEN, v) };
+}
+const S1 = { t0: 0.96, n: 4, per: 0.21, close: 0.07, s0: 110, adv: 400 };
+const S2 = { t0: 2.15, n: 3, per: 0.14, close: 0.055, s0: -150, adv: 430 };
+const GAG = { in0: 5.86, in1: 6.1, snip: 6.1, close: 0.07, out0: 6.2, out1: 6.5 };
+function scissors(t) {
+  const along = (c, s) => [c.a[0] + c.d[0] * s, c.a[1] + c.d[1] * s];
+  if (t < 0.25) return null;
+  if (t < S1.t0) {   // slide in from the right with the jaws opening
+    const u = eOut(seg(t, 0.25, 0.86)), s = lerp(-1150, S1.s0, u), [x, y] = along(CUT1, s);
+    return { x, y, ang: CUT1.ang, th: lerp(deg(8), OPEN, eOut(seg(t, 0.3, 0.8))), z: 1 };
+  }
+  const e1 = S1.t0 + S1.n * S1.per;
+  if (t < e1) { const p = snipPhase(t, S1.t0, S1.n, S1.per, S1.close, S1.s0, S1.adv), [x, y] = along(CUT1, p.s); return { x, y, ang: CUT1.ang, th: p.th, z: 1 }; }
+  if (t < S2.t0) {   // hop up and over to the top of cut 2
+    const u = eInOut(seg(t, e1, S2.t0)), p0 = along(CUT1, S1.s0 + S1.n * S1.adv), p2 = along(CUT2, S2.s0 - 60), c = [p0[0] + 160, -260];
+    const x = (1 - u) * (1 - u) * p0[0] + 2 * u * (1 - u) * c[0] + u * u * p2[0], y = (1 - u) * (1 - u) * p0[1] + 2 * u * (1 - u) * c[1] + u * u * p2[1];
+    let a0 = CUT1.ang, a1 = CUT2.ang; while (a1 - a0 > Math.PI) a1 -= 2 * Math.PI; while (a0 - a1 > Math.PI) a1 += 2 * Math.PI;
+    return { x, y, ang: lerp(a0, a1, u), th: lerp(SHUT, OPEN, seg(u, 0.4, 1)), z: 1.2 };
+  }
+  const e2 = S2.t0 + S2.n * S2.per;
+  if (t < e2) { const p = snipPhase(t, S2.t0, S2.n, S2.per, S2.close, S2.s0, S2.adv), [x, y] = along(CUT2, p.s); return { x, y, ang: CUT2.ang, th: p.th, z: 1 }; }
+  if (t < 2.85) { const s = S2.s0 + S2.n * S2.adv + 1400 * eIn(seg(t, e2, 2.85)), [x, y] = along(CUT2, s); return { x, y, ang: CUT2.ang + deg(20) * seg(t, e2, 2.85), th: lerp(SHUT, deg(14), seg(t, e2, 2.85)), z: 1.2 }; }
+  // the gag: back in for the D
+  if (t >= GAG.in0 && t < GAG.out1) {
+    const D = letterPose(2, GAG.snip), ang = deg(158), dir = [Math.cos(ang), Math.sin(ang)];
+    const home = [D.x - dir[0] * SL * 0.62, D.y - dir[1] * SL * 0.62 + 6];
+    let k, th;
+    if (t < GAG.in1) { k = 1 - eOut(seg(t, GAG.in0, GAG.in1)); th = OPEN; }
+    else if (t < GAG.out0) { k = 0; th = lerp(OPEN, SHUT, eIn(seg(t, GAG.snip, GAG.snip + GAG.close))); }
+    else { k = eIn(seg(t, GAG.out0, GAG.out1)); th = lerp(SHUT, deg(20), seg(t, GAG.out0, GAG.out1)); }
+    return { x: home[0] - dir[0] * 1300 * k, y: home[1] - dir[1] * 1300 * k, ang, th, z: 1 };
+  }
+  return null;
+}
+// how far each cut has gone: the cutting point runs from the pivot (open) to the tips (shut)
+function cutLen(t, which) {
+  const c = which === 1 ? CUT1 : CUT2, t0 = which === 1 ? S1.t0 : S2.t0, t1 = which === 1 ? S1.t0 + S1.n * S1.per : S2.t0 + S2.n * S2.per, S = which === 1 ? S1 : S2;
+  let best = 0;
+  for (let tt = t0; tt <= Math.min(t, t1); tt += 1 / 240) {
+    const p = snipPhase(tt, t0, S.n, S.per, S.close, S.s0, S.adv), close = 1 - (p.th - SHUT) / (OPEN - SHUT);
+    best = Math.max(best, p.s + SL * 0.96 * close);
+  }
+  return clamp(best, 0, c.len + 40);
+}
+
+// ── poses ──
+// hover: lifted off the board where it was printed; flight: lifted toward the lens and slapped down
+function homePose(it) { return { x: PX + it.cx, y: PY + it.cy, r: 0, s: 1 }; }
+function hover(it, t, ph) {
+  const h = homePose(it), u = t - SNAP;
+  return { x: h.x + Math.sin(u * 3.1 + ph) * 5, y: h.y + Math.sin(u * 2.3 + ph * 2) * 4 - 6 * eOut(seg(t, SNAP, SNAP + 0.25)), r: deg(Math.sin(u * 2.7 + ph) * 1.6), s: 1, z: 0.45 * eOut(seg(t, SNAP, SNAP + 0.2)) };
+}
+function flown(id, t, ph, it = ITEMS[id]) {
+  const [t0, d, f] = FLY[id], fin = { x: f.x, y: f.y, r: deg(f.r), s: f.s };
+  if (t < t0) return hover(it, t, ph);
+  const a = hover(it, t0, ph), u = seg(t, t0, t0 + d);
+  if (u < 1) {
+    const e = eInOut(u);
+    return { x: lerp(a.x, fin.x, e), y: lerp(a.y, fin.y, e) - Math.sin(Math.PI * u) * 40, r: lerp(a.r, fin.r, eBack(u, 2.2)), s: lerp(a.s, fin.s, eOut(u)) * (1 + 0.12 * Math.sin(Math.PI * u)), z: lerp(0.45, 0.12, u) + 0.7 * Math.sin(Math.PI * u) };
+  }
+  const v = t - t0 - d;   // landed: a small paper bounce
+  return { x: fin.x, y: fin.y, r: fin.r + deg(1.4) * Math.exp(-v * 9) * Math.sin(v * 38), s: fin.s * (1 - 0.035 * Math.exp(-v * 14) * Math.cos(v * 40)), z: 0.12 };
+}
+
+// ORDER → ERROR. Slots for E, R, R(red), O, R around the ORDER position, each at its own angle.
+const ERR = { t0: 6.2, hop: 0.34, stag: 0.07, redIn: 6.5, redD: 0.26 };
+const ERR_SLOTS = [   // [source letter index or 'red', dx, dy, rot, scale]
+  [3, -278, 4, -8, 1.16], [1, -146, 20, 7, 0.95], ['red', -12, -16, -11, 1.0], [0, 128, 10, 9, 1.1], [4, 262, 26, -5, 0.92],
+];
+function letterPose(i, t) {
+  const g = flown('ORDER', t, 1.3, ITEMS.ORDER), lt = LET[i];
+  const ox = (lt.cx - ITEMS.ORDER.cx) * g.s, oy = (lt.cy - ITEMS.ORDER.cy) * g.s;
+  const base = { x: g.x + ox * Math.cos(g.r) - oy * Math.sin(g.r), y: g.y + ox * Math.sin(g.r) + oy * Math.cos(g.r), r: g.r, s: g.s, z: g.z };
+  if (t < GAG.snip + GAG.close) return base;
+  if (i === 2) {   // the D, snipped out: drops and tumbles off the bottom
+    const u = t - GAG.snip - GAG.close;
+    return { x: base.x - 160 * u, y: base.y + 40 * u + 1500 * u * u, r: base.r - deg(260) * u, s: base.s, z: 0.6 };
+  }
+  const k = ERR_SLOTS.findIndex(sl => sl[0] === i), sl = ERR_SLOTS[k], fx = FLY.ORDER[2];
+  const tgt = { x: fx.x + sl[1], y: fx.y + sl[2], r: deg(sl[3]), s: fx.s * sl[4] };
+  const t0 = ERR.t0 + k * ERR.stag, u = seg(t, t0, t0 + ERR.hop);
+  if (u <= 0) return base;
+  if (u < 1) { const e = eInOut(u); return { x: lerp(base.x, tgt.x, e), y: lerp(base.y, tgt.y, e) - Math.sin(Math.PI * u) * 70, r: lerp(base.r, tgt.r, eBack(u, 2)), s: tgt.s * (1 + 0.1 * Math.sin(Math.PI * u)) + (base.s - tgt.s) * (1 - e), z: 0.12 + 0.6 * Math.sin(Math.PI * u) }; }
+  const v = t - t0 - ERR.hop;
+  return { ...tgt, r: tgt.r + deg(2) * Math.exp(-v * 9) * Math.sin(v * 40), z: 0.12 };
+}
+function redRPose(t) {
+  const sl = ERR_SLOTS[2], fx = FLY.ORDER[2], tgt = { x: fx.x + sl[1], y: fx.y + sl[2], r: deg(sl[3]), s: fx.s * sl[4] * 0.92 };
+  if (t < ERR.redIn) return null;
+  const u = seg(t, ERR.redIn, ERR.redIn + ERR.redD);
+  if (u < 1) return { x: tgt.x + 60 * (1 - u), y: lerp(-180, tgt.y, eIn(u)), r: lerp(deg(30), tgt.r, eOut(u)), s: tgt.s * 1.15, z: 1 - 0.8 * u };
+  const v = t - ERR.redIn - ERR.redD;
+  return { ...tgt, s: tgt.s * (1 + 0.06 * Math.exp(-v * 12) * Math.cos(v * 36)), z: 0.12 };
+}
+
+// gear spin: angular velocity schedule integrated in fixed steps (deterministic)
+function omega(t) {
+  if (t < 4.3) return 0;
+  let w = 40 * eOut(seg(t, 4.3, 4.8));
+  w += 110 * eInOut(seg(t, 7.2, 7.6)) * (1 - eInOut(seg(t, 8.15, 8.6)));
+  return deg(w);
+}
+function gearAngle(t) { let a = 0; for (let x = 4.3; x < t; x += 1 / 240) a += omega(x) / 240; return a; }
+
+// eye: where it looks (unit vector-ish) and how shut the lid is
+const LOOKS = [[0, 0, 0], [4.7, -0.2, -0.9], [5.05, 0.75, 0.55], [5.5, 1, 0.5], [5.85, 0.95, -0.75], [6.75, 0, 0], [7.3, -0.15, -0.95], [7.9, 0, 0], [8.3, 0.6, -0.4], [8.75, 0, 0]];
+function look(t) {
+  let a = LOOKS[0];
+  for (const k of LOOKS) { if (k[0] <= t) a = k; }
+  const u = eInOut(seg(t, a[0], a[0] + 0.14));
+  const prev = LOOKS[Math.max(0, LOOKS.indexOf(a) - 1)];
+  return [lerp(prev[1], a[1], u), lerp(prev[2], a[2], u)];
+}
+const BLINKS = [[6.98, 0.16], [8.26, 0.13], [9.05, 0.16]];
+function lid(t) { let c = 0; for (const [b, d] of BLINKS) { const u = seg(t, b, b + d); if (u > 0 && u < 1) c = Math.max(c, Math.sin(Math.PI * u)); } return c; }
+// hat tip
+function hatTip(t) { const u = seg(t, 7.35, 7.95); if (u <= 0 || u >= 1) return { dy: 0, r: 0 }; const k = Math.sin(Math.PI * Math.min(1, u * 1.25)); return { dy: -78 * k, r: deg(-16) * k }; }
+
+// stamp
+const ST = { t: 8.22, x: 902, y: 622, r: -13 };
+function buildStamp() {
+  const w = 560, h = 236, c = mk(w + 40, h + 40), g = c.getContext('2d'), r = rng(808);
+  g.translate(20, 20); g.fillStyle = C.red; g.strokeStyle = C.red;
+  g.lineWidth = 12; g.beginPath(); g.roundRect(6, 6, w - 12, h - 12, 22); g.stroke();
+  g.lineWidth = 4; g.beginPath(); g.roundRect(24, 24, w - 48, h - 48, 12); g.stroke();
+  g.textAlign = 'center'; g.font = `400 136px ${F.arch}`; g.letterSpacing = '14px'; g.fillText('DADA', w / 2 + 7, 162);
+  g.font = `400 25px ${F.arch}`; g.letterSpacing = '6px'; g.fillText('APPROVED BY NOBODY', w / 2 + 3, 204); g.letterSpacing = '0px';
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  // rubber unevenness: lighter patches, voids, and a darker rim where the ink pools
+  g.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 2400; i++) { g.fillStyle = `rgba(0,0,0,${0.2 + 0.6 * r()})`; g.beginPath(); g.arc(r() * c.width, r() * c.height, 0.5 + r() * 1.8, 0, 7); g.fill(); }
+  for (let i = 0; i < 18; i++) { const x = r() * c.width, y = r() * c.height, rad = 30 + r() * 90, gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, `rgba(0,0,0,${0.25 + 0.3 * r()})`); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2); }
+  STAMP = c;
+}
+
+// ── board, light, grain ──
+let BOARD, LIGHT, GRAIN;
+const BM = 140;   // board margin beyond the frame (camera moves and shake)
+function buildBoard() {
+  BOARD = mk(W + BM * 2, H + BM * 2); const g = BOARD.getContext('2d'), r = rng(21), w = BOARD.width, h = BOARD.height;
+  g.fillStyle = C.ground; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 30; i++) { const x = r() * w, y = r() * h, rad = 100 + r() * 300, gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, `rgba(${r() < 0.5 ? '0,0,0' : '120,100,80'},${0.12 * r()})`); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2); }
+  fibers(g, w, h, r, 500, 0.5); grain(g, w, h, 10, 22);
+}
+function buildScreen() {
+  LIGHT = mk(W, H); const g = LIGHT.getContext('2d');
+  const v = g.createRadialGradient(W / 2, H * 0.46, H * 0.3, W / 2, H / 2, H * 1.05); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(20,10,0,0.45)');
+  g.fillStyle = v; g.fillRect(0, 0, W, H);
+  const S = 320, c = mk(S, S), cg = c.getContext('2d'), id = cg.createImageData(S, S), r = rng(99);
+  for (let i = 0; i < S * S; i++) { const n = r() * 255; id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = n; id.data[i * 4 + 3] = 18; }
+  cg.putImageData(id, 0, 0); GRAIN = ctx.createPattern(c, 'repeat');
+}
+
+// ── camera ──
+const SLAPS = () => [...Object.entries(FLY).map(([id, f]) => [f[0] + f[1], id === 'gear' || id === 'BUY' || id === 'NOTHING' ? 5 : 3]), [ERR.redIn + ERR.redD, 3]];
+function camera(t) {
+  let z = 1 + 0.03 * eInOut(seg(t, 0, SNAP)), cx = 960, cy = 540;
+  z -= 0.03 * eInOut(seg(t, SNAP, SNAP + 0.9));
+  let sx = 0, sy = 0;
+  const kick = (t0, amp, dec) => { const u = t - t0; if (u >= 0 && u < 0.6) { const e = amp * Math.exp(-u * dec); sx += e * Math.sin(u * 95); sy += e * Math.cos(u * 77); } };
+  kick(SNAP, 7, 9); for (const [t0, a] of SLAPS()) kick(t0, a, 14);
+  kick(ST.t, 16, 8);
+  return { cx, cy, z, sx, sy };
+}
+let CAM;
+function setCam() { ctx.setTransform(CAM.z, 0, 0, CAM.z, W / 2 - CAM.cx * CAM.z + CAM.sx, H / 2 - CAM.cy * CAM.z + CAM.sy); }
+
+// ── drawing ──
+const SH = { dx: 16, dy: 24 };
+function drawSprite(sp, shadow, R, pose, w, h, cx = w / 2, cy = h / 2) {
+  // sprite covers a page rect of w×h with (cx, cy) as the pose origin (page units from the rect's corner)
+  const k = pose.s / R;
+  ctx.save(); setCam();
+  ctx.translate(pose.x + SH.dx * pose.z, pose.y + SH.dy * pose.z); ctx.rotate(pose.r); ctx.scale(k, k);
+  ctx.globalAlpha = 0.32 + 0.18 * pose.z; const pad = (shadow.width - sp.width) / 2;
+  ctx.drawImage(shadow, -cx * R - pad, -cy * R - pad); ctx.restore();
+  ctx.save(); setCam(); ctx.translate(pose.x, pose.y); ctx.rotate(pose.r); ctx.scale(k, k); ctx.drawImage(sp, -cx * R, -cy * R); ctx.restore();
+}
+function drawItem(it, pose) { drawSprite(it.sprite, it.shadow, it.R, pose, it.rect.w, it.rect.h, it.cx - it.rect.x, it.cy - it.rect.y); }
+function drawEye(pose, t) {
+  const it = ITEMS.eye; drawItem(it, pose);
+  const [lx, ly] = look(t), c = lid(t);
+  ctx.save(); setCam(); ctx.translate(pose.x, pose.y); ctx.rotate(pose.r); ctx.scale(pose.s, pose.s);
+  ctx.beginPath(); eyeOpening(ctx, 0, 0); ctx.clip();
+  ctx.drawImage(ITEMS.iris, -40 + lx * 24, IRIS.dy - 40 + ly * 10, 80, 80);
+  const open = 1 - c; ctx.drawImage(ITEMS.lid, -112, -72 - open * LID.h, 224, 118);
+  ctx.restore();
+}
+function drawPage(t) {
+  ctx.save(); setCam();
+  ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 30 * CAM.z; ctx.shadowOffsetX = 8; ctx.shadowOffsetY = 14;
+  ctx.fillStyle = C.news; ctx.fillRect(PX, PY, PW, PH); ctx.shadowColor = 'transparent';
+  ctx.drawImage(PAGE, PX, PY);
+  ctx.beginPath(); ctx.rect(PX, PY, PW, PH); ctx.clip();
+  // cuts so far: a dark hairline gap with a lit lip
+  for (const [c, n] of [[CUT1, 1], [CUT2, 2]]) {
+    const l = cutLen(t, n); if (l <= 0) continue;
+    const x1 = c.a[0] + c.d[0] * l, y1 = c.a[1] + c.d[1] * l;
+    ctx.lineCap = 'butt'; ctx.strokeStyle = 'rgba(25,16,8,0.85)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(c.a[0], c.a[1]); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,250,235,0.6)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(c.a[0] - c.d[1] * 2.2, c.a[1] + c.d[0] * 2.2); ctx.lineTo(x1 - c.d[1] * 2.2, y1 + c.d[0] * 2.2); ctx.stroke();
+  }
+  ctx.restore();
+}
+function piecePose(pc, t) {
+  const u = t - SNAP - pc.delay; if (u <= 0) return { dx: 0, dy: 0, r: 0, z: 0 };
+  const pop = eOut(clamp(u / 0.1)) * pc.pop;
+  if (pc.stay) {
+    const e = eBack(seg(u, 0, 0.55), 1.3);
+    return { dx: pc.dir[0] * pop * (1 - e) + pc.stay.dx * e, dy: pc.dir[1] * pop * (1 - e) + pc.stay.dy * e, r: deg(pc.stay.r) * e, z: 0.5 * Math.sin(Math.PI * seg(u, 0, 0.55)) + 0.1 };
+  }
+  const fly = 2600 * eIn(seg(u, 0.05, 0.95));
+  return { dx: pc.dir[0] * (pop + fly), dy: pc.dir[1] * (pop + fly) + 300 * eIn(seg(u, 0.05, 0.95)), r: deg(pc.spin) * (0.15 * eOut(clamp(u / 0.1)) + eIn(seg(u, 0.05, 0.95))), z: 0.3 + 0.9 * seg(u, 0, 0.6) };
+}
+function drawPieces(t) {
+  for (const pc of PIECES) {
+    const p = piecePose(pc, t);
+    if (!pc.stay && t - SNAP > 1.1) continue;
+    const [cx, cy] = [PX + pc.cx, PY + pc.cy];
+    ctx.save(); setCam();
+    ctx.translate(cx + p.dx, cy + p.dy); ctx.rotate(p.r); ctx.translate(-cx, -cy);
+    ctx.save(); ctx.translate(SH.dx * p.z + 6, SH.dy * p.z + 10); polyPath(ctx, pc.poly.map(([x, y]) => [x + PX, y + PY]));
+    ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 24 * CAM.z; ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fill(); ctx.restore();
+    polyPath(ctx, pc.poly.map(([x, y]) => [x + PX, y + PY])); ctx.clip(); ctx.drawImage(PAGEH, PX, PY);
+    ctx.restore();
+  }
+}
+function drawScissors(t) {
+  const s = scissors(t); if (!s) return;
+  for (const [half, a] of [[SCI.dn, s.ang + s.th / 2], [SCI.up, s.ang - s.th / 2]]) {
+    ctx.save(); setCam(); ctx.translate(s.x + 34 * s.z, s.y + 50 * s.z); ctx.rotate(a); ctx.globalAlpha = 0.34;
+    const pad = (half.shadow.width - half.sprite.width) / 2; ctx.drawImage(half.shadow, -half.ox - pad, -half.oy - pad); ctx.restore();
+  }
+  for (const [half, a] of [[SCI.dn, s.ang + s.th / 2], [SCI.up, s.ang - s.th / 2]]) {
+    ctx.save(); setCam(); ctx.translate(s.x, s.y); ctx.rotate(a); ctx.drawImage(half.sprite, -half.ox, -half.oy); ctx.restore();
+  }
+}
+
+window.ready = (async () => {
+  await Promise.all([`400 100px ${F.frak}`, `900 100px ${F.play}`, `400 20px ${F.old}`, `italic 400 20px ${F.old}`, `700 20px ${F.old}`, `400 100px ${F.anton}`, `400 100px ${F.slab}`, `400 100px ${F.arch}`].map(f => document.fonts.load(f)));
+  await document.fonts.ready;
+  buildSpeckle(); layoutPage(); buildPictures(); buildPage(); buildItems(); buildCuts(); buildScissors(); buildStamp(); buildBoard(); buildScreen();
+})();
+
+window.draw = ({ t }) => {
+  CAM = camera(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  setCam(); ctx.drawImage(BOARD, -BM, -BM);
+  if (t < SNAP) drawPage(t);
+  else {
+    drawPieces(t);
+    // hovering cut-outs first, then those already pasted down, then whatever is in the air
+    const order = ['PRICE', ...Object.keys(FLY)];
+    const layers = order.map(id => {
+      if (id === 'PRICE') { const it = ITEMS.PRICE, h = hover(it, t, 2.2), u = seg(t, PRICE_DROP, PRICE_DROP + 0.3); return { id, z: 0, draw: () => drawItem(it, u <= 0 ? h : { x: h.x + 40 * eOut(u), y: h.y + 22 * eOut(u), r: lerp(h.r, deg(11), eBack(u)), s: 1, z: lerp(h.z, 0.1, u) }) }; }
+      const [t0, d] = FLY[id], rank = t < t0 ? 0 : t < t0 + d ? 2 : 1;
+      if (id === 'ORDER') return { id, rank: t >= GAG.snip ? 3 : rank, k: t0, draw: () => { for (let i = 0; i < 5; i++) drawItem(LET[i], letterPose(i, t)); } };
+      if (id === 'eye') return { id, rank, k: t0, draw: () => drawEye(flown('eye', t, 0.9), t) };
+      if (id === 'gear') return { id, rank, k: t0, draw: () => { const p = flown('gear', t, 0.4); p.r += gearAngle(t); drawItem(ITEMS.gear, p); } };
+      if (id === 'hat') return { id, rank, k: t0, draw: () => { const p = flown('hat', t, 1.7), tip = hatTip(t); drawItem(ITEMS.hat, { ...p, y: p.y + tip.dy, r: p.r + tip.r, z: p.z + Math.abs(tip.dy) / 200 }); } };
+      return { id, rank, k: t0, draw: () => drawItem(ITEMS[id], flown(id, t, id.length * 0.7)) };
+    });
+    layers.sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || (a.k ?? 0) - (b.k ?? 0)).forEach(l => l.draw());
+    const rp = redRPose(t); if (rp) drawSprite(REDR.sprite, REDR.shadow, REDR.R, rp, REDR.w, REDR.h);
+  }
+  drawScissors(t);
+  // the stamp: its shadow closes in, then the impression lands and the frame jumps
+  if (t >= ST.t - 0.2) {
+    ctx.save(); setCam(); ctx.translate(ST.x, ST.y); ctx.rotate(deg(ST.r));
+    if (t < ST.t) { const u = seg(t, ST.t - 0.2, ST.t); ctx.globalAlpha = 0.45 * u; ctx.filter = `blur(${lerp(40, 6, u)}px)`; ctx.fillStyle = '#000'; const s = lerp(1.5, 1.02, eIn(u)); ctx.fillRect(-300 * s + 30 * (1 - u), -128 * s + 40 * (1 - u), 600 * s, 256 * s); ctx.filter = 'none'; }
+    else { const v = t - ST.t, s = 1 + 0.07 * Math.exp(-v * 30); ctx.scale(s, s); ctx.globalAlpha = 0.95; ctx.drawImage(STAMP, -STAMP.width / 2, -STAMP.height / 2); }
+    ctx.restore();
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(LIGHT, 0, 0);
+  ctx.fillStyle = GRAIN;   // static: paper does not boil, and a still grain costs the encoder nothing ctx.globalCompositeOperation = 'overlay'; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over';
+  const fi = 1 - seg(t, 0, 0.45), fo = seg(t, 9.35, 9.98), f = Math.max(eInOut(fi), eInOut(fo));
+  if (f > 0) { ctx.fillStyle = `rgba(0,0,0,${f})`; ctx.fillRect(0, 0, W, H); }
+  return cv.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+
+// sound cues for audio.py
+window.events = () => {
+  const ev = [{ k: 'slide', t: 0.25, d: 0.6 }];
+  for (let i = 0; i < S1.n; i++) ev.push({ k: 'snip', t: S1.t0 + i * S1.per + S1.close * 0.8, v: 1 });
+  ev.push({ k: 'swish', t: S1.t0 + S1.n * S1.per, d: S2.t0 - S1.t0 - S1.n * S1.per });
+  for (let i = 0; i < S2.n; i++) ev.push({ k: 'snip', t: S2.t0 + i * S2.per + S2.close * 0.8, v: 1 });
+  ev.push({ k: 'swish', t: S2.t0 + S2.n * S2.per, d: 0.3 });
+  ev.push({ k: 'rip', t: SNAP }, { k: 'flutter', t: SNAP, d: 0.9 });
+  for (const [id, [t0, d]] of Object.entries(FLY)) ev.push({ k: id === 'gear' ? 'clank' : id === 'hat' ? 'thud' : 'slap', t: t0 + d, v: id === 'BUY' || id === 'NOTHING' ? 1.2 : id === 'eye' ? 0.6 : 1 });
+  ev.push({ k: 'slap', t: PRICE_DROP + 0.3, v: 0.5 });
+  ev.push({ k: 'swish', t: GAG.in0, d: GAG.in1 - GAG.in0 }, { k: 'snip', t: GAG.snip + GAG.close * 0.8, v: 1.2 }, { k: 'fall', t: GAG.snip + GAG.close, d: 0.6 });
+  for (let k = 0; k < 5; k++) if (k !== 2) ev.push({ k: 'hop', t: ERR.t0 + k * ERR.stag + ERR.hop, v: 0.7 });
+  ev.push({ k: 'drop', t: ERR.redIn, d: ERR.redD }, { k: 'slap', t: ERR.redIn + ERR.redD, v: 1 });
+  for (const [b] of BLINKS) ev.push({ k: 'blink', t: b });
+  ev.push({ k: 'whistle', t: 7.35, d: 0.3, up: 1 }, { k: 'whistle', t: 7.66, d: 0.29, up: 0 });
+  // gear ratchet: one click per tooth that passes
+  let last = 0; for (let x = 4.3; x < 9.6; x += 1 / 240) { const a = gearAngle(x), n = Math.floor(a / (2 * Math.PI / GEAR.n)); if (n > last) { ev.push({ k: 'tick', t: +x.toFixed(4) }); last = n; } }
+  ev.push({ k: 'stamp', t: ST.t });
+  return ev;
+};
+</script>
+</body></html>
