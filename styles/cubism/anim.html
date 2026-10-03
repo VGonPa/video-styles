@@ -1,0 +1,1071 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#11100e;overflow:hidden}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+'use strict';
+// Cubism: one acoustic guitar, built as a small 3D model in code and painted in flat tonal bands.
+// A charcoal drawing of it goes down on a primed ochre canvas and fills with flat planes; then thin
+// charcoal cut lines snap across the picture one after another and every new facet swings to its own
+// viewpoint, so the round sound hole, the thin side and the neck are seen from different angles at
+// once while the guitar stays in register. Passage and short hatching model the planes, three
+// scissor-cut papers are pasted on (faux-bois, grey-blue paper, newsprint marks) and drawn over, the
+// title is stippled through a stencil with a brush, and the picture settles and fades out.
+// Every shape is generated in window.ready from seeded numbers; frames depend only on t.
+const W = 1920, H = 1080, DUR = 9.6;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d', { alpha: false });
+
+/* ------------------------------------------------------------ numbers */
+function seeded(seed) {                         // xorshift32 floats in [0,1)
+  let s = Math.imul(seed + 0x51ed27, 0x9e3779b1) >>> 0 || 1;
+  return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+}
+function hash2(i, k) {
+  let h = Math.imul(i | 0, 0x2545f491) ^ Math.imul((k | 0) + 0x3c6ef372, 0x6c8e9cf5);
+  h ^= h >>> 15; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function wob(x, k) {                            // smooth 1D value noise in [0,1)
+  const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+  return hash2(i, k) * (1 - u) + hash2(i + 1, k) * u;
+}
+function wob2(x, y, k) {                        // smooth 2D value noise in [0,1)
+  const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const a = hash2(i * 9176 + j, k), b = hash2((i + 1) * 9176 + j, k), c = hash2(i * 9176 + j + 1, k), d = hash2((i + 1) * 9176 + j + 1, k);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const sstep = (a, b, v) => { const x = clamp((v - a) / (b - a), 0, 1); return x * x * (3 - 2 * x); };
+const ease3 = x => { x = clamp(x, 0, 1); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(2 - 2 * x, 3) / 2; };
+const lin = (a, b, v) => clamp((v - a) / (b - a), 0, 1);
+
+/* ------------------------------------------------------------ palette */
+const HEX = {
+  ochre: '#b8913f', lochre: '#d2b06a', umber: '#6b4f2e', sienna: '#8a5a34',
+  wgrey: '#8c877b', cgrey: '#5f625f', char: '#26231f',
+  gblue: '#6e7f8d', dblue: '#45525e', white: '#e4d9bf',
+  wood1: '#a07440', wood2: '#7a5530', wood0: '#c39a5c', news: '#d9d2bf', ink: '#8f8a7e',
+};
+const C = {};
+for (const k in HEX) C[k] = [1, 3, 5].map(i => parseInt(HEX[k].slice(i, i + 2), 16));
+const mix = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+const rgba = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const GROUND = mix(C.ochre, C.wgrey, 0.45);
+
+// Each surface is painted from a ramp of four tones (shadow → light); a facet's tint mixes the ochre,
+// grey and grey-blue versions of the same ramp.
+const RAMP = {
+  top: [[C.umber, mix(C.ochre, C.umber, 0.45), C.ochre, C.lochre],
+        [C.cgrey, mix(C.wgrey, C.cgrey, 0.4), C.wgrey, mix(C.wgrey, C.white, 0.5)],
+        [C.dblue, mix(C.gblue, C.dblue, 0.4), C.gblue, mix(C.gblue, C.white, 0.42)]],
+  side: [[mix(C.char, C.umber, 0.55), C.umber, C.sienna, mix(C.sienna, C.ochre, 0.55)],
+         [mix(C.char, C.cgrey, 0.5), C.cgrey, mix(C.cgrey, C.wgrey, 0.5), C.wgrey],
+         [mix(C.char, C.dblue, 0.5), C.dblue, mix(C.dblue, C.gblue, 0.5), C.gblue]],
+  board: [[C.char, mix(C.char, C.umber, 0.4), mix(C.char, C.umber, 0.7), C.umber],
+          [C.char, mix(C.char, C.cgrey, 0.45), mix(C.char, C.cgrey, 0.75), C.cgrey],
+          [C.char, mix(C.char, C.dblue, 0.45), mix(C.char, C.dblue, 0.75), C.dblue]],
+  bridge: [[C.char, mix(C.char, C.umber, 0.5), C.umber, C.sienna]],
+  bone: [[C.wgrey, mix(C.wgrey, C.white, 0.5), C.white, C.white]],
+  rosette: [[C.umber, mix(C.umber, C.wgrey, 0.5), C.wgrey, mix(C.wgrey, C.white, 0.4)]],
+  hole: [[mix(C.char, [0, 0, 0], 0.3), mix(C.char, [0, 0, 0], 0.3), C.char, C.char]],
+};
+RAMP.neck = RAMP.side; RAMP.head = RAMP.side;
+function tone(mat, band, tint, key = 0) {
+  const R = RAMP[mat];
+  band = clamp(band + key, 0, 3);
+  if (R.length === 1) return R[0][band];
+  const s = tint[0] + tint[1] + tint[2] || 1, c = [0, 0, 0];
+  for (let i = 0; i < 3; i++) if (tint[i]) { const q = R[i][band]; c[0] += q[0] * tint[i] / s; c[1] += q[1] * tint[i] / s; c[2] += q[2] * tint[i] / s; }
+  return c;
+}
+
+/* ------------------------------------------------------------ the guitar (local units: x across the body, y along the neck, z out of the top) */
+const ZF = 0.2, ZB = -0.2, PY = 0.2, Y0 = -1.23, Y1 = 0.85;
+const TILT = -0.5236, SC = 262, PIV = [820, 630], CAMD = 9;
+function halfWidth(y) {                         // two bouts joined by a softened waist
+  const lo = 0.4624 - (y + 0.55) ** 2, up = 0.2209 - (y - 0.38) ** 2;
+  return Math.max(lo > 0 ? Math.sqrt(lo) : 0, up > 0 ? Math.sqrt(up) : 0) + 0.07 * Math.exp(-(((y - 0.045) / 0.12) ** 2));
+}
+const OUT = [];                                 // body outline, counter-clockwise
+{
+  const n = 44;
+  for (let k = 0; k <= n; k++) { const y = Y0 + (Y1 - Y0) * (1 - Math.cos(Math.PI * k / n)) / 2; OUT.push([halfWidth(y), y]); }
+  for (let k = n - 1; k >= 1; k--) OUT.push([-OUT[k][0], OUT[k][1]]);
+}
+const SIDEN = OUT.map((p, i) => {
+  const q = OUT[(i + 1) % OUT.length], dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1;
+  return [dy / l, -dx / l, 0];
+});
+const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+function faceNormal(pts, centre) {              // Newell normal turned to face away from `centre`
+  let nx = 0, ny = 0, nz = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    nx += (a[1] - b[1]) * (a[2] + b[2]); ny += (a[2] - b[2]) * (a[0] + b[0]); nz += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  const l = Math.hypot(nx, ny, nz) || 1, c = pts.reduce((s, p) => [s[0] + p[0] / pts.length, s[1] + p[1] / pts.length, s[2] + p[2] / pts.length], [0, 0, 0]);
+  const d = sub3(c, centre), sg = d[0] * nx + d[1] * ny + d[2] * nz < 0 ? -1 : 1;
+  return [sg * nx / l, sg * ny / l, sg * nz / l];
+}
+const PARTS = [];                               // faces of the neck, head, bridge and fittings
+function hexa(corner, mats, grp, line) {        // corner(xi, yi, zi) → point; mats: front (z+) and the rest
+  const P = [];
+  for (let i = 0; i < 8; i++) P.push(corner(i & 1, (i >> 1) & 1, (i >> 2) & 1));
+  const centre = P.reduce((s, p) => [s[0] + p[0] / 8, s[1] + p[1] / 8, s[2] + p[2] / 8], [0, 0, 0]);
+  for (const [idx, front] of [[[4, 5, 7, 6], 1], [[0, 2, 3, 1], 0], [[0, 4, 6, 2], 0], [[1, 3, 7, 5], 0], [[0, 1, 5, 4], 0], [[2, 6, 7, 3], 0]]) {
+    const pts = idx.map(i => P[i]);
+    PARTS.push({ pts, n: faceNormal(pts, centre), mat: front ? mats[0] : mats[1], grp, line, front: !!front });
+  }
+}
+function flat(pts, n, mat, grp) { PARTS.push({ pts, n, mat, grp, line: 0 }); }
+const HEAD_A = 0.21, NUT = 2.25, HEADL = 0.56;
+const headPt = (x, u, z) => [x, NUT + u * Math.cos(HEAD_A), z - u * Math.sin(HEAD_A)];
+{
+  hexa((xi, yi, zi) => { const w = yi ? 0.088 : 0.105; return [xi ? w : -w, yi ? NUT : 0.8, zi ? 0.24 : 0.0]; }, ['board', 'neck'], 'neck', 2.2);
+  hexa((xi, yi, zi) => [xi ? 0.106 : -0.106, yi ? 0.82 : 0.42, zi ? 0.24 : 0.2], ['board', 'board'], 'neck', 1.6);
+  hexa((xi, yi, zi) => { const w = yi ? 0.136 : 0.118; return headPt(xi ? w : -w, yi ? HEADL : 0, zi ? 0.215 : 0.145); }, ['head', 'head'], 'head', 2.2);
+  hexa((xi, yi, zi) => [xi ? 0.27 : -0.27, yi ? -0.565 : -0.665, zi ? 0.245 : 0.2], ['bridge', 'bridge'], 'bridge', 1.6);
+}
+const disc = (cx, cy, r, z, n) => Array.from({ length: n }, (_, i) => [cx + r * Math.cos(2 * Math.PI * i / n), cy + r * Math.sin(2 * Math.PI * i / n), z]);
+const ROSETTE = disc(0, 0.18, 0.245, ZF + 0.002, 40), HOLE = disc(0, 0.18, 0.185, ZF + 0.004, 40);
+const STRINGS = Array.from({ length: 6 }, (_, i) => [[-0.105 + 0.042 * i, -0.592, 0.263], [-0.062 + 0.0248 * i, NUT, 0.259]]);
+function strings(g, V, seed) {                // six thin strings, each broken once or twice
+  g.beginPath();
+  STRINGS.forEach((st, i) => {
+    const a = V.proj(V.rot(...st[0])), b = V.proj(V.rot(...st[1])), cut = [0];
+    const g1 = 0.2 + 0.45 * hash2(seed + i, 3), g2 = 0.62 + 0.3 * hash2(seed + i, 5);
+    cut.push(g1, g1 + 0.03 + 0.05 * hash2(seed + i, 4));
+    if (hash2(seed + i, 6) < 0.5) cut.push(g2, g2 + 0.04);
+    cut.push(1);
+    for (let k = 0; k + 1 < cut.length; k += 2) {
+      const u0 = cut[k], u1 = Math.min(1, cut[k + 1]);
+      g.moveTo(a[0] + (b[0] - a[0]) * u0, a[1] + (b[1] - a[1]) * u0); g.lineTo(a[0] + (b[0] - a[0]) * u1, a[1] + (b[1] - a[1]) * u1);
+    }
+  });
+  g.stroke();
+}
+// tonal bands across the top: straight boundaries in the guitar's own frame, so they turn with it
+const TOPBANDS = [-0.62, -0.08, 0.42];
+const BANDDIR = [Math.cos(0.62), Math.sin(0.62)], TOPSTEP = [-0.24, 0, 0.2, 0.06];
+
+function viewer(v) {
+  const cy = Math.cos(v.yaw), sy = Math.sin(v.yaw), cp = Math.cos(v.pitch), sp = Math.sin(v.pitch);
+  const ca = Math.cos(TILT), sa = Math.sin(TILT), py = v.py, o = G2S(0, py);
+  const R = (x, y, z) => {
+    const x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y2 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
+    return [x1 * ca - y2 * sa, x1 * sa + y2 * ca, z2];
+  };
+  return {
+    s: SC,
+    rot: (x, y, z) => R(x, y - py, z),
+    dir: n => R(n[0], n[1], n[2]),
+    proj: p => { const f = CAMD / (CAMD - p[2]); return [o[0] + SC * p[0] * f, o[1] - SC * p[1] * f]; },
+  };
+}
+const LIGHT = (() => { const l = [-0.5, 0.55, 0.67], n = Math.hypot(...l); return l.map(x => x / n); })();
+const bandOf = n => clamp(Math.floor((0.5 + 0.5 * (n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2])) * 4.2 - 0.35), 0, 3);
+const facing = (n, c) => n[0] * -c[0] + n[1] * -c[1] + n[2] * (CAMD - c[2]) > 0;
+function polyPath(P, pts) { P.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) P.lineTo(pts[i][0], pts[i][1]); P.closePath(); }
+
+/* ------------------------------------------------------------ charcoal */
+// A line of charcoal as a filled ribbon: a little wobble across it, pressure varying along it,
+// tapered where it starts and stops. `frac` draws only the first part (a line being drawn on);
+// `gaps` lists [from, to] stretches (0..1 of the length) where the stick lifted off the canvas.
+function ribbon(P, pts, closed, w, seed, frac = 1, gaps = null, wa = 1.3, loose = false) {
+  const n = pts.length; if (n < 2 || frac <= 0) return;
+  const seg = closed ? n : n - 1, cum = [0];
+  for (let i = 0; i < seg; i++) { const a = pts[i], b = pts[(i + 1) % n]; cum.push(cum[i] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+  const total = cum[seg], L = total * Math.min(1, frac); if (L < 2) return;
+  const runs = [];
+  let s0 = 0;
+  for (const g of gaps || []) { if (g[0] * total > s0) runs.push([s0, Math.min(L, g[0] * total)]); s0 = g[1] * total; }
+  if (s0 < L) runs.push([s0, L]);
+  for (const [a0, a1] of runs) {
+    if (a1 - a0 < 3) continue;
+    const m = Math.max(2, Math.ceil((a1 - a0) / 6) + 1), Lp = [], Rp = [];
+    let si = 0;
+    for (let k = 0; k < m; k++) {
+      const s = a0 + (a1 - a0) * k / (m - 1);
+      while (si < seg - 1 && cum[si + 1] < s) si++;
+      const A = pts[si], B = pts[(si + 1) % n], len = cum[si + 1] - cum[si] || 1, f = (s - cum[si]) / len;
+      const tx = (B[0] - A[0]) / len, ty = (B[1] - A[1]) / len, x = A[0] + (B[0] - A[0]) * f, y = A[1] + (B[1] - A[1]) * f;
+      // `loose`: the guitar's contours, pressed harder and lighter along the stroke and wandering a little more
+      const off = loose ? (wob(s / 80, seed) - 0.5) * 2 * wa + (wob(s / 23 + 4, seed + 2) - 0.5) * 0.9 : (wob(s / 46, seed) - 0.5) * 2 * wa;
+      let hw = loose ? 0.5 * w * Math.max(0.4, 0.42 + 1.1 * wob(s / 64 + 3, seed + 5) + 0.4 * (wob(s / 13, seed + 9) - 0.5))
+        : 0.5 * w * (0.4 + 1.0 * wob(s / 31 + 9, seed + 3));
+      if (!closed || gaps || frac < 1) hw *= Math.min(1, 0.25 + (s - a0) / 20, 0.25 + (a1 - s) / 20);
+      Lp.push(x - ty * (off + hw), y + tx * (off + hw)); Rp.push(x - ty * (off - hw), y + tx * (off - hw));
+    }
+    P.moveTo(Lp[0], Lp[1]);
+    for (let k = 2; k < Lp.length; k += 2) P.lineTo(Lp[k], Lp[k + 1]);
+    for (let k = Rp.length - 2; k >= 0; k -= 2) P.lineTo(Rp[k], Rp[k + 1]);
+    P.closePath();
+  }
+}
+const CHAR = rgba(C.char, 0.9);
+let GRAIN = null;                               // charcoal with the tooth of the canvas showing through
+function buildGrain() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d'), img = g.createImageData(256, 256), D = img.data;
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+    const v = 0.55 * hash2(x * 263 + y, 41) + 0.45 * wob2(x / 3.2, y / 3.2, 42), o = (y * 256 + x) * 4;
+    D[o] = C.char[0]; D[o + 1] = C.char[1]; D[o + 2] = C.char[2]; D[o + 3] = 255 * clamp(0.35 + 0.85 * v, 0, 0.96);
+  }
+  g.putImageData(img, 0, 0);
+  GRAIN = ctx.createPattern(c, 'repeat');
+}
+
+/* ------------------------------------------------------------ drawing the guitar from one viewpoint */
+// Where a contour lifts off: a few short gaps, fixed by the seed.
+function liftGaps(seed, n, len) {
+  const out = [];
+  for (let i = 0; i < n; i++) { const a = 0.06 + 0.88 * (i + hash2(seed, i * 3 + 1)) / n; out.push([a, a + len * (0.6 + 0.8 * hash2(seed, i * 3 + 2))]); }
+  return out.filter(g => g[1] < 0.98);
+}
+// o.fill: how far each group of planes has been filled (0..1, a wipe up the guitar); o.line: how much of
+// each contour has been drawn; o.fills / o.lines switch the planes and the charcoal on or off; o.seed
+// gives every facet its own hand for the contours.
+const FULL = { side: 1, top: 1, neck: 1, detail: 1 }, LINES = { top: 1, side: 1, hole: 1, neck: 1, head: 1, bridge: 1 };
+function drawGuitar(g, v, tint, o) {
+  const V = viewer(v), M = OUT.length, fill = o.fill || FULL, line = o.line || LINES, seed = o.seed || 0, key = o.key || 0;
+  const fr = new Array(M), bk = new Array(M), frS = new Array(M), bkS = new Array(M);
+  for (let i = 0; i < M; i++) {
+    fr[i] = V.rot(OUT[i][0], OUT[i][1], ZF); bk[i] = V.rot(OUT[i][0], OUT[i][1], ZB);
+    frS[i] = V.proj(fr[i]); bkS[i] = V.proj(bk[i]);
+  }
+  const vis = new Array(M), band = new Array(M);
+  for (let i = 0; i < M; i++) {
+    const j = (i + 1) % M, n = V.dir(SIDEN[i]);
+    const c = [(fr[i][0] + fr[j][0] + bk[i][0] + bk[j][0]) / 4, (fr[i][1] + fr[j][1] + bk[i][1] + bk[j][1]) / 4, (fr[i][2] + fr[j][2] + bk[i][2] + bk[j][2]) / 4];
+    vis[i] = facing(n, c); band[i] = bandOf(n);
+  }
+  const topN = V.dir([0, 0, 1]), topC = V.rot(0, -0.2, ZF), topVis = facing(topN, topC);
+  // the wipe that fills the planes: a straight front moving up the guitar
+  const b0 = V.proj(V.rot(0, Y0 - 0.05, 0)), b1 = V.proj(V.rot(0, NUT + HEADL + 0.05, 0));
+  const ax = [b1[0] - b0[0], b1[1] - b0[1]], al = Math.hypot(ax[0], ax[1]) || 1;
+  const wipe = (k, fn) => {
+    if (k <= 0) return;
+    if (k >= 1) { fn(); return; }
+    const ux = ax[0] / al, uy = ax[1] / al, d = al * k, cx = b0[0] + ux * d, cy = b0[1] + uy * d;
+    g.save(); g.beginPath();
+    g.moveTo(cx - uy * 3000, cy + ux * 3000); g.lineTo(cx + uy * 3000, cy - ux * 3000);
+    g.lineTo(cx + uy * 3000 - ux * 4000, cy - ux * 3000 - uy * 4000); g.lineTo(cx - uy * 3000 - ux * 4000, cy + ux * 3000 - uy * 4000);
+    g.closePath(); g.clip(); fn(); g.restore();
+  };
+  const paint = (pts, col) => { g.beginPath(); polyPath(g, pts); g.fillStyle = col; g.fill(); g.lineWidth = 1; g.strokeStyle = col; g.stroke(); };
+  // the side: runs of quads that share a tone merge into one band
+  const strips = [];
+  for (let i = 0; i < M; i++) {
+    if (!vis[i]) continue;
+    let j = i; while (j + 1 < M && vis[j + 1] && band[j + 1] === band[i]) j++;
+    const pts = [], depth = [];
+    for (let k = i; k <= j + 1; k++) pts.push(frS[k % M]);
+    for (let k = j + 1; k >= i; k--) pts.push(bkS[k % M]);
+    for (let k = i; k <= j; k++) depth.push(fr[k][2] + bk[k][2]);
+    strips.push({ pts, band: band[i], z: depth.reduce((a, b) => a + b, 0) / depth.length });
+    i = j;
+  }
+  strips.sort((a, b) => a.z - b.z);
+  const rotated = PARTS.map(f => {
+    const r = f.pts.map(p => V.rot(p[0], p[1], p[2])), c = r.reduce((s, p) => [s[0] + p[0] / r.length, s[1] + p[1] / r.length, s[2] + p[2] / r.length], [0, 0, 0]);
+    const n = V.dir(f.n);
+    return { f, s: r.map(V.proj), z: c[2], vis: facing(n, c), band: bandOf(n) };
+  }).filter(r => r.vis);
+  rotated.sort((a, b) => a.z - b.z);
+  if (o.fills !== false) {
+    wipe(fill.side, () => { for (const st of strips) paint(st.pts, rgba(tone('side', st.band, tint, key))); });
+    if (topVis) wipe(fill.top, () => {
+      // the top in four straight tonal bands fixed to the guitar, so they turn with it
+      const sh = 0.5 + 0.5 * (topN[0] * LIGHT[0] + topN[1] * LIGHT[1] + topN[2] * LIGHT[2]), edges = [-3, ...TOPBANDS, 3];
+      g.save(); g.beginPath(); polyPath(g, frS); g.clip();
+      for (let k = 0; k < 4; k++) {
+        const q = [[edges[k], -3], [edges[k + 1], -3], [edges[k + 1], 3], [edges[k], 3]].map(([u, w]) => V.proj(V.rot(BANDDIR[0] * u - BANDDIR[1] * w, BANDDIR[1] * u + BANDDIR[0] * w, ZF)));
+        const col = rgba(tone('top', clamp(Math.floor((sh + TOPSTEP[k]) * 4.2 - 0.35), 0, 3), tint, key));
+        g.beginPath(); polyPath(g, q); g.fillStyle = col; g.fill(); g.strokeStyle = col; g.lineWidth = 1; g.stroke();
+      }
+      g.restore();
+      const base = bandOf(topN);
+      paint(ROSETTE.map(p => V.proj(V.rot(p[0], p[1], p[2]))), rgba(tone('rosette', clamp(base - 1, 0, 3), tint, key)));
+      paint(HOLE.map(p => V.proj(V.rot(p[0], p[1], p[2]))), rgba(RAMP.hole[0][0]));
+    });
+    wipe(fill.neck, () => {
+      for (const r of rotated) {
+        if (r.f.grp === 'slot') continue;
+        paint(r.s, rgba(tone(r.f.mat, r.band, tint, key - (r.f.grp === 'head' ? 1 : 0))));   // a plain headstock, a tone darker
+      }
+    });
+    wipe(fill.detail, () => {
+      if (topVis) { g.lineWidth = 1.1 * V.s / SC; g.strokeStyle = rgba(C.white, 0.75); strings(g, V, seed); }
+    });
+  }
+  if (o.lines === false) return;
+  // charcoal: the top's contour, the outer edge of the side, the hole, the neck, head and bridge
+  const P = new Path2D(), P2 = new Path2D(), k = V.s / SC;
+  if (topVis) {
+    ribbon(P, frS, true, 3.8 * k, 11 + seed, line.top, liftGaps(11 + seed, 3, 0.03), 1.9, true);
+    ribbon(P2, frS, true, 2.4 * k, 61 + seed, line.top, liftGaps(61 + seed, 4, 0.09), 3.4, true);   // a second, lighter pass
+    ribbon(P, HOLE.map(p => V.proj(V.rot(p[0], p[1], p[2]))), true, 3.0 * k, 13 + seed, line.hole, liftGaps(13 + seed, 1, 0.05), 1.4, true);
+    ribbon(P, ROSETTE.map(p => V.proj(V.rot(p[0], p[1], p[2]))), true, 1.6 * k, 14 + seed, line.hole, [[0.55, 0.7]], 1.2, true);
+  }
+  for (let i = 0; i < M; i++) {                 // the side's silhouette: one open line per visible run
+    if (!vis[i]) continue;
+    let j = i; while (j + 1 < M && vis[j + 1]) j++;
+    const pts = [frS[i]];
+    for (let q = i; q <= j + 1; q++) pts.push(bkS[q % M]);
+    pts.push(frS[(j + 1) % M]);
+    if (pts.length > 4) {
+      ribbon(P, pts, false, 3.4 * k, 12 + seed + i, line.side, liftGaps(12 + seed + i, 1, 0.07), 1.9, true);
+      ribbon(P2, pts, false, 2.2 * k, 72 + seed + i, line.side, liftGaps(72 + seed + i, 2, 0.12), 3.4, true);
+    }
+    i = j;
+  }
+  const groupLine = { neck: line.neck, head: line.head, bridge: line.bridge };
+  for (const r of rotated) {
+    if (!r.f.line) continue;
+    const sd = 20 + seed + Math.round(r.z * 50);
+    ribbon(P, r.s, true, r.f.line * 1.3 * k, sd, groupLine[r.f.grp] ?? 1, hash2(sd, 7) < 0.45 ? liftGaps(sd, 1, 0.12) : null, 1.3, true);
+  }
+  g.fillStyle = GRAIN || CHAR;
+  g.globalAlpha = 0.45; g.fill(P2); g.globalAlpha = 1; g.fill(P);
+  if (o.fills === false && topVis) { g.lineWidth = 1.1 * k; g.strokeStyle = rgba(C.char, 0.75); strings(g, V, seed); }
+}
+
+/* ------------------------------------------------------------ the facets */
+// One binary space partition of the picture: each cut splits one facet in two along a straight line.
+// Cuts happen in order (big ones first) and each one lands on a beat; the two new facets start from
+// their parent's view and spring to their own.
+const ANT = 0.1, OMEGA = 9.8, DAMP = 6.2, LOCK = ANT + Math.PI / (2 * OMEGA), SNAP = 0.1;
+const LOCK0 = 1.72, LSTEP = 0.12, NCUT = 24;
+function spring(x) {
+  if (x <= 0) return 0;
+  if (x < ANT) return -0.08 * Math.sin(Math.PI * x / ANT);
+  const u = x - ANT; return 1 - Math.exp(-DAMP * u) * Math.cos(OMEGA * u);
+}
+const ROOT = { poly: [[-90, -90], [2010, -90], [2010, 1170], [-90, 1170]], parent: null, birth: -9, id: 0, path: new Path2D() };
+polyPath(ROOT.path, ROOT.poly);
+const NODES = [ROOT], CUTS = [];
+function G2S(x, y) { const w = y - PY, ca = Math.cos(TILT), sa = Math.sin(TILT); return [PIV[0] + SC * (x * ca - w * sa), PIV[1] - SC * (x * sa + w * ca)]; }
+const AXD = Math.atan2(-Math.cos(TILT), -Math.sin(TILT)) * 180 / Math.PI;      // screen angle of the guitar's long axis
+const CRD = AXD + 90;
+function areaOf(p) { let a = 0; for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; a += p[i][0] * q[1] - q[0] * p[i][1]; } return Math.abs(a) / 2; }
+function perimOf(p) { let l = 0; for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; l += Math.hypot(q[0] - p[i][0], q[1] - p[i][1]); } return l; }
+const inradius = p => 2 * areaOf(p) / perimOf(p);
+function inside(pt, p) {
+  let sg = 0;
+  for (let i = 0; i < p.length; i++) {
+    const a = p[i], b = p[(i + 1) % p.length], c = (b[0] - a[0]) * (pt[1] - a[1]) - (b[1] - a[1]) * (pt[0] - a[0]);
+    if (c) { if (!sg) sg = Math.sign(c); else if (Math.sign(c) !== sg) return false; }
+  }
+  return true;
+}
+function split(poly, p, d) {                    // A: left of the directed line, B: right
+  const A = [], B = [], hit = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const sa = (a[0] - p[0]) * d[1] - (a[1] - p[1]) * d[0], sb = (b[0] - p[0]) * d[1] - (b[1] - p[1]) * d[0];
+    if (sa >= 0) A.push(a); if (sa <= 0) B.push(a);
+    if ((sa > 0 && sb < 0) || (sa < 0 && sb > 0)) { const k = sa / (sa - sb), q = [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]; A.push(q); B.push(q); hit.push(q); }
+  }
+  return [A, B, hit];
+}
+const centroid = p => p.reduce((s, q) => [s[0] + q[0] / p.length, s[1] + q[1] / p.length], [0, 0]);
+const GPTS = [];                                // points on the guitar, base pose
+for (let y = Y0 + 0.05; y < Y1; y += 0.07) { const w = halfWidth(y); for (let x = -w + 0.04; x < w; x += 0.07) GPTS.push(G2S(x, y)); }
+for (let y = 0.9; y < NUT + HEADL; y += 0.05) for (const x of [-0.07, 0, 0.07]) GPTS.push(G2S(x, y));
+const SOUNDHOLE = G2S(0, 0.18), HEADC = G2S(0, NUT + 0.3);
+const TITLEBOX = [1175, 690, 1805, 960];
+const BASEVIEW = t => { const k = ease3(t / 1.75); return { yaw: -0.64 + 0.47 * k, pitch: 0.12 - 0.08 * k, py: PY, rot: 0, dx: 0, dy: 0, sc: 1 }; };
+const BGS = { ground: 1.6, lochre: 2, ochre: 1.8, wgrey: 2.6, cgrey: 1, gblue: 1.1, dblue: 0.5, umber: 1.8, white: 0.35 };
+function localOf(pt) {                          // screen point → guitar (x, y) in the base pose
+  const ca = Math.cos(TILT), sa = Math.sin(TILT), dx = (pt[0] - PIV[0]) / SC, dy = -(pt[1] - PIV[1]) / SC;
+  return [dx * ca + dy * sa, PY - dx * sa + dy * ca];
+}
+function randIn(poly, R) {
+  const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  for (let k = 0; k < 80; k++) { const q = [x0 + (x1 - x0) * R(), y0 + (y1 - y0) * R()]; if (inside(q, poly)) return q; }
+  return centroid(poly);
+}
+
+function buildFacets() {
+  const R = seeded(1907);
+  const rr = (a, b) => a + (b - a) * R();
+  ROOT.target = BASEVIEW(1.75); ROOT.bg = GROUND; ROOT.tint = [1, 0, 0]; ROOT.bgName = 'ground';
+  const guitarIn = p => GPTS.filter(q => inside(q, p)).length;
+  const HAND = [
+    { at: G2S(0.07, 0.4), ang: AXD, A: { yaw: -0.1, pitch: 0.02 }, B: { yaw: -1.02, pitch: -0.04 }, bgA: 'gblue', bgB: 'lochre' },
+    { at: G2S(-0.3, -0.13), ang: CRD + 4, A: { yaw: -0.04, pitch: 0.0 }, B: { yaw: 0.62, pitch: 0.5 }, bgA: 'gblue', bgB: 'wgrey', tintB: [0, 1, 0] },
+    { at: G2S(0.32, 0.86), ang: 4, A: { yaw: 0.42, pitch: -0.55 }, B: { yaw: -1.02, pitch: -0.04 }, bgA: 'cgrey', bgB: 'lochre' },
+    { at: [1150, 900], ang: -83, A: null, B: null, bgB: 'wgrey' },
+    { at: [1520, 668], ang: -4, A: null, B: null, bgA: 'dblue', bgB: 'ochre', titleB: true },
+  ];
+  const leaves = () => NODES.filter(n => !n.kids);
+  const leafAt = pt => leaves().find(n => inside(pt, n.poly));
+  const makeKid = (parent, poly, spec, bgName, tint, rr2 = rr) => {
+    const rr = rr2;
+    const n = { poly, parent, id: NODES.length, guitar: guitarIn(poly), path: new Path2D() };
+    polyPath(n.path, poly);
+    // each facet turns and slides about its own piece of the guitar, so the pieces stay in register
+    const gp = GPTS.filter(q => inside(q, poly));
+    n.anchor = gp.length > 5 ? centroid(gp) : centroid(poly);
+    const py = clamp(localOf(n.anchor)[1], Y0 + 0.25, NUT + 0.2);
+    const keep = spec === null, pt = parent.target;
+    n.target = { yaw: keep ? pt.yaw : spec.yaw, pitch: keep ? pt.pitch : spec.pitch, py, rot: rr(-0.035, 0.035), dx: rr(-7, 7), dy: rr(-7, 7), sc: rr(0.985, 1.025) };
+    n.tint = tint || parent.tint;
+    n.bgName = bgName; n.bg = bgName === 'ground' ? mix(GROUND, C.wgrey, 0.12) : C[bgName];
+    n.pass = { ang: rr(0, Math.PI * 2), dark: rr(0.3, 0.42), light: rr(0.16, 0.26) };
+    NODES.push(n);
+    return n;
+  };
+  const bgTotal = Object.values(BGS).reduce((a, b) => a + b, 0);
+  const pickBg = (parent, hasGuitar, tint) => {
+    for (let k = 0; k < 40; k++) {
+      let r = R() * bgTotal, b = 'wgrey';
+      for (const [name, w] of Object.entries(BGS)) { r -= w; if (r <= 0) { b = name; break; } }
+      if (b === parent.bgName) continue;
+      if (hasGuitar && (b === 'ground' || b === 'white' || b === 'umber')) continue;
+      if (hasGuitar && tint[0] > 0.5 && (b === 'ochre' || b === 'lochre')) continue;
+      if (hasGuitar && tint[1] > 0.5 && (b === 'wgrey' || b === 'cgrey')) continue;
+      if (hasGuitar && tint[2] > 0.5 && (b === 'gblue' || b === 'dblue')) continue;
+      return b;
+    }
+    return 'lochre';
+  };
+  const doCut = (node, at, angDeg, choose) => {
+    const d = [Math.cos(angDeg * Math.PI / 180), Math.sin(angDeg * Math.PI / 180)];
+    const [A, B, hit] = split(node.poly, at, d);
+    const c = { node, a: hit[0], b: hit[1], d, idx: CUTS.length };
+    c.lock = LOCK0 + LSTEP * c.idx; c.birth = c.lock - LOCK;
+    node.kids = choose(A, B); node.cut = c;
+    for (const k of node.kids) k.birth = c.birth;
+    CUTS.push(c);
+    return c;
+  };
+  for (const h of HAND) {
+    const node = leafAt(h.at);
+    doCut(node, h.at, h.ang, (A, B) => {
+      const tA = h.tintA || node.tint, tB = h.tintB || node.tint;
+      const a = makeKid(node, A, h.A, h.bgA || pickBg(node, guitarIn(A) > 0, tA), tA);
+      const b = makeKid(node, B, h.B, h.bgB || pickBg(node, guitarIn(B) > 0, tB), tB);
+      if (h.titleB) b.title = true;
+      return [a, b];
+    });
+  }
+  const FAMG = [AXD, AXD, CRD, CRD, AXD + 40, AXD - 40, -78, 8];
+  const FAMB = [-82, -76, 98, -6, 4, 10, AXD, CRD, 40, -38];
+  while (CUTS.length < NCUT) {
+    const cand = leaves().filter(n => !n.title && !n.noCut && inradius(n.poly) > 70);
+    let best = null, bs = -1;
+    for (const n of cand) { const sc = areaOf(n.poly) * (0.45 + 3.5 * n.guitar / GPTS.length) * (0.75 + 0.5 * R()); if (sc > bs) { bs = sc; best = n; } }
+    let pick = null, pq = -1;
+    const gp = GPTS.filter(q => inside(q, best.poly)), ir = inradius(best.poly);
+    for (let tries = 0; tries < 90; tries++) {
+      const useG = gp.length > 8 && R() < 0.8;
+      const at = useG ? gp[Math.floor(R() * gp.length)] : randIn(best.poly, R);
+      const fam = useG ? FAMG : FAMB, ang = fam[Math.floor(R() * fam.length)] + rr(-7, 7);
+      const d = [Math.cos(ang * Math.PI / 180), Math.sin(ang * Math.PI / 180)];
+      const off = q => Math.abs((q[0] - at[0]) * d[1] - (q[1] - at[1]) * d[0]);
+      if (off(SOUNDHOLE) < 74 || off(HEADC) < 95) continue;   // keep the sound hole and the headstock whole
+      const [A, B, hit] = split(best.poly, at, d);
+      if (A.length < 3 || B.length < 3 || hit.length < 2) continue;
+      if (Math.min(areaOf(A), areaOf(B)) < 20000 || Math.min(inradius(A), inradius(B)) < 40) continue;
+      // a cut that runs into an existing corner starts a starburst: keep its ends clear of corners
+      let near = 1e9;
+      for (const h of hit) for (const v of best.poly) near = Math.min(near, Math.hypot(h[0] - v[0], h[1] - v[1]));
+      if (near < 48) continue;
+      const cA = gp.filter(q => inside(q, A)).length, cB = gp.length - cA;
+      const q = Math.min(inradius(A), inradius(B)) / ir + 0.3 * R() + (gp.length > 8 ? 0.5 * Math.min(cA, cB) / gp.length : 0);
+      if (q > pq) { pq = q; pick = { at, ang }; }
+    }
+    if (!pick) { best.noCut = true; continue; }       // can't be cut well: leave it whole
+    const node = best;
+    doCut(node, pick.at, pick.ang, (A, B) => {
+      const hasA = guitarIn(A), hasB = guitarIn(B);
+      const holeA = inside(SOUNDHOLE, A), holeB = inside(SOUNDHOLE, B);
+      // one child keeps (about) the parent's view, the other swings away; the sound hole stays frontal
+      let keepA = holeA ? true : holeB ? false : (hasA === hasB ? R() < 0.5 : hasA > hasB === R() < 0.4);
+      // a facet that swings turns its own side of the body toward us, so a sliver of the thin side shows
+      const py = node.target.yaw, swing = poly => {
+        const gpc = GPTS.filter(q => inside(q, poly)), lx = gpc.length > 5 ? localOf(centroid(gpc))[0] : 0;
+        const sg = lx > 0.12 ? -1 : lx < -0.12 ? 1 : (R() < 0.5 ? -1 : 1);
+        let y = sg * rr(0.8, 1.22);
+        if (Math.abs(y - py) < 0.45) y = clamp(py - sg * rr(0.6, 0.9), -1.25, 1.25);
+        return { yaw: y, pitch: R() < 0.3 ? (R() < 0.5 ? -1 : 1) * rr(0.32, 0.6) : node.target.pitch * 0.5 };
+      };
+      const front = () => ({ yaw: clamp(py * 0.4 + rr(-0.12, 0.12), -0.22, 0.22), pitch: rr(-0.06, 0.06) });
+      const specA = keepA ? (holeA ? front() : null) : swing(A), specB = keepA ? swing(B) : (holeB ? front() : null);
+      const tintSwing = () => { const r = R(); return r < 0.68 ? [1, 0, 0] : r < 0.9 ? [0, 1, 0] : [0, 0, 1]; };
+      const tA = keepA ? node.tint : tintSwing(), tB = keepA ? tintSwing() : node.tint;
+      return [makeKid(node, A, specA, pickBg(node, hasA > 0, tA), tA), makeKid(node, B, specB, pickBg(node, hasB > 0, tB), tB)];
+    });
+  }
+  // make sure the final picture has the thin side showing next to the frontal sound hole
+  {
+    const fin = leaves().filter(n => n.guitar > 15 && !inside(SOUNDHOLE, n.poly));
+    const sideOk = n => { const lx = localOf(n.anchor)[0]; return Math.abs(n.target.yaw) > 0.8 && Math.sign(n.target.yaw) === (lx > 0 ? -1 : 1); };
+    if (!fin.some(sideOk) && fin.length) {
+      const n = fin.sort((a, b) => b.guitar - a.guitar)[0];
+      n.target.yaw = localOf(n.anchor)[0] > 0 ? -1.12 : 1.12; n.target.pitch = 0.05;
+    }
+  }
+  // the lower bout pitched hard over (about 56°) in the two facets that hold most of it, sharing one view
+  // about the bout's centre, so the bout reads as one flattened ellipse with its rim showing below
+  {
+    const sideOk = n => { const lx = localOf(n.anchor)[0]; return Math.abs(n.target.yaw) > 0.8 && Math.sign(n.target.yaw) === (lx > 0 ? -1 : 1); };
+    const low = n => GPTS.filter(q => inside(q, n.poly) && localOf(q)[1] < -0.25).length;
+    const cand = leaves().filter(n => n.guitar > 15 && !inside(SOUNDHOLE, n.poly) && !sideOk(n) && low(n) > 12).sort((a, b) => low(b) - low(a));
+    for (const n of cand.slice(0, 2)) {
+      Object.assign(n.target, { yaw: 0.1, pitch: -0.98, py: -0.55, rot: 0, dx: 0, dy: 0, sc: 1 });
+      n.tint = [1, 0, 0]; n.pitched = true;
+      if (['ochre', 'lochre', 'umber', 'ground'].includes(n.bgName)) { n.bgName = 'wgrey'; n.bg = C.wgrey; }
+    }
+  }
+  // and one open stretch of the neck turned to show its thin side
+  {
+    const neck = GPTS.filter(q => { const y = localOf(q)[1]; return y > 0.95 && y < NUT - 0.05; });
+    const open = neck.filter(q => !PIECES.some(pc => inside(q, pc.poly)));
+    const cnt = n => open.filter(q => inside(q, n.poly)).length;
+    const cand = leaves().filter(n => !n.pitched && !inside(HEADC, n.poly) && !inside(SOUNDHOLE, n.poly)).sort((a, b) => cnt(b) - cnt(a));
+    if (cand.length && cnt(cand[0]) >= 9) {
+      const n = cand[0];
+      n.target.yaw = n.target.yaw >= 0 ? 1.32 : -1.32; n.target.pitch = 0.02; n.tint = [1, 0, 0]; n.neckSide = true;
+      if (['umber', 'ground'].includes(n.bgName)) { n.bgName = 'wgrey'; n.bg = C.wgrey; }
+    }
+  }
+  // L1: the guitar itself breaks into disagreeing views. Every facet that holds a piece of it repaints
+  // that piece in its own tonal key and slides it by a few tens of pixels (registered, but the contour
+  // steps at the facet edges); then a few facets get set roles. All of this uses its own random numbers.
+  {
+    const R4 = seeded(4242), r4 = (a, b) => a + (b - a) * R4();
+    const isHole = n => inside(SOUNDHOLE, n.poly);
+    for (const n of NODES) {
+      if (!n.parent || !n.guitar) continue;
+      if (isHole(n)) { Object.assign(n.target, { dx: 0, dy: 0, rot: 0, sc: 1 }); n.key = 0; continue; }
+      if (n.pitched) { Object.assign(n.target, { dx: 18, dy: -14, rot: 0, sc: 1 }); n.key = 0; continue; }
+      const m = r4(16, 34), th = r4(0, Math.PI * 2);
+      n.target.dx = m * Math.cos(th); n.target.dy = m * Math.sin(th);
+      n.target.rot = (R4() < 0.5 ? -1 : 1) * r4(0.02, 0.06);
+      const kr = R4(); n.key = kr < 0.3 ? -1 : kr < 0.55 ? 1 : 0;
+      // a grey or blue guitar piece needs a warm plane behind it, or it turns into a ghost
+      if (n.tint[1] + n.tint[2] > 0.5 && ['wgrey', 'cgrey', 'gblue', 'dblue'].includes(n.bgName)) { n.bgName = R4() < 0.5 ? 'lochre' : 'ochre'; n.bg = C[n.bgName]; }
+    }
+    const ux = [Math.cos(TILT), -Math.sin(TILT)];                     // screen direction across the guitar
+    const margin = (q, poly) => {
+      if (!inside(q, poly)) return -1;
+      let m = 1e9;
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], b = poly[(i + 1) % poly.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        m = Math.min(m, Math.abs((q[0] - a[0]) * (b[1] - a[1]) - (q[1] - a[1]) * (b[0] - a[0])) / l);
+      }
+      return m;
+    };
+    const sideSign = n => localOf(n.anchor)[0] > 0 ? -1 : 1;           // turn the facet's own side toward us
+    // slide a facet's whole view across the guitar until `pt` (local x, y, z) lands well inside the facet
+    const bring = (n, pt, want) => {
+      const V = viewer(n.target), p0 = V.proj(V.rot(...pt));
+      for (const need of [want, want * 0.7, want * 0.45]) for (let d = 0; d < 280; d += 4) for (const sg of [1, -1]) {
+        const q = [p0[0] + sg * d * ux[0], p0[1] + sg * d * ux[1]];
+        if (margin(q, n.poly) >= need) { Object.assign(n.target, { dx: q[0] - p0[0], dy: q[1] - p0[1], rot: 0, sc: 1 }); return true; }
+      }
+      return false;
+    };
+    // early on (by 2.2 s): the right half turned to its side, the lower-left bout pitched over, the neck at
+    // a different angle (the profile shard below joins them at 2.14 s)
+    for (const id of [2, 6, 7]) if (NODES[id].guitar) NODES[id].target.yaw = -1.2;
+    Object.assign(NODES[4].target, { yaw: 0.3, pitch: -0.85, py: -0.55 }); NODES[4].tint = [1, 0, 0];
+    NODES[5].target.rot = 0.12;
+    // two long shards laid over the picture, each a registered view of its own (see SHARDS):
+    // the profile along the body's left side, and one whose edge crosses the sound hole
+    {
+      const sh = SHARDS[0], corners = [[-1.12, Y0 - 0.32], [-0.44, Y0 - 0.12], [-0.36, NUT + HEADL - 0.12], [-0.86, NUT + HEADL - 0.3]];
+      sh.poly = corners.map(([x, y]) => G2S(x, y)); sh.anchor = centroid(sh.poly);
+      sh.target = { yaw: 1.4, pitch: 0, py: -0.2, rot: 0, dx: 0, dy: 0, sc: 1 };
+      // slide the profile across (not along) the guitar so it lies inside the shard, beside the body
+      const V = viewer(sh.target), p0 = V.proj(V.rot(0, -0.2, 0)), d = (sh.anchor[0] - p0[0]) * ux[0] + (sh.anchor[1] - p0[1]) * ux[1];
+      sh.target.dx = d * ux[0]; sh.target.dy = d * ux[1];
+      sh.edges = [[sh.poly[0], sh.poly[3]], [sh.poly[1], sh.poly[2]]];
+    }
+    {
+      // the hole shard's left edge runs through the middle of the sound hole: a half circle on one side, the
+      // same hole pitched 54° about its own centre (a flat half ellipse) on the other
+      const sh = SHARDS[1], c = [0, 0.18], d = [Math.sin(0.26), Math.cos(0.26)], q = [d[1], -d[0]];
+      const at = (u, w) => G2S(c[0] + d[0] * u + q[0] * w, c[1] + d[1] * u + q[1] * w);
+      sh.poly = [at(-0.55, 0), at(0.5, 0), at(0.5, 0.5), at(-0.55, 0.42)]; sh.anchor = G2S(0, 0.18);
+      sh.target = { yaw: 0.08, pitch: 0.95, py: 0.18, rot: 0, dx: 0, dy: 0, sc: 1 };
+      // the hole sits on the top face, above the pitch axis: slide the view so both halves share one centre
+      const hl = leaves().find(isHole), Vf = viewer(hl.target), Vp = viewer(sh.target);
+      const pf = Vf.proj(Vf.rot(0, 0.18, ZF)), pp = Vp.proj(Vp.rot(0, 0.18, ZF));
+      sh.target.dx = pf[0] - pp[0]; sh.target.dy = pf[1] - pp[1];
+      sh.edges = [[sh.poly[0], sh.poly[1]], [sh.poly[1], sh.poly[2]]];
+    }
+    for (const sh of SHARDS) { sh.path = new Path2D(); polyPath(sh.path, sh.poly); }
+    // at least four guitar facets in clearly different tonal keys: umber, warm grey, grey-blue, light ochre
+    const inShard = n => SHARDS.some(sh => inside(n.anchor, sh.poly));
+    const keyed = leaves().filter(n => n.guitar > 12 && !isHole(n) && !n.pitched && !n.neckSide && !inShard(n)).sort((a, b) => b.guitar - a.guitar);
+    [['umber', [1, 0, 0], -1, 'wgrey'], ['grey', [0, 1, 0], 0, 'lochre'], ['blue', [0, 0, 1], 0, 'ochre'], ['light', [1, 0, 0], 1, 'umber']]
+      .forEach(([name, tint, key, bg], i) => { const n = keyed[i]; if (!n) return; n.tint = tint; n.key = key; n.keyName = name; n.bgName = bg; n.bg = C[bg]; });
+    // a second neck: the facet over the upper neck and headstock turned 7° against its neighbour
+    const upper = leaves().filter(n => n.guitar > 8 && localOf(n.anchor)[1] > NUT - 0.4 && !inside(HEADC, n.poly)).sort((a, b) => b.guitar - a.guitar)[0];
+    if (upper) { upper.target.rot = 0.12; upper.target.dx = 22 * ux[0]; upper.target.dy = 22 * ux[1]; upper.neck2 = true; }
+    // the neck, turned to its side, sits at a different angle from its neighbour across the edge
+    for (const n of leaves()) if (n.neckSide) { n.target.rot = 0.13; n.target.dx = 0; n.target.dy = 0; }
+  }
+  // L3: the lower right stays broken into ordinary planes; the title's sheet is pasted on later (PIECES)
+  {
+    const R5 = seeded(77), r5 = (a, b) => a + (b - a) * R5(), T0 = NODES.find(n => n.title);
+    const under = n => { for (let m = n; m; m = m.parent) if (m === T0) return true; return false; };
+    for (const sc of [{ at: [1585, 880], ang: 63, lock: 3.06, bg: ['ochre', 'umber'] }, { at: [1770, 770], ang: -13, lock: 3.66, bg: ['wgrey', 'lochre'] }]) {
+      const node = leaves().find(n => under(n) && inside(sc.at, n.poly));
+      if (!node) continue;
+      const c = doCut(node, sc.at, sc.ang, (A, B) => [makeKid(node, A, null, sc.bg[0], node.tint, r5), makeKid(node, B, null, sc.bg[1], node.tint, r5)]);
+      c.lock = sc.lock; c.birth = c.lock - LOCK; for (const k of node.kids) k.birth = c.birth;
+    }
+  }
+  // passage runs from one real edge of each facet (the dark edge) across to the far side
+  for (const n of [...NODES, ...SHARDS]) {
+    if (!n.parent) continue;
+    const R3 = seeded(700 + n.id), p = n.poly, cen = centroid(p);
+    const wts = p.map((q, i) => {
+      const r = p[(i + 1) % p.length], mx = (q[0] + r[0]) / 2, my = (q[1] + r[1]) / 2;
+      return Math.hypot(r[0] - q[0], r[1] - q[1]) * (mx > 0 && mx < W && my > 0 && my < H ? 1 : 0.12);
+    });
+    let r = R3() * wts.reduce((a, b) => a + b, 0), e = 0;
+    for (; e < p.length - 1; e++) { r -= wts[e]; if (r <= 0) break; }
+    const a = p[e], b = p[(e + 1) % p.length];
+    let nx = a[1] - b[1], ny = b[0] - a[0];
+    const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
+    if (nx * (cen[0] - (a[0] + b[0]) / 2) + ny * (cen[1] - (a[1] + b[1]) / 2) < 0) { nx = -nx; ny = -ny; }
+    n.pass.ang = Math.atan2(ny, nx); n.pass.edge = [a, b];
+  }
+  // the drawn part of each cut: thin, broken charcoal that stops short inside the picture
+  for (const c of CUTS) {
+    const len = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]), u = [(c.b[0] - c.a[0]) / len, (c.b[1] - c.a[1]) / len];
+    // keep inside an inner margin of the frame
+    let s0 = 0, s1 = len;
+    for (let s = 0; s < len; s += 4) { const x = c.a[0] + u[0] * s, y = c.a[1] + u[1] * s; if (x > 70 && x < W - 70 && y > 60 && y < H - 60) { s0 = s; break; } }
+    for (let s = len; s > 0; s -= 4) { const x = c.a[0] + u[0] * s, y = c.a[1] + u[1] * s; if (x > 70 && x < W - 70 && y > 60 && y < H - 60) { s1 = s; break; } }
+    s0 += rr(10, 90); s1 -= rr(10, 90);
+    if (s1 - s0 > 720) { const mid = (s0 + s1) / 2 + rr(-120, 120); s0 = Math.max(s0, mid - 360); s1 = Math.min(s1, mid + 360); }
+    c.p0 = [c.a[0] + u[0] * s0, c.a[1] + u[1] * s0]; c.p1 = [c.a[0] + u[0] * s1, c.a[1] + u[1] * s1];
+    c.w = rr(2.2, 4.6); c.seed = 300 + c.idx * 7;
+    const gaps = [], ng = Math.floor(rr(1, 3.2));
+    for (let k = 0; k < ng; k++) { const g0 = rr(0.12, 0.85); gaps.push([g0, g0 + rr(0.03, 0.09)]); }
+    c.gaps = gaps.sort((a, b) => a[0] - b[0]).filter((g, i, arr) => !i || g[0] > arr[i - 1][1]);
+    c.shown = R() > 0.12;                        // a few edges show only as a change of tone
+    c.mid = [(c.p0[0] + c.p1[0]) / 2, (c.p0[1] + c.p1[1]) / 2];
+  }
+  // hatching: tapered brush strokes (3–5 px wide, 20–45 px long) banked against each final facet's dark
+  // edge and thinning out across it, running roughly along that edge at an angle of the facet's own; a
+  // darker core near the start of each stroke; a few pale strokes by the light edge. Low contrast: umber
+  // and grey a little darker or lighter than the plane.
+  const lens = (P, x, y, ca, sa, len, hw) => {
+    const hx = ca * len / 2, hy = sa * len / 2, nx = -sa * hw * 2, ny = ca * hw * 2;
+    P.moveTo(x - hx, y - hy);
+    P.quadraticCurveTo(x - hx * 0.25 + nx, y - hy * 0.25 + ny, x + hx, y + hy);
+    P.quadraticCurveTo(x - hx * 0.25 - nx, y - hy * 0.25 - ny, x - hx, y - hy);
+    P.closePath();
+  };
+  const offTitle = (n, x, y) => n.title && x > TITLEBOX[0] - 60 && x < TITLEBOX[2] + 40 && y > TITLEBOX[1] - 50 && y < TITLEBOX[3] + 40;
+  for (const n of [...leaves(), ...SHARDS]) {
+    const R2 = seeded(500 + n.id);
+    const [a, b] = n.pass.edge, el = Math.hypot(b[0] - a[0], b[1] - a[1]), ex = (b[0] - a[0]) / el, ey = (b[1] - a[1]) / el;
+    const pd = [Math.cos(n.pass.ang), Math.sin(n.pass.ang)], [mn, mx] = passExtent(n), depth = mx - mn;
+    const ang = Math.atan2(ey, ex) + (R2() - 0.5) * 0.7;          // along the dark edge, give or take 20°
+    const band = Math.min(180, depth * 0.55);
+    const body = new Path2D(), core = new Path2D(), pale = new Path2D(), paleCore = new Path2D();
+    const stroke = (B, K, x, y) => {
+      const len = 20 + R2() * 25, hw = 1.5 + R2(), tw = (R2() - 0.5) * 0.1, c = Math.cos(ang + tw), s = Math.sin(ang + tw);
+      lens(B, x, y, c, s, len, hw);
+      lens(K, x - c * len * 0.17, y - s * len * 0.17, c, s, len * 0.55, hw * 0.6);
+    };
+    let nd = 0, nl = 0;
+    for (let d = 5; d < band && nd < 420; d += 6.5) {
+      const keep = 0.92 * Math.exp(-d / (band * 0.33));
+      for (let u = -50 + R2() * 20; u < el + 50 && nd < 420; u += 12 + R2() * 12) {
+        if (R2() > keep) continue;
+        const x = a[0] + ex * u + pd[0] * d + (R2() - 0.5) * 4, y = a[1] + ey * u + pd[1] * d + (R2() - 0.5) * 4;
+        if (x < -30 || x > W + 30 || y < -30 || y > H + 30 || !inside([x, y], n.poly) || offTitle(n, x, y)) continue;
+        stroke(body, core, x, y); nd++;
+      }
+    }
+    for (let d = 8; d < band * 0.6 && nl < 120; d += 9) {     // the light side: sparse and pale
+      for (let u = R2() * 30; u < el && nl < 120; u += 30 + R2() * 30) {
+        if (R2() > 0.35 * Math.exp(-d / (band * 0.25))) continue;
+        const x = a[0] + ex * u + pd[0] * (depth - d), y = a[1] + ey * u + pd[1] * (depth - d);
+        if (x < -30 || x > W + 30 || y < -30 || y > H + 30 || !inside([x, y], n.poly) || offTitle(n, x, y)) continue;
+        stroke(pale, paleCore, x, y); nl++;
+      }
+    }
+    n.hatch = { body, core, pale, paleCore };
+  }
+}
+function passExtent(n) {
+  const pd = [Math.cos(n.pass.ang), Math.sin(n.pass.ang)], pr = n.poly.map(p => p[0] * pd[0] + p[1] * pd[1]);
+  return [Math.min(...pr), Math.max(...pr)];
+}
+
+/* ------------------------------------------------------------ facet state at time t */
+const lerpView = (a, b, k) => ({ yaw: a.yaw + (b.yaw - a.yaw) * k, pitch: a.pitch + (b.pitch - a.pitch) * k, py: a.py + (b.py - a.py) * k, rot: a.rot + (b.rot - a.rot) * k, dx: a.dx + (b.dx - a.dx) * k, dy: a.dy + (b.dy - a.dy) * k, sc: a.sc + (b.sc - a.sc) * k });
+let STAMP = -1;
+function state(n, t) {
+  if (n._t === STAMP) return n._s;
+  let s;
+  if (!n.parent) s = { view: BASEVIEW(t), bg: GROUND, tint: [1, 0, 0], key: 0 };
+  else {
+    const p = state(n.parent, t), x = t - n.birth, k = spring(x), kc = clamp(k, 0, 1);
+    const view = lerpView(p.view, n.target, k);
+    s = { view, bg: mix(p.bg, n.bg, kc), tint: p.tint.map((w, i) => w + (n.tint[i] - w) * kc), key: p.key + ((n.key || 0) - p.key) * kc };
+  }
+  n._t = STAMP; n._s = s;
+  return s;
+}
+function driftView(n, v, t) {                   // the picture breathes: a slow sway of each facet's view
+  const a = sstep(4.3, 5.1, t) * (1 - sstep(7.7, 8.5, t));
+  if (!a) return v;
+  const ph = n.id * 1.7;
+  return { ...v, yaw: v.yaw + a * 0.035 * Math.sin(1.7 * t + ph), pitch: v.pitch + a * 0.02 * Math.sin(1.3 * t + ph * 1.3), dx: v.dx + a * 3 * Math.sin(1.1 * t + ph), dy: v.dy + a * 3 * Math.cos(0.9 * t + ph) };
+}
+function leavesAt(t) {
+  const out = [], walk = n => { if (n.kids && n.cut.birth <= t) { walk(n.kids[0]); walk(n.kids[1]); } else out.push(n); };
+  walk(ROOT);
+  return out;
+}
+
+/* ------------------------------------------------------------ the opening: sketch and fill */
+const SKETCH = { top: [0.03, 0.34], side: [0.12, 0.42], hole: [0.18, 0.32], neck: [0.14, 0.4], head: [0.3, 0.5], bridge: [0.3, 0.42] };
+const FILLS = { side: [0.4, 0.72], top: [0.5, 0.86], neck: [0.6, 0.9], detail: [0.76, 1.04] };
+const prog = (tab, t) => Object.fromEntries(Object.entries(tab).map(([k, [a, b]]) => [k, lin(a, b, t)]));
+
+/* ------------------------------------------------------------ papier collé */
+const PIECES = [
+  { kind: 'wood', t0: 4.58, d: 0.62, from: [-1250, 60], rot0: -0.05, poly: [[54, 934], [1096, 912], [1100, 1012], [612, 1022], [50, 1030]] },
+  { kind: 'blue', t0: 5.12, d: 0.62, from: [820, -700], rot0: 0.07, poly: [[962, 262], [1346, 214], [1396, 512], [1118, 556], [990, 486]] },
+  { kind: 'news', t0: 5.66, d: 0.62, from: [-760, -520], rot0: -0.08, poly: [[300, 176], [604, 160], [624, 372], [318, 392]] },
+  { kind: 'sheet', t0: 6.12, d: 0.62, from: [900, 160], rot0: 0.06, poly: [[1118, 714], [1828, 664], [1842, 974], [1132, 1010]] },
+];
+// Shards: long facets laid over the picture, each opening along its length as its edges snap on, then
+// springing to its own registered view and locking on a pluck. [0] the profile, [1] across the sound hole.
+const SHARDS = [
+  { id: 998, parent: true, lock: 2.14, bgName: 'gblue', bg: C.gblue, tint: [1, 0, 0], key: -1, guitar: 1, pass: { ang: 0, dark: 0.34, light: 0.2 } },
+  { id: 997, parent: true, lock: 2.74, bgName: 'wgrey', bg: C.wgrey, tint: [1, 0, 0], key: 1, guitar: 1, pass: { ang: 0, dark: 0.3, light: 0.18 } },
+];
+for (const sh of SHARDS) sh.birth = sh.lock - LOCK;
+function drawShard(sh, t, mode) {
+  const t0 = sh.birth - SNAP;
+  if (t <= t0) return;
+  const open = clamp((t - t0) / (SNAP + 0.06), 0, 1), k = spring(t - sh.birth);
+  const a = sh.edges[0][0], b = sh.edges[0][1], ax = [b[0] - a[0], b[1] - a[1]], al = Math.hypot(ax[0], ax[1]);
+  ctx.save(); ctx.clip(sh.path);
+  if (open < 1) {                               // the shard opens from one end
+    const ux = ax[0] / al, uy = ax[1] / al, c = [a[0] + ax[0] * open * 1.15 - ux * 80, a[1] + ax[1] * open * 1.15 - uy * 80];
+    ctx.beginPath(); ctx.moveTo(c[0] - uy * 900, c[1] + ux * 900); ctx.lineTo(c[0] + uy * 900, c[1] - ux * 900);
+    ctx.lineTo(c[0] + uy * 900 - ux * 3000, c[1] - ux * 900 - uy * 3000); ctx.lineTo(c[0] - uy * 900 - ux * 3000, c[1] + ux * 900 - uy * 3000);
+    ctx.closePath(); ctx.clip();
+  }
+  const base = BASEVIEW(t), v = driftView(sh, lerpView({ ...base, py: sh.target.py }, sh.target, k), t), an = sh.anchor;
+  if (mode !== 'lines') { ctx.fillStyle = rgba(sh.bg); ctx.fill(sh.path); }
+  ctx.save();
+  ctx.translate(an[0] + v.dx, an[1] + v.dy); ctx.rotate(v.rot); ctx.scale(v.sc, v.sc); ctx.translate(-an[0], -an[1]);
+  drawGuitar(ctx, v, sh.tint, { fills: mode !== 'lines', seed: sh.id * 13, key: sh.key });
+  ctx.restore();
+  if (mode !== 'lines') { passage(sh, sstep(sh.birth, sh.birth + 0.45, t), sh.path); hatchFill(sh, sstep(sh.lock, sh.lock + 0.5, t)); }
+  ctx.restore();
+  if (mode === 'lines') return;
+  const P = new Path2D();
+  sh.edges.forEach((e, i) => ribbon(P, e, false, 3.4, sh.id + i, open, liftGaps(sh.id + i, 2, 0.06), 1.1));
+  ctx.fillStyle = CHAR; ctx.fill(P);
+}
+function passage(m, a, path) {                  // darker toward the facet's dark edge, lighter toward the far side
+  if (a <= 0.003) return;
+  const [mn, mx] = passExtent(m), pd = [Math.cos(m.pass.ang), Math.sin(m.pass.ang)];
+  const gr = ctx.createLinearGradient(pd[0] * mn, pd[1] * mn, pd[0] * mx, pd[1] * mx);
+  gr.addColorStop(0, rgba(C.char, m.pass.dark * a)); gr.addColorStop(0.55, rgba(C.char, 0));
+  gr.addColorStop(0.75, rgba(C.white, 0)); gr.addColorStop(1, rgba(C.white, m.pass.light * a));
+  ctx.fillStyle = gr; ctx.fill(path);
+}
+function hatchFill(n, h) {
+  if (!n.hatch || h <= 0) return;
+  const dk = mix(C.umber, C.char, 0.3), lt = mix(C.white, C.wgrey, 0.2);
+  ctx.fillStyle = rgba(dk, 0.17 * h); ctx.fill(n.hatch.body);
+  ctx.fillStyle = rgba(dk, 0.12 * h); ctx.fill(n.hatch.core);
+  ctx.fillStyle = rgba(lt, 0.12 * h); ctx.fill(n.hatch.pale);
+  ctx.fillStyle = rgba(lt, 0.08 * h); ctx.fill(n.hatch.paleCore);
+}
+const backC = x => { const c1 = 0.9, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+function pieceState(pc, t) {
+  const x = (t - pc.t0) / pc.d;
+  if (x <= 0) return null;
+  const e = x >= 1 ? 1 : backC(x);
+  return { e, ox: pc.from[0] * (1 - e), oy: pc.from[1] * (1 - e), rot: pc.rot0 * (1 - e), lift: 1 - sstep(0.55, 1.0, x) };
+}
+function newCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function buildPieces() {
+  for (const pc of PIECES) {
+    const xs = pc.poly.map(p => p[0]), ys = pc.poly.map(p => p[1]);
+    pc.bb = [Math.min(...xs) - 4, Math.min(...ys) - 4, Math.max(...xs) + 4, Math.max(...ys) + 4];
+    pc.c = centroid(pc.poly);
+    const w = Math.ceil(pc.bb[2] - pc.bb[0]), h = Math.ceil(pc.bb[3] - pc.bb[1]);
+    const cvs = newCanvas(w, h), g = cvs.getContext('2d'), img = g.createImageData(w, h), D = img.data;
+    const R = seeded(pc.kind.length * 31 + 5);
+    if (pc.kind === 'wood') {
+      // decorator's faux-bois: a comb dragged through the glaze, wavering round a couple of knots
+      const knots = [[w * 0.27, h * 0.55, 1], [w * 0.68, h * 0.38, -1]];
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let gy = y + 7 * Math.sin(x / 160 + 0.7) + 3 * Math.sin(x / 47 + 2.1) + 4 * (wob(x / 90, 7) - 0.5);
+        for (const [kx, ky, sg] of knots) { const dx = (x - kx) / 70, dy = (gy - ky) / 16, r2 = dx * dx + dy * dy; gy += sg * 14 * Math.exp(-r2) * (dy >= 0 ? 1 : -1) * Math.min(1, Math.sqrt(r2) * 3); }
+        const teeth = Math.pow(0.5 + 0.5 * Math.cos(2 * Math.PI * gy / 3.1), 5);
+        const ribbonK = sstep(0.25, 0.75, 0.5 + 0.5 * Math.cos(2 * Math.PI * gy / 29 + 1.3 * Math.sin(x / 230)));
+        const flame = sstep(0.62, 0.95, 0.5 + 0.5 * Math.cos(2 * Math.PI * (gy + 9 * Math.sin(x / 120)) / 47));
+        let c = mix(C.wood0, C.wood1, 0.75 * teeth * ribbonK + 0.12);
+        c = mix(c, C.wood2, 0.6 * flame * (0.5 + 0.5 * teeth));
+        const fib = (hash2(x * 131 + y, 5) - 0.5) * 8;
+        const o = (y * w + x) * 4; D[o] = c[0] + fib; D[o + 1] = c[1] + fib; D[o + 2] = c[2] + fib; D[o + 3] = 255;
+      }
+      g.putImageData(img, 0, 0); pc.base = rgba(C.wood0);
+    } else if (pc.kind === 'blue') {
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const v = (wob2(x / 30, y / 30, 3) - 0.5) * 9 + (hash2(x * 977 + y, 9) - 0.5) * 7;
+        const o = (y * w + x) * 4; D[o] = C.gblue[0] + v; D[o + 1] = C.gblue[1] + v; D[o + 2] = C.gblue[2] + v; D[o + 3] = 255;
+      }
+      g.putImageData(img, 0, 0);
+      g.strokeStyle = rgba(C.white, 0.08); g.lineWidth = 1;
+      for (let k = 0; k < 70; k++) { const x = R() * w, y = R() * h, a = R() * 6.28, l = 6 + R() * 16; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+      pc.base = rgba(C.gblue);
+    } else {
+      // newsprint: rows of short grey dashes of random length, drawn as shapes, no letters
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const v = (wob2(x / 40, y / 40, 4) - 0.5) * 6 + (hash2(x * 313 + y, 2) - 0.5) * 5;
+        const o = (y * w + x) * 4; D[o] = C.news[0] + v; D[o + 1] = C.news[1] + v; D[o + 2] = C.news[2] + v; D[o + 3] = 255;
+      }
+      g.putImageData(img, 0, 0);
+      g.fillStyle = rgba(C.ink, 0.85);
+      for (let y = 18; y < h - 14; y += 11) {
+        if (R() < 0.08) continue;                // a paragraph break
+        let x = 16 + (R() < 0.2 ? 14 : 0);
+        const end = w - 16 - (R() < 0.15 ? R() * 120 : 0);
+        while (x < end) { const l = 6 + R() * 26; if (x + l > end) break; g.fillRect(x, y, l, 4); x += l + 4 + R() * 3; }
+      }
+      pc.base = rgba(C.news);
+    }
+    if (pc.kind === 'sheet') {                  // unbleached paper for the title: just its fibre
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const v = (wob2(x / 50, y / 50, 6) - 0.5) * 7 + (hash2(x * 571 + y, 12) - 0.5) * 5;
+        const o = (y * w + x) * 4; D[o] = C.white[0] + v; D[o + 1] = C.white[1] + v; D[o + 2] = C.white[2] + v - 1; D[o + 3] = 255;
+      }
+      g.putImageData(img, 0, 0); pc.base = rgba(C.white);
+    }
+    pc.tex = cvs;
+    // the moment it first touches down (for the thump)
+    let x = 0.3; while (x < 1 && backC(x) < 1) x += 0.002;
+    pc.land = pc.t0 + pc.d * x;
+  }
+}
+function piecePath(pc, st) {
+  const P = new Path2D(), ca = Math.cos(st.rot), sa = Math.sin(st.rot);
+  const pts = pc.poly.map(([x, y]) => { const dx = x - pc.c[0], dy = y - pc.c[1]; return [pc.c[0] + st.ox + dx * ca - dy * sa, pc.c[1] + st.oy + dx * sa + dy * ca]; });
+  polyPath(P, pts);
+  return P;
+}
+function drawPiece(pc, t, camS) {
+  const st = pieceState(pc, t); if (!st) return;
+  const P = piecePath(pc, st);
+  ctx.save();
+  ctx.shadowColor = 'rgba(30,22,12,0.4)'; ctx.shadowBlur = (8 + 30 * st.lift) * camS;
+  ctx.shadowOffsetX = (5 + 26 * st.lift) * camS; ctx.shadowOffsetY = (7 + 32 * st.lift) * camS;
+  ctx.fillStyle = pc.base; ctx.fill(P);
+  ctx.restore();
+  ctx.save(); ctx.clip(P);
+  ctx.translate(pc.c[0] + st.ox, pc.c[1] + st.oy); ctx.rotate(st.rot); ctx.translate(-pc.c[0], -pc.c[1]);
+  ctx.drawImage(pc.tex, pc.bb[0], pc.bb[1]);
+  ctx.restore();
+  ctx.save(); ctx.lineWidth = 1.6; ctx.strokeStyle = 'rgba(244,236,214,0.6)'; ctx.stroke(P);
+  ctx.translate(1.2, 1.6); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(40,30,18,0.35)'; ctx.stroke(P); ctx.restore();
+}
+
+/* ------------------------------------------------------------ the stencil title */
+// Paint dabbed through a stencil with a stiff brush: thousands of small stipple dabs inside the
+// letters (the stencil's own bridges included), clipped by a slightly dry-brushed letter mask. Each
+// dab has a threshold from one shared noise field, so every letter fills in at the same rate; the dabs
+// are grouped by threshold into layers, painted once in ready.
+const TITLE = { text: 'CUBISM', cx: 1488, cy: 804, ang: -0.07, size: 143, w: 760, h: 240, spacing: 10, dab: 4.0, step: 4.0, seed: 61 };
+const SUBT = { text: 'PARIS · 1907–1914', cx: 1488, cy: 908, ang: -0.07, size: 50, w: 640, h: 92, spacing: 7, dab: 1.7, step: 2.2, seed: 62 };
+const TL = { title: [6.86, 7.28], sub: [7.08, 7.42], fade: [8.95, 9.6] };
+const NLAYER = 24;
+function buildStencil(S) {
+  const mask = newCanvas(S.w, S.h), m = mask.getContext('2d');
+  m.font = `700 ${S.size}px "Stardos Stencil"`; m.letterSpacing = S.spacing + 'px';
+  let size = S.size;
+  while (m.measureText(S.text).width > S.w - 40) { size -= 2; m.font = `700 ${size}px "Stardos Stencil"`; }
+  m.textAlign = 'center'; m.textBaseline = 'middle'; m.fillStyle = '#000';
+  m.fillText(S.text, S.w / 2, S.h / 2);
+  const A = m.getImageData(0, 0, S.w, S.h).data;
+  // the dry-brushed edge: the letter alpha thresholded against a fine noise, so the rim breaks up a little
+  const em = m.createImageData(S.w, S.h), E = em.data;
+  for (let y = 0; y < S.h; y++) for (let x = 0; x < S.w; x++) {
+    const o = (y * S.w + x) * 4, a = A[o + 3] / 255;
+    const th = 0.5 + 0.38 * (wob2(x / 2.2, y / 2.2, S.seed) - 0.5) + 0.25 * (hash2(x * 7 + y * 1031, S.seed) - 0.5);
+    E[o + 3] = a >= 0.98 ? 255 : 255 * sstep(th - 0.08, th + 0.08, a);
+  }
+  m.clearRect(0, 0, S.w, S.h); m.putImageData(em, 0, 0);
+  const R = seeded(S.seed);
+  const layers = Array.from({ length: NLAYER }, () => newCanvas(S.w, S.h));
+  const lg = layers.map(c => c.getContext('2d'));
+  for (let y = 0; y < S.h; y += S.step) for (let x = 0; x < S.w; x += S.step) {
+    const px = x + R() * S.step, py = y + R() * S.step;
+    const xi = Math.min(S.w - 1, Math.round(px)), yi = Math.min(S.h - 1, Math.round(py));
+    let near = 0;
+    for (const [ox, oy] of [[0, 0], [5, 0], [-5, 0], [0, 5], [0, -5]]) { const xx = clamp(xi + ox, 0, S.w - 1), yy = clamp(yi + oy, 0, S.h - 1); near = Math.max(near, A[(yy * S.w + xx) * 4 + 3]); }
+    if (near < 20) continue;
+    // one shared field: fine noise plus a little texture smaller than a stroke, never larger than a letter
+    const th = clamp(0.8 * R() + 0.2 * wob2(px / 9, py / 9, S.seed + 1), 0, 0.9999);
+    const g = lg[Math.floor(th * NLAYER)];
+    const tone = R(), col = tone < 0.15 ? mix(C.char, C.umber, 0.35) : C.char;
+    g.fillStyle = rgba(col, 0.74 + 0.22 * R());
+    g.beginPath(); g.ellipse(px, py, S.dab * (0.75 + 0.5 * R()), S.dab * (0.55 + 0.4 * R()), R() * 3.14, 0, 6.283); g.fill();
+    for (let b = 0; b < 3; b++) {                // bristle specks around the dab
+      const a = R() * 6.283, r = S.dab * (0.8 + 0.9 * R());
+      g.beginPath(); g.arc(px + Math.cos(a) * r, py + Math.sin(a) * r, S.dab * (0.18 + 0.22 * R()), 0, 6.283); g.fill();
+    }
+  }
+  for (const g of lg) { g.globalCompositeOperation = 'destination-in'; g.drawImage(mask, 0, 0); g.globalCompositeOperation = 'source-over'; }
+  S.layers = layers;
+}
+function drawStencil(S, p) {
+  if (p <= 0) return;
+  ctx.save(); ctx.translate(S.cx, S.cy); ctx.rotate(S.ang);
+  const f = p * NLAYER;
+  for (let k = 0; k < NLAYER; k++) {
+    const a = clamp(f - k, 0, 1);
+    if (a <= 0) break;
+    ctx.globalAlpha = a; ctx.drawImage(S.layers[k], -S.w / 2, -S.h / 2);
+  }
+  ctx.restore();
+}
+
+/* ------------------------------------------------------------ canvas weave (screen space, static) */
+let WEAVE = null;
+function buildWeave() {
+  WEAVE = newCanvas(W, H);
+  const g = WEAVE.getContext('2d'), img = g.createImageData(W, H), D = img.data;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const ph = ((Math.floor(x / 5) + Math.floor(y / 5)) & 1);
+    const thr = ph ? 0.5 + 0.5 * Math.sin(2 * Math.PI * y / 5 + 0.8 * Math.sin(x / 23)) : 0.5 + 0.5 * Math.sin(2 * Math.PI * x / 5 + 0.8 * Math.sin(y / 29));
+    const nx = x / W - 0.5, ny = y / H - 0.5, vig = 1 - 0.22 * (nx * nx + ny * ny) * 2.2;
+    const v = 255 * vig * (0.955 + 0.03 * thr + 0.015 * (wob2(x / 60, y / 60, 8) - 0.5));
+    const o = (y * W + x) * 4; D[o] = v; D[o + 1] = v * 0.995; D[o + 2] = v * 0.985; D[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+}
+
+/* ------------------------------------------------------------ one frame */
+const CAMC = [980, 500];
+const camScale = t => 1 + 0.045 * ease3((t - 1.4) / 3.4);
+function drawLeaf(n, t, mode) {
+  const s = state(n, t), v = driftView(n, s.view, t);
+  ctx.save(); ctx.clip(n.path);
+  if (mode !== 'lines') { ctx.fillStyle = rgba(s.bg); ctx.fill(n.path); }
+  if (n.guitar || !n.parent) {
+    const first = !n.parent, an = n.anchor || SOUNDHOLE;
+    ctx.save();
+    ctx.translate(an[0] + v.dx, an[1] + v.dy); ctx.rotate(v.rot); ctx.scale(v.sc, v.sc); ctx.translate(-an[0], -an[1]);
+    drawGuitar(ctx, v, s.tint, {
+      fill: first ? prog(FILLS, t) : FULL, line: first ? prog(SKETCH, t) : LINES,
+      fills: mode !== 'lines', seed: n.id * 13, key: Math.round(s.key),
+    });
+    ctx.restore();
+  }
+  if (mode !== 'lines' && n.parent) {
+    // passage: darker toward one edge, lighter toward the other; crossfades from the parent's
+    const k = sstep(n.birth, n.birth + 0.45, t);
+    const grad = (m, a) => passage(m, a, n.path);
+    // the gradient endpoints are the polygon's extent along the passage direction (projected through the origin)
+    if (n.parent.parent && k < 1) grad(n.parent, (1 - k) * sstep(n.parent.birth, n.parent.birth + 0.45, n.birth));
+    grad(n, k);
+    hatchFill(n, sstep(n.birth + LOCK, n.birth + LOCK + 0.5, t));
+  }
+  ctx.restore();
+}
+function drawCuts(t) {
+  const P = new Path2D();
+  for (const c of CUTS) {
+    if (!c.shown) continue;
+    const f = (t - (c.birth - SNAP)) / SNAP;
+    if (f <= 0) continue;
+    ribbon(P, [c.p0, c.p1], false, c.w, c.seed, Math.min(1, f), c.gaps, 1.1);
+  }
+  ctx.fillStyle = CHAR; ctx.fill(P);
+}
+function render(t) {
+  STAMP = t;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = rgba(GROUND); ctx.fillRect(0, 0, W, H);
+  const s = camScale(t);
+  ctx.setTransform(s, 0, 0, s, CAMC[0] * (1 - s), CAMC[1] * (1 - s));
+  const leaves = leavesAt(t);
+  for (const n of leaves) drawLeaf(n, t, 'full');
+  for (const sh of SHARDS) drawShard(sh, t, 'full');
+  drawCuts(t);
+  // the papers, then the drawing carried on over them
+  for (const pc of PIECES) {
+    drawPiece(pc, t, s);
+    if (pc.kind === 'sheet') continue;            // the title's sheet stays calm: nothing drawn over it
+    const a = sstep(pc.land + 0.05, pc.land + 0.4, t);
+    if (a <= 0) continue;
+    const st = pieceState(pc, t), P = piecePath(pc, st);
+    ctx.save(); ctx.clip(P); ctx.globalAlpha = a;
+    for (const n of leaves) if (n.guitar) drawLeaf(n, t, 'lines');
+    for (const sh of SHARDS) drawShard(sh, t, 'lines');
+    drawCuts(t);
+    ctx.restore();
+  }
+  drawStencil(TITLE, ease3(lin(TL.title[0], TL.title[1], t)));
+  drawStencil(SUBT, ease3(lin(TL.sub[0], TL.sub[1], t)));
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(WEAVE, 0, 0); ctx.globalCompositeOperation = 'source-over';
+  const fade = sstep(TL.fade[0], TL.fade[1] - 0.02, t);
+  if (fade > 0) { ctx.fillStyle = `rgba(8,7,6,${fade})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.draw = function ({ t }) { render(t); const url = cv.toDataURL('image/jpeg', 0.92); return url.slice(url.indexOf(',') + 1); };
+
+window.events = function () {
+  const r3 = v => Math.round(v * 1000) / 1000, pan = x => r3(clamp((x - W / 2) / (W / 2), -1, 1)), ev = [];
+  const sx = { top: 700, side: 760, hole: 820, neck: 990, head: 1130, bridge: 690 };
+  for (const [k, [a, b]] of Object.entries(SKETCH)) ev.push({ k: 'scratch', t: a, d: r3(b - a), p: pan(sx[k]), v: k === 'top' || k === 'side' ? 1 : 0.6 });
+  for (const [k, [a, b]] of Object.entries(FILLS)) ev.push({ k: 'fill', t: a, d: r3(b - a), p: pan(sx[k] || 800) });
+  SHARDS.forEach((sh, i) => {
+    ev.push({ k: 'cut', t: r3(sh.birth - SNAP), d: SNAP, p: pan(sh.anchor[0]), v: 0.9 });
+    ev.push({ k: 'lock', t: sh.lock, i: 98 + i, p: pan(sh.anchor[0]), g: 1 });
+  });
+  for (const c of CUTS) {
+    if (c.shown) ev.push({ k: 'cut', t: r3(c.birth - SNAP), d: SNAP, p: pan(c.mid[0]), v: r3(Math.min(1, Math.hypot(c.p1[0] - c.p0[0], c.p1[1] - c.p0[1]) / 700)) });
+    ev.push({ k: 'lock', t: r3(c.lock), i: c.idx, p: pan(c.mid[0]), g: c.node.guitar > 0 ? 1 : 0 });
+  }
+  for (const pc of PIECES) {
+    const p = pan(pc.c[0]);
+    ev.push({ k: 'snip', t: r3(pc.t0 - 0.36), p }, { k: 'snip', t: r3(pc.t0 - 0.2), p });
+    ev.push({ k: 'slide', t: r3(pc.t0), d: r3(pc.land - pc.t0), p: pan(pc.c[0] + pc.from[0] * 0.4), p1: p });
+    ev.push({ k: 'land', t: r3(pc.land), p, kind: pc.kind });
+    if (pc.kind !== 'sheet') ev.push({ k: 'scratch', t: r3(pc.land + 0.08), d: 0.32, p, v: 0.45 });
+  }
+  ev.push({ k: 'dabs', t: TL.title[0], d: r3(TL.title[1] - TL.title[0]), p: pan(TITLE.cx), v: 1 });
+  ev.push({ k: 'dabs', t: TL.sub[0], d: r3(TL.sub[1] - TL.sub[0]), p: pan(SUBT.cx), v: 0.5 });
+  ev.push({ k: 'strum', t: TL.sub[1] });
+  ev.push({ k: 'fade', t: TL.fade[0], d: r3(TL.fade[1] - TL.fade[0]) });
+  return ev.sort((a, b) => a.t - b.t);
+};
+
+window.ready = (async () => {
+  await document.fonts.load(`700 ${TITLE.size}px "Stardos Stencil"`);
+  await document.fonts.ready;
+  buildGrain();
+  buildFacets();
+  buildPieces();
+  buildStencil(TITLE); buildStencil(SUBT);
+  buildWeave();
+})();
+</script>
+</body></html>
