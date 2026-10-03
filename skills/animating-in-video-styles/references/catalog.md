@@ -49,7 +49,7 @@ Styles borrowed from art and design history.
 Lines that appear as if drawn live.
 
 - `blueprint` **Blueprint** — Engineering drawing. Best for measurements, technical details, and inner workings · explainer, product · Originally developed by Yasin Özmen
-- `chalkboard` **Chalkboard** — Chalk-drawn classroom lesson. Best for teaching a rule or memorable point · tutorial, explainer · Originally developed by Yasin Özmen · *no recipe yet*
+- `chalkboard` **Chalkboard** — Chalk-drawn classroom lesson. Best for teaching a rule or memorable point · tutorial, explainer · Originally developed by Yasin Özmen
 - `existential-stick` **Existential Stick Figures** — Deadpan pencil lives, sudden colour. Best for quiet, funny stories about memory and ordinary days · story · Inspired by Don Hertzfeldt · *no recipe yet*
 - `ink-wash` **Ink & Watercolor** — Sumi-e brush and blooming washes. Best for quiet, poetic stories and graceful title openers · story, titles · *no recipe yet*
 - `rubber-hose` **Rubber Hose** — 1930s bouncing sepia cartoon. Best for playful gags, mascots, and nostalgic brand shorts · social, story · *no recipe yet*
