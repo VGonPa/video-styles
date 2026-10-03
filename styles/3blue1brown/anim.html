@@ -1,308 +1,548 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3blue1brown</title>
 <link rel="stylesheet" href="fonts.css">
-<style>html,body{margin:0;background:#000}canvas{display:block}</style>
-</head><body>
-<canvas id="c" width="1920" height="1080"></canvas>
+<style>html,body{margin:0;background:#000}#c{display:block}</style>
+</head>
+<body>
+<canvas id="c" height="1080" width="1920"></canvas>
 <script>
-// ── 3blue1brown · Manim-style math explainer ─────────────────────────────────────────
-// A visual proof that 1 + 3 + 5 + … + (2n − 1) = n². The title is Written (outline, then fill); unit squares
-// DrawBorderThenFill layer by layer (each odd L-shaped layer its own colour, the matching term written in that
-// colour); braces grow and label the side 5; the equation morphs glyph by glyph (TransformMatchingTex: matching
-// symbols glide, the rest fade); a SurroundingRectangle draws around the result; the square's grid becomes a
-// NumberPlane, basis vectors grow, a shear ApplyMatrix warps everything (area stays n²); FadeOut of all mobjects.
-// Everything is a pure function of t, all motion uses Manim's `smooth` rate function (no overshoot).
-const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
-const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-const lerp = (a, b, u) => a + (b - a) * u;
-const smooth = u => { u = clamp(u); return u * u * u * (u * (6 * u - 15) + 10); };
-const seg = (t, a, d) => clamp((t - a) / d);
-const sm = (t, a, d) => smooth(seg(t, a, d));
-const hex = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
-const mix = (a, b, u) => { const A = hex(a), B = hex(b); return `rgb(${A.map((v, i) => Math.round(lerp(v, B[i], u))).join(',')})`; };
+'use strict';
+/*
+ * 3blue1brown — Manim-style math on black.
+ *
+ * Story (10 s): a number plane draws itself and a unit circle is created; the identity
+ * e^{iθ} = cos θ + i sin θ is written in Computer Modern; a yellow vector sweeps once around
+ * the circle with its blue cos and red sin projections; the camera pans left, the grid dims,
+ * a θ-axis is created and the "sin θ" glyphs fly out of the equation onto the graph; the sin
+ * projection then unrolls into a red curve as the dot goes round again; a passing flash runs
+ * along the curve and everything fades to black.
+ *
+ * Contract: window.ready settles once the KaTeX faces are loaded and the formulas measured;
+ * window.draw({t}) paints time t and returns base64 JPEG; window.events() returns the cue list.
+ * Frames depend on t only: there is no clock and no randomness anywhere.
+ */
+const W = 1920, H = 1080, DUR = 10, TAU = Math.PI * 2;
+const cv = document.getElementById('c');
+const g = cv.getContext('2d');
 
-// ── palette (Manim colour constants) ──
-const BG = '#1a1a1a', WHITE = '#FFFFFF', GREY = '#888888';
-const BLUE = '#58C4DD', BLUE_D = '#29ABCA', BLUE_E = '#236B8E', TEAL = '#5CD0B3', GREEN = '#83C167';
-const GOLD = '#E1A158', BROWN = '#A0785A', YELLOW = '#FFFF00', RED = '#FC6255';
-const LAYER = [BLUE, TEAL, GREEN, GOLD, BROWN];   // 1, 3, 5, 7, 9
-const NCOL = YELLOW;                                // n is always yellow
-const MAIN = 'KaTeX_Main', MATH = 'KaTeX_Math';
-
-// ── timeline (s) ──
-const T = {
-  title: 0.2, layer: [0.85, 1.45, 2.05, 2.65, 3.25], layerDur: 0.62,
-  brace: 3.95, eqEnd: 4.2, morph: 5.05, morphDur: 1.05, box: 6.25, boxDur: 0.55,
-  tr: 7.0, trDur: 0.85, plane: 7.05, planeDur: 0.95, vec: 7.8, vecDur: 0.38, warp: 8.2, warpDur: 0.85,
-  out: 9.3, outDur: 0.55,
+// Manim's palette: the blues of the plane, the yellow vector, the red sine.
+const C = {
+  blue: '#58C4DD', blueD: '#29ABCA', blueE: '#1C758A',
+  yellow: '#FFFF00', red: '#FC6255', axis: '#E8E8E8',
+  white: '#FFFFFF', grey: '#8A8A8A', lgrey: '#BBBBBB', flash: '#FFF9C4',
 };
 
-// ── square geometry ──
-const CS = 96, N = 5, O0 = [214, 812], O1 = [470, 862]; // cell size (px); square's bottom-left corner before/after the transition
-let O = [...O0];                                    // current origin (the square + plane glide to the centre as the plane appears)
-const CELLS = [];                                   // layer k = cells with max(i,j) == k, walked along the L
-for (let k = 0; k < N; k++) {
-  const L = [];
-  for (let j = 0; j <= k; j++) L.push([k, j]);
-  for (let i = k - 1; i >= 0; i--) L.push([i, k]);
-  L.forEach(([i, j], q) => CELLS.push({ i, j, k, q, n: L.length }));
-}
+// --- easing -------------------------------------------------------------------------------
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const span = (t, a, b) => clamp01((t - a) / (b - a));              // 0 → 1 across [a, b]
+const smooth = u => u * u * u * (u * (u * 6 - 15) + 10);           // Manim's quintic "smooth"
+const mix = (a, b, k) => a + (b - a) * k;
+const easeOut = u => 1 - (1 - u) * (1 - u) * (1 - u);
+const backOut = u => { const c = 1.70158, v = u - 1; return 1 + (c + 1) * v * v * v + c * v * v; };
+const traceRate = u => 0.72 * u + 0.28 * smooth(u);                // near-linear with soft ends
 
-// ── typesetting: tokens → measured glyph positions (TeX spacing: bin 4mu, rel 5mu) ──
-const fontOf = (f, px) => f === 'math' ? `italic 400 ${px}px ${MATH}` : `400 ${px}px ${MAIN}`;
-function layout(toks, size, cx, by) {
-  const out = []; let x = 0;
-  for (const tk of toks) {
-    const s = tk.s || 1, px = size * s;
-    ctx.font = fontOf(tk.f, px);
-    const w = tk.c === ' ' ? size * 0.28 : ctx.measureText(tk.c).width;
-    const sp = tk.sp === 'bin' ? size * 4 / 18 : tk.sp === 'rel' ? size * 5 / 18 : 0;
-    x += sp + (tk.pre || 0) * size;
-    out.push({ ...tk, x, w, y: -(tk.dy || 0) * size, sz: px, col: tk.col || WHITE });
-    x += w + sp;
-  }
-  const off = cx - x / 2;
-  for (const g of out) { g.x += off; g.y += by; }
-  out.width = x; out.left = off; out.right = off + x; return out;
-}
-const tk = (k, c, col, o = {}) => ({ k, c, col, ...o });
-const EQ_SIZE = 70, EQ_CX = 1300, EQ_BY = 592;
-const EQA_T = [tk('t1', '1', LAYER[0]), tk('p1', '+', 0, { sp: 'bin' }), tk('t3', '3', LAYER[1]), tk('p2', '+', 0, { sp: 'bin' }),
-  tk('t5', '5', LAYER[2]), tk('p3', '+', 0, { sp: 'bin' }), tk('t7', '7', LAYER[3], { grp: 1 }), tk('p4', '+', 0, { sp: 'bin' }),
-  tk('t9', '9', LAYER[4], { grp: 1 }), tk('eq', '=', 0, { sp: 'rel' }), tk('b5', '5', NCOL, { grp: 2 }), tk('sq', '2', 0, { s: .7, dy: .38, pre: .03 })];
-const EQB_T = [tk('t1', '1', LAYER[0]), tk('p1', '+', 0, { sp: 'bin' }), tk('t3', '3', LAYER[1]), tk('p2', '+', 0, { sp: 'bin' }),
-  tk('t5', '5', LAYER[2]), tk('p3', '+', 0, { sp: 'bin' }), tk('dots', '⋯', 0, { grp: 1 }), tk('p4', '+', 0, { sp: 'bin' }),
-  tk('lp', '(', LAYER[4], { grp: 1 }), tk('two', '2', LAYER[4], { grp: 1 }), tk('nn', 'n', NCOL, { f: 'math', grp: 1 }), tk('mi', '−', LAYER[4], { sp: 'bin', grp: 1 }),
-  tk('one', '1', LAYER[4], { grp: 1 }), tk('rp', ')', LAYER[4], { grp: 1 }), tk('eq', '=', 0, { sp: 'rel' }), tk('bn', 'n', NCOL, { f: 'math', grp: 2 }),
-  tk('sq', '2', 0, { s: .7, dy: .38, pre: .07 })];
-// Write order for equation A (term i arrives with layer i)
-const EQA_GROUPS = [['t1'], ['p1', 't3'], ['p2', 't5'], ['p3', 't7'], ['p4', 't9'], ['eq', 'b5', 'sq']];
-const TITLE_T = [...'Sum of the first '].map((c, i) => tk('a' + i, c, WHITE)).concat([tk('n', 'n', NCOL, { f: 'math' })],
-  [...' odd numbers'].map((c, i) => tk('b' + i, c, WHITE)));
-let EQA, EQB, TITLE, LBL5, LBLN, LBL5L, LBLNL;
+// --- timeline (seconds) ---------------------------------------------------------------------
+const T = {
+  plane: [0.00, 1.05],
+  coords: [0.70, 1.10],
+  circle: [0.90, 1.90],
+  write: [1.55, 3.05],
+  arrow: [2.45, 2.85],
+  spin: [2.90, 5.05],
+  angle: [3.00, 3.30],
+  angleLabel: [3.35, 3.65],
+  proj: [3.15, 3.55],
+  pan: [5.10, 6.10],
+  out: [5.10, 5.45],
+  move: [5.50, 6.35],
+  axis: [5.60, 6.40],
+  ticks: [6.00, 6.70],
+  trace: [6.50, 8.80],
+  flash: [8.80, 9.45],
+  fade: [9.30, 10.0],
+};
+const GX = 2.0;                                                     // graph origin, world x
+const X_END = GX + TAU + 0.35;                                      // graph θ-axis tip, world x
+const WRITE_DUR = 0.5;                                              // one glyph's Write time
 
-// ── drawing primitives ──
-// Manim "Write" on a glyph: outline strokes on (dash), fill fades in, outline fades away.
-function glyph(x, g, a = 1, w = 1, dx = 0, dy = 0, sc = 1) {
-  if (a <= 0.002 || w <= 0 || g.c === ' ') return;
-  const px = g.sz * sc;
-  x.save(); x.font = fontOf(g.f, px); x.textBaseline = 'alphabetic';
-  const gx = g.x + dx + g.w * (1 - sc) / 2, gy = g.y + dy;
-  if (w >= 1) { x.globalAlpha = a; x.fillStyle = g.col; x.fillText(g.c, gx, gy); }
-  else {
-    const sp = smooth(w / 0.62), fp = smooth((w - 0.38) / 0.62), L = px * 4.2;
-    x.lineJoin = 'round'; x.lineCap = 'round';
-    x.setLineDash([L * sp + 0.01, L * 3]); x.lineWidth = Math.max(1.4, px * 0.022);
-    x.strokeStyle = g.col; x.globalAlpha = a * (1 - fp * fp); x.strokeText(g.c, gx, gy);
-    x.setLineDash([]); x.globalAlpha = a * fp; x.fillStyle = g.col; x.fillText(g.c, gx, gy);
-  }
-  x.restore();
+// --- camera: world (unit = one grid cell) → screen ----------------------------------------
+const CAM_A = { ox: 960, oy: 590, s: 240 };
+const CAM_B = { ox: 380, oy: 570, s: 170 };
+function camera(t) {
+  const k = smooth(span(t, T.pan[0], T.pan[1]));
+  return { ox: mix(CAM_A.ox, CAM_B.ox, k), oy: mix(CAM_A.oy, CAM_B.oy, k), s: mix(CAM_A.s, CAM_B.s, k) };
 }
-// Write a list of glyphs with a lagged start: total span d, each glyph run r of it
-function writeGlyphs(x, gs, t, t0, d, a = 1, r = 0.5) {
-  const n = gs.filter(g => g.c !== ' ').length; let q = 0;
-  for (const g of gs) { if (g.c === ' ') continue; const st = t0 + (n > 1 ? q / (n - 1) : 0) * d * (1 - r); glyph(x, g, a, seg(t, st, d * r)); q++; }
-}
-// polyline with partial "Create" (0..1 of its length)
-function partialPath(x, pts, u, close = false) {
-  if (u <= 0) return;
-  const P = close ? [...pts, pts[0]] : pts; let tot = 0; const ls = [];
-  for (let i = 1; i < P.length; i++) { const l = Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); ls.push(l); tot += l; }
-  let rem = tot * clamp(u); x.beginPath(); x.moveTo(P[0][0], P[0][1]);
-  for (let i = 1; i < P.length && rem > 0; i++) {
-    const l = ls[i - 1], f = Math.min(1, rem / l); x.lineTo(lerp(P[i - 1][0], P[i][0], f), lerp(P[i - 1][1], P[i][1], f)); rem -= l;
-  }
-  if (u >= 1 && close) x.closePath();
-  x.stroke();
-}
-// Manim Brace: a filled, tapered curly brace. Local frame: spans x ∈ [0,w] at y=0, tip pointing +y.
-function bracePoly(w) {
-  const r = 15, nArc = 14, half = [];
-  // left end curls from (0,0) down to (r,r), runs flat, then curls down into the tip at (w/2, 2r)
-  for (let i = 0; i <= nArc; i++) { const a = Math.PI - i / nArc * (Math.PI / 2); half.push([r + r * Math.cos(a), r * Math.sin(a)]); }
-  const mid = w / 2;
-  for (let i = 1; i <= 20; i++) half.push([lerp(r, mid - r, i / 20), r]);
-  for (let i = 1; i <= nArc; i++) { const a = -Math.PI / 2 + i / nArc * (Math.PI / 2); half.push([mid - r + r * Math.cos(a), 2 * r + r * Math.sin(a)]); }
-  // tapered thickness along the half, offset both sides along the normal
-  let tot = 0; const cum = [0];
-  for (let i = 1; i < half.length; i++) { tot += Math.hypot(half[i][0] - half[i - 1][0], half[i][1] - half[i - 1][1]); cum.push(tot); }
-  const A = [], B = [];
-  for (let i = 0; i < half.length; i++) {
-    const p = half[i], q = half[Math.min(half.length - 1, i + 1)], o = half[Math.max(0, i - 1)];
-    let tx = q[0] - o[0], ty = q[1] - o[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
-    const v = cum[i] / tot, h = 0.6 + 3.1 * Math.pow(Math.sin(Math.PI * v), 0.7);
-    A.push([p[0] - ty * h, p[1] + tx * h]); B.push([p[0] + ty * h, p[1] - tx * h]);
-  }
-  const left = [...A, ...B.reverse()];
-  const right = left.map(([px, py]) => [w - px, py]);
-  return [left, right];
-}
-function drawBrace(x, cx, cy, w, rot, sc, a) {
-  if (a <= 0 || sc <= 0) return;
-  x.save(); x.translate(cx, cy); x.rotate(rot); x.scale(sc, sc); x.translate(-w / 2, 0);
-  x.globalAlpha = a; x.fillStyle = WHITE;
-  for (const poly of bracePoly(w)) { x.beginPath(); poly.forEach(([px, py], i) => i ? x.lineTo(px, py) : x.moveTo(px, py)); x.closePath(); x.fill(); }
-  x.restore();
-}
-function arrow(x, p0, p1, col, a, width = 6) {
-  const dx = p1[0] - p0[0], dy = p1[1] - p0[1], L = Math.hypot(dx, dy); if (L < 1 || a <= 0) return;
-  const ux = dx / L, uy = dy / L, tipL = Math.min(34, L * 0.45), tipW = tipL * 0.62;
-  const bx = p1[0] - ux * tipL, by = p1[1] - uy * tipL;
-  x.save(); x.globalAlpha = a; x.strokeStyle = col; x.fillStyle = col; x.lineWidth = width; x.lineCap = 'butt';
-  x.beginPath(); x.moveTo(p0[0], p0[1]); x.lineTo(bx + ux, by + uy); x.stroke();
-  x.beginPath(); x.moveTo(p1[0], p1[1]); x.lineTo(bx - uy * tipW, by + ux * tipW); x.lineTo(bx + uy * tipW, by - ux * tipW); x.closePath(); x.fill();
-  x.restore();
-}
+const sx = (cam, x) => cam.ox + x * cam.s;
+const sy = (cam, y) => cam.oy - y * cam.s;
 
-// ── plane coordinates (unit = one cell), with a linear map M = [[a,b],[c,d]] ──
-const toS = (M, px, py) => [O[0] + (M[0] * px + M[1] * py) * CS, O[1] - (M[2] * px + M[3] * py) * CS];
+// --- typography: KaTeX_Math for variables, KaTeX_Main for operators and words --------------
+const MATH = px => `italic 400 ${px}px 'KaTeX_Math'`;
+const ROMAN = px => `400 ${px}px 'KaTeX_Main'`;
 
-function render(t) {
-  const x = ctx;
-  x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over';
-  x.fillStyle = BG; x.fillRect(0, 0, W, H);
-  const FO = 1 - sm(t, T.out, T.outDur);                  // final FadeOut of every mobject
-  if (FO <= 0) return;
-  const tr = sm(t, T.tr, T.trDur);                        // transition: eq to top, title/braces out
-  const wu = sm(t, T.warp, T.warpDur);                    // ApplyMatrix progress
-  const M = [1, wu * 1.0, 0, 1];
-  const mv = sm(t, T.tr + 0.3, 0.75);                    // square + plane glide to the centre after the equation has lifted
-  O = [lerp(O0[0], O1[0], mv), lerp(O0[1], O1[1], mv)];                          // shear [[1,1],[0,1]] (det = 1: area stays n²)
-
-  // ── stationary ghost grid (appears as the warp starts, like Manim's background copy) ──
-  if (t >= T.warp) {
-    x.save(); x.globalAlpha = FO * 0.35 * clamp((t - T.warp) / 0.15); x.strokeStyle = GREY; x.lineWidth = 1;
-    x.beginPath();
-    for (let k = -6; k <= 16; k++) { const a = toS([1, 0, 0, 1], k, -4), b = toS([1, 0, 0, 1], k, 10); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); }
-    for (let k = -3; k <= 9; k++) { const a = toS([1, 0, 0, 1], -7, k), b = toS([1, 0, 0, 1], 18, k); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); }
-    x.stroke(); x.restore();
-  }
-
-  // ── NumberPlane: Create with lag (axes first, then lines outward from the square) ──
-  if (t >= T.plane) {
-    const lines = [];
-    for (let k = -30; k <= 30; k++) { if (k === 0) continue; lines.push({ v: 1, k, o: Math.abs(k - 2.5) }); }
-    for (let k = -12; k <= 12; k++) { if (k === 0) continue; lines.push({ v: 0, k, o: Math.abs(k - 2.5) }); }
-    const drawLine = (ln, u, col, wd, a) => {
-      if (u <= 0) return; x.globalAlpha = a * FO; x.strokeStyle = col; x.lineWidth = wd;
-      const R = u >= 1 ? 40 : 1;                          // while drawing, sweep the on-screen span; afterwards full length
-      const pts = ln.v ? [toS(M, ln.k, -3 * R), toS(M, ln.k, 9.2 * R)] : [toS(M, -5.2 * R, ln.k), toS(M, 18 * R, ln.k)];
-      partialPath(x, pts, u);
-    };
-    x.save(); x.lineCap = 'butt';
-    for (const ln of lines) {
-      const st = T.plane + 0.12 + Math.min(1, ln.o / 16) * T.planeDur * 0.45, u = sm(t, st, T.planeDur * 0.5);
-      // faded half-unit lines
-      if (Math.abs(ln.k) < 30) drawLine({ v: ln.v, k: ln.k + 0.5 }, u, BLUE_D, 1, 0.3);
-      drawLine(ln, u, BLUE_D, 2, 1);
+// A formula is a list of runs {s, f: 'M'|'R', col, sup, gap, after}. layout() splits the runs
+// into glyphs with offsets from the formula's left edge at the given pixel size, measuring the
+// ink box of every glyph so Write can sweep across it.
+function layout(runs, size) {
+  const glyphs = [];
+  let x = 0;
+  for (const r of runs) {
+    const px = r.sup ? size * 0.7 : size, dy = r.sup ? -size * 0.44 : 0;
+    g.font = r.f === 'M' ? MATH(px) : ROMAN(px);
+    if (r.gap) x += r.gap * size;
+    for (const ch of r.s) {
+      const m = g.measureText(ch);
+      glyphs.push({
+        ch, f: r.f, px, x, dy, col: r.col || C.white,
+        l: m.actualBoundingBoxLeft, r: m.actualBoundingBoxRight,
+        a: m.actualBoundingBoxAscent, d: m.actualBoundingBoxDescent,
+      });
+      x += m.width;
     }
-    drawLine({ v: 0, k: -0.5 }, sm(t, T.plane + .12, T.planeDur * .5), BLUE_D, 1, .3); drawLine({ v: 1, k: -0.5 }, sm(t, T.plane + .12, T.planeDur * .5), BLUE_D, 1, .3);
-    const ua = sm(t, T.plane, T.planeDur * 0.6);
-    drawLine({ v: 0, k: 0 }, ua, WHITE, 2.5, 1); drawLine({ v: 1, k: 0 }, ua, WHITE, 2.5, 1);
-    x.restore();
+    if (r.after) x += r.after * size;
   }
+  return { glyphs, w: x, size };
+}
 
-  // ── the square: DrawBorderThenFill per cell, lagged along each L ──
-  const fillOp = lerp(0.82, 0.5, sm(t, T.plane, T.planeDur));
-  for (const c of CELLS) {
-    const t0 = T.layer[c.k] + (c.n > 1 ? c.q / (c.n - 1) : 0) * T.layerDur * 0.55, u = seg(t, t0, T.layerDur * 0.5);
-    if (u <= 0) continue;
-    const pts = [toS(M, c.i, c.j + 1), toS(M, c.i + 1, c.j + 1), toS(M, c.i + 1, c.j), toS(M, c.i, c.j)];
-    const bu = smooth(u / 0.6), fu = smooth((u - 0.45) / 0.55), col = LAYER[c.k];
-    x.save();
-    if (fu > 0) { x.globalAlpha = fillOp * fu * FO; x.fillStyle = col; x.beginPath(); pts.forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath(); x.fill(); }
-    x.lineJoin = 'miter'; x.lineWidth = 2.6; x.globalAlpha = FO; x.strokeStyle = fu < 1 ? mix(col, WHITE, fu) : WHITE;
-    partialPath(x, pts, bu, true);
-    x.restore();
-  }
+const B = C.blue, R = C.red;
+const RUNS = {
+  eq: [
+    { s: 'e', f: 'M' }, { s: 'iθ', f: 'M', sup: true },
+    { s: '=', f: 'R', gap: 0.3, after: 0.3 },
+    { s: 'cos', f: 'R', col: B, after: 0.17 }, { s: 'θ', f: 'M', col: B },
+    { s: '+', f: 'R', gap: 0.24, after: 0.24 },
+    { s: 'i', f: 'M', col: R, after: 0.14 }, { s: 'sin', f: 'R', col: R, after: 0.17 }, { s: 'θ', f: 'M', col: R },
+  ],
+  cos: [{ s: 'cos', f: 'R', col: B, after: 0.17 }, { s: 'θ', f: 'M', col: B }],
+  sin: [{ s: 'sin', f: 'R', col: R, after: 0.17 }, { s: 'θ', f: 'M', col: R }],
+  theta: [{ s: 'θ', f: 'M', col: C.yellow }],
+  thetaAxis: [{ s: 'θ', f: 'M', col: C.axis }],
+  one: [{ s: '1', f: 'R', col: C.lgrey }],
+  mone: [{ s: '−', f: 'R', col: C.lgrey }, { s: '1', f: 'R', col: C.lgrey }],
+  i: [{ s: 'i', f: 'M', col: C.lgrey }],
+  mi: [{ s: '−', f: 'R', col: C.lgrey }, { s: 'i', f: 'M', col: C.lgrey }],
+  halfPi: [{ s: 'π', f: 'M', col: C.lgrey }, { s: '/', f: 'R', col: C.lgrey }, { s: '2', f: 'R', col: C.lgrey }],
+  pi: [{ s: 'π', f: 'M', col: C.lgrey }],
+  threeHalfPi: [{ s: '3', f: 'R', col: C.lgrey }, { s: 'π', f: 'M', col: C.lgrey }, { s: '/', f: 'R', col: C.lgrey }, { s: '2', f: 'R', col: C.lgrey }],
+  twoPi: [{ s: '2', f: 'R', col: C.lgrey }, { s: 'π', f: 'M', col: C.lgrey }],
+};
+const F = {};                                                      // measured formulas (setup)
+const SIN_IN_EQ = [10, 11, 12, 13];                                 // glyph indices of "sin θ" in eq
 
-  // ── basis vectors î (green) and ĵ (red): GrowArrow, then carried by the matrix ──
-  if (t >= T.vec) {
-    const g = sm(t, T.vec, T.vecDur), o = toS(M, 0, 0);
-    const pi = toS(M, g, 0), pj = toS(M, 0, g);
-    arrow(x, o, pi, GREEN, FO); arrow(x, o, pj, RED, FO);
-  }
+function setup() {
+  F.eq = layout(RUNS.eq, 78);
+  F.cos = layout(RUNS.cos, 46);
+  F.sin = layout(RUNS.sin, 46);
+  F.sinLabel = layout(RUNS.sin, 50);
+  F.theta = layout(RUNS.theta, 46);
+  F.thetaAxis = layout(RUNS.thetaAxis, 40);
+  for (const k of ['one', 'mone', 'i', 'mi']) F[k] = layout(RUNS[k], 34);
+  for (const k of ['halfPi', 'pi', 'threeHalfPi', 'twoPi']) F[k] = layout(RUNS[k], 36);
+}
 
-  // ── braces with labels (GrowFromCenter + Write); label 5 → n during the morph ──
-  const bo = 1 - sm(t, T.tr, T.trDur * 0.6);
-  if (t >= T.brace && bo > 0) {
-    const gs = sm(t, T.brace, 0.5), a = bo * FO;
-    drawBrace(x, O[0] + N * CS / 2, O[1] + 14, N * CS, 0, gs, a);
-    drawBrace(x, O[0] - 14, O[1] - N * CS / 2, N * CS, Math.PI / 2, gs, a);
-    const mu = sm(t, T.morph, T.morphDur), lw = seg(t, T.brace + 0.2, 0.5);
-    for (const [L5, LN] of [[LBL5, LBLN], [LBL5L, LBLNL]]) {
-      const m1 = smooth(mu / 0.55), m2 = smooth((mu - 0.3) / 0.55);    // 5 fades up and out, n fades up and in
-      const ox = O[0] - O0[0], oy = O[1] - O0[1];
-      glyph(x, L5, a * (1 - m1), lw, ox, oy - 14 * m1);
-      if (m2 > 0) glyph(x, LN, a * m2, 1, ox, oy + 14 * (1 - m2));
+// Draws a measured formula centred on cx with its baseline on by. opts.prog(i) gives the Write
+// progress of glyph i (absent = finished); opts.alpha scales everything; opts.scale resizes.
+function formula(Fm, cx, by, opts = {}) {
+  const alpha = opts.alpha === undefined ? 1 : opts.alpha;
+  if (alpha <= 0) return;
+  const k = opts.scale || 1, x0 = cx - Fm.w * k / 2;
+  for (let i = 0; i < Fm.glyphs.length; i++) {
+    const q = Fm.glyphs[i];
+    const p = opts.prog ? opts.prog(i) : 1;
+    if (p <= 0) continue;
+    const gx = x0 + q.x * k, gy = by + q.dy * k;
+    g.font = (q.f === 'M' ? MATH : ROMAN)(q.px * k);
+    g.fillStyle = q.col;
+    g.strokeStyle = q.col;
+    if (p >= 1) {
+      g.globalAlpha = alpha;
+      g.fillText(q.ch, gx, gy);
+      continue;
+    }
+    // DrawBorderThenFill: the outline is swept across the ink box, then the fill comes up.
+    const border = span(p, 0, 0.55), fill = span(p, 0.55, 1);
+    if (border < 1) {
+      const left = gx - q.l * k - 2, wid = (q.l + q.r) * k + 4;
+      const top = gy - q.a * k - 3, hgt = (q.a + q.d) * k + 6;
+      g.save();
+      g.beginPath();
+      g.rect(left, top, wid * border, hgt);
+      g.clip();
+    }
+    g.globalAlpha = alpha * (1 - fill);
+    g.lineWidth = 1.7;
+    g.lineJoin = 'round';
+    g.strokeText(q.ch, gx, gy);
+    if (border < 1) g.restore();
+    if (fill > 0) {
+      g.globalAlpha = alpha * fill;
+      g.fillText(q.ch, gx, gy);
     }
   }
-
-  // ── title: Write, then FadeOut shifting up ──
-  if (t >= T.title) {
-    const to = sm(t, T.tr, 0.5), a = (1 - to) * FO;
-    x.save(); x.translate(0, -50 * to); writeGlyphs(x, TITLE, t, T.title, 1.05, a, 0.42); x.restore();
-  }
-
-  // ── equation (in a group that later moves to the top) ──
-  const tx = sm(t, T.tr + 0.2, T.trDur), ty = sm(t, T.tr, T.trDur * 0.75);   // lift first, then slide left (clears the square)
-  const eqS = lerp(1, 0.8, ty), ex = lerp(0, 960 - EQ_CX, tx), ey = lerp(0, 158 - EQ_BY, ty);
-  x.save(); x.translate(EQ_CX + ex, EQ_BY + ey); x.scale(eqS, eqS); x.translate(-EQ_CX, -EQ_BY);
-  const mu = sm(t, T.morph, T.morphDur);
-  const bx0 = EQB.left - 30, bx1 = EQB.right + 30, by0 = EQ_BY - EQ_SIZE * 0.98, by1 = EQ_BY + EQ_SIZE * 0.42;
-  if (tr > 0) {                                          // BackgroundRectangle so the plane doesn't cross the text
-    x.globalAlpha = 0.88 * tr * FO; x.fillStyle = BG; x.fillRect(bx0 - 6, by0 - 6, bx1 - bx0 + 12, by1 - by0 + 12); x.globalAlpha = 1;
-  }
-  if (t < T.morph) {
-    EQA_GROUPS.forEach((grp, gi) => {
-      const t0 = gi < 5 ? T.layer[gi] + 0.12 : T.eqEnd;
-      const gs = grp.map(k => EQA.find(g => g.k === k));
-      writeGlyphs(x, gs, t, t0, gi < 5 ? 0.55 : 0.7, FO, gi < 5 ? 0.8 : 0.6);
-    });
-  } else {
-    // TransformMatchingTex: matched keys glide from layout A to layout B; each unmatched group
-    // (7 + 9 ↔ ⋯ + (2n − 1), 5 ↔ n) cross-fades while travelling towards the other group's place.
-    const cen = (lay, gr) => { const gs = lay.filter(g => g.grp === gr); return gs.reduce((s, g) => s + g.x + g.w / 2, 0) / gs.length; };
-    for (const g of EQA) {
-      const m = EQB.find(o => o.k === g.k);
-      if (m) glyph(x, { ...g, x: lerp(g.x, m.x, mu), y: lerp(g.y, m.y, mu), sz: lerp(g.sz, m.sz, mu), w: lerp(g.w, m.w, mu), col: g.col === m.col ? g.col : mix(g.col, m.col, mu) }, FO);
-      else glyph(x, g, FO * (1 - smooth(mu / 0.62)), 1, (cen(EQB, g.grp) - cen(EQA, g.grp)) * mu, 0);
-    }
-    for (const g of EQB) {
-      if (EQA.find(o => o.k === g.k)) continue;
-      glyph(x, g, FO * smooth((mu - 0.3) / 0.62), 1, (cen(EQA, g.grp) - cen(EQB, g.grp)) * (1 - mu), 0);
-    }
-  }
-  // SurroundingRectangle: Create (stroke travels around from the top-left corner)
-  if (t >= T.box) {
-    const u = sm(t, T.box, T.boxDur);
-    x.save(); x.strokeStyle = YELLOW; x.lineWidth = 4 / eqS; x.lineJoin = 'miter'; x.globalAlpha = FO;
-    partialPath(x, [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]], u, true); x.restore();
-  }
-  x.restore();
+  g.globalAlpha = 1;
 }
 
-window.ready = (async () => {
-  await Promise.all([`400 80px ${MAIN}`, `italic 400 80px ${MATH}`].map(f => document.fonts.load(f, '0123456789+=()n−⋯Sumoftherdb')));
-  await document.fonts.ready;
-  EQA = layout(EQA_T, EQ_SIZE, EQ_CX, EQ_BY); EQB = layout(EQB_T, EQ_SIZE, EQ_CX, EQ_BY);
-  TITLE = layout(TITLE_T, 58, 960, 128);
-  const bcx = O[0] + N * CS / 2;
-  LBL5 = layout([tk('l', '5', NCOL)], 62, bcx, O[1] + 100)[0]; LBLN = layout([tk('l', 'n', NCOL, { f: 'math' })], 62, bcx, O[1] + 100)[0];
-  const lcy = O[1] - N * CS / 2 + 21;
-  LBL5L = layout([tk('l', '5', NCOL)], 62, O[0] - 72, lcy)[0]; LBLNL = layout([tk('l', 'n', NCOL, { f: 'math' })], 62, O[0] - 72, lcy)[0];
-  render(0);
-})();
-window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
-// audio cue list (read by events.mjs → events.json → audio.py)
+// Write timing: glyph i of n starts at t0 + i * step and takes WRITE_DUR.
+function writeStart(i, n, t0, t1) { return t0 + i * (t1 - t0 - WRITE_DUR) / Math.max(1, n - 1); }
+
+// --- primitives ---------------------------------------------------------------------------
+function line(cam, x0, y0, x1, y1, col, width, alpha = 1, dash = null) {
+  g.globalAlpha = alpha;
+  g.strokeStyle = col;
+  g.lineWidth = width;
+  g.lineCap = 'butt';
+  g.setLineDash(dash || []);
+  g.beginPath();
+  g.moveTo(sx(cam, x0), sy(cam, y0));
+  g.lineTo(sx(cam, x1), sy(cam, y1));
+  g.stroke();
+  g.setLineDash([]);
+  g.globalAlpha = 1;
+}
+
+function dot(cam, x, y, radius, col, alpha = 1) {
+  g.globalAlpha = alpha;
+  g.fillStyle = col;
+  g.beginPath();
+  g.arc(sx(cam, x), sy(cam, y), radius * cam.s, 0, TAU);
+  g.fill();
+  g.globalAlpha = 1;
+}
+
+// A vector from (x0,y0) to (x1,y1) with Manim's filled triangular tip (tip length in units).
+function arrow(cam, x0, y0, x1, y1, col, width, tip, alpha = 1) {
+  const X0 = sx(cam, x0), Y0 = sy(cam, y0), X1 = sx(cam, x1), Y1 = sy(cam, y1);
+  const dx = X1 - X0, dy = Y1 - Y0, len = Math.hypot(dx, dy);
+  if (len < 0.5) return;
+  const ux = dx / len, uy = dy / len;
+  const tl = Math.min(tip * cam.s, len * 0.7), hw = tl * 0.4;
+  const bx = X1 - ux * tl, by = Y1 - uy * tl;
+  g.globalAlpha = alpha;
+  g.strokeStyle = col;
+  g.fillStyle = col;
+  g.lineWidth = width;
+  g.lineCap = 'butt';
+  g.beginPath();
+  g.moveTo(X0, Y0);
+  g.lineTo(bx, by);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(X1, Y1);
+  g.lineTo(bx - uy * hw, by + ux * hw);
+  g.lineTo(bx + uy * hw, by - ux * hw);
+  g.closePath();
+  g.fill();
+  g.globalAlpha = 1;
+}
+
+// --- the number plane -----------------------------------------------------------------------
+// k is the pan progress: the plane dims as the graph scene takes over and the circle keeps a
+// short local axis cross of its own.
+function plane(t, cam, k) {
+  const t0 = T.plane[0];
+  const dim = mix(1, 0.28, k);
+  // Grid lines: minor at every half unit, major at integers; each grows out of its axis with a
+  // stagger that follows its distance from the origin, as Create(NumberPlane) does.
+  const xMin = Math.floor((0 - cam.ox) / cam.s) - 1, xMax = Math.ceil((W - cam.ox) / cam.s) + 1;
+  const yMin = Math.floor((cam.oy - H) / cam.s) - 1, yMax = Math.ceil(cam.oy / cam.s) + 1;
+  const growth = (c, minor) => {
+    const start = t0 + 0.08 + Math.min(Math.abs(c), 6) * 0.075 + (minor ? 0.05 : 0);
+    return smooth(span(t, start, start + 0.45));
+  };
+  g.lineCap = 'butt';
+  for (let c = xMin; c <= xMax; c += 0.5) {
+    if (c === 0) continue;
+    const minor = c % 1 !== 0, p = growth(c, minor);
+    if (p <= 0) continue;
+    const X = sx(cam, c), Y = cam.oy;
+    g.globalAlpha = (minor ? 0.34 : 0.62) * dim;
+    g.strokeStyle = minor ? C.blueE : C.blueD;
+    g.lineWidth = minor ? 1.3 : 2;
+    g.beginPath();
+    g.moveTo(X, Y - Y * p);
+    g.lineTo(X, Y + (H - Y) * p);
+    g.stroke();
+  }
+  for (let c = yMin; c <= yMax; c += 0.5) {
+    if (c === 0) continue;
+    const minor = c % 1 !== 0, p = growth(c, minor);
+    if (p <= 0) continue;
+    const Y = sy(cam, c), X = cam.ox;
+    g.globalAlpha = (minor ? 0.34 : 0.62) * dim;
+    g.strokeStyle = minor ? C.blueE : C.blueD;
+    g.lineWidth = minor ? 1.3 : 2;
+    g.beginPath();
+    g.moveTo(X - X * p, Y);
+    g.lineTo(X + (W - X) * p, Y);
+    g.stroke();
+  }
+  // Axes grow out of the origin first.
+  const pa = smooth(span(t, t0, t0 + 0.55));
+  if (pa > 0) {
+    g.globalAlpha = mix(1, 0.3, k);
+    g.strokeStyle = C.axis;
+    g.lineWidth = 2.4;
+    g.beginPath();
+    g.moveTo(cam.ox - cam.ox * pa, cam.oy);
+    g.lineTo(cam.ox + (W - cam.ox) * pa, cam.oy);
+    g.moveTo(cam.ox, cam.oy - cam.oy * pa);
+    g.lineTo(cam.ox, cam.oy + (H - cam.oy) * pa);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  // The circle's own short axes, which take over from the plane's during the pan.
+  if (k > 0) {
+    line(cam, -1.45, 0, 1.45, 0, C.axis, 2.4, k);
+    line(cam, 0, -1.45, 0, 1.45, C.axis, 2.4, k);
+  }
+  // Complex-plane coordinates: 1, −1, i, −i, each fading in with a small upward drift.
+  const labels = [
+    ['one', 1.16, -0.2], ['mone', -1.18, -0.2], ['i', -0.2, 1.16], ['mi', -0.24, -1.16],
+  ];
+  labels.forEach(([k, x, y], i) => {
+    const s0 = T.coords[0] + i * 0.08, p = easeOut(span(t, s0, s0 + 0.3));
+    if (p <= 0) return;
+    const by = sy(cam, y) + 12 + (1 - p) * 10;
+    formula(F[k], sx(cam, x), by, { alpha: p });
+  });
+}
+
+// --- the angle --------------------------------------------------------------------------------
+function theta(t) {
+  if (t < T.spin[0]) return 0;
+  if (t < T.trace[0]) return TAU * smooth(span(t, T.spin[0], T.spin[1]));
+  return TAU * traceRate(span(t, T.trace[0], T.trace[1]));
+}
+
+// --- scene pieces ---------------------------------------------------------------------------
+function unitCircle(t, cam) {
+  const p = smooth(span(t, T.circle[0], T.circle[1]));
+  if (p <= 0) return;
+  g.strokeStyle = C.blue;
+  g.lineWidth = 4;
+  g.lineCap = 'butt';
+  g.beginPath();
+  g.arc(sx(cam, 0), sy(cam, 0), cam.s, 0, -TAU * p, true);
+  g.stroke();
+}
+
+function equation(t, cam) {
+  const n = F.eq.glyphs.length;
+  const cx = 960, by = 170;
+  const gone = easeOut(span(t, T.move[0], T.move[0] + 0.4));       // non-matching glyphs fade
+  const fly = smooth(span(t, T.move[0], T.move[1]));               // "sin θ" travels to the graph
+  if (t < T.move[0]) {
+    formula(F.eq, cx, by, { prog: i => span(t, writeStart(i, n, T.write[0], T.write[1]), writeStart(i, n, T.write[0], T.write[1]) + WRITE_DUR) });
+    return;
+  }
+  if (gone < 1) formula(F.eq, cx, by, { alpha: 1 - gone, prog: i => SIN_IN_EQ.includes(i) ? 0 : 1 });
+  // TransformMatchingTex: each "sin θ" glyph is interpolated from its place in the equation
+  // to its place in the graph label, in position and size.
+  const lab = F.sinLabel, tx = sx(cam, GX + Math.PI / 2), ty = sy(cam, 1.32);
+  const x0 = cx - F.eq.w / 2, lx0 = tx - lab.w / 2;
+  SIN_IN_EQ.forEach((gi, j) => {
+    const a = F.eq.glyphs[gi], b = lab.glyphs[j];
+    const X = mix(x0 + a.x, lx0 + b.x, fly), Y = mix(by + a.dy, ty + b.dy, fly), px = mix(a.px, b.px, fly);
+    g.font = (a.f === 'M' ? MATH : ROMAN)(px);
+    g.fillStyle = a.col;
+    g.fillText(a.ch, X, Y);
+  });
+}
+
+function vector(t, cam, th) {
+  const grow = easeOut(span(t, T.arrow[0], T.arrow[1]));
+  if (grow <= 0) return;
+  const r = grow, px = Math.cos(th) * r, py = Math.sin(th) * r;
+  arrow(cam, 0, 0, px, py, C.yellow, 4, 0.22);
+  const pop = backOut(span(t, T.arrow[0] + 0.1, T.arrow[1] + 0.1));
+  if (pop > 0) dot(cam, px, py, 0.055 * pop, C.yellow);
+}
+
+function angleMark(t, cam, th) {
+  const a = easeOut(span(t, T.angle[0], T.angle[1])) * (1 - easeOut(span(t, T.out[0], T.out[1])));
+  if (a <= 0 || th <= 0.01) return;
+  g.globalAlpha = a;
+  g.strokeStyle = C.yellow;
+  g.lineWidth = 3;
+  g.beginPath();
+  g.arc(sx(cam, 0), sy(cam, 0), 0.42 * cam.s, 0, -th, true);
+  g.stroke();
+  g.globalAlpha = 1;
+  // the label sits on the bisector once the wedge is wide enough to hold it, and is nudged off
+  // the vector while the angle is still thin
+  const la = easeOut(span(t, T.angleLabel[0], T.angleLabel[1])) * (1 - easeOut(span(t, T.out[0], T.out[1])));
+  if (la <= 0) return;
+  const lr = 0.6, lift = 0.12 * (1 - clamp01(th / 1.2));
+  const lx = Math.cos(th / 2) * lr, ly = Math.sin(th / 2) * lr + lift;
+  formula(F.theta, sx(cam, lx), sy(cam, ly) + 14, { alpha: la });
+}
+
+function projections(t, cam, th) {
+  const create = smooth(span(t, T.proj[0], T.proj[1]));
+  const out = easeOut(span(t, T.out[0], T.out[1]));
+  if (create <= 0) return;
+  const cx = Math.cos(th), sn = Math.sin(th);
+  // cos θ: a blue segment along the real axis, created from the origin.
+  if (out < 1) {
+    line(cam, 0, 0, cx * create, 0, C.blue, 6, 1 - out);
+    const show = clamp01((Math.abs(cx) - 0.3) / 0.2) * (1 - out) * create;
+    // The label hangs under the segment while the vector is above the axis; once the vector
+    // swings below, it hangs under the vector instead, clear of the arc and the dashed drop.
+    const lx = sn >= 0 ? cx / 2 : cx * 0.45, ly = sn >= 0 ? -0.25 : sn / 2 - 0.34;
+    formula(F.cos, sx(cam, lx), sy(cam, ly) + 12, { alpha: show });
+  }
+  // sin θ: a red dashed drop from the point to the real axis; it stays for the graph scene.
+  line(cam, cx, 0, cx, sn * create, C.red, 3, 1, [14, 10]);
+  if (out < 1) {
+    // beside the point, outside the circle; it fades across cos θ = 0, where it changes side
+    const show = clamp01((Math.abs(sn) - 0.42) / 0.15) * clamp01((Math.abs(cx) - 0.12) / 0.12) * (1 - out) * create;
+    const side = cx >= 0 ? 1 : -1;
+    formula(F.sin, sx(cam, cx + side * 0.38), sy(cam, sn) + 16, { alpha: show });
+  }
+}
+
+function graphAxes(t, cam) {
+  const px = smooth(span(t, T.axis[0], T.axis[1]));
+  if (px <= 0) return;
+  const py = smooth(span(t, T.axis[0] + 0.2, T.axis[1]));
+  const xEnd = X_END;
+  arrow(cam, GX, 0, GX + (xEnd - GX) * px, 0, C.axis, 2.4, 0.2);
+  if (py > 0) arrow(cam, GX, -1.4 * py, GX, 1.4 * py, C.axis, 2.4, 0.2);
+  // ticks and labels at multiples of π/2, staggered FadeIn
+  const names = ['halfPi', 'pi', 'threeHalfPi', 'twoPi'];
+  names.forEach((k, i) => {
+    const s0 = T.ticks[0] + i * 0.15, p = easeOut(span(t, s0, s0 + 0.3));
+    if (p <= 0) return;
+    const x = GX + (i + 1) * Math.PI / 2;
+    line(cam, x, -0.08, x, 0.08, C.axis, 2.4, p);
+    formula(F[k], sx(cam, x), sy(cam, -0.3) + 12 + (1 - p) * 8, { alpha: p });
+  });
+  [[1, 'one'], [-1, 'mone']].forEach(([y, k], i) => {
+    const s0 = T.ticks[0] + 0.1 + i * 0.12, p = easeOut(span(t, s0, s0 + 0.3));
+    if (p <= 0) return;
+    line(cam, GX - 0.08, y, GX + 0.08, y, C.axis, 2.4, p);
+    formula(F[k], sx(cam, GX - 0.28), sy(cam, y) + 12, { alpha: p });
+  });
+  const pl = easeOut(span(t, T.ticks[0] + 0.6, T.ticks[0] + 0.9));
+  if (pl > 0) formula(F.thetaAxis, sx(cam, xEnd + 0.22), sy(cam, 0) + 14, { alpha: pl });
+}
+
+function sinePath(cam, a, b) {
+  const steps = Math.max(2, Math.ceil((b - a) * cam.s / 3));
+  g.beginPath();
+  for (let i = 0; i <= steps; i++) {
+    const th = a + (b - a) * i / steps;
+    const X = sx(cam, GX + th), Y = sy(cam, Math.sin(th));
+    if (i === 0) g.moveTo(X, Y); else g.lineTo(X, Y);
+  }
+}
+
+function sineTrace(t, cam, th) {
+  if (t < T.trace[0]) return;
+  const link = easeOut(span(t, T.trace[0], T.trace[0] + 0.25)) * (1 - easeOut(span(t, T.flash[0], T.flash[0] + 0.3)));
+  const cx = Math.cos(th), sn = Math.sin(th);
+  // dashed guide from the point on the circle across to the point on the graph; it has done
+  // its job once the curve is complete and leaves with the flash
+  if (link > 0) line(cam, cx, sn, GX + th, sn, C.grey, 2, 0.75 * link, [12, 9]);
+  if (th > 0.002) {
+    g.strokeStyle = C.red;
+    g.lineWidth = 4;
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+    sinePath(cam, 0, th);
+    g.stroke();
+  }
+  dot(cam, GX + th, sn, 0.05, C.red, link);
+  // ShowPassingFlash: a bright comet runs the length of the curve once it is complete
+  const f = span(t, T.flash[0], T.flash[1]);
+  if (f > 0 && f < 1) {
+    const tail = 1.5, head = f * (TAU + tail), segs = 14;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    for (let i = 0; i < segs; i++) {
+      const a = Math.max(0, head - tail + tail * i / segs), b = Math.min(TAU, head - tail + tail * (i + 1) / segs);
+      if (b <= a) continue;
+      const k = (i + 1) / segs;
+      g.globalAlpha = 0.18 * k;
+      g.strokeStyle = C.yellow;
+      g.lineWidth = 14;
+      sinePath(cam, a, b);
+      g.stroke();
+      g.globalAlpha = k;
+      g.strokeStyle = C.flash;
+      g.lineWidth = 6;
+      sinePath(cam, a, b);
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+}
+
+// --- the frame ------------------------------------------------------------------------------
+function frame(t) {
+  const cam = camera(t);
+  const th = theta(t);
+  const panK = smooth(span(t, T.pan[0], T.pan[1]));
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, W, H);
+  g.textBaseline = 'alphabetic';
+  g.textAlign = 'left';
+  plane(t, cam, panK);
+  graphAxes(t, cam);
+  unitCircle(t, cam);
+  projections(t, cam, th);
+  sineTrace(t, cam, th);
+  vector(t, cam, th);
+  angleMark(t, cam, th);
+  equation(t, cam);
+  // FadeOut to black at the end
+  const fade = smooth(span(t, T.fade[0], T.fade[1]));
+  if (fade > 0) {
+    g.globalAlpha = fade;
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, W, H);
+    g.globalAlpha = 1;
+  }
+}
+
+window.draw = ({ t }) => {
+  frame(Math.max(0, Math.min(DUR, t)));
+  const data = cv.toDataURL('image/jpeg', 0.92);
+  return data.slice(data.indexOf(',') + 1);
+};
+
+// Sound cues for audio.py: every Write glyph, the Creates, the vector pop, the sweep, the pan,
+// the matching-tex move, the axis and tick FadeIns, the sine trace, the flash and the fade.
 window.events = () => {
   const ev = [];
-  T.layer.forEach((lt, k) => ev.push({ t: lt, k: 'note', n: k }));
-  for (const c of CELLS) ev.push({ t: T.layer[c.k] + (c.n > 1 ? c.q / (c.n - 1) : 0) * T.layerDur * 0.55 + T.layerDur * 0.3, k: 'tick', v: 0.5 + 0.1 * c.k });
-  ev.push({ t: T.brace, k: 'soft' }, { t: T.morph, k: 'morph', d: T.morphDur }, { t: T.box, k: 'chord' },
-    { t: T.plane, k: 'swell', d: 1.2 }, { t: T.warp, k: 'swell', d: 1.1 }, { t: T.out, k: 'end' });
+  const push = (t, k, extra = {}) => ev.push({ t: +t.toFixed(4), k, ...extra });
+  push(T.plane[0], 'plane', { d: T.plane[1] - T.plane[0] });
+  push(T.circle[0], 'circle', { d: T.circle[1] - T.circle[0] });
+  const n = F.eq.glyphs.length;
+  for (let i = 0; i < n; i++) push(writeStart(i, n, T.write[0], T.write[1]), 'glyph', { v: i / (n - 1) });
+  push(T.arrow[0], 'pop');
+  push(T.spin[0], 'spin', { d: T.spin[1] - T.spin[0] });
+  push(T.angle[0], 'show');
+  push(T.proj[0], 'show');
+  push(T.pan[0], 'pan', { d: T.pan[1] - T.pan[0] });
+  push(T.move[0], 'move', { d: T.move[1] - T.move[0] });
+  push(T.axis[0], 'axis', { d: T.axis[1] - T.axis[0] });
+  for (let i = 0; i < 4; i++) push(T.ticks[0] + i * 0.15, 'tick', { v: i / 3 });
+  push(T.trace[0], 'trace', { d: T.trace[1] - T.trace[0] });
+  push(T.flash[0], 'flash', { d: T.flash[1] - T.flash[0] });
+  push(T.fade[0], 'end', { d: T.fade[1] - T.fade[0] });
   return ev.sort((a, b) => a.t - b.t);
 };
+
+window.ready = document.fonts.ready
+  .then(() => Promise.all([
+    document.fonts.load(MATH(40), 'eiθπxy'),
+    document.fonts.load(ROMAN(40), 'cosin=+−/0123'),
+  ]))
+  .then(setup);
 </script>
-</body></html>
+</body>
+</html>
