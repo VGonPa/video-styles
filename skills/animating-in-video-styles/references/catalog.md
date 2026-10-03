@@ -166,7 +166,7 @@ Panels, strips, and cartoon traditions from every decade.
 - `clear-line` **Clear-Line Comic** — Clean ink, flat colour, adventure. Best for journeys, places, and stories told panel by panel · explainer, story · Inspired by Hergé's ligne claire · *no recipe yet*
 - `comic-book` **Comic Book** — Newspaper comic panels. Best for dialogue, humor, and tension · story, social · Originally developed by Yasin Özmen · *no recipe yet*
 - `golden-age-comic` **Golden Age Comic** — Pulpy, off-register 1940s heroics. Best for origin stories, heroic reveals, and cliffhanger teasers · story, social · *no recipe yet*
-- `magazine-cartoon` **Magazine Cartoon** — Dry wit, pen and wash. Best for punchlines, wry observations, and understated social commentary · social, story · Inspired by The New Yorker's cartoons · *no recipe yet*
+- `magazine-cartoon` **Magazine Cartoon** — Dry wit, pen and wash. Best for punchlines, wry observations, and understated social commentary · social, story · Inspired by The New Yorker's cartoons
 - `manga` **Manga** — Inked panels, screentone and speed lines. Best for tense moments, big reveals, and dramatic countdowns · story, social · *no recipe yet*
 - `minimal-strip` **Minimal Line Strip** — Trembling pen, white space, quiet wit. Best for gentle philosophical humor and a tender four-panel punchline · story · Inspired by Peanuts (Charles M. Schulz) · *no recipe yet*
 - `comic-strip` **Newspaper Comic Strip** — Four panels, ink on newsprint. Best for dry wit, a setup, a beat, and a punchline · social, story
