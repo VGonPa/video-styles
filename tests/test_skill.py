@@ -104,6 +104,15 @@ class RecipeCheckTests(unittest.TestCase):
                          "`brush` is not defined in js/fantasy.js", "`easeOutElastic`", "`SHADOW`"):
             self.assertTrue(any(expected in p for p in problems), (expected, problems))
 
+    def test_fenced_code_is_code_to_write(self):
+        recipe = (FIXTURES / "good" / "references" / "styles" / "voxel.md").read_text()
+        recipe = recipe.replace("## Adapting\n", "## Adapting\n```js\nfunction drawLogoBlocks(t) { mirroredCallout(t); }\n```\n", 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            styles = Path(tmp) / "references" / "styles"
+            styles.mkdir(parents=True)
+            (styles / "voxel.md").write_text(recipe)
+            self.assertEqual(self.check(Path(tmp), "voxel"), [])
+
     def test_glsl_definitions_count(self):
         self.assertTrue(check_catalog.defines("nebula", "vec3 nebula(vec3 d){"))
         self.assertTrue(check_catalog.defines("uScol", "uniform vec3 uSd, uScol;"))

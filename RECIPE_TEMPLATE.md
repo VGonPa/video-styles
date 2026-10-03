@@ -24,7 +24,8 @@ length and possibly in 9:16, that a viewer would recognise as this style.
   to the style folder, such as `js/lib.js` or `vendor/three.min.js`); never line numbers. Backticks mean "this is
   in the style's code or its vendored library", and `()` marks a function that exists. Write everything else in
   plain words: a value without a name in the code (the third value of an array row), or a function you suggest
-  the reader create (a drawLogo function). In Sound, backtick only cue kinds and fields audio.py reads and names
+  the reader create (a drawLogo function); to give its code, use a fenced code block, which the
+  checker treats as code to write and skips. In Sound, backtick only cue kinds and fields audio.py reads and names
   audio.py itself defines; leave out cues that anim.html emits but audio.py ignores (they are silent).
 - **`check_catalog.py` catches slips, not wrong facts.** It fails a recipe when a backticked file or name
   (outside Boundaries and Technical notes) is not in the code, when in `path` → `name` the file does not define
@@ -35,7 +36,8 @@ length and possibly in 9:16, that a viewer would recognise as this style.
   column, exactly as written in the code, instead of a hex you worked out.
 - **Explain why** a rule matters when it is not obvious, so the reader can apply it to scenes the demo never
   had ("no overshoot: Manim's `smooth` rate function is part of the look").
-- **Stay concise:** about 100–200 lines, one fact per bullet, no praise or history. The catalog already holds
+- **Stay concise:** about 150–250 lines (rendered format values, the short-film plan and the tables earn the
+  upper end; prose does not), one fact per bullet, no praise or history. The catalog already holds
   family, use cases, feel, "best for" and credits; do not repeat them.
 - **Keep every heading below, in this order** (`check_catalog.py` enforces it). The Palette, Film grammar and
   Reuse map tables are required, with the headers shown; elsewhere write "None." rather than dropping a

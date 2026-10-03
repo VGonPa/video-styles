@@ -114,6 +114,8 @@ def section(text, heading):
 
 
 SEPARATOR = re.compile(r"^\|\s*:?-{3,}")
+# A fenced code block in a recipe is code the reader writes (a helper the style lacks), so it is not checked.
+FENCED = re.compile(r"^```.*?^```[^\n]*$", re.S | re.M)
 # The tables the checks read; each must be present with this exact header.
 TABLES = {"Palette": ["Role", "Colour", "In code"],
           "Film grammar": ["Time (s)", "What happens", "In code"],
@@ -312,7 +314,8 @@ def check_recipe(s, problems, notes):
     # names things a style lacks, such as "no `render.json`").
     for heading in ("Signature", "Palette", "Typography and copy", "Texture and finish", "Shapes, line and figures",
                     "Composition and camera", "Motion", "Film grammar", "Sound", "Adapting"):
-        prose = "\n".join(l for l in section(text, heading).splitlines() if not l.lstrip().startswith("|"))
+        prose = "\n".join(l for l in FENCED.sub("", section(text, heading)).splitlines()
+                          if not l.lstrip().startswith("|"))
         cited_names(prose, folder, names, problems, heading.split(",")[0].split()[0].lower())
     check_sound(s["slug"], text, problems)
     # "Poor fit: use `x`" sends the reader to another style, which must exist.
@@ -320,7 +323,7 @@ def check_recipe(s, problems, notes):
         if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", token) and token not in SLUGS:
             problems.append(f"recipe boundaries: `{token}` is not a style in the catalog")
     # Calls in backticks anywhere, tables included (`drawTitle()`), must exist; each code span is checked whole.
-    prose = re.sub(r"^```.*?^```[^\n]*$", "", text, flags=re.S | re.M)
+    prose = FENCED.sub("", text)
     for span in re.findall(r"`([^`\n]+)`", prose):
         span = GLOBAL_MEMBER.sub(" ", re.sub(r"'[^']*'|\"[^\"]*\"", " ", span))
         for call in re.findall(r"([A-Za-z_$][\w$]*)\s*\(", span):
