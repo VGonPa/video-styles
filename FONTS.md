@@ -26,7 +26,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Archivo Black](https://fonts.google.com/specimen/Archivo+Black) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [dada](styles/dada), [glitch](styles/glitch), [neo-brutalism](styles/neo-brutalism), [risograph](styles/risograph) |
 | [Bangers](https://fonts.google.com/specimen/Bangers) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [comic-book](styles/comic-book), [digital-comic](styles/digital-comic), [storytime](styles/storytime) |
 | [Barlow](https://fonts.google.com/specimen/Barlow) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [split-flap](styles/split-flap) |
-| [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s), [blueprint](styles/blueprint), [split-flap](styles/split-flap) |
+| [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s), [blueprint](styles/blueprint), [pop-art](styles/pop-art), [split-flap](styles/split-flap) |
 | [Bodoni Moda](https://fonts.google.com/specimen/Bodoni+Moda) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [neoclassicism](styles/neoclassicism) |
 | [Bowlby One SC](https://fonts.google.com/specimen/Bowlby+One+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [mid-century](styles/mid-century) |
 | [Bricolage Grotesque](https://fonts.google.com/specimen/Bricolage+Grotesque) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [kinetic-typography](styles/kinetic-typography) |
@@ -99,6 +99,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Rammetto One](https://fonts.google.com/specimen/Rammetto+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [saturday-cartoon](styles/saturday-cartoon) |
 | [Reenie Beanie](https://fonts.google.com/specimen/Reenie+Beanie) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [existential-stick](styles/existential-stick) |
 | [Rubik](https://fonts.google.com/specimen/Rubik) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [absurd-minimal](styles/absurd-minimal), [memphis](styles/memphis) |
+| [Rubik Mono One](https://fonts.google.com/specimen/Rubik+Mono+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [pop-art](styles/pop-art) |
 | [Russo One](https://fonts.google.com/specimen/Russo+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s) |
 | [Rye](https://fonts.google.com/specimen/Rye) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [rubber-hose](styles/rubber-hose) |
 | [Short Stack](https://fonts.google.com/specimen/Short+Stack) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [minimal-strip](styles/minimal-strip) |
@@ -206,6 +207,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Rammetto One**: Copyright 2011 The Rammetto Project Authors (https://github.com/googlefonts/RammettoFont), with Reserved Font Name Rammetto.
 - **Reenie Beanie**: Copyright (c) 2010 Typeco (james@typeco.com). All rights reserved.
 - **Rubik**: Copyright 2015 The Rubik Project Authors (https://github.com/googlefonts/rubik)
+- **Rubik Mono One**: Copyright 2015 The Rubik Project Authors (mail@hubertfischer.com)
 - **Russo One**: Copyright (c) 2011-2012, Jovanny Lemonad (lemonad@jovanny.ru), with Reserved Font Name "Russo"
 - **Rye**: Copyright (c) 2012, Sorkin Type Co (eben@eyebytes.com) with Reserved Font Name 'Rye'
 - **Short Stack**: Copyright (c) 2011, Sorkin Type Co (www.sorkintype.com eben@eyebytes.com) with Reserved Font Names "Short Stack" and "Short Stack One".
