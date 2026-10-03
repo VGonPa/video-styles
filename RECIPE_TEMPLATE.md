@@ -13,7 +13,8 @@ length and possibly in 9:16, that a viewer would recognise as this style.
   2.5 s (`node render.mjs stills 30 0 10 1 0.5,1.5,2.5` in that folder). Check the Signature against them.
 - **Render the formats you advise on.** In a scratch copy, set the canvas and `W`/`H` to 1080 × 1920, apply
   your 9:16 values and render stills of every shot, each at the moment its characters and props reach their
-  widest position, plus the end card; check that nothing
+  widest position, plus the end card; then go through every Signature item in every shot of every format and
+  confirm each is visible and whole (a sun hidden behind a city or a cropped crown fails), check that nothing
   defining the look leaves the frame, nothing is left unpainted, and key text stays out of the bands in
   review.md. Give only values you rendered; if you could not test one, say so. Untested format advice was the
   most common serious error in the pilot recipes.
