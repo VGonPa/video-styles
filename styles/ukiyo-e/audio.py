@@ -1,66 +1,179 @@
-# events.json → audio.wav (48 kHz stereo, 10 s)
-# sea ambience bed (surf swells), hyoshigi clappers, baren rubbing, koto plucks (in-scale), wooden tocks,
-# a rumbling rise, the crash (noise burst + taiko), falling spray hiss, the seal thud and a closing koto chord.
-import json, wave, numpy as np
+# events.json -> audio.wav (48 kHz stereo, 10 s), all synthesised with numpy.
+# A quiet print-shop and sea piece: wooden block knocks and baren rubs while the print is pulled,
+# koto-like plucked strings on a hirajoshi-flavoured scale, a rising sea swell, the crash with a
+# low drum, plover peeps, a paper rub for the second sheet, the seal press and a ringing bowl.
+import json
+import wave
+
+import numpy as np
+
 SR, DUR = 48000, 10.0
-N = int(SR * DUR); L = np.zeros(N); R = np.zeros(N)
-rs = np.random.default_rng(38)
-def add(sig, t, g=1.0, pan=0.0):
-    i = int(t * SR); n = min(len(sig), N - i)
-    if n > 0 and i >= 0:
-        L[i:i + n] += sig[:n] * g * np.sqrt(0.5 - pan / 2) * 1.414; R[i:i + n] += sig[:n] * g * np.sqrt(0.5 + pan / 2) * 1.414
-def band(x, lo, hi):
-    X = np.fft.rfft(x); f = np.fft.rfftfreq(len(x), 1 / SR); X[(f < lo) | (f > hi)] = 0; return np.fft.irfft(X, len(x))
-def tt(d): return np.arange(int(d * SR)) / SR
-def norm(x): return x / (np.abs(x).max() + 1e-9)
-nt = lambda m: 440 * 2 ** ((m - 69) / 12)
-def clack():
-    t = tt(0.25); s = sum(np.sin(2 * np.pi * f * t) * np.exp(-t / d) for f, d in [(1450, .03), (2380, .02), (3600, .012)])
-    return norm(s + 0.6 * band(rs.standard_normal(len(t)), 1500, 8000) * np.exp(-t / .004))
-def tock(f=520):
-    t = tt(0.2); return norm(np.sin(2 * np.pi * f * t) * np.exp(-t / .04) + .5 * np.sin(2 * np.pi * f * 2.7 * t) * np.exp(-t / .015) + .3 * band(rs.standard_normal(len(t)), 800, 5000) * np.exp(-t / .003))
+N = int(SR * DUR)
+L = np.zeros(N)
+R = np.zeros(N)
+noise = np.random.default_rng(183)
+BASE = 293.66  # D4
+
+
+def secs(d):
+    return np.arange(int(d * SR)) / SR
+
+
+def place(sig, t, gain=1.0, pan=0.0):
+    i = int(round(t * SR))
+    if i >= N:
+        return
+    n = min(len(sig), N - i)
+    gl, gr = np.cos((pan + 1) * np.pi / 4), np.sin((pan + 1) * np.pi / 4)
+    L[i:i + n] += sig[:n] * gain * gl * 1.414
+    R[i:i + n] += sig[:n] * gain * gr * 1.414
+
+
+def bandpass(x, lo, hi):
+    X = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / SR)
+    X[(f < lo) | (f > hi)] = 0
+    return np.fft.irfft(X, len(x))
+
+
+def norm(x):
+    return x / (np.abs(x).max() + 1e-9)
+
+
+def koto(n):
+    """Plucked string: decaying partials, brighter attack, a small press-bend after the pluck."""
+    f0 = BASE * 2 ** (n / 12)
+    t = secs(2.6)
+    bend = 1 + 0.012 * np.clip((t - 0.18) / 0.12, 0, 1) * np.exp(-np.maximum(t - 0.3, 0) / 0.5)
+    phase = 2 * np.pi * f0 * np.cumsum(bend) / SR
+    out = np.zeros_like(t)
+    for h in range(1, 9):
+        amp = (1 / h) * (1.0 if h % 2 else 0.7)
+        out += amp * np.sin(h * phase + h * 0.3) * np.exp(-t * (1.2 + 0.9 * h))
+    click = bandpass(noise.standard_normal(len(t)), 1500, 7000) * np.exp(-t / 0.006) * 0.25
+    return (out / 2.2 + click) * np.minimum(1, t / 0.002)
+
+
+def tok(f):
+    """Wooden block knock: two damped modes and a short noise tap."""
+    t = secs(0.35)
+    body = np.sin(2 * np.pi * f * t) * np.exp(-t / 0.05) + 0.5 * np.sin(2 * np.pi * f * 2.7 * t) * np.exp(-t / 0.025)
+    tap = bandpass(noise.standard_normal(len(t)), 800, 4000) * np.exp(-t / 0.008) * 0.6
+    return norm(body + tap)
+
+
 def rub(d):
-    t = tt(d); n = band(rs.standard_normal(len(t)), 600, 6000); am = 0.6 + 0.4 * np.abs(np.sin(2 * np.pi * 7 * t))
-    return norm(n) * am * np.sin(np.pi * t / d) ** 0.8
-def koto(f, d=2.2):
-    n = int(d * SR); P = int(SR / f); buf = rs.uniform(-1, 1, P) * np.hanning(P); out = np.zeros(n)
-    for i in range(n): out[i] = buf[i % P]; buf[i % P] = 0.5 * (buf[i % P] + buf[(i + 1) % P]) * 0.9965
-    t = np.arange(n) / SR; bend = 1 + 0.0 * t
-    return norm(out) * np.exp(-t / 0.9)
-def taiko():
-    t = tt(1.4); f = 95 * np.exp(-t * 3) + 55; ph = 2 * np.pi * np.cumsum(f) / SR
-    return norm(np.sin(ph) * np.exp(-t / .35) + .4 * band(rs.standard_normal(len(t)), 60, 900) * np.exp(-t / .05))
-def noise_sweep(d, lo0, hi0, lo1, hi1, env):
-    t = tt(d); x = rs.standard_normal(len(t)); out = np.zeros_like(x); K = 8; seglen = len(t) // K + 1
-    for k in range(K):
-        a, b = k * seglen, min(len(t), (k + 1) * seglen); u = k / (K - 1)
-        out[a:b] = band(x, lo0 + (lo1 - lo0) * u, hi0 + (hi1 - hi0) * u)[a:b]
-    return norm(out) * env(t / d)
-# bed: surf — band-limited noise with slow swells, stereo-decorrelated
-t = np.arange(N) / SR
-for ch, sh in ((L, 0), (R, 1.3)):
-    s = band(rs.standard_normal(N), 120, 2400); sw = 0.55 + 0.45 * np.sin(2 * np.pi * (t / 3.1) + sh) ** 2
-    ch += norm(s) * sw * 0.05
-low = band(rs.standard_normal(N), 30, 180); L += norm(low) * 0.05; R += norm(low) * 0.05
+    """The baren circling on the back of the sheet: soft papery noise with a slow wobble."""
+    t = secs(d)
+    x = norm(bandpass(noise.standard_normal(len(t)), 900, 6000))
+    wob = 0.55 + 0.45 * np.sin(2 * np.pi * 5.5 * t) ** 2
+    return x * wob * np.sin(np.pi * t / d) ** 1.2
+
+
+def sea_bed(d):
+    """Distant surf: low rumble breathing slowly, fading in and out."""
+    t = secs(d)
+    x = norm(bandpass(noise.standard_normal(len(t)), 60, 700))
+    breath = 0.6 + 0.4 * np.sin(2 * np.pi * 0.23 * t - 1.2)
+    fade = np.minimum(1, t / 0.8) * np.minimum(1, (d - t) / 1.2)
+    return x * breath * fade * 0.3
+
+
+def swell(d):
+    """The wave gathering: band-limited noise opening upward in brightness and level."""
+    t = secs(d)
+    x = noise.standard_normal(len(t))
+    lo = norm(bandpass(x, 80, 500))
+    hi = norm(bandpass(x, 500, 3500))
+    u = t / d
+    return (lo * (0.3 + 0.7 * u) + hi * u ** 2 * 0.8) * u ** 1.4
+
+
+def crash():
+    t = secs(1.8)
+    x = noise.standard_normal(len(t))
+    body = norm(bandpass(x, 100, 5000)) * np.exp(-t / 0.45)
+    low = norm(bandpass(x, 40, 220)) * np.exp(-t / 0.6)
+    return body * 0.8 + low * 0.7
+
+
+def taiko(f):
+    t = secs(1.2)
+    fr = f * (1 + 0.6 * np.exp(-t / 0.03))
+    skin = np.sin(2 * np.pi * np.cumsum(fr) / SR) * np.exp(-t / 0.32)
+    slap = bandpass(noise.standard_normal(len(t)), 200, 2000) * np.exp(-t / 0.015) * 0.5
+    return norm(skin + slap)
+
+
+def hiss(d):
+    t = secs(d)
+    return norm(bandpass(noise.standard_normal(len(t)), 3000, 11000)) * np.exp(-t / (d * 0.35)) * np.minimum(1, t / 0.03)
+
+
+def peep(f):
+    """Plover call: a short rising-falling whistle, two notes."""
+    out = np.zeros(int(0.32 * SR))
+    for k, (dt, a) in enumerate([(0.0, 1.0), (0.14, 0.7)]):
+        t = secs(0.11)
+        fr = f * (1 + 0.18 * np.sin(np.pi * t / 0.11)) * (1 - 0.05 * k)
+        s = np.sin(2 * np.pi * np.cumsum(fr) / SR) * np.sin(np.pi * t / 0.11) ** 2
+        i = int(dt * SR)
+        out[i:i + len(s)] += s * a
+    return out
+
+
+def tick(f):
+    t = secs(0.05)
+    return np.sin(2 * np.pi * f * t) * np.exp(-t / 0.008)
+
+
+def stamp():
+    """Seal pressed into paper: a dull wooden thock and a soft paper crush."""
+    t = secs(0.5)
+    thock = np.sin(2 * np.pi * 110 * t) * np.exp(-t / 0.06) + 0.4 * np.sin(2 * np.pi * 260 * t) * np.exp(-t / 0.03)
+    crush = bandpass(noise.standard_normal(len(t)), 400, 3000) * np.exp(-t / 0.04) * 0.5
+    return norm(thock + crush)
+
+
+def rin(f):
+    """Singing bowl: inharmonic partials with slow beating."""
+    t = secs(2.8)
+    out = np.zeros_like(t)
+    for ratio, amp, dec in [(1, 1, 1.6), (2.71, 0.5, 1.0), (5.12, 0.25, 0.6), (8.4, 0.12, 0.35)]:
+        out += amp * np.sin(2 * np.pi * f * ratio * t) * (1 + 0.15 * np.sin(2 * np.pi * 3.1 * t)) * np.exp(-t / dec)
+    return out / 1.9 * np.minimum(1, t / 0.004)
+
+
+GEN = {
+    'koto': lambda e: koto(e['n']),
+    'tok': lambda e: tok(e['f']),
+    'rub': lambda e: rub(e['d']),
+    'sea': lambda e: sea_bed(e['d']),
+    'swell': lambda e: swell(e['d']),
+    'crash': lambda e: crash(),
+    'taiko': lambda e: taiko(e['f']),
+    'hiss': lambda e: hiss(e['d']),
+    'peep': lambda e: peep(e['f']),
+    'tick': lambda e: tick(e['f']),
+    'stamp': lambda e: stamp(),
+    'rin': lambda e: rin(e['f']),
+}
+PAN = {'peep': lambda: noise.uniform(0.1, 0.6), 'koto': lambda: noise.uniform(-0.35, 0.2),
+       'tick': lambda: 0.45, 'crash': lambda: 0.15, 'rub': lambda: noise.uniform(-0.3, 0.3)}
+
 for e in json.load(open('events.json')):
-    k, te, v = e['k'], e['t'], e.get('v', 1.0)
-    if k == 'clack': add(clack(), te, 0.35 * v, -.2); add(clack(), te + 0.045, 0.22 * v, .2)
-    elif k == 'rub': add(rub(e['d']), te, 0.08, -.3 + .6 * (te > .5))
-    elif k == 'tock': add(tock(), te, 0.25 * v, -.4)
-    elif k == 'koto': add(koto(nt(e['n'])), te, 0.2, rs.uniform(-.35, .35))
-    elif k == 'rise': d = e['d']; add(noise_sweep(d, 40, 300, 100, 2500, lambda u: u ** 2.2), te, 0.32)
-    elif k == 'crash': add(noise_sweep(1.6, 200, 9000, 80, 2500, lambda u: np.exp(-u * 3.2) * np.minimum(1, u * 40)), te, 0.6)
-    elif k == 'taiko': add(taiko(), te, 0.55)
-    elif k == 'splash':
-        d = e['d']; add(noise_sweep(d, 2000, 11000, 3000, 12000, lambda u: np.exp(-u * 2.5)), te, 0.12, .2)
-        for i in range(14): add(tock(1800 + rs.uniform(0, 1500)) * 0.5, te + rs.uniform(0, d * .8), 0.03, rs.uniform(-.6, .6))
-    elif k == 'seal':
-        add(taiko() * 0.4 + np.pad(tock(260), (0, int(1.4 * SR) - int(0.2 * SR))), te, 0.35)
-    elif k == 'chord':
-        for i, m in enumerate([52, 57, 59, 64, 69]): add(koto(nt(m), 2.0), te + 0.1 + i * 0.07, 0.14, -.4 + i * .2)
-fi = int(0.2 * SR); fo = int(0.9 * SR)
-for ch in (L, R): ch[:fi] *= np.linspace(0, 1, fi); ch[-fo:] *= np.linspace(1, 0, fo) ** 1.5
-st = np.stack([L, R], 1); st = np.tanh(st * 1.5) * 0.8
-pcm = (np.clip(st, -1, 1) * 32767).astype(np.int16)
-w = wave.open('audio.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(pcm.tobytes()); w.close()
-print('audio.wav ok', np.abs(st).max().round(3))
+    pan = PAN.get(e['k'], lambda: 0.0)()
+    place(GEN[e['k']](e), e['t'], e.get('v', 0.5), pan)
+
+fade = int(0.8 * SR)
+for ch in (L, R):
+    ch[-fade:] *= np.linspace(1, 0, fade) ** 1.6
+mixd = np.stack([L, R], 1)
+mixd = np.tanh(mixd / (np.abs(mixd).max() + 1e-9) * 1.3) * 0.85
+pcm = (np.clip(mixd, -1, 1) * 32767).astype(np.int16)
+with wave.open('audio.wav', 'wb') as w:
+    w.setnchannels(2)
+    w.setsampwidth(2)
+    w.setframerate(SR)
+    w.writeframes(pcm.tobytes())
+print('audio.wav ok', round(float(np.abs(mixd).max()), 3))
