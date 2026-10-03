@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#f8f3e6}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── pop art · process inks on paper ─────────────────────────────────────────────────────────────
+// Every picture is printed, not painted: it is split into four ink plates. Cyan, magenta and yellow are
+// laid over the paper with `multiply`, so where two overprint you get the secondaries (C+Y green, M+Y
+// red, C+M violet) and nothing else; the black key goes on top. Each plate carries its region fills as
+// flat ink or as a Ben-Day screen (uniform dots on a diagonal lattice, never size-modulated), with the
+// regions above it knocked out, and each is laid down a few pixels out of register, so paper slivers
+// and overprint fringes show along the black outlines.
+// A frame is printed into four full-frame ink layers (one per plate). Every print (a cell of the grid, its
+// cherry, the title) first knocks its own shape out of each layer and then lays its ink, so prints occlude
+// each other plate by plate, exactly as overlapping sheets would. The plates are precomputed per palette at
+// the scales the camera holds at; only the zooms between holds and the dive print live, at screen scale.
+// The film: the plates of one ice-cream cone slam into register on the beats, the camera pulls back into a
+// Warhol-style grid of colour permutations, the grid re-inks in diagonal waves, the camera dives into one
+// scoop's dots, and `POP ART` is printed over the giant dots. Seeded; a frame depends only on t.
+const W = 1920, H = 1080, DUR = 10, PI = Math.PI, TAU = 2 * PI, SQ2 = Math.SQRT2;
+const cv = document.getElementById('c'), cx = cv.getContext('2d');
+const cl = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const mix = (a, b, k) => a + (b - a) * k;
+const span = (t, a, b) => cl((t - a) / (b - a));
+const sm = k => (k = cl(k), k * k * (3 - 2 * k));
+const easeOut = (k, p = 3) => 1 - (1 - cl(k)) ** p;
+const easeInOut = k => (k = cl(k), k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
+const backOut = (k, o = 1.6) => { k = cl(k) - 1; return 1 + k * k * ((o + 1) * k + o); };   // overshoots, then settles at 1
+function rng(seed) {                             // xorshift-multiply, seeded
+  let s = (seed * 2654435761 + 0x5bd1e995) >>> 0 || 1;
+  return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return (Math.imul(s, 0x2c1b3c6d) >>> 0) / 4294967296; };
+}
+const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(2, Math.ceil(w)); c.height = Math.max(2, Math.ceil(h)); return c; };
+// affine matrices [a, b, c, d, e, f]; mul(A, B) applies B first
+const mul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
+const Tr = (x, y) => [1, 0, 0, 1, x, y];
+const Sc = (x, y = x) => [x, 0, 0, y, 0, 0];
+const Ro = a => [Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), 0, 0];
+const chain = (...Ms) => Ms.reduce(mul);
+const setT = (g, M, o = [0, 0]) => g.setTransform(M[0], M[1], M[2], M[3], M[4] + o[0], M[5] + o[1]);
+
+// ── process inks ──
+const PAPER = '#f8f3e6';
+const INK = { c: '#00a6e6', m: '#e6007e', y: '#ffe400', k: '#141414' };
+const CMY = ['c', 'm', 'y'];
+const SOLID = 'solid';
+
+// ── Ben-Day screens ──
+// A screen is { ph: [u, v] lattice phase in tile units }; its pitch p (nearest-neighbour distance, cell units)
+// is chosen by whoever prints it, and every dot has diameter 0.6·p. The lattice is diagonal: a square tile of
+// side p·√2 with a dot on each corner and one in the middle, rasterised at the pixel size it lands at (rounded
+// to whole pixels); the pattern matrix anchors the lattice to cell space, so every scale of a plate shows the
+// same dots.
+const DOT_R = 0.3;
+const TILES = new Map();
+function tile(ink, side) {
+  const key = ink + '|' + side;
+  let pat = TILES.get(key);
+  if (!pat) {
+    const c = canvas(side, side), g = c.getContext('2d'), rad = DOT_R * side / SQ2;
+    g.fillStyle = INK[ink]; g.beginPath();
+    for (const [x, y] of [[0, 0], [side, 0], [0, side], [side, side], [side / 2, side / 2]]) { g.moveTo(x + rad, y); g.arc(x, y, rad, 0, TAU); }
+    g.fill();
+    pat = cx.createPattern(c, 'repeat'); TILES.set(key, pat);
+  }
+  return pat;
+}
+// fill `path` (cell units, under g's transform of screen scale s) with ink as tex: SOLID or a screen of pitch p
+function inkFill(g, path, ink, tex, s, p, rule) {
+  if (!tex) return;
+  if (tex === SOLID) { g.fillStyle = INK[ink]; g.fill(path, rule); return; }
+  const A = p * SQ2, side = Math.max(4, Math.round(A * s)), pat = tile(ink, side);
+  pat.setTransform(new DOMMatrix([A / side, 0, 0, A / side, tex.ph[0] * A, tex.ph[1] * A]));
+  g.fillStyle = pat; g.fill(path, rule);
+}
+function knock(g, path, rule) {
+  const a = g.globalAlpha; g.globalAlpha = 1;
+  g.globalCompositeOperation = 'destination-out'; g.fillStyle = '#000'; g.fill(path, rule);
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = a;
+}
+
+// ── a design is a picture split into regions (cell units), back to front ──
+// regions: [{ id, path, clip?, rule? }] — the first is the print's whole sheet (it knocks out what lies under the
+// print); each later region knocks out the ones beneath it on every plate before laying its own ink, so overprint
+// only happens where it is meant to. knock: shapes cut out of all colour plates (glossy highlights: bare paper).
+// key(g, s): draws the black plate. A palette maps region id → { c, m, y } textures (null, SOLID or a screen).
+function drawPlate(g, ink, D, pal, s, p, dens = 1) {
+  for (const rg of D.regions) {
+    const tex = pal[rg.id] ? pal[rg.id][ink] : null;
+    if (rg.clip) { g.save(); g.clip(rg.clip); }
+    knock(g, rg.path, rg.rule);
+    g.globalAlpha = dens; inkFill(g, rg.path, ink, tex, s, p, rg.rule); g.globalAlpha = 1;
+    if (rg.clip) g.restore();
+  }
+  for (const k of D.knock) knock(g, k);
+}
+
+// ── the subject: one generic diner ice-cream cone (cell units: the print is CW × CH, origin at its centre) ──
+const CW = 906, CH = 1020, PAD = 24, OY = 18;
+const BODY = {}, CHERRY = {};
+const CH_POS = [22, -317], CHR = 66;             // the cherry sits in the top of the scoop
+function buildDesign() {
+  const P = () => new Path2D();
+  const cell = P(); cell.rect(-CW / 2, -CH / 2, CW, CH);
+  // the waffle cone, with a shaded strip down its right side
+  const top = 30 + OY, tip = 448 + OY;
+  const cone = P(); cone.moveTo(-200, top); cone.lineTo(-13, tip - 22); cone.quadraticCurveTo(0, tip + 6, 13, tip - 22); cone.lineTo(200, top); cone.closePath();
+  const coneSh = P(); coneSh.moveTo(78, top - 30); coneSh.lineTo(320, top - 30); coneSh.lineTo(320, tip + 60); coneSh.lineTo(-4, tip + 60); coneSh.closePath();
+  const hatch = P(); {                           // the waffle: two families of steep diagonals
+    const a = 0.62, sp = 58;
+    for (const sg of [-1, 1]) {
+      const vx = sg * Math.sin(a), vy = Math.cos(a), nx = Math.cos(a), ny = -sg * Math.sin(a);
+      for (let k = -9; k <= 9; k++) { const px = nx * k * sp, py = 250 + ny * k * sp; hatch.moveTo(px - vx * 600, py - vy * 600); hatch.lineTo(px + vx * 600, py + vy * 600); }
+    }
+  }
+  // the scoop: a round top and a drippy lower rim (scallops and four drips of different lengths)
+  const cy = -105 + OY, rx = 265, ry = 215, b = 44 + OY;
+  const scoop = P(); let X = 236;
+  scoop.moveTo(-rx, cy); scoop.ellipse(0, cy, rx, ry, 0, PI, TAU);
+  scoop.bezierCurveTo(rx + 6, cy + 70, rx - 4, b - 22, X, b);
+  const scal = (x1, dep) => { scoop.quadraticCurveTo((X + x1) / 2, b + dep, x1, b); X = x1; };
+  const drip = (xc, w, len) => {
+    const rb = w * 0.56, x1 = xc + w / 2, x0 = xc - w / 2;
+    scoop.lineTo(x1, b);
+    scoop.bezierCurveTo(x1 - w * 0.1, b + len * 0.4, xc + rb, b + len - rb * 1.9, xc + rb, b + len);
+    scoop.arc(xc, b + len, rb, 0, PI);
+    scoop.bezierCurveTo(xc - rb, b + len - rb * 1.9, x0 + w * 0.1, b + len * 0.4, x0, b);
+    X = x0;
+  };
+  scal(198, 26); drip(166, 40, 105); scal(100, 24); drip(80, 30, 50); scal(20, 22); drip(-16, 58, 168);
+  scal(-95, 26); scal(-132, 20); drip(-154, 40, 84); scal(-220, 24);
+  scoop.bezierCurveTo(-rx + 4, b - 22, -rx - 6, cy + 70, -rx, cy); scoop.closePath();
+  const shade = P(); shade.rect(-700, -800, 1400, 1600); shade.moveTo(-50 + 275, cy - 50); shade.ellipse(-50, cy - 50, 275, 258, 0, 0, TAU);
+  const hl1 = P(); hl1.moveTo(-212, -140 + OY); hl1.quadraticCurveTo(-222, -290 + OY, -88, -290 + OY); hl1.quadraticCurveTo(-176, -246 + OY, -212, -140 + OY); hl1.closePath();
+  const hl2 = P(); hl2.moveTo(-50 + 14, -255 + OY); hl2.arc(-50, -255 + OY, 14, 0, TAU);
+  const folds = P(); folds.moveTo(178, -168 + OY); folds.quadraticCurveTo(226, -110 + OY, 218, -40 + OY);
+  Object.assign(BODY, {
+    cell, cone, scoop, hatch, folds, hl: [hl1, hl2],
+    regions: [{ id: 'bg', path: cell }, { id: 'cone', path: cone }, { id: 'coneSh', path: coneSh, clip: cone },
+              { id: 'scoop', path: scoop }, { id: 'shade', path: shade, clip: scoop, rule: 'evenodd' }],
+    knock: [hl1, hl2],
+    key(g, s) {
+      const lw = (u, px) => Math.max(u, px / s);
+      g.save(); g.lineJoin = 'round'; g.lineCap = 'round'; g.strokeStyle = g.fillStyle = INK.k;
+      g.save(); g.clip(cone);                    // inside the cone: the waffle, and the drips' black cast shadow
+      g.lineWidth = lw(6.5, 1.3); g.stroke(hatch);
+      g.translate(0, 18); g.fill(scoop); g.restore();
+      brush(g, cone, lw(10.5, 2.4), s);
+      knock(g, scoop);                          // the scoop lies over the cone: clear what it covers, then ink it
+      brush(g, scoop, lw(10.5, 2.4), s);
+      g.lineWidth = lw(7.5, 1.5); g.stroke(folds);
+      g.lineWidth = lw(5.5, 1.2); g.stroke(hl1); g.stroke(hl2);
+      g.restore();
+    },
+  });
+  // the cherry, in its own coordinates (centre at the origin), so it can squash and hop off the scoop
+  const ball = P(); ball.moveTo(CHR, 0); ball.arc(0, 0, CHR, 0, TAU);
+  const cres = P(); cres.rect(-300, -300, 600, 600); cres.moveTo(-12 + 64, -14); cres.arc(-12, -14, 64, 0, TAU);
+  const stem = P(); stem.moveTo(8, -58); stem.bezierCurveTo(14, -104, 46, -132, 86, -140);
+  const c1 = P(); c1.ellipse(-24, -27, 19, 11, -0.6, 0, TAU);
+  const c2 = P(); c2.moveTo(-43 + 6, 2); c2.arc(-43, 2, 6, 0, TAU);
+  Object.assign(CHERRY, {
+    ball, regions: [{ id: 'cherry', path: ball }], knock: [c1, c2],
+    key(g, s) {
+      const lw = (u, px) => Math.max(u, px / s);
+      g.save(); g.lineJoin = 'round'; g.lineCap = 'round'; g.strokeStyle = g.fillStyle = INK.k;
+      g.save(); g.clip(ball); g.fill(cres, 'evenodd'); g.restore();
+      g.lineWidth = lw(14, 2.2); g.stroke(stem);
+      brush(g, ball, lw(10, 2.2), s);
+      g.lineWidth = lw(5, 1.1); g.stroke(c1); g.stroke(c2);
+      g.restore();
+    },
+  });
+}
+// a brush-weighted outline: heavier on the shadow side (down-right). At hero scale the light side is a touch
+// leaner, so the plates' few px of misregistration clear it; the grid's small prints keep the full weight.
+function brush(g, path, w, s) {
+  const d = Math.max(2.6, 0.8 / s);
+  g.lineWidth = w * mix(1, 0.74, sm((s - 0.55) / 0.3)); g.stroke(path);
+  g.translate(d, d * 1.15); g.lineWidth = w * 0.8; g.stroke(path); g.translate(-d, -d * 1.15);
+}
+
+// ── colour permutations ──
+// A palette gives each region a ground (inks laid solid; '' = paper) and an optional Ben-Day dot ink. Six schemes
+// rotate three roles through the process inks (6 permutations each), so cells differ in which ink is the
+// background, the dot field, the scoop, the cone and the cherry, and every colour is a process ink or an overprint.
+const PH = { bg: [0, 0], scoop: [0.5, 0], shade: [0.25, 0.5], cone: [0.5, 0.5], coneSh: [0.75, 0.25] };
+const tex = (ground, dots, ph) => { const o = {}; for (const i of CMY) o[i] = ground.includes(i) ? SOLID : dots === i ? { ph } : null; return o; };
+const SCHEMES = [
+  (A, B, C) => ({ bg: ['', A], scoop: [B, ''], shade: [B, A], cone: [C, ''], coneSh: [C, A], cherry: A + C }),
+  (A, B, C) => ({ bg: [A, ''], scoop: ['', B], shade: [B, ''], cone: [C, ''], coneSh: [C, B], cherry: A + B }),
+  (A, B, C) => ({ bg: [A + B, ''], scoop: [C, ''], shade: [C, A], cone: [A, ''], coneSh: [A, C], cherry: B + C }),
+  (A, B, C) => ({ bg: [A, B], scoop: [C, ''], shade: [C, B], cone: [B, ''], coneSh: [B, A], cherry: A + C }),
+  (A, B, C) => ({ bg: [B + C, ''], scoop: [A + B, ''], shade: [A + B, C], cone: [C, ''], coneSh: [C, A], cherry: A + C }),
+  (A, B, C) => ({ bg: [A + C, ''], scoop: ['', B], shade: [B, ''], cone: [A, ''], coneSh: [A, B], cherry: B + C }),
+];
+const PERMS = [['m', 'c', 'y'], ['c', 'm', 'y'], ['y', 'm', 'c'], ['m', 'y', 'c'], ['c', 'y', 'm'], ['y', 'c', 'm']];
+function makePal(d) {
+  const p = { cherryInk: d.cherry, cherry: tex(d.cherry, '', [0, 0]) };
+  for (const id of ['bg', 'scoop', 'shade', 'cone', 'coneSh']) p[id] = tex(d[id][0], d[id][1], PH[id]);
+  return p;
+}
+const isPinkDotScoop = p => !p.scoop.c && !p.scoop.y && p.scoop.m && p.scoop.m !== SOLID;
+let POOL = [];
+function buildPool() {
+  const all = [];
+  for (const sch of SCHEMES) for (const pm of PERMS) all.push(makePal(sch(...pm)));
+  const hero = all.shift(), r = rng(77);           // scheme 0 on (m, c, y): pink dots, cyan scoop, yellow cone, red cherry
+  for (let i = all.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [all[i], all[j]] = [all[j], all[i]]; }
+  POOL = [hero, ...all.slice(0, 31)];
+  // the hero cell ends the pulse on POOL[31]: give it a pink-dot scoop, so the dive lands in magenta dots on paper
+  if (!isPinkDotScoop(POOL[31])) {
+    let j = POOL.findIndex((p, i) => i > 0 && i < 31 && isPinkDotScoop(p));
+    if (j < 0) { POOL[31] = all.slice(31).find(isPinkDotScoop); } else [POOL[31], POOL[j]] = [POOL[j], POOL[31]];
+  }
+}
+
+// ── precomputed plates ──
+// A plate canvas is centred on the design's origin and covers it plus PAD; blit() draws it at its exact pixel size
+// when the matrix scale equals the plate scale.
+const PITCH_HERO = 22.8, PITCH_GRID = 33;          // dot pitch, cell units: 21 px on the hero, 8.5 px in the 8 × 4 grid
+const CACHE = new Map();
+function plateSet(D, pal, s, p, half, tag) {
+  const key = tag + '|' + s;
+  let P = CACHE.get(key);
+  if (!P) {
+    P = {};
+    for (const ink of [...CMY, 'k']) {
+      const c = canvas(2 * Math.ceil(half[0] * s), 2 * Math.ceil(half[1] * s)), g = c.getContext('2d');
+      g.setTransform(s, 0, 0, s, c.width / 2, c.height / 2);
+      if (ink === 'k') D.key(g, s); else drawPlate(g, ink, D, pal, s, p);
+      P[ink] = c;
+    }
+    CACHE.set(key, P);
+  }
+  return P;
+}
+const BODY_HALF = [CW / 2 + PAD, CH / 2 + PAD], CHERRY_HALF = [130, 170];
+const bodySet = (pi, s, p) => plateSet(BODY, POOL[pi], s, p, BODY_HALF, 'b' + pi);
+const cherrySet = (pi, s) => plateSet(CHERRY, POOL[pi], s, PITCH_HERO, CHERRY_HALF, 'ch' + POOL[pi].cherryInk);
+const blit = (g, c, s) => g.drawImage(c, -c.width / 2 / s, -c.height / 2 / s, c.width / s, c.height / s);
+
+// ── dry streaks: where the squeegee ran starved, one pass across the whole cell (clipped hard at its edges, at the
+// height of the scoop or the cone) in which the plate printed broken: crisp torn edges and crisp drag-shaped holes
+// leaving roughly half the ink. A mask, cut out of one ink layer of the cell; precomputed, one drawImage a frame.
+function makeStreak(seed) {
+  const r = rng(seed), k = 0.5, c = canvas(CW * k, CH * k), g = c.getContext('2d');
+  g.scale(k, k); g.translate(CW / 2, CH / 2);
+  const yc = r() < 0.55 ? mix(-250, -50, r()) + OY : mix(100, 320, r()) + OY;   // across the scoop, or across the cone
+  const h = CH * (0.08 + 0.07 * r()), tilt = (r() - 0.5) * 0.05, xa = -CW / 2 - 20, xb = CW / 2 + 20;
+  const edge = side => {                          // a torn edge: straight runs between jags 40–110 units apart, plus fine tooth
+    const pts = []; let x = xa;
+    while (x < xb) { pts.push([x, side * h / 2 * (1 + 0.4 * (r() - 0.5))]); x += 40 + r() * 70; }
+    pts.push([xb, side * h / 2]);
+    const out = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], m = Math.max(1, Math.round((x1 - x0) / 9));
+      for (let j = 0; j < m; j++) { const u = j / m; out.push([mix(x0, x1, u), mix(y0, y1, u) + (r() - 0.5) * 7]); }
+    }
+    out.push(pts[pts.length - 1]);
+    return out.map(([x, y]) => [x, yc + tilt * x + y]);
+  };
+  const top = edge(-1), bot = edge(1).reverse(), band = new Path2D();
+  top.forEach(([x, y], i) => (i ? band.lineTo(x, y) : band.moveTo(x, y))); bot.forEach(([x, y]) => band.lineTo(x, y)); band.closePath();
+  g.save(); g.clip(band); g.fillStyle = '#000'; g.globalAlpha = 0.8;
+  const ph = r() * TAU, dens = x => 0.75 + 0.25 * Math.sin(ph + x / 85);   // patchy along the pass, never fading out
+  const holes = Math.round(0.42 * (xb - xa) * h / (PI * 5 * 12.5));        // drag-shaped holes over about a third of the pass
+  for (let i = 0; i < holes; i++) {
+    const x = mix(xa, xb, r()); if (r() > dens(x)) continue;
+    const y = yc + tilt * x + (r() - 0.5) * h * 1.1, ry = 3 + r() * 4, rx = ry * (1.5 + r() * 2);
+    g.beginPath(); g.ellipse(x, y, rx, ry, tilt + (r() - 0.5) * 0.1, 0, TAU); g.fill();
+  }
+  g.globalAlpha = 0.08; g.fill(band);             // and a slight overall thinning of what ink is left
+  g.restore();
+  return c;
+}
+
+// ── the paper: warm stock with a faint fibre, one static overlay multiplied over the whole frame ──
+let FIBRE = null;
+function makePaper() {
+  const c = canvas(W, H), g = c.getContext('2d'), r = rng(146);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.lineCap = 'round';
+  for (let i = 0; i < 5200; i++) {               // fibres: short soft curls, a few lighter than the stock
+    const x = r() * W, y = r() * H, a = r() * TAU, l = 6 + r() * 26, dark = r() < 0.8;
+    g.strokeStyle = dark ? `rgba(150,128,96,${(0.035 + r() * 0.05).toFixed(3)})` : 'rgba(255,255,255,0.5)';
+    g.lineWidth = 0.6 + r() * 1.1;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a + 0.8) * l * 0.6, y + Math.sin(a + 0.8) * l * 0.6, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+  }
+  const im = g.getImageData(0, 0, W, H), d = im.data;  // a fine tooth
+  for (let i = 0; i < d.length; i += 4) { const n = (r() - 0.5) * 9; d[i] += n; d[i + 1] += n; d[i + 2] += n * 1.1; }
+  g.putImageData(im, 0, 0);
+  FIBRE = c;
+}
+
+// ── the four ink layers a frame is printed into ──
+const LAY = {};
+function clearLayers() { for (const ink of [...CMY, 'k']) { const g = LAY[ink].g; g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, W, H); } }
+function pressLayers() {
+  cx.setTransform(1, 0, 0, 1, 0, 0); cx.globalAlpha = 1;
+  cx.globalCompositeOperation = 'source-over'; cx.fillStyle = PAPER; cx.fillRect(0, 0, W, H);
+  cx.globalCompositeOperation = 'multiply'; for (const ink of CMY) cx.drawImage(LAY[ink].c, 0, 0);
+  cx.globalCompositeOperation = 'source-over'; cx.drawImage(LAY.k.c, 0, 0);
+}
+
+// ── timing: 120 BPM, beats at 0.25 + 0.5k. Every cue lives in these tables; window.events() reads CUES ──
+const BEATS = Array.from({ length: 20 }, (_, k) => 0.25 + 0.5 * k);
+// the hero's plates, one per beat: impact time, where the plate drops in from (screen px) and its tilt
+const SLAM = { y: { tb: 0.25, from: [-80, -150], rot: -0.05 }, m: { tb: 0.75, from: [160, 50], rot: 0.045 },
+               c: { tb: 1.25, from: [-130, 120], rot: 0.035 }, k: { tb: 1.75, from: [10, -110], rot: -0.02 } };
+const HERO_OFF = { c: [5, -5], m: [-3, 4], y: [-7, 2] };    // where each colour plate stays, relative to the key (px):
+                                                             // cyan up-right, yellow left, so slivers clear the outline's thin side
+const KICKS = [[0.25, 3, 0.004], [0.75, 3, 0.004], [1.25, 3, 0.004], [1.75, 10, 0.014]];   // t, drop px, zoom
+// the grid: 8 × 4 cells on a 240 × 270 lattice at zoom 1 (thin paper gutters), entering in pop order
+const PX = 240, PY = 270, CS = 262 / CH;          // CS: a cell's print scale at zoom 1
+const S_H = 0.93, Z_H = S_H / CS;                 // the hero's print scale and zoom
+const BLOCK = [[3, 1], [4, 1], [3, 2], [4, 2], [2, 1], [5, 1], [2, 2], [5, 2]];
+const CAMK = [[0, Z_H, 840, 405], [2.42, Z_H, 840, 405], [2.75, 3.3, 960, 405], [3.45, 3.3, 960, 405],
+              [3.76, 2, 960, 540], [4.42, 2, 960, 540], [4.74, 1, 960, 540]];
+const RIPPLES = [[5.25, 'tl', 13], [5.75, 'tr', 7], [6.25, 'tl', 19]];   // beat, direction, palette shift
+const DV = { t0: 6.6, t1: 6.7, t2: 7.3, za: 0.94, ze: 27, p: [0, -62] };   // the dive into cell 0's scoop
+const SC = { S2: 3.3 * CS, S8: 2 * CS, S32: CS };
+let CELLS = [], STREAKS = [], CUES = [];
+
+function buildCells() {
+  const r = rng(21), rest = [];
+  for (let row = 0; row < 4; row++) for (let col = 0; col < 8; col++)
+    if (!BLOCK.some(([c, w]) => c === col && w === row)) rest.push([col, row, Math.hypot((col + 0.5) * PX - 960, ((row + 0.5) * PY - 540) * 1.4) + r() * 120]);
+  rest.sort((a, b) => a[2] - b[2]);
+  const pos = [...BLOCK, ...rest.map(([c, w]) => [c, w])];
+  CELLS = pos.map(([col, row], i) => {
+    const cell = { i, col, row, wx: (col + 0.5) * PX, wy: (row + 0.5) * PY, swaps: [], hops: [] };
+    cell.t0 = i === 0 ? -1 : i === 1 ? 2.65 : i < 8 ? 3.65 + 0.04 * (i - 2) : 4.65 + 0.012 * (i - 8);
+    cell.spin = (r() - 0.5) * 0.3;
+    if (i === 0) { cell.off = HERO_OFF; cell.dens = { c: 1, m: 1, y: 1 }; cell.streak = null; }
+    else {
+      cell.off = {}; cell.dens = {};
+      for (const k of CMY) { const a = r() * TAU, m = 3 + r() * 4; cell.off[k] = [Math.cos(a) * m, Math.sin(a) * m]; cell.dens[k] = 0.95 + r() * 0.05; }
+      if (r() < 0.5) cell.dens[CMY[Math.floor(r() * 3)]] = 0.8 + r() * 0.08;      // a lighter pull
+      cell.streak = r() < 0.55 ? { s: Math.floor(r() * STREAKS.length), ink: CMY[Math.floor(r() * 3)], a: 0.75 + r() * 0.2 } : null;
+    }
+    // palettes: cell i starts on POOL[i]; the 8-cell block re-inks at 4.25 onto POOL[24 + i]; then three ripples
+    let cur = i;
+    if (i < 8) { const ts = 4.25 + 0.04 * ((col - 2) + (row - 1)); cur = 24 + i; cell.swaps.push([ts, cur]); cell.hops.push([ts, 0.65]); }
+    cell.pal0 = i;
+    for (const [tb, dir, sh] of RIPPLES) {
+      const d = dir === 'tl' ? col + row : (7 - col) + row, ts = tb + 0.028 * d;
+      cur = (cur + sh) % 32; cell.swaps.push([ts, cur]); cell.hops.push([ts, 0.65]);
+    }
+    if (i === 0) cell.hops.unshift([2.0, 1]);                      // the registration bounce, landing on 2.25
+    if (i < 2) cell.hops.push([3.0, 0.8]);                         // both cells hop onto 3.25
+    cell.hops.sort((a, b) => a[0] - b[0]);
+    return cell;
+  });
+}
+
+// ── camera ──
+// Holds between moves (static frames compress well); each pull-back lands on the beat its new cells pop on.
+function camera(t) {
+  let Z, x, y;
+  if (t < DV.t0) {
+    let i = CAMK.length - 1; while (t < CAMK[i][0]) i--;
+    const a = CAMK[i], b = CAMK[i + 1];
+    if (!b) [Z, x, y] = [a[1], a[2], a[3]];
+    else { const e = easeInOut(span(t, a[0], b[0])); Z = Math.exp(mix(Math.log(a[1]), Math.log(b[1]), e)); x = mix(a[2], b[2], e); y = mix(a[3], b[3], e); }
+  } else {                                       // the dive: zoom about a point in cell 0's scoop and bring it to centre
+    const P = divePoint(); let S;
+    if (t < DV.t1) { Z = mix(1, DV.za, easeOut(span(t, DV.t0, DV.t1), 2)); S = P; }
+    else { const k = span(t, DV.t1, DV.t2), e = easeInOut(k); Z = Math.exp(mix(Math.log(DV.za), Math.log(DV.ze), e)); const f = easeInOut(cl(k * 1.3)); S = [mix(P[0], 960, f), mix(P[1], 540, f)]; }
+    x = P[0] - (S[0] - 960) / Z; y = P[1] - (S[1] - 540) / Z;
+  }
+  let dy = 0, dz = 0;                              // impact kicks: the frame jolts down and in, then rings out
+  for (const [tk, a, z] of KICKS) { const u = t - tk; if (u >= 0 && u < 0.4) { const e = Math.exp(-u / 0.06); dy += a * e * Math.cos(TAU * u / 0.15); dz += z * e; } }
+  const G = chain(Tr(960, 540 + dy), Sc(1 + dz), Tr(-960, -540));
+  return { Z, x, y, G };
+}
+const divePoint = () => [CELLS[0].wx + DV.p[0] * CS, CELLS[0].wy + DV.p[1] * CS];
+
+// ── a cell's state at t: pop-in, rotation, palette, squash, cherry hop ──
+const REST = { lift: 0, sx: 1, sy: 1 };
+function hop(u, amp) {                           // lands at u = 0.25
+  if (u < 0.08) { const k = sm(u / 0.08); return { lift: 0, sx: 1 + 0.16 * k * amp, sy: 1 - 0.22 * k * amp }; }
+  if (u < 0.25) { const k = (u - 0.08) / 0.17, st = Math.abs(1 - 2 * k); return { lift: -70 * amp * 4 * k * (1 - k), sx: 1 - 0.1 * amp * st, sy: 1 + 0.16 * amp * st }; }
+  const k = cl((u - 0.25) / 0.2), q = Math.exp(-k * 3) * Math.cos(k * 9) * (1 - k);
+  return { lift: 0, sx: 1 + 0.12 * amp * q, sy: 1 - 0.16 * amp * q };
+}
+function squash(u) {                             // a re-ink: the cell compresses into the swap, then rings out
+  if (u < -0.08 || u > 0.32) return 0;
+  if (u < 0) return 0.1 * sm((u + 0.08) / 0.08);
+  return 0.1 * Math.exp(-u / 0.08) * Math.cos(TAU * u / 0.26) * (1 - u / 0.32);
+}
+function cellState(cell, t) {
+  if (t < cell.t0) return null;
+  const k = cell.t0 < 0 ? 1 : cl((t - cell.t0) / 0.34), pop = cell.t0 < 0 ? 1 : backOut(k, 2.0);
+  if (pop < 0.01) return null;
+  let pal = cell.pal0, q = 0, ch = REST;
+  for (const [ts, pi] of cell.swaps) { if (t >= ts) pal = pi; q += squash(t - ts); }
+  for (const [th, amp] of cell.hops) { const u = t - th; if (u >= 0 && u <= 0.45) ch = hop(u, amp); }
+  return { pop, rot: (1 - easeOut(k, 2)) * cell.spin, pal, sqx: 1 + 0.45 * q, sqy: 1 - q, ch, offMul: 1 + 2.2 * (1 - sm(k)) };
+}
+const offScale = s => s <= S_H ? 0.45 + 0.55 * s / S_H : Math.sqrt(s / S_H);
+const cherryLocal = ch => chain(Tr(CH_POS[0], CH_POS[1] + CHR + ch.lift), Sc(ch.sx, ch.sy), Tr(0, -CHR));
+function cellMatrix(cell, cam, st) {
+  const sb = cam.Z * CS, x = (cell.wx - cam.x) * cam.Z + 960, y = (cell.wy - cam.y) * cam.Z + 540;
+  return chain(cam.G, Tr(x, y), Ro(st.rot), Sc(sb * st.pop), Tr(0, CH / 2), Sc(st.sqx, st.sqy), Tr(0, -CH / 2));
+}
+
+// ── printing a cell into the layers ──
+function drawCell(cell, t, cam) {
+  const st = cellState(cell, t); if (!st) return;
+  const sb = cam.Z * CS, M = cellMatrix(cell, cam, st), sNow = sb * st.pop;
+  const rx = (CW / 2 + PAD) * sNow * 1.3, ry = (CH / 2 + PAD) * sNow * 1.3;
+  if (M[4] + rx < 0 || M[4] - rx > W || M[5] + ry < 0 || M[5] - ry > H) return;
+  const pal = POOL[st.pal], live = t >= DV.t0 || (sb < 0.4 && cam.Z > 1.0005);
+  const p = t >= 4.74 ? PITCH_GRID : Math.max(PITCH_HERO, 8.5 / sb);
+  const sK = sb > 0.7 ? SC.S2 : sb > 0.4 ? SC.S8 : SC.S32, pK = sK === SC.S32 ? PITCH_GRID : PITCH_HERO;
+  const BS = live ? null : bodySet(st.pal, sK, pK), CSET = live ? null : cherrySet(st.pal, sK);
+  const MC = mul(M, cherryLocal(st.ch)), om = offScale(sb) * st.offMul;
+  for (const ink of CMY) {
+    const g = LAY[ink].g, o = [cell.off[ink][0] * om, cell.off[ink][1] * om], d = cell.dens[ink];
+    setT(g, M, o);
+    if (live) drawPlate(g, ink, BODY, pal, sNow, p, d);
+    else { knock(g, BODY.cell); g.globalAlpha = d; blit(g, BS[ink], sK); g.globalAlpha = 1; }
+    const sa = cell.streak && cell.streak.ink === ink ? cell.streak.a * (t < DV.t0 ? 1 : cl(1 - (cam.Z - 1) / 0.5)) : 0;   // no magnified streaks in the dive
+    if (sa > 0) {
+      g.globalCompositeOperation = 'destination-out'; g.globalAlpha = sa;
+      g.drawImage(STREAKS[cell.streak.s], -CW / 2, -CH / 2, CW, CH);
+      g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+    }
+    setT(g, MC, o);
+    if (live) drawPlate(g, ink, CHERRY, pal, sNow, p, d);
+    else { knock(g, CHERRY.ball); g.globalAlpha = d; blit(g, CSET[ink], sK); g.globalAlpha = 1; }
+  }
+  const g = LAY.k.g;
+  setT(g, M); knock(g, BODY.cell);
+  if (live) BODY.key(g, sNow); else blit(g, BS.k, sK);
+  setT(g, MC); knock(g, CHERRY.ball);
+  if (live) CHERRY.key(g, sNow); else blit(g, CSET.k, sK);
+}
+
+// ── shot 1: the hero's plates slam into register ──
+// Before the press run the sheet already carries its background screen (pink dots) with the subject left bare;
+// it bleeds past the frame until the pull-back crops it to its cell. Each plate hovers in, oversized and tilted
+// (anticipation), drops onto the paper on its beat, sinks a hair and settles a few px out of register.
+const HERO = {};
+function slam(ink, t) {
+  const S = SLAM[ink], u = t - S.tb;
+  if (u < -0.2) return null;
+  let sc, f, a = 1;
+  if (u < -0.1) { const k = (u + 0.2) / 0.1; sc = 1.3 + 0.06 * easeOut(k); f = 1; a = sm(k / 0.6); }
+  else if (u < 0) { const e = ((u + 0.1) / 0.1) ** 2.2; sc = mix(1.36, 1, e); f = 1 - e; }
+  else { sc = u < 0.32 ? 1 - 0.035 * Math.exp(-u / 0.07) * Math.sin(TAU * u / 0.16) : 1; f = 0; }
+  return { A: chain(Tr(960 + S.from[0] * f, 540 + S.from[1] * f), Ro(S.rot * f), Sc(sc), Tr(-960, -540)), a };
+}
+function drawHero(t, cam) {
+  const cell = CELLS[0], st = cellState(cell, t), sb = cam.Z * CS, M = cellMatrix(cell, cam, st), MCl = cherryLocal(st.ch), om = offScale(sb);
+  // the bleed is cropped to the cell as the camera starts to pull back
+  const e = easeInOut(span(t, 2.4, 2.62)), x0 = M[4] - CW / 2 * sb, y0 = M[5] - CH / 2 * sb;
+  const clip = [mix(-60, x0, e), mix(-60, y0, e), mix(W + 120, CW * sb, e), mix(H + 120, CH * sb, e)];
+  for (const ink of CMY) {
+    const g = LAY[ink].g, o = [HERO_OFF[ink][0] * om, HERO_OFF[ink][1] * om];
+    if (HERO.bleed[ink]) {
+      g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.beginPath(); g.rect(...clip); g.clip();
+      setT(g, M, o); blit(g, HERO.bleed[ink], S_H); g.restore();
+    }
+    const sl = slam(ink, t), Mi = sl ? mul(sl.A, M) : M;
+    if (sl) { setT(g, Mi, o); g.globalAlpha = sl.a; blit(g, HERO.sub[ink], S_H); g.globalAlpha = 1; }
+    setT(g, mul(Mi, MCl), o); knock(g, CHERRY.ball);
+    if (sl) { g.globalAlpha = sl.a; blit(g, HERO.cherry[ink], S_H); g.globalAlpha = 1; }
+  }
+  const sl = slam('k', t);
+  if (sl) {
+    const g = LAY.k.g, Mi = mul(sl.A, M);
+    setT(g, Mi); g.globalAlpha = sl.a; blit(g, HERO.sub.k, S_H);
+    setT(g, mul(Mi, MCl)); knock(g, CHERRY.ball); blit(g, HERO.cherry.k, S_H); g.globalAlpha = 1;
+  }
+}
+function buildHero() {
+  const pal = POOL[0], sub = Object.assign({}, pal, { bg: {} }), bgOnly = { bg: pal.bg };
+  HERO.sub = plateSet(BODY, sub, S_H, PITCH_HERO, BODY_HALF, 'heroSub');
+  HERO.cherry = cherrySet(0, S_H);
+  // the bleed: the background screen over a sheet far wider than the cell, the subject knocked out of it
+  const bleedRect = new Path2D(); bleedRect.rect(-1160, -660, 2320, 1320);
+  const D = { regions: [{ id: 'bg', path: bleedRect }, ...BODY.regions.slice(1)], knock: [], key() {} };
+  HERO.bleed = {};
+  for (const ink of CMY) {
+    if (!pal.bg[ink]) continue;
+    const c = canvas(2 * Math.ceil(1160 * S_H), 2 * Math.ceil(660 * S_H)), g = c.getContext('2d');
+    g.setTransform(S_H, 0, 0, S_H, c.width / 2, c.height / 2); drawPlate(g, ink, D, bgOnly, S_H, PITCH_HERO);
+    HERO.bleed[ink] = c;
+  }
+}
+
+function drawWorld(t) {
+  const cam = camera(t);
+  clearLayers();
+  for (const cell of CELLS) { if (cell.i === 0 && t < 2.75) drawHero(t, cam); else drawCell(cell, t, cam); }
+  pressLayers();
+}
+
+// ── shot 4: the title, printed over the giant dots ──
+// Three plates each carry the WHOLE word: cyan and magenta print its drop shadow (flat cyan under a magenta dot
+// screen), yellow prints its face. They hover in oversized and far apart, converge onto the beat, and stay a few
+// px out of register; the black key outline lands last. The shadow and the face are opaque prints (they knock
+// the dots out under them), so the settled title reads as one flat-filled word, never as see-through overprints.
+const TITLE = 'POP ART', SUB = 'LONDON · NEW YORK · 1950s–60s';   // U+00B7 middle dots, U+2013 en dash
+const T_FIELD = DV.t2, TY = 476, SUBY = 700, SHX = 20, SHY = 18, TOUT = 13;
+const TT = { c: { from: [-92, -58], rot: -0.032, reg: [-4, 3] }, m: { from: [86, 62], rot: 0.03, reg: [4, -3] },
+             y: { from: [-30, 80], rot: 0.022, reg: [2, 4] }, k: { from: [0, -64], rot: 0, reg: [0, 0] } };
+const T_IN = 7.48, T_HIT = 7.75, T_KIN = 7.68, T_KHIT = 7.8, T_SETTLE = 0.12, T_SUB = 8.4, T_CLOSE = 9.66, T_FADE = 0.3;
+let FIELD = null;
+const TP = {};
+function buildTitle() {
+  const m = cx, WS = -0.42;                       // Rubik Mono One's space is a full cell wide: close the gap a little
+  m.font = '400 200px "Rubik Mono One"'; m.wordSpacing = `${WS * 200}px`;
+  const F = Math.round(200 * 1330 / m.measureText(TITLE).width), font = `400 ${F}px "Rubik Mono One"`;
+  m.font = font; m.wordSpacing = `${WS * F}px`; const mt = m.measureText(TITLE), asc = mt.actualBoundingBoxAscent, desc = mt.actualBoundingBoxDescent; m.wordSpacing = '0px';
+  const w = 2 * Math.ceil((mt.width + 2 * TOUT + SHX + 40) / 2), h = 2 * Math.ceil((asc + desc + 2 * TOUT + SHY + 40) / 2);
+  const make = fn => { const c = canvas(w, h), g = c.getContext('2d'); g.translate(w / 2, h / 2 + (asc - desc) / 2); g.font = font; g.wordSpacing = `${WS * F}px`; g.textAlign = 'center'; g.lineJoin = 'round'; fn(g); return c; };
+  const fat = (g, style) => { g.fillStyle = g.strokeStyle = style; g.lineWidth = TOUT; g.strokeText(TITLE, 0, 0); g.fillText(TITLE, 0, 0); };
+  TP.paper = make(g => fat(g, PAPER));
+  TP.shC = make(g => fat(g, INK.c));
+  TP.shM = make(g => {
+    const side = 24, t = canvas(side, side), tg = t.getContext('2d'), r = DOT_R * side / SQ2;
+    tg.fillStyle = INK.m; tg.beginPath(); for (const [x, y] of [[0, 0], [side, 0], [0, side], [side, side], [side / 2, side / 2]]) { tg.moveTo(x + r, y); tg.arc(x, y, r, 0, TAU); } tg.fill();
+    fat(g, g.createPattern(t, 'repeat'));
+  });
+  TP.y = make(g => { g.fillStyle = INK.y; g.fillText(TITLE, 0, 0); });
+  TP.k = make(g => {                              // the key: the shadow's thin contour, cut where the face sits, then the face's heavy outline
+    g.strokeStyle = g.fillStyle = INK.k;
+    g.translate(SHX, SHY); g.lineWidth = TOUT + 6; g.strokeText(TITLE, 0, 0); g.globalCompositeOperation = 'destination-out'; g.lineWidth = TOUT - 6; g.strokeText(TITLE, 0, 0); g.fillText(TITLE, 0, 0);
+    g.translate(-SHX, -SHY); g.lineWidth = TOUT + 2; g.strokeText(TITLE, 0, 0); g.fillText(TITLE, 0, 0);
+    g.globalCompositeOperation = 'source-over'; g.lineWidth = TOUT; g.strokeText(TITLE, 0, 0);
+  });
+  // the subtitle: black type with the dot screen knocked out around it (a paper halo)
+  const sf = '700 64px "Barlow Condensed"'; m.font = sf; m.letterSpacing = '5px';
+  const sw = 2 * Math.ceil((m.measureText(SUB).width + 60) / 2); m.letterSpacing = '0px';
+  TP.sub = canvas(sw, 120); const g = TP.sub.getContext('2d');
+  g.translate(sw / 2, 60); g.font = sf; g.letterSpacing = '5px'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+  g.strokeStyle = PAPER; g.lineWidth = 18; g.strokeText(SUB, 0, 2); g.fillStyle = INK.k; g.fillText(SUB, 0, 2);
+}
+function titlePlate(ink, t) {
+  const S = TT[ink], k = ink === 'k', t0 = k ? T_KIN : T_IN, t1 = k ? T_KHIT : T_HIT, sc0 = k ? 1.14 : 1.22;
+  if (t < t0) return null;
+  let sc, f; const a = sm((t - t0) / 0.07);
+  if (t < t1) { const e = ((t - t0) / (t1 - t0)) ** 2; sc = mix(sc0, 1, e); f = 1 - e; }
+  else { const u = t - t1; sc = u < T_SETTLE ? 1 - 0.03 * Math.exp(-u / 0.04) * Math.sin(TAU * u / T_SETTLE) * (1 - u / T_SETTLE) : 1; f = 0; }   // lands exactly at rest
+  return { M: chain(Tr(960 + S.reg[0] + S.from[0] * f, TY + S.reg[1] + S.from[1] * f), Ro(S.rot * f), Sc(sc)), a };
+}
+function drawTitle(t) {
+  const u = t - T_KHIT, z = u >= 0 && u < 0.1 ? 1 + 0.016 * (1 - u / 0.1) ** 3 : 1;   // the key's impact: a small zoom jolt, still by T_KHIT + 0.1
+  const Z = chain(Tr(960, 540), Sc(z), Tr(-960, -540));
+  cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over';
+  setT(cx, Z); cx.drawImage(FIELD, 0, 0);
+  const P = { c: titlePlate('c', t), m: titlePlate('m', t), y: titlePlate('y', t), k: titlePlate('k', t) };
+  const put = (pl, c, sh, op) => { if (!pl) return; setT(cx, chain(Z, pl.M, Tr(sh ? SHX : 0, sh ? SHY : 0))); cx.globalAlpha = pl.a; cx.globalCompositeOperation = op; cx.drawImage(c, -c.width / 2, -c.height / 2); };
+  put(P.c, TP.paper, true, 'source-over'); put(P.m, TP.paper, true, 'source-over');   // the shadow's sheet, then its two inks
+  put(P.c, TP.shC, true, 'multiply'); put(P.m, TP.shM, true, 'multiply');
+  put(P.y, TP.paper, false, 'source-over'); put(P.y, TP.y, false, 'multiply');        // the face, opaque over its shadow
+  put(P.k, TP.k, false, 'source-over');
+  const sa = sm(span(t, T_SUB, T_SUB + 0.35));
+  if (sa > 0) { setT(cx, Z); cx.globalAlpha = sa; cx.globalCompositeOperation = 'source-over'; cx.drawImage(TP.sub, 960 - TP.sub.width / 2, SUBY - TP.sub.height / 2); }
+  cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over';
+}
+
+function frame(t) {
+  if (t < T_FIELD) drawWorld(t); else drawTitle(t);
+  cx.setTransform(1, 0, 0, 1, 0, 0); cx.globalAlpha = 1;
+  const f = sm(span(t, T_CLOSE, T_CLOSE + T_FADE));    // close: the sheet fades back to bare paper before the last frame
+  if (f > 0) { cx.globalAlpha = f; cx.fillStyle = PAPER; cx.fillRect(0, 0, W, H); cx.globalAlpha = 1; }
+  cx.globalCompositeOperation = 'multiply'; cx.drawImage(FIBRE, 0, 0); cx.globalCompositeOperation = 'source-over';
+}
+
+// ── the cue list for audio.py ──
+function buildCues() {
+  const pan = x => Math.round(cl((x - 960) / 960, -1, 1) * 100) / 100, r2 = v => Math.round(v * 1000) / 1000;
+  const C = [];
+  BEATS.forEach((t, i) => C.push({ k: 'beat', t, i }));
+  for (const ink of ['y', 'm', 'c', 'k']) C.push({ k: 'plate', t: SLAM[ink].tb, ink });
+  C.push({ k: 'bounce', t: 2.25, pan: 0.02 });
+  for (const cell of CELLS) {                    // pan by where the cell sits when it pops (and when it re-inks)
+    const x = cell.i === 1 ? 1356 : cell.i < 8 ? (cell.wx - 960) * 2 + 960 : cell.wx;
+    if (cell.i > 0) C.push({ k: 'pop', t: r2(cell.t0 + 0.1), pan: pan(x), row: cell.row });
+    for (const [ts] of cell.swaps) C.push({ k: 'swap', t: r2(ts), pan: pan(ts < 5 ? (cell.wx - 960) * 2 + 960 : cell.wx), d: cell.col + cell.row });
+    if (cell.i < 2) C.push({ k: 'hop', t: 3.25, pan: pan(cell.i === 0 ? 564 : 1356) });
+  }
+  for (let i = 1; i < 7; i += 2) if (CAMK[i + 1]) C.push({ k: 'zoom', t: CAMK[i][0], d: r2(CAMK[i + 1][0] - CAMK[i][0]) });
+  C.push({ k: 'dive', t: DV.t0, d: r2(DV.t2 - DV.t0) });
+  C.push({ k: 'title', t: T_HIT }, { k: 'tkey', t: T_KHIT }, { k: 'sub', t: T_SUB }, { k: 'close', t: T_CLOSE });
+  CUES = C.sort((a, b) => a.t - b.t);
+}
+
+function build() {
+  makePaper();
+  for (const ink of [...CMY, 'k']) { const c = canvas(W, H); LAY[ink] = { c, g: c.getContext('2d') }; }
+  STREAKS = [3, 5, 8, 13, 21, 34, 55, 89].map(makeStreak);
+  buildDesign(); buildPool(); buildCells(); buildHero(); buildTitle(); buildCues();
+  for (const pi of [0, 1]) { bodySet(pi, SC.S2, PITCH_HERO); cherrySet(pi, SC.S2); }
+  for (const pi of [0, 1, 2, 3, 4, 5, 6, 7, 24, 25, 26, 27, 28, 29, 30, 31]) { bodySet(pi, SC.S8, PITCH_HERO); cherrySet(pi, SC.S8); }
+  for (let pi = 0; pi < 32; pi++) { bodySet(pi, SC.S32, PITCH_GRID); cherrySet(pi, SC.S32); }
+  // the giant dot field the dive ends on, kept as one static backdrop for the title
+  drawWorld(T_FIELD); FIELD = canvas(W, H); FIELD.getContext('2d').drawImage(cv, 0, 0);
+}
+
+window.draw = ({ t }) => { frame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.events = () => CUES;
+window.ready = (async () => {
+  await document.fonts.load('400 100px "Rubik Mono One"'); await document.fonts.load('700 60px "Barlow Condensed"'); await document.fonts.ready;
+  build();
+})();
+</script>
+</body></html>
