@@ -50,6 +50,8 @@ The output file is named after the project folder (`SLUG=$(basename "$PWD")` in 
   test). Chromium also rasterizes some later fills a few levels differently once a gradient has been used as a
   fill on the main canvas (pattern fills, text glow); if the determinism test differs only there, do one
   transparent gradient `fillRect()` at the end of `window.ready` so every frame starts in that state.
+  Where a scene fades by setting `globalAlpha` before its drawers, a drawer that assigns `globalAlpha` instead of
+  multiplying it (`ctx.globalAlpha *= a`) ignores the fade: its figure stays opaque, then vanishes in one frame.
   A simulation that depends on its history must pre-simulate inside `window.ready` and look the
   result up by `t`. Ten catalog styles still set `"schedule": "contiguous"`: a leftover, since their frames pass
   the stills test and their contact sheets are valid. Do not add it to new code; stills cannot honour it.
