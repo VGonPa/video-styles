@@ -18,12 +18,12 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 |---|---|---|
 | [Abril Fatface](https://fonts.google.com/specimen/Abril+Fatface) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [victorian-engraving](styles/victorian-engraving) |
 | [Alegreya](https://fonts.google.com/specimen/Alegreya) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [picture-book](styles/picture-book) |
-| [Alfa Slab One](https://fonts.google.com/specimen/Alfa+Slab+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [atomic-wasteland](styles/atomic-wasteland), [collage](styles/collage), [golden-age-comic](styles/golden-age-comic), [linocut](styles/linocut), [mesoamerican-codex](styles/mesoamerican-codex) |
+| [Alfa Slab One](https://fonts.google.com/specimen/Alfa+Slab+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [atomic-wasteland](styles/atomic-wasteland), [collage](styles/collage), [dada](styles/dada), [golden-age-comic](styles/golden-age-comic), [linocut](styles/linocut), [mesoamerican-codex](styles/mesoamerican-codex) |
 | [Amatic SC](https://fonts.google.com/specimen/Amatic+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [cave-painting](styles/cave-painting) |
 | [Amiri](https://fonts.google.com/specimen/Amiri) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [persian-miniature](styles/persian-miniature) |
-| [Anton](https://fonts.google.com/specimen/Anton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [constructivism](styles/constructivism), [newspaper](styles/newspaper), [title-sequence](styles/title-sequence) |
+| [Anton](https://fonts.google.com/specimen/Anton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [constructivism](styles/constructivism), [dada](styles/dada), [newspaper](styles/newspaper), [title-sequence](styles/title-sequence) |
 | [Archivo](https://fonts.google.com/specimen/Archivo) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bauhaus](styles/bauhaus) |
-| [Archivo Black](https://fonts.google.com/specimen/Archivo+Black) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [glitch](styles/glitch), [neo-brutalism](styles/neo-brutalism), [risograph](styles/risograph) |
+| [Archivo Black](https://fonts.google.com/specimen/Archivo+Black) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [dada](styles/dada), [glitch](styles/glitch), [neo-brutalism](styles/neo-brutalism), [risograph](styles/risograph) |
 | [Bangers](https://fonts.google.com/specimen/Bangers) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [comic-book](styles/comic-book), [digital-comic](styles/digital-comic), [storytime](styles/storytime) |
 | [Barlow](https://fonts.google.com/specimen/Barlow) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [split-flap](styles/split-flap) |
 | [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s), [blueprint](styles/blueprint), [split-flap](styles/split-flap) |
@@ -78,7 +78,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Mr Dafoe](https://fonts.google.com/specimen/Mr+Dafoe) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [synthwave](styles/synthwave) |
 | [Newsreader](https://fonts.google.com/specimen/Newsreader) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [editorial-illustration](styles/editorial-illustration) |
 | [Nunito](https://fonts.google.com/specimen/Nunito) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [blob-sim](styles/blob-sim), [frutiger-aero](styles/frutiger-aero), [history-comedy](styles/history-comedy) |
-| [Old Standard TT](https://fonts.google.com/specimen/Old+Standard+TT) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [documentary-16mm](styles/documentary-16mm), [newspaper](styles/newspaper) |
+| [Old Standard TT](https://fonts.google.com/specimen/Old+Standard+TT) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [dada](styles/dada), [documentary-16mm](styles/documentary-16mm), [newspaper](styles/newspaper) |
 | [Oleo Script](https://fonts.google.com/specimen/Oleo+Script) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [rubber-hose](styles/rubber-hose) |
 | [Open Sans](https://fonts.google.com/specimen/Open+Sans) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [frutiger-aero](styles/frutiger-aero) |
 | [Orbitron](https://fonts.google.com/specimen/Orbitron) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [digital-comic](styles/digital-comic), [synthwave](styles/synthwave) |
@@ -87,7 +87,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Patrick Hand](https://fonts.google.com/specimen/Patrick+Hand) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [clear-line](styles/clear-line), [comic-book](styles/comic-book), [history-comedy](styles/history-comedy), [stick-webcomic](styles/stick-webcomic), [storytime](styles/storytime), [sunday-strip](styles/sunday-strip) |
 | [Patrick Hand SC](https://fonts.google.com/specimen/Patrick+Hand+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [comic-strip](styles/comic-strip) |
 | [Pixelify Sans](https://fonts.google.com/specimen/Pixelify+Sans) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [retro-desktop](styles/retro-desktop) |
-| [Playfair Display](https://fonts.google.com/specimen/Playfair+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [newspaper](styles/newspaper) |
+| [Playfair Display](https://fonts.google.com/specimen/Playfair+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [dada](styles/dada), [newspaper](styles/newspaper) |
 | [Plus Jakarta Sans](https://fonts.google.com/specimen/Plus+Jakarta+Sans) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [product-ui](styles/product-ui) |
 | [Poiret One](https://fonts.google.com/specimen/Poiret+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-deco](styles/art-deco) |
 | [Potta One](https://fonts.google.com/specimen/Potta+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [manga](styles/manga) |
@@ -110,7 +110,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Titan One](https://fonts.google.com/specimen/Titan+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [absurd-webcomic](styles/absurd-webcomic), [flash-cartoon](styles/flash-cartoon), [golden-age-comic](styles/golden-age-comic) |
 | [Unbounded](https://fonts.google.com/specimen/Unbounded) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [particles](styles/particles) |
 | [UnifrakturCook](https://fonts.google.com/specimen/UnifrakturCook) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [illuminated-manuscript](styles/illuminated-manuscript) |
-| [UnifrakturMaguntia](https://fonts.google.com/specimen/UnifrakturMaguntia) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [newspaper](styles/newspaper) |
+| [UnifrakturMaguntia](https://fonts.google.com/specimen/UnifrakturMaguntia) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [dada](styles/dada), [newspaper](styles/newspaper) |
 | [VT323](https://fonts.google.com/specimen/VT323) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [atomic-wasteland](styles/atomic-wasteland), [retro-desktop](styles/retro-desktop), [vhs-camcorder](styles/vhs-camcorder) |
 | [Yatra One](https://fonts.google.com/specimen/Yatra+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [madhubani](styles/madhubani) |
 | [Yellowtail](https://fonts.google.com/specimen/Yellowtail) | [Apache 2.0](licenses/Apache-2.0.txt) | [atomic-wasteland](styles/atomic-wasteland), [mid-century](styles/mid-century) |
