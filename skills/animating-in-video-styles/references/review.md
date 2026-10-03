@@ -24,6 +24,9 @@ time), fix them, render again. Stop when a fresh look finds nothing worth fixing
 - At least one scene change or transformation.
 - A beginning and an ending: open on purpose; close on a settle, fade or final pose, holding the final state
   (nothing still sweeping, glinting or arriving) for at least 0.8 s. Never a hard cut on the last frame.
+  Anything that belongs to an action must have stopped: strokes, the dust or debris they shed, a light or glow
+  still ramping, a card or iris still moving. Slow ambient motion the style keeps through its own ending (a
+  camera push or orbit, water, an idle bob, twinkling stars) may continue.
 - People read clearly: a head with a readable profile, neck and shoulders, torso, jointed limbs and hands,
   even as a silhouette. If a figure cannot be drawn well, tell the story with objects or animals.
 - The brief lands: the film explains, sells or tells what the user asked for.

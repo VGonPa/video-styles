@@ -121,7 +121,9 @@ that passes ±1 gives NaN and a silent track).>
 - **Shorter:** <how it compresses below the demo's length: between about 6 s and the demo, which holds and how
   much copy shorten within the style's minimums; for 3–6 s, cut whole beats rather than compressing each; which to keep, which to
   drop first, the shortest opening that still shows the signature (counted after the fade-in, whose length you give), what a
-  title card costs (its final hold counted from the moment everything on it has settled), and any helper that
+  title card costs (its final hold counted from the moment everything on it has settled, ramps of brightness or
+  glow included: measure it by pixel difference against the same moment with every action forced to its end
+  state, ambient motion kept (see review.md), not by eye), and any helper that
   must be removed with a dropped scene; a tested plan for 4 s if you can>
 - **Other formats:** <9:16 and 1:1: what recomposes easily and what does not; rendered values for the subject
   staying on screen to the end, not only for the demo's end card>
