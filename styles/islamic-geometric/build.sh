@@ -5,7 +5,7 @@ set -e; cd "$(dirname "$0")"; SLUG=$(basename "$PWD"); DUR=${DUR:-10}; WORKERS=$
 FR=$(mktemp -d "${TMPDIR:-/tmp}/${SLUG}_frames.XXXX")
 trap 'rm -rf "$FR"' EXIT
 node render.mjs "$FR" 30 0 $DUR $WORKERS
-node events.mjs && uv run --no-project --with numpy --index-url https://pypi.org/simple python audio.py
+node events.mjs && python3 audio.py
 ffmpeg -loglevel error -y -framerate 30 -i "$FR/%05d.jpg" -i audio.wav -map 0:v -map 1:a \
   -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -r 30 \
   -c:a aac -b:a 192k -ar 48000 -ac 2 -shortest -movflags +faststart $SLUG.mp4
