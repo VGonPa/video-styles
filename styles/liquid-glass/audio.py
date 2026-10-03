@@ -1,88 +1,156 @@
-# events.json → audio.wav (48 kHz stereo, 10 s)
-# soft UI sounds: glass drop "plink", airy whooshes, light taps, a toggle click, a liquid "bloop" merge,
-# bell-like glass chimes, letter ticks, a shimmer for each light sweep, a soft pad bed and a closing glass chord.
-import json, wave, numpy as np
+# events.json → audio.wav (48 kHz stereo, 10 s), all synthesized.
+# A soft D-major pad that follows the scene changes (I → vi → IV → I), glassy water-drop plips when the drop
+# lands and the droplets condense/merge, airy risers into each morph, a glass "bloom" (low thump + bell
+# partials) when the liquid snaps into a new shape, a three-note chime for the mark, small glass taps for
+# the staggered letters, a bubble pop when the pill pinches off and sparkling shimmers for the light sweeps.
+# Everything runs through a synthetic stereo reverb.
+import json, wave
+import numpy as np
+
 SR, DUR = 48000, 10.0
-N = int(SR * DUR); L = np.zeros(N); R = np.zeros(N)
-rs = np.random.default_rng(22)
-def add(sig, t, g=1.0, pan=0.0):
-    i = int(t * SR); n = min(len(sig), N - i)
-    if n > 0 and i >= 0:
-        L[i:i + n] += sig[:n] * g * np.sqrt(0.5 - pan / 2) * 1.414; R[i:i + n] += sig[:n] * g * np.sqrt(0.5 + pan / 2) * 1.414
-def band(x, lo, hi):
-    X = np.fft.rfft(x); f = np.fft.rfftfreq(len(x), 1 / SR); X[(f < lo) | (f > hi)] = 0; return np.fft.irfft(X, len(x))
+N = int(SR * DUR)
+dry = np.zeros((2, N)); wet = np.zeros((2, N))
+rs = np.random.default_rng(183)
+
+
 def tt(d): return np.arange(int(d * SR)) / SR
 def norm(x): return x / (np.abs(x).max() + 1e-9)
-def bell(f, d=1.2, dec=0.35):
-    t = tt(d); s = np.zeros_like(t)
-    for h, a, k in [(1, 1, 1), (2.0, .35, 1.6), (2.76, .22, 2.4), (4.07, .10, 3.4), (5.4, .05, 4.5)]:
-        s += a * np.sin(2 * np.pi * f * h * t + h) * np.exp(-t * k / dec)
-    return s * np.minimum(1, t / 0.003)
-def tap(f):
-    t = tt(0.12); body = np.sin(2 * np.pi * f * t) * np.exp(-t / 0.018)
-    click = band(rs.standard_normal(len(t)), 3000, 12000) * np.exp(-t / 0.0015)
-    return 0.8 * body + 0.25 * norm(click)
-def tick():
-    t = tt(0.04); return norm(band(rs.standard_normal(len(t)), 4000, 14000)) * np.exp(-t / 0.003) * 0.6 + np.sin(2 * np.pi * 2600 * t) * np.exp(-t / 0.006) * 0.4
-def whoosh(d, rev=False):
-    t = tt(d); x = rs.standard_normal(len(t)); y = np.zeros_like(x); p = 0.0
-    env = np.sin(np.pi * t / d) ** 1.6
-    if rev: env = (t / d) ** 2.2 * np.exp(-np.maximum(t - d * .9, 0) * 60)
-    fc = 250 + 3200 * env
-    a = np.exp(-2 * np.pi * fc / SR)
-    for i in range(len(x)): p = (1 - a[i]) * x[i] + a[i] * p; y[i] = p
-    return norm(y) * env
-def bloop():
-    t = tt(0.32); f = 260 + 700 * np.exp(-t * 22); ph = 2 * np.pi * np.cumsum(f) / SR
-    return np.sin(ph) * np.exp(-t / 0.07) * np.minimum(1, t / 0.004)
-def click():
-    t = tt(0.08)
-    c = lambda: norm(band(rs.standard_normal(len(t)), 1500, 9000)) * np.exp(-t / 0.002) + 0.5 * np.sin(2 * np.pi * 1400 * t) * np.exp(-t / 0.01)
-    s = c(); s2 = np.zeros_like(s); k = int(0.045 * SR); s2[k:] = c()[:len(s) - k] * 0.6
-    return s + s2
-def shimmer():
-    d = 1.0; t = tt(d); s = np.zeros_like(t)
-    for i in range(14):
-        f = 2600 + 3800 * rs.random(); t0 = rs.uniform(0, 0.6); k = int(t0 * SR)
-        g = np.zeros_like(t); tl = t[:len(t) - k]; g[k:] = np.sin(2 * np.pi * f * tl) * np.exp(-tl / 0.12)
-        s += g * rs.uniform(.3, 1)
-    return s * np.sin(np.pi * t / d) ** .5
-def drop():
-    t = tt(0.9); thump = np.sin(2 * np.pi * (90 + 120 * np.exp(-t * 30)) * t) * np.exp(-t / 0.06)
-    return 0.6 * thump + bell(1760, 0.9, 0.22) * 0.5
-def rise(d):
-    t = tt(d); f = 520 * 2 ** (t / d * 0.6); ph = 2 * np.pi * np.cumsum(f) / SR
-    return (np.sin(ph) + .3 * np.sin(2 * ph)) * np.sin(np.pi * t / d) ** 2
-nt = lambda m: 440 * 2 ** ((m - 69) / 12)
-def pad(freq, d, att, rel):
-    t = tt(d); s = sum(a * np.sin(2 * np.pi * freq * h * t + h) for h, a in [(1, 1), (2, .18), (3, .06)])
-    s *= 1 + 0.2 * np.sin(2 * np.pi * 0.3 * t)
-    return s * np.minimum(1, t / att) * np.minimum(1, (d - t) / rel)
-# bed: soft Cmaj9 pad + airy noise
-for m, g, p in [(48, .05, -.2), (55, .035, .25), (59, .022, -.3), (62, .018, .3), (64, .015, 0)]:
-    add(pad(nt(m), 9.8, 1.4, 1.5), 0.1, g, p)
-air = norm(band(rs.standard_normal(N), 2000, 9000)); tA = np.arange(N) / SR
-L += air * .004 * np.clip(tA / 1.5, 0, 1); R += np.roll(air, 999) * .004 * np.clip(tA / 1.5, 0, 1)
-for e in json.load(open('events.json')):
-    k, te, v = e['k'], e['t'], e.get('v', 1.0)
-    if k == 'drop': add(drop(), te, 0.35)
-    elif k == 'whoosh': add(whoosh(e['d']), te, 0.13 * v, rs.uniform(-.2, .2))
-    elif k == 'swish': add(whoosh(0.45), te, 0.12, -.3); add(whoosh(0.4), te + .08, 0.09, .35)
-    elif k == 'shimmer': add(shimmer(), te, 0.035, .2)
-    elif k == 'tap': add(tap(e['f']), te, 0.2, (e['f'] - 1000) / 900)
-    elif k == 'tick': add(tick(), te, 0.035 * v, rs.uniform(-.25, .25))
-    elif k == 'rise': add(rise(e['d']), te, 0.025, -.4)
-    elif k == 'click': add(click(), te, 0.22, .3)
-    elif k == 'chime': add(bell(e['f'], 1.6, 0.45), te, 0.07, rs.uniform(-.2, .2))
-    elif k == 'bloop': add(bloop(), te, 0.3, .25)
-    elif k == 'suck': add(whoosh(0.4, rev=True), te - .1, 0.16)
-    elif k == 'chord':
-        for i, m in enumerate([72, 76, 79, 83, 86]): add(bell(nt(m), 2.6, 0.9), te + i * 0.05, 0.05, (i - 2) * .15)
-        add(pad(nt(36), 1.9, .05, 1.2), te, 0.07)
-# master: fade in/out, soft limiter
-fi = int(0.2 * SR); fo = int(0.7 * SR)
-for ch in (L, R): ch[:fi] *= np.linspace(0, 1, fi); ch[-fo:] *= np.linspace(1, 0, fo) ** 1.5
-st = np.stack([L, R], 1); st = np.tanh(st * 1.4) * 0.8
-pcm = (np.clip(st, -1, 1) * 32767).astype(np.int16)
+def hz(m): return 440.0 * 2 ** ((m - 69) / 12)
+
+
+def add(sig, t, g=1.0, pan=0.0, send=0.3):
+    i = int(round(t * SR)); n = min(len(sig), N - i)
+    if n <= 0 or i < 0: return
+    gl, gr = np.sqrt(0.5 - pan / 2) * 1.414, np.sqrt(0.5 + pan / 2) * 1.414
+    for ch, gg in ((0, gl), (1, gr)):
+        dry[ch, i:i + n] += sig[:n] * g * gg * (1 - send * 0.5)
+        wet[ch, i:i + n] += sig[:n] * g * gg * send
+
+
+def lowpass(x, fc):
+    # one-pole low-pass; fc may be an array (time-varying cutoff)
+    fc = np.broadcast_to(np.asarray(fc, float), x.shape)
+    a = 1 - np.exp(-2 * np.pi * fc / SR)
+    y = np.empty_like(x); s = 0.0
+    for k in range(len(x)):
+        s += a[k] * (x[k] - s); y[k] = s
+    return y
+
+
+def bell(f, d=1.6, bright=1.0):
+    t = tt(d); s = np.zeros(len(t))
+    for r, a, dec in ((1.0, 1.0, 1.0), (2.76, 0.45 * bright, 0.45), (5.40, 0.22 * bright, 0.25), (8.93, 0.10 * bright, 0.14)):
+        if f * r < SR / 2.2:
+            s += a * np.sin(2 * np.pi * f * r * t) * np.exp(-t / (d * 0.32 * dec))
+    return s * np.minimum(1, t / 0.002)
+
+
+def plip(f0, f1, d=0.12, sweep=0.04):
+    # water drop: a quick upward pitch glide
+    t = tt(d); f = f1 + (f0 - f1) * np.exp(-t / sweep)
+    return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / (d / 3.2)) * np.minimum(1, t / 0.0015)
+
+
+def thump(f0=110, f1=48, d=0.35):
+    t = tt(d); f = f1 + (f0 - f1) * np.exp(-t / 0.05)
+    return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / (d / 4)) * np.minimum(1, t / 0.003)
+
+
+def whoosh(d, f0, f1, rise=True):
+    t = tt(d); u = t / d
+    fc = f0 * (f1 / f0) ** u
+    n = lowpass(rs.standard_normal(len(t)), fc) - lowpass(rs.standard_normal(len(t)), fc * 0.35) * 0.6
+    env = (u ** 2.2 if rise else np.sin(np.pi * u) ** 1.5) * np.minimum(1, (1 - u) / 0.04 + 0.0001)
+    return norm(n) * env
+
+
+def pad_note(f, d, att=0.7, rel=0.9, det=0.0):
+    t = tt(d); s = np.zeros(len(t))
+    for k in range(1, 7):
+        for dc in (-4 + det, 4 + det):
+            s += np.sin(2 * np.pi * f * k * (1 + dc / 1200 * 1.0) * t + k * 0.7) / (k ** 1.6)
+    env = np.minimum(1, t / att) * np.minimum(1, (d - t) / rel)
+    return s * np.clip(env, 0, 1)
+
+
+data = json.load(open('events.json'))
+CH = {'I': [50, 57, 64, 66, 69], 'vi': [47, 54, 57, 62, 64], 'IV': [43, 50, 57, 59, 66], 'I2': [50, 57, 64, 66, 69, 74]}
+chords = data['chords']
+for k, (t0, name) in enumerate(chords):
+    t1 = chords[k + 1][0] if k + 1 < len(chords) else DUR
+    notes = CH['I2'] if (name == 'I' and k > 0) else CH[name]
+    d = t1 - t0 + 1.0
+    for j, m in enumerate(notes):
+        g = 0.012 if m < 52 else 0.014
+        add(pad_note(hz(m), d, att=0.9 if k == 0 else 0.45, det=1.5), max(0, t0 - 0.25), g, pan=(j / (len(notes) - 1) - 0.5) * 0.7, send=0.45)
+
+# air bed
+air = norm(lowpass(rs.standard_normal(N), 9000) - lowpass(rs.standard_normal(N), 3500))
+tline = np.arange(N) / SR
+air *= 0.5 + 0.5 * np.sin(2 * np.pi * 0.11 * tline)
+dry[0] += air * 0.006; dry[1] += np.roll(air, 3000) * 0.006
+
+SCALE = [74, 76, 78, 81, 83, 86, 88, 90, 93, 95, 98]
+for e in data['ev']:
+    k, t = e['k'], e['t']
+    if k == 'drip':
+        add(bell(hz(98), 0.5, 0.5), t, 0.035, 0.0, 0.6)
+    elif k == 'fall':
+        add(whoosh(0.5, 2500, 500, rise=False), t, 0.05, 0.0, 0.3)
+    elif k == 'land':
+        add(plip(420, 1250, 0.16, 0.035), t, 0.22, 0.0, 0.35)
+        add(thump(120, 52, 0.4), t, 0.19, 0.0, 0.1)
+        add(bell(hz(74), 1.8, 0.7), t + 0.01, 0.05, 0.0, 0.6)
+    elif k == 'bead':
+        add(plip(700, 1500, 0.10, 0.025), t, 0.12, e.get('pan', 0), 0.45)
+    elif k == 'merge':
+        add(plip(260, 560, 0.18, 0.05), t, 0.22, e.get('pan', 0), 0.35)
+        add(thump(90, 50, 0.3), t, 0.10, e.get('pan', 0), 0.1)
+    elif k == 'riser':
+        add(whoosh(e['d'], 300, 5000, rise=True), t, 0.06, 0.0, 0.4)
+    elif k == 'morph':
+        v = e.get('v', 1.0)
+        add(thump(95, 45, 0.5), t, 0.20 * v, 0.0, 0.12)
+        for j, m in enumerate((74, 81, 86)):
+            add(bell(hz(m), 2.2, 0.8), t + j * 0.012, 0.05 * v, (j - 1) * 0.35, 0.6)
+    elif k == 'chime':
+        for j, m in enumerate((86, 90, 93)):
+            add(bell(hz(m), 2.4, 0.9), t + j * 0.07, 0.06, (j - 1) * 0.4, 0.6)
+    elif k == 'tap':
+        v = e.get('v', 1.0); m = SCALE[e['i'] % len(SCALE)] + (0 if v >= 1 else 12)
+        add(bell(hz(m), 0.6, 0.6), t, 0.032 * v, (e['i'] / 10 - 0.35) * 0.8, 0.55)
+    elif k == 'pop':
+        add(plip(380, 980, 0.12, 0.03), t, 0.20, 0.0, 0.35)
+        add(bell(hz(81), 1.4, 0.6), t + 0.02, 0.04, 0.0, 0.6)
+    elif k == 'shimmer':
+        d = e['d']
+        for j in range(14):
+            tj = t + d * j / 14 + rs.uniform(0, d / 14)
+            add(bell(hz(SCALE[rs.integers(4, len(SCALE))] + 12), 0.4, 0.3), tj, 0.010 + 0.008 * np.sin(np.pi * j / 13), rs.uniform(-0.7, 0.7), 0.7)
+        add(whoosh(d, 3000, 9000, rise=False), t, 0.018, 0.0, 0.5)
+
+# synthetic stereo reverb: decaying filtered noise, convolved by FFT
+L_ir = int(2.4 * SR); ti = np.arange(L_ir) / SR
+irs = []
+for ch in range(2):
+    n = rs.standard_normal(L_ir) * np.exp(-ti / 0.55)
+    n = np.convolve(n, np.ones(6) / 6, mode='same')
+    n[:int(0.012 * SR)] = 0
+    irs.append(n / np.sqrt((n ** 2).sum()))
+M = 1 << int(np.ceil(np.log2(N + L_ir)))
+out = np.zeros((2, N))
+for ch in range(2):
+    rv = np.fft.irfft(np.fft.rfft(wet[ch], M) * np.fft.rfft(irs[ch], M), M)[:N]
+    out[ch] = dry[ch] + rv * 0.9
+
+# master: high-pass below ~35 Hz, fade in, fade out with the picture, soft limiter
+fr = np.fft.rfftfreq(N, 1 / SR); hp = np.clip((fr - 20) / 25, 0, 1) ** 2
+for ch in range(2): out[ch] = np.fft.irfft(np.fft.rfft(out[ch]) * hp, N)
+fi = int(0.25 * SR); out[:, :fi] *= np.linspace(0, 1, fi)
+f0 = data.get('fadeOut', 9.15)
+u = np.clip((tline - f0) / (DUR - 0.03 - f0), 0, 1); out *= 1 - u * u * (3 - 2 * u)
+out = np.tanh(out * 1.6) / np.tanh(1.6) * 0.85
+pk = np.abs(out).max(); out *= min(1.0, 0.89 / (pk + 1e-9))
+pcm = (np.clip(out.T, -1, 1) * 32767).astype(np.int16)
 w = wave.open('audio.wav', 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(pcm.tobytes()); w.close()
-print('audio.wav ok', np.abs(st).max().round(3))
+print('audio.wav ok, peak', round(float(np.abs(out).max()), 3))

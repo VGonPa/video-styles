@@ -1,407 +1,509 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html><head><meta charset="utf-8">
 <link rel="stylesheet" href="fonts.css">
-<style>html,body{margin:0;background:#000}canvas{display:block}#g{display:none}</style>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
 </head><body>
 <canvas id="c" width="1920" height="1080"></canvas>
-<canvas id="g" width="1920" height="1080"></canvas>
 <script>
-// ── liquid-glass · premium product reveal in refractive glass ─────────────────────────────────────
-// A glass drop pops in over a slow, saturated aurora → stretches into a pill that reads "Meet Focus." →
-// the pill splits like liquid into three widgets (timer ring, Focus-mode card with toggle, notification pill) →
-// the toggle flips and the notification pill is pulled into the card (metaball merge) → everything gathers into
-// one wide slab for the tagline "Less noise. More you." → the slab collapses into a single glowing orb → fade.
-// Glass is a WebGL2 SDF shader: shapes are rounded boxes blended with a smooth union (liquid merges), the
-// background is procedural (gaussian blobs + silk ribbons) so its blur is analytic (σ' = √(σ²+b²)) and refraction
-// is just re-sampling it at displaced coordinates (per channel → chromatic edge). Springs drive every move.
-// Typography/icons are drawn in 2D on top. The frame depends only on t.
-const W = 1920, H = 1080, DUR = 10.0, TAU = Math.PI * 2;
-const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const gc = document.getElementById('g');
-const gl = gc.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false });
-const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+// Liquid Glass: refractive glass morphing over a glowing aurora.
+// A fictional product reveal ("Opaline"): a glass drop falls through the word "Introducing", two droplets
+// condense and merge into it, the liquid snaps into an app-icon tile, then stretches into a frosted title
+// card that pinches off a pill button. Glass is a WebGL2 shader over signed-distance shapes (smooth union →
+// liquid bridges): rim refraction with chromatic dispersion, frost, Fresnel rim light, specular, soft
+// shadow and caustic. The aurora, stars and the background word are drawn into a texture the glass bends.
+// Type (Inter Tight) is set on top with 2D canvas. Every frame depends only on t.
+const W = 1920, H = 1080, DUR = 10;
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const lerp = (a, b, u) => a + (b - a) * u;
 const seg = (t, a, b) => clamp((t - a) / (b - a));
-const eOut = u => 1 - Math.pow(1 - u, 3);
-const eInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
-const FONT = '"Inter Tight"';
-
-// damped spring step response (0 → 1 with gentle overshoot)
-function spring(u, f = 1.6, z = 0.62) {
-  if (u <= 0) return 0;
-  const w = TAU * f, wd = w * Math.sqrt(1 - z * z);
-  return 1 - Math.exp(-z * w * u) * (Math.cos(wd * u) + (z * w / wd) * Math.sin(wd * u));
+const smooth = u => u * u * (3 - 2 * u);
+const easeOut = u => 1 - Math.pow(1 - u, 3);
+const easeIn = u => u * u * u;
+const easeInOut = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const easeOutBack = u => { const c = 1.7; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+// damped spring step response: 0 before t=0, settles at 1 with overshoot
+function spring(t, f, z) {
+  if (t <= 0) return 0;
+  const w = 2 * Math.PI * f, wd = w * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + z * w / wd * Math.sin(wd * t));
 }
-// keyframed state where each change is a spring superposed on the previous ones
-function track(init, keys) {
-  return t => {
-    const out = { ...init }, tgt = { ...init };
-    for (const [tk, st, f = 1.6, z = 0.62] of keys) {
-      const s = spring(t - tk, f, z);
-      for (const k in st) { out[k] += (st[k] - tgt[k]) * s; tgt[k] = st[k]; }
-    }
-    return out;
-  };
-}
+// decaying oscillation kicked at t=0
+const wob = (t, f, d) => t <= 0 ? 0 : Math.exp(-t / d) * Math.sin(2 * Math.PI * f * t);
 
-// ── timeline ──
-const T = {
-  orb: 0.30, pre: 0.86, pill: 0.98, title: 1.12, sweep1: 1.55, titleOut: 2.28,
-  split: 2.52, ring: 3.0, toggle: 3.72, merge: 4.25, row: 4.95,
-  contentOut: 5.42, gather: 5.62, tag1: 6.05, tag2: 6.38, sweep2: 6.85, tagOut: 7.62,
-  squash: 7.86, collapse: 8.04, word: 8.62, fadeA: 9.25, fadeB: 9.97
+// ---------- timeline ----------
+const TL = {
+  introIn: 0.30, introOut: 2.50,
+  creep: 0.38, release: 0.95, land: 1.42,
+  cL: 1.55, cR: 1.72, pullL: 2.15, pullR: 2.33,
+  antic3: 3.55, morph3: 3.78, mark: 4.08, sweep1: 4.55,
+  antic4: 5.50, morph4: 5.72, title: 6.18, sub: 6.86, pill: 6.95, pillLabel: 7.42, sweep2: 8.05,
+  fadeOut: 9.15,
 };
-const CX = 960, CY = 540;
-const ORB = { cx: CX, cy: CY, hw: 72, hh: 72, r: 72, a: 1 };
-const HID = { cx: CX, cy: CY, hw: 0, hh: 0, r: 0, a: 1 };
-const PILL = { cx: CX, cy: CY, hw: 540, hh: 122, r: 122 };
-const TIMER = { cx: 560, cy: 585, hw: 205, hh: 205, r: 205 };
-const CARD = { cx: 1190, cy: 650, hw: 335, hh: 165, r: 58 };
-const CARD2 = { cx: 1190, cy: 620, hw: 335, hh: 205, r: 58 };
-const NOTE = { cx: 1250, cy: 300, hw: 270, hh: 54, r: 54 };
-const SLAB = { cx: CX, cy: CY, hw: 640, hh: 180, r: 96 };
-const SQ = { cx: CX, cy: CY + 6, hw: 690, hh: 150, r: 96 };
-const END = { cx: CX, cy: 500, hw: 100, hh: 100, r: 100 };
-const intro = [[T.orb, ORB, 1.9, 0.45], [T.pre, { hw: 62, hh: 62, r: 62 }, 3, 0.8], [T.pill, PILL, 1.35, 0.55]];
-const outro = [[T.gather, SLAB, 1.3, 0.62], [T.squash, SQ, 3, 0.8], [T.collapse, END, 1.7, 0.7], [T.fadeA, { hw: 84, hh: 84, r: 84 }, 1, 0.9]];
-const shapes = [
-  track(HID, [...intro, [T.split, TIMER, 1.45, 0.58], ...outro]),                                    // timer
-  track(HID, [...intro, [T.split + .09, CARD, 1.45, 0.58], [T.merge + .12, CARD2, 1.5, 0.6], ...outro]),  // card
-  track(HID, [...intro, [T.split + .18, NOTE, 1.45, 0.58], [T.merge, { cx: 1195, cy: 470, hw: 230, hh: 46, r: 46 }, 1.3, 0.7],
-    [T.merge + .32, { cx: 1190, cy: 560, hw: 150, hh: 30, r: 30 }, 1.3, 0.8], [T.merge + .7, { a: 0 }, 2, 0.95]]),
-];
-// the notification pill leaves the intro once it has been absorbed
-const shapeAt = t => shapes.map((f, i) => { const s = f(t); if (i === 2 && t > T.merge + 1.4) s.a = 0; return s; });
-const tints = t => {
-  const on = spring(t - T.toggle, 1.4, 0.8) * (1 - seg(t, T.contentOut, T.gather + .3));
-  return [[0.55, 0.85, 1.0, 0.05], [0.35, 1.0, 0.75, 0.05 + 0.16 * on], [1.0, 0.55, 0.8, 0.05]];
-};
+const INTRO = 'Introducing', TITLE = 'Opaline', SUB = 'Light, reshaped.', PILL = 'Available now';
+const F_INTRO = '300 58px "Inter Tight"', F_TITLE = '600 136px "Inter Tight"', F_SUB = '400 40px "Inter Tight"', F_PILL = '500 29px "Inter Tight"';
+const L = {};   // layout measured once fonts are ready
 
-// ── WebGL glass ──
+// ---------- shaders ----------
 const VS = `#version 300 es
 in vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }`;
-const FS = `#version 300 es
-precision highp float;
+const COMMON = `#version 300 es
+precision highp float; precision highp int;
+uniform vec2 uRes;
 out vec4 o;
-uniform vec2 uRes; uniform float uT;
-uniform vec4 uS[3]; uniform vec4 uP[3]; uniform vec4 uTint[3];
-uniform float uK, uFrost, uRefr, uGlow, uSweep, uSweepA, uLa, uFade, uBgIn;
-const vec3 BASE0 = vec3(0.008, 0.010, 0.05), BASE1 = vec3(0.035, 0.006, 0.06);
-vec3 blobCol(int i){
-  if(i==0) return vec3(0.10,0.26,1.00)*1.05;
-  if(i==1) return vec3(0.52,0.10,0.95)*0.95;
-  if(i==2) return vec3(1.00,0.14,0.52)*0.85;
-  if(i==3) return vec3(1.00,0.42,0.08)*0.75;
-  if(i==4) return vec3(0.00,0.72,0.95)*0.70;
-  return vec3(0.25,0.08,0.70)*0.9;
-}
-vec3 blob(int i, float t){ // x, y, sigma
-  float fi = float(i);
-  vec2 c = vec2(0.5 + 0.34*sin(t*0.23 + fi*2.1) + 0.08*sin(t*0.51 + fi*4.3), 0.5 + 0.30*cos(t*0.19 + fi*1.37) + 0.07*sin(t*0.43 + fi));
-  float s = 300. + 110.*sin(fi*1.9 + 0.7);
-  return vec3(c * vec2(1920., 1080.), s);
-}
-float ribY(int i, float x, float t){
-  float fi = float(i);
-  return 1080.*(0.20 + 0.19*fi) + 110.*sin(x*0.0029 + fi*1.7 + t*0.32) + 45.*sin(x*0.0067 - t*0.47 + fi*2.3);
-}
-vec3 bg(vec2 p, float b){
-  vec3 col = mix(BASE0, BASE1, p.y/1080. + 0.2*sin(p.x*0.001));
-  for(int i=0;i<6;i++){
-    vec3 bl = blob(i, uT);
-    float s2 = bl.z*bl.z + b*b; vec2 d = p - bl.xy;
-    col += blobCol(i) * 0.78 * (bl.z*bl.z/s2) * exp(-dot(d,d)/(2.*s2)) * uBgIn;
-  }
-  for(int i=0;i<5;i++){
-    float y = ribY(i, p.x, uT);
-    float slope = (ribY(i, p.x + 4., uT) - y) / 4.;
-    float dy = abs(p.y - y) / sqrt(1. + slope*slope);
-    float w = 1.1 + 0.5*float(i%3);
-    float e = 1.0 + b*1.2;
-    float core = (w/(w + b*0.35)) * (1. - smoothstep(w, w + e, dy));
-    float gw = 26. + b;
-    float glow = exp(-dy*dy/(2.*gw*gw)) * (26./gw);
-    vec3 rc = mix(vec3(1.0,0.85,0.95), vec3(0.75,0.9,1.0), float(i%2));
-    float fade = 0.55 + 0.45*sin(p.x*0.0021 + float(i)*2.4 + uT*0.3);
-    col += rc * (core*0.62 + glow*0.12) * fade * uBgIn;
+uint hu(uint x){ x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x; }
+float h1(int i){ return float(hu(uint(i))) * (1.0 / 4294967296.0); }
+float h2(ivec2 p){ return float(hu(uint(p.x) * 73856093u ^ hu(uint(p.y) + 19349663u))) * (1.0 / 4294967296.0); }
+float n1(float x){ float i = floor(x), f = x - i; float u = f * f * (3. - 2. * f); int k = int(i); return mix(h1(k), h1(k + 1), u); }
+float fbm1(float x){ return 0.5 * n1(x) + 0.3 * n1(x * 2.13 + 17.) + 0.2 * n1(x * 4.71 + 41.); }
+// FBO textures are stored y-up; scene coordinates pd are canvas pixels, y-down
+vec4 texD(sampler2D s, vec2 pd){ return texture(s, vec2(pd.x, uRes.y - pd.y) / uRes); }
+`;
+const FS_BG = COMMON + `
+uniform float uT, uAur;
+uniform vec3 uLo[4], uHi[4];
+uniform vec4 uRib[4];          // base y, slope, wave amplitude, gain
+uniform sampler2D uText;
+vec3 aurora(vec2 uv, float t){
+  vec3 col = vec3(0.);
+  for (int i = 0; i < 4; i++){
+    float fi = float(i); vec4 P = uRib[i]; float x = uv.x + 3.;
+    float yc = P.x + P.y * (uv.x - 0.5)
+      + P.z * (0.62 * sin(x * 2.3 + fi * 1.9 + t * 0.42) + 0.28 * sin(x * 5.1 - t * 0.33 + fi * 3.1))
+      + 0.05 * (n1(x * 3.1 + fi * 13.7 + t * 0.12 + 100.) - 0.5);
+    float dy = uv.y - yc;
+    float below = exp(-pow(max(dy, 0.) / 0.026, 2.));
+    float up = dy < 0. ? exp(dy / 0.15) : 1.;
+    float rays = 0.40 + 0.60 * fbm1(x * 46. + fi * 57. + t * (0.55 + 0.2 * fi) + 300.);
+    float fine = 0.65 + 0.35 * n1(x * 170. + fi * 19. + t * 0.05 + 500.);
+    float ray = mix(1., rays * fine, smoothstep(0.0, -0.06, dy));
+    float bx = 0.30 + 0.70 * smoothstep(0.12, 0.88, n1(x * 2.2 + t * 0.18 + fi * 7. + 200.));
+    vec3 c = mix(uLo[i], uHi[i], smoothstep(0.01, -0.20, dy));
+    col += c * below * up * ray * bx * P.w;
   }
   return col;
 }
-float sdBox(vec2 p, vec2 bb, float r){ vec2 q = abs(p) - bb + r; return length(max(q, 0.)) + min(max(q.x, q.y), 0.) - r; }
-float smin(float a, float b, float k){ float h = max(k - abs(a - b), 0.) / k; return min(a, b) - h*h*k*0.25; }
-float shapeD(int i, vec2 p){ vec4 s = uS[i]; vec4 q = uP[i]; vec2 hb = max(s.zw, vec2(0.01)); float r = min(q.x, min(hb.x, hb.y)); return sdBox(p - s.xy, hb, r) + (1. - q.y)*3000. + (s.z < 0.5 ? 3000. : 0.); }
-float scene(vec2 p){ float d = shapeD(0, p); for(int i=1;i<3;i++) d = smin(d, shapeD(i, p), uK); return d; }
-float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)) + uT*0.0) * 43758.5453); }
-vec3 tone(vec3 c){ return 1. - exp(-c*1.25); }
 void main(){
-  vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
-  float di[3]; float dm = 1e9;
-  for(int i=0;i<3;i++){ di[i] = shapeD(i, p); dm = min(dm, di[i]); }
-  float D = di[0]; for(int i=1;i<3;i++) D = smin(D, di[i], uK);
-  vec3 outc = bg(p, 0.);
-  // soft contact + drop shadow
-  float Ds = scene(p - vec2(0., 30.));
-  outc *= 1. - 0.42*exp(-max(Ds, 0.)/55.) - 0.12*exp(-max(D, 0.)/160.);
-  vec3 glowC = vec3(0.50, 0.78, 1.0);
-  outc += glowC * uGlow * (0.75*exp(-max(D,0.)/60.) + 0.45*exp(-max(D,0.)/240.));
-  vec3 col = outc;
-  if (D < 2.) {
-    vec2 e = vec2(1., 0.);
-    vec2 g = vec2(scene(p + e.xy) - scene(p - e.xy), scene(p + e.yx) - scene(p - e.yx));
-    g = g / max(length(g), 1e-5);
-    float ws = 0.; vec4 tint = vec4(0.); float bev = 0.;
-    for(int i=0;i<3;i++){
-      float w = exp(-(di[i] - dm)/18.) * uP[i].y * step(0.5, uS[i].z);
-      ws += w; tint += uTint[i]*w; bev += w * min(uP[i].z, 0.92*min(uS[i].z, uS[i].w));
-    }
-    tint /= max(ws, 1e-5); bev = max(bev / max(ws, 1e-5), 8.);
-    float x = clamp(-D / bev, 0., 1.);
-    float edge = 1. - x;
-    // circular bevel: slope grows toward the rim
-    float h = sqrt(max(1. - edge*edge, 0.02));
-    float slope = min(edge / h, 4.);
-    float disp = uRefr * slope * 0.32 + 10.*x;
-    vec2 q = p - g * disp;
-    float fr = uFrost * (0.45 + 0.55*x);
-    float ca = 0.10 + 0.25*edge;
-    vec3 rc = vec3(bg(q + g*disp*ca, fr).r, bg(q, fr).g, bg(q - g*disp*ca, fr).b);
-    vec3 c = mix(rc, tint.rgb * 0.9, tint.a);
-    c = c * 1.04 + vec3(0.016, 0.018, 0.026);
-    vec2 L = vec2(cos(uLa), sin(uLa));
-    float ndl = dot(g, L);
-    float rim = pow(edge, 2.6) * (1.25*pow(max(ndl, 0.), 1.4) + 0.55*pow(max(-ndl, 0.), 1.4));
-    c += vec3(0.95, 0.97, 1.0) * rim;
-    c *= 1. - 0.22*pow(edge, 1.6)*max(-ndl, 0.)*(1. - edge);
-    float line = smoothstep(2.2, 0.2, abs(D + 1.3));
-    c += vec3(1.) * line * (0.22 + 1.2*pow(max(ndl, 0.), 1.2) + 0.55*pow(max(-ndl, 0.), 1.2));
-    // top sheen
-    c += vec3(1.) * 0.05 * smoothstep(0.2, 1., -g.y) * pow(edge, 1.5);
-    // light sweep
-    vec2 sd = normalize(vec2(1., -0.42));
-    float u = (dot(p, sd) - uSweep);
-    float sw = exp(-u*u/(2.*120.*120.)) * 0.16 + exp(-u*u/(2.*26.*26.)) * 0.30;
-    c += vec3(1.) * sw * uSweepA * (0.5 + 0.5*x);
-    // emissive orb
-    c += glowC * uGlow * (0.55 + 1.0*pow(x, 0.7)) + vec3(1.)*uGlow*0.10*pow(x, 2.);
-    col = mix(outc, c, smoothstep(1., -1., D));
+  vec2 pd = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec2 uv = pd / uRes; float t = uT;
+  vec3 base = mix(vec3(0.010, 0.012, 0.042), vec3(0.022, 0.016, 0.070), uv.y);
+  vec2 q = uv - vec2(0.12, 1.05); base += uLo[0] * 0.10 * exp(-dot(q, q * vec2(3., 5.)));
+  q = uv - vec2(0.92, 0.0); base += uHi[1] * 0.09 * exp(-dot(q, q * vec2(3., 5.)));
+  vec3 a = aurora(uv, t) * uAur;
+  vec3 col = base + a;
+  // stars (fixed field, slow twinkle)
+  vec2 cs = pd / 21.; ivec2 ci = ivec2(floor(cs)) + ivec2(4096);
+  float hs = h2(ci);
+  if (hs < 0.09){
+    vec2 sp = (floor(cs) + 0.2 + 0.6 * vec2(h2(ci + ivec2(7, 0)), h2(ci + ivec2(0, 7)))) * 21.;
+    float b = h2(ci + ivec2(3, 3)); float sz = 0.6 + 1.0 * b * b; float dd = length(pd - sp);
+    float tw = 0.75 + 0.25 * sin(t * 1.9 + hs * 700.);
+    col += vec3(0.85, 0.9, 1.0) * exp(-dd * dd / (sz * sz)) * (0.25 + 0.6 * b) * tw * (1. - min(length(a) * 1.2, 0.8)) * uAur;
   }
-  col = tone(col) * uFade;
-  col += (hash(p) - 0.5) / 255. * 1.5;
+  col = 1. - exp(-col * 1.3);
+  float ta = texture(uText, uv).a;
+  col = mix(col, vec3(0.96, 0.97, 1.0), ta * 0.92);
   o = vec4(col, 1.);
 }`;
-let prog, U = {};
-function initGL() {
-  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
-  prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-  gl.useProgram(prog);
-  const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  for (const n of ['uRes', 'uT', 'uS', 'uP', 'uTint', 'uK', 'uFrost', 'uRefr', 'uGlow', 'uSweep', 'uSweepA', 'uLa', 'uFade', 'uBgIn']) U[n] = gl.getUniformLocation(prog, n);
-  gl.viewport(0, 0, W, H);
+const FS_DOWN = COMMON + `
+uniform sampler2D uSrc; uniform vec2 uOut, uTexel;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uOut; vec2 d = uTexel;
+  o = 0.25 * (texture(uSrc, uv + d * vec2(-1., -1.)) + texture(uSrc, uv + d * vec2(1., -1.))
+            + texture(uSrc, uv + d * vec2(-1., 1.)) + texture(uSrc, uv + d * vec2(1., 1.)));
+}`;
+const FS_BLUR = COMMON + `
+uniform sampler2D uSrc; uniform vec2 uOut, uDir;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uOut;
+  vec4 s = texture(uSrc, uv); float wsum = 1.;
+  for (int i = 1; i <= 7; i++){
+    float x = float(i); float w = exp(-x * x / (2. * 3.2 * 3.2));
+    s += (texture(uSrc, uv + uDir * x) + texture(uSrc, uv - uDir * x)) * w; wsum += 2. * w;
+  }
+  o = s / wsum;
+}`;
+const FS_GLASS = COMMON + `
+uniform sampler2D uBg, uBlur;
+uniform vec4 uS[5]; uniform float uRr[5];
+uniform float uK;
+uniform vec4 uWob;               // 3-lobe amp (px), phase, 4-lobe amp, phase
+uniform float uBevel, uRefr, uFrost, uDark, uDisp, uFade, uShadow, uBloom;
+uniform vec3 uSweep;             // band position, width, strength
+float sdRB(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.)) + min(max(q.x, q.y), 0.) - r; }
+// smooth union that also blends an attribute (y = the shape's half-thickness)
+vec2 smin(vec2 a, vec2 b, float k){
+  float h = clamp(0.5 + 0.5 * (b.x - a.x) / k, 0., 1.);
+  return vec2(mix(b.x, a.x, h) - k * h * (1. - h), mix(b.y, a.y, h));
 }
-const sweepPos = u => lerp(-300, 2300, u);   // along (1,-0.42) direction projection
-function glass(t, S) {
-  gl.uniform2f(U.uRes, W, H); gl.uniform1f(U.uT, t + 12.0);
-  gl.uniform4fv(U.uS, S.flatMap(s => [s.cx, s.cy, s.hw, s.hh]));
-  gl.uniform4fv(U.uP, S.flatMap(s => [s.r, s.a, 58, 0]));
-  gl.uniform4fv(U.uTint, tints(t).flat());
-  gl.uniform1f(U.uK, 1 + 89 * eOut(seg(t, T.split - .02, T.split + .2)) * (1 - eInOut(seg(t, T.gather + .5, T.gather + 1.1))));
-  gl.uniform1f(U.uFrost, 7);
-  gl.uniform1f(U.uRefr, 105);
-  const glow = seg(t, T.collapse + .15, T.collapse + .9) * (1 - 0.35 * seg(t, T.fadeA, T.fadeB));
-  gl.uniform1f(U.uGlow, 0.9 * eInOut(glow) + 0.18 * Math.max(0, 1 - Math.abs(t - T.orb - .1) / .4) * (t < T.pill ? 1 : 0));
-  // two light sweeps across the glass
-  let sw = 0, sa = 0;
-  const s1 = seg(t, T.sweep1, T.sweep1 + .9), s2 = seg(t, T.sweep2, T.sweep2 + 1.0);
-  if (s1 > 0 && s1 < 1) { sw = sweepPos(eInOut(s1)); sa = Math.sin(Math.PI * s1); }
-  if (s2 > 0 && s2 < 1) { sw = sweepPos(eInOut(s2)); sa = Math.sin(Math.PI * s2); }
-  gl.uniform1f(U.uSweep, sw); gl.uniform1f(U.uSweepA, sa);
-  const vx = (shapes[0](t + 1 / 60).cx - shapes[0](t - 1 / 60).cx) * 30;   // light tilts with motion
-  gl.uniform1f(U.uLa, -2.2 + 0.35 * Math.sin(t * 0.45) + 0.25 * seg(t, 2.4, 5.6) + clamp(vx * 0.0007, -0.5, 0.5));
-  gl.uniform1f(U.uFade, 1);
-  gl.uniform1f(U.uBgIn, 0.25 + 0.75 * eOut(seg(t, 0, 1.2)));
+vec2 sceneD(vec2 p){
+  vec2 q = p - uS[0].xy;
+  float d = sdRB(q, uS[0].zw, uRr[0]);
+  float th = atan(q.y, q.x);
+  d += uWob.x * sin(3. * th + uWob.y) + uWob.z * sin(4. * th + uWob.w);
+  vec2 r = vec2(d, min(uS[0].z, uS[0].w));
+  for (int i = 1; i < 5; i++){
+    if (uS[i].z <= 0.) continue;
+    r = smin(r, vec2(sdRB(p - uS[i].xy, uS[i].zw, uRr[i]), min(uS[i].z, uS[i].w)), uK);
+  }
+  return r;
+}
+void main(){
+  vec2 pd = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec3 bg = texD(uBg, pd).rgb, bl = texD(uBlur, pd).rgb;
+  vec3 outside = bg + bl * uBloom;
+  vec2 sd = sceneD(pd); float d = sd.x;
+  float B = min(uBevel, 0.92 * sd.y), refr = uRefr * B;
+  // soft shadow below the glass, a thin caustic of focused light offset away from the key light
+  float dsh = sceneD(pd - vec2(0., 34.)).x;
+  outside *= 1. - uShadow * (1. - smoothstep(-50., 80., dsh));
+  float dc = sceneD(pd - vec2(12., 24.)).x;
+  outside += exp(-pow((dc + 2.) / 22., 2.)) * smoothstep(0., 30., d) * (bl * 0.9 + 0.015) * uShadow;
+  vec3 col = outside;
+  if (d < 2.){
+    float e = 1.0;
+    vec2 g = vec2(sceneD(pd + vec2(e, 0.)).x - sceneD(pd - vec2(e, 0.)).x, sceneD(pd + vec2(0., e)).x - sceneD(pd - vec2(0., e)).x);
+    g /= max(length(g), 1e-4);
+    float s = max(-d, 0.);
+    float v = 1. - clamp(s / B, 0., 1.);
+    float slope = v / sqrt(max(1. - v * v, 0.02));
+    vec3 n = normalize(vec3(g * slope, 1.));
+    vec3 T = refract(vec3(0., 0., -1.), n, 1. / 1.5);
+    vec2 off = T.xy * refr;
+    vec2 oR = off * (1. - uDisp), oB = off * (1. + uDisp);
+    vec3 sharp = vec3(texD(uBg, pd + oR).r, texD(uBg, pd + off).g, texD(uBg, pd + oB).b);
+    vec3 fro = vec3(texD(uBlur, pd + oR).r, texD(uBlur, pd + off).g, texD(uBlur, pd + oB).b);
+    vec3 gc = mix(sharp, fro * 1.08, uFrost);
+    gc = gc * 1.03 + vec3(0.014, 0.018, 0.034);
+    gc = mix(gc, gc * 0.55 + vec3(0.02, 0.02, 0.05), uDark);
+    float fr = pow(1. - n.z, 3.);
+    vec3 env = texD(uBlur, pd + g * 80.).rgb * 1.5 + vec3(0.05, 0.06, 0.09);
+    gc = mix(gc, env, clamp(fr, 0., 1.) * 0.55);
+    vec3 Lk = normalize(vec3(-0.45, -0.75, 0.6));
+    vec3 Hh = normalize(Lk + vec3(0., 0., 1.));
+    gc += pow(max(dot(n, Hh), 0.), 60.) * 0.85;
+    float rim = exp(-s / 1.4);
+    float tl = max(dot(g, normalize(vec2(-0.5, -0.85))), 0.);
+    float br = max(dot(g, normalize(vec2(0.5, 0.85))), 0.);
+    gc += rim * (0.25 + 0.75 * tl + 0.45 * br) * 0.9;
+    gc += exp(-s / 14.) * br * 0.28 * (env * 0.8 + 0.1);
+    gc *= 1. - 0.18 * exp(-pow((s - 10.) / 7., 2.)) * (1. - tl);
+    float sw = exp(-pow((dot(pd, normalize(vec2(1., 0.55))) - uSweep.x) / uSweep.y, 2.)) * uSweep.z;
+    gc += sw * (0.6 + 0.8 * rim);
+    col = mix(outside, gc, smoothstep(1., -1., d));
+  }
+  vec2 uv = pd / uRes - 0.5;
+  col *= 1. - 0.38 * pow(length(uv * vec2(1.0, 1.2)) * 1.25, 2.4);
+  col += (h2(ivec2(pd) + ivec2(9000)) - 0.5) * 0.022;
+  o = vec4(col * uFade, 1.);
+}`;
+
+// ---------- GL plumbing ----------
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const glc = document.createElement('canvas'); glc.width = W; glc.height = H;
+const gl = glc.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true, alpha: false, premultipliedAlpha: false });
+const txc = document.createElement('canvas'); txc.width = W; txc.height = H;
+const tx = txc.getContext('2d');
+const QW = W / 4, QH = H / 4;
+let P = {}, T = {}, quad, textTex, textDirty = true, textEmpty = false;
+
+function compile(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function program(fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, VS)); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, 'a'); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  for (let i = 0, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i < n; i++) {
+    const info = gl.getActiveUniform(p, i);
+    u[info.name.replace(/\[0\]$/, '')] = gl.getUniformLocation(p, info.name);
+  }
+  return { p, u };
+}
+function texture(w, h, internal) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  if (internal) gl.texStorage2D(gl.TEXTURE_2D, 1, internal, w, h);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function target(w, h) {
+  const t = texture(w, h, gl.RGBA16F), f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  return { t, f, w, h };
+}
+function initGL() {
+  if (!gl) throw new Error('WebGL2 unavailable');
+  if (!gl.getExtension('EXT_color_buffer_float')) throw new Error('EXT_color_buffer_float unavailable');
+  P.bg = program(FS_BG); P.down = program(FS_DOWN); P.blur = program(FS_BLUR); P.glass = program(FS_GLASS);
+  T.bg = target(W, H); T.q1 = target(QW, QH); T.q2 = target(QW, QH);
+  textTex = texture(W, H, null);
+  quad = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.disable(gl.BLEND); gl.disable(gl.DEPTH_TEST);
+}
+function pass(prog, out, set) {
+  gl.useProgram(prog.p);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, out ? out.f : null);
+  gl.viewport(0, 0, out ? out.w : W, out ? out.h : H);
+  gl.uniform2f(prog.u.uRes, W, H);
+  set(prog.u);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
+function bindTex(unit, tex, loc) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(loc, unit); }
 
-// ── 2D typography & icons ──
-function setFont(size, weight, tr = -0.028) { ctx.font = `${weight} ${size}px ${FONT}`; ctx.letterSpacing = `${(tr * size).toFixed(2)}px`; }
-// per-letter staggered spring reveal (rise + un-blur + fade)
-function letters(str, x, y, o) {
-  const { size, weight = 700, align = 'center', t0, stagger = 0.035, t, alpha = 1, fill = '#fff', rise = 0.5, out = 1 } = o;
-  setFont(size, weight);
-  const total = ctx.measureText(str).width;
-  let x0 = align === 'center' ? x - total / 2 : align === 'right' ? x - total : x;
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i]; if (ch === ' ') continue;
-    const px = x0 + (i ? ctx.measureText(str.slice(0, i)).width : 0);
-    const u = t - t0 - i * stagger;
-    if (u <= 0) continue;
-    const s = spring(u, 1.7, 0.6), a = clamp(u / 0.22) * alpha * out;
-    if (a <= 0.003) continue;
-    const bl = (1 - clamp(u / 0.3)) * size * 0.08;
-    ctx.save();
-    ctx.globalAlpha = a;
-    if (bl > 0.3) ctx.filter = `blur(${bl.toFixed(1)}px)`;
-    ctx.translate(px, y + (1 - s) * size * rise);
-    ctx.fillStyle = typeof fill === 'function' ? fill(px - x0, total) : fill;
-    ctx.fillText(ch, 0, 0);
-    ctx.restore();
+// ---------- palette ----------
+const PAL_A = {
+  lo: [[0.10, 1.00, 0.70], [0.15, 0.85, 1.00], [0.10, 0.90, 0.62], [0.40, 0.32, 1.00]],
+  hi: [[0.38, 0.25, 0.95], [0.55, 0.25, 0.95], [0.20, 0.35, 0.90], [0.80, 0.30, 0.90]],
+};
+const PAL_B = {
+  lo: [[0.25, 0.68, 1.00], [1.00, 0.42, 0.68], [0.30, 0.82, 1.00], [0.90, 0.38, 0.82]],
+  hi: [[0.85, 0.26, 0.85], [0.55, 0.26, 1.00], [0.60, 0.30, 1.00], [0.40, 0.30, 1.00]],
+};
+const RIB = [[0.60, -0.16, 0.055, 1.0], [0.40, 0.10, 0.045, 0.72], [0.80, -0.06, 0.040, 0.55], [0.22, 0.18, 0.050, 0.45]];
+
+// ---------- choreography ----------
+function bodyY(t) {
+  if (t < TL.release) return lerp(-260, -70, easeOut(seg(t, TL.creep, TL.release - 0.10)));
+  return lerp(-70, 540, spring(t - TL.release, 0.95, 0.6));
+}
+const zoom = t => 1 + 0.045 * easeInOut(seg(t, 7.7, 10.0));
+const hover = t => 6 * Math.sin(2 * Math.PI * 0.55 * (t - 4.3)) * smooth(seg(t, 4.0, 4.5)) * (1 - smooth(seg(t, 5.35, 5.72)));
+const velo = (f, t, e = 1 / 240) => (f(t + e) - f(t - e)) / (2 * e);
+const DROPS = [
+  { p: [585, 410], tc: TL.cL, tp: TL.pullL, ph: 0.0 },
+  { p: [1345, 650], tc: TL.cR, tp: TL.pullR, ph: 2.1 },
+];
+function dropPos(D, t) {
+  let x = D.p[0], y = D.p[1] + 7 * Math.sin(t * 2.1 + D.ph);
+  const dx = 960 - D.p[0], dy = 540 - D.p[1], dl = Math.hypot(dx, dy), ux = dx / dl, uy = dy / dl;
+  const away = easeOut(seg(t, D.tp, D.tp + 0.18)), pull = easeIn(seg(t, D.tp + 0.18, D.tp + 0.62));
+  x -= ux * 26 * away; y -= uy * 26 * away;
+  return [lerp(x, 960, pull), lerp(y, 540, pull), pull, ux, uy];
+}
+function state(t) {
+  const S = [];
+  for (let i = 0; i < 5; i++) S.push([-3000, -3000, 0, 0, 0]);
+  // main body
+  let cx = 960, cy = bodyY(t);
+  const r = 150 + 17 * smooth(seg(t, 2.60, 2.86)) + 17 * smooth(seg(t, 2.78, 3.04));
+  const vy = velo(bodyY, t);
+  const drip = 0.12 * smooth(seg(t, 0.70, TL.release)) * (1 - smooth(seg(t, TL.release, TL.release + 0.3)));
+  const st = clamp(vy / 2400, -0.35, 1) * 0.22 + drip;
+  let hx = r * (1 - 0.5 * st), hy = r * (1 + st);
+  const mL = wob(t - 2.70, 2.4, 0.33), mR = wob(t - 2.90, 2.4, 0.33);
+  hx += 16 * mL + 12 * mR; hy -= 16 * mL + 12 * mR;
+  const liquid = 1 - smooth(seg(t, 3.55, 4.1));
+  let w3 = 7 * wob(t - TL.land, 2.8, 0.4) + 6 * wob(t - 2.70, 3.3, 0.35) + liquid * 2.2 * Math.sin(t * 1.7);
+  let w4 = 5 * wob(t - 2.90, 3.6, 0.35) + liquid * 1.6 * Math.sin(t * 1.3 + 2);
+  let rad = Math.min(hx, hy);
+  if (t >= TL.antic3) {
+    const a = easeInOut(seg(t, TL.antic3, TL.morph3));
+    const s3 = spring(t - TL.morph3, 1.5, 0.42), k3 = wob(t - TL.morph3, 2.2, 0.3);
+    const base = lerp(184, 172, a), side = lerp(base, 196, s3);
+    hx = side + 10 * k3; hy = side * (1 - 0.05 * a * (1 - Math.min(s3, 1))) - 10 * k3;
+    rad = lerp(base, 92, s3);
   }
+  if (t >= TL.antic4) {
+    const a = easeInOut(seg(t, TL.antic4, TL.morph4));
+    const s4 = spring(t - TL.morph4, 1.15, 0.55), s4y = spring(t - TL.morph4 - 0.08, 1.15, 0.55);
+    cx = lerp(960 + 12 * a, L.card.cx, s4);
+    hx = lerp(196 - 10 * a, L.card.hx, s4);
+    hy = lerp(196 + 8 * a, L.card.hy, s4y);
+    cy = lerp(540, L.card.cy, s4y);
+    rad = lerp(92, L.card.r, s4);
+  }
+  if (t >= TL.antic3) cy += hover(t);
+  rad = clamp(rad, 0, Math.min(hx, hy));
+  S[0] = [cx, cy, hx, hy, rad];
+  const Z = zoom(t);
+  // droplets that condense and get pulled in
+  DROPS.forEach((D, k) => {
+    if (t < D.tc) return;
+    const [x, y, pull, ux, uy] = dropPos(D, t);
+    let rr = 76 * spring(t - D.tc, 1.8, 0.45) * (1 - smooth(seg(pull, 0.72, 1.0)));
+    if (rr <= 0.5) return;
+    const str = 0.32 * Math.sin(Math.PI * clamp(pull * 1.2)) ;
+    const ex = rr * (1 + str * Math.abs(ux) - 0.4 * str * Math.abs(uy)), ey = rr * (1 + str * Math.abs(uy) - 0.4 * str * Math.abs(ux));
+    S[1 + k] = [x, y, ex, ey, Math.min(ex, ey)];
+  });
+  // pill button that pinches off the card
+  if (t >= TL.pill) {
+    const sp = spring(t - TL.pill, 1.25, 0.5), sx = spring(t - TL.pill - 0.12, 1.4, 0.45);
+    const py = lerp(L.card.cy + L.card.hy - 58, L.pill.cy, sp);
+    const v = velo(u => spring(u - TL.pill, 1.25, 0.5), t);
+    const phx = lerp(96, L.pill.hx, sx), phy = L.pill.hy * (1 + clamp(v / 9, -0.2, 0.25));
+    S[3] = [960, py, phx, phy, Math.min(phx, phy)];
+  }
+  for (const s of S) if (s[2] > 0) { s[0] = 960 + (s[0] - 960) * Z; s[1] = 540 + (s[1] - 540) * Z; s[2] *= Z; s[3] *= Z; s[4] *= Z; }
+  // material
+  const frost = 0.03 + 0.20 * smooth(seg(t, 3.8, 4.6)) + 0.32 * smooth(seg(t, 5.8, 6.6));
+  const dark = 0.12 * smooth(seg(t, 3.8, 4.6)) + 0.16 * smooth(seg(t, 5.8, 6.6));
+  const bevel = lerp(lerp(122, 92, smooth(seg(t, 3.7, 4.3))), 80, smooth(seg(t, 5.7, 6.4))) * Z;
+  // light sweeps
+  const dn = Math.hypot(1, 0.55), cp = (960 + 0.55 * 540) / dn;
+  let sweep = [0, 1, 0];
+  const u1 = seg(t, TL.sweep1, TL.sweep1 + 0.7), u2 = seg(t, TL.sweep2, TL.sweep2 + 0.95);
+  if (u1 > 0 && u1 < 1) sweep = [cp - 380 + 760 * easeInOut(u1), 60, 0.34 * Math.sin(Math.PI * u1)];
+  if (u2 > 0 && u2 < 1) sweep = [cp - 760 + 1520 * easeInOut(u2), 80, 0.34 * Math.sin(Math.PI * u2)];
+  const fade = smooth(seg(t, 0, 0.55)) * (1 - smooth(seg(t, TL.fadeOut, 9.97)));
+  const aur = 0.25 + 0.75 * smooth(seg(t, 0.1, 1.5)) + 0.15 * smooth(seg(t, 5.7, 6.6));
+  return { S, w: [w3, t * 0.9, w4, -t * 0.7 + 1.3], frost, dark, bevel, refr: 0.46, sweep, fade, aur, pal: smooth(seg(t, 3.6, 6.3)) };
 }
-function text(str, x, y, size, weight, color, align = 'left', alpha = 1, tr) {
-  if (alpha <= 0.003) return;
-  setFont(size, weight, tr ?? (size < 32 ? -0.01 : -0.028)); ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
-  ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.fillText(str, x, y); ctx.globalAlpha = 1;
+
+// ---------- type ----------
+function prefixX(c, str) { const xs = []; for (let i = 0; i <= str.length; i++) xs.push(c.measureText(str.slice(0, i)).width); return xs; }
+function layout() {
+  ctx.font = F_TITLE; ctx.letterSpacing = '-3px';
+  L.titleX = prefixX(ctx, TITLE); const tw = L.titleX[TITLE.length] + 3;
+  ctx.font = F_SUB; ctx.letterSpacing = '0.5px'; L.subW = ctx.measureText(SUB).width;
+  ctx.font = F_PILL; ctx.letterSpacing = '0.6px'; L.pillW = ctx.measureText(PILL).width;
+  tx.font = F_INTRO; tx.letterSpacing = '22px'; L.introX = prefixX(tx, INTRO);
+  ctx.letterSpacing = '0px'; tx.letterSpacing = '0px';
+  const markW = 136, gap = 54, content = markW + gap + tw;
+  L.card = { cx: 960, cy: 468, hx: content / 2 + 96, hy: 148, r: 76 };
+  L.left = 960 - content / 2;
+  L.markX = L.left + markW / 2; L.textX = L.left + markW + gap;
+  L.pill = { cy: 726, hx: L.pillW / 2 + 50, hy: 44 };
 }
-function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
-function moon(x, y, r, col) {
-  ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.clip();
-  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.arc(x + r * .55, y - r * .42, r * .82, 0, TAU); ctx.fillStyle = col; ctx.fill('evenodd'); ctx.restore();
+function drawIntro(t) {
+  const out = smooth(seg(t, TL.introOut, TL.introOut + 0.6));
+  const vis = t >= TL.introIn && out < 1;
+  if (!vis) { if (!textEmpty) { tx.clearRect(0, 0, W, H); textEmpty = true; textDirty = true; } return; }
+  textEmpty = false; textDirty = true;
+  tx.clearRect(0, 0, W, H);
+  tx.font = F_INTRO; tx.fillStyle = '#fff'; tx.textBaseline = 'alphabetic';
+  const n = INTRO.length, total = L.introX[n] - 22, x0 = 960 - total / 2;
+  for (let i = 0; i < n; i++) {
+    const u = seg(t, TL.introIn + i * 0.045, TL.introIn + i * 0.045 + 0.6);
+    if (u <= 0) continue;
+    const spread = (i - (n - 1) / 2) * 10 * out;
+    tx.globalAlpha = easeOut(u) * (1 - out);
+    tx.fillText(INTRO[i], x0 + L.introX[i] + spread, 561 + 16 * (1 - easeOut(u)) - 8 * out);
+  }
+  tx.globalAlpha = 1;
 }
-function chatIcon(x, y, s, a) {
-  ctx.save(); ctx.globalAlpha = a;
-  const g = ctx.createLinearGradient(x - s, y - s, x + s, y + s); g.addColorStop(0, '#ff8a5c'); g.addColorStop(1, '#ff3d7f');
-  rrect(x - s, y - s, 2 * s, 2 * s, s * .46); ctx.fillStyle = g; ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(x, y - s * .06, s * .56, s * .44, 0, 0, TAU); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(x - s * .34, y + s * .2); ctx.lineTo(x - s * .5, y + s * .52); ctx.lineTo(x - s * .05, y + s * .32); ctx.fill();
+function drawMark(x, y, sc, prog, dot, alpha) {
+  if (alpha <= 0 || prog <= 0) return;
+  ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc); ctx.globalAlpha = alpha;
+  ctx.lineCap = 'round'; ctx.strokeStyle = '#fff'; ctx.fillStyle = '#fff';
+  const gapA = 0.46, a0 = -Math.PI / 4 + gapA;
+  ctx.lineWidth = 11; ctx.beginPath(); ctx.arc(0, 0, 56, a0, a0 + (2 * Math.PI - 2 * gapA) * prog); ctx.stroke();
+  ctx.globalAlpha = alpha * 0.62; ctx.lineWidth = 7;
+  const p2 = seg(prog, 0.35, 1);
+  if (p2 > 0) { ctx.beginPath(); ctx.arc(0, 0, 30, Math.PI * 1.05, Math.PI * (1.05 + 0.42 * p2)); ctx.stroke(); }
+  if (dot > 0) { ctx.globalAlpha = alpha; ctx.beginPath(); ctx.arc(56 * Math.cos(-Math.PI / 4), 56 * Math.sin(-Math.PI / 4), 16 * dot, 0, 2 * Math.PI); ctx.fill(); }
   ctx.restore();
 }
-function shadowOn(b = 18, a = .22) { ctx.shadowColor = `rgba(10,5,40,${a})`; ctx.shadowBlur = b; ctx.shadowOffsetY = b * .25; }
-function shadowOff() { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0; }
-
-function overlay(t, S) {
-  // ── S1: "Meet Focus." inside the pill ──
-  if (t < T.split + .2) {
-    const out = 1 - eOut(seg(t, T.titleOut, T.titleOut + .3));
-    const lift = -40 * eInOut(seg(t, T.titleOut, T.titleOut + .3));
-    ctx.save(); shadowOn(24, .25);
-    if (out < 1) ctx.filter = `blur(${((1 - out) * 10).toFixed(1)}px)`;
-    letters('Meet Focus.', CX, CY + 52 + lift, { size: 150, weight: 700, t0: T.title, stagger: 0.04, t, out });
-    ctx.restore(); shadowOff();
+function drawType(t, st) {
+  const fade = st.fade, Z = zoom(t);
+  ctx.save();
+  ctx.translate(960, 540); ctx.scale(Z, Z); ctx.translate(-960, -540);
+  ctx.shadowColor = 'rgba(16,8,48,0.38)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 2;
+  // mark: drawn on the tile, then rides to the left of the card
+  const s4 = spring(t - TL.morph4, 1.15, 0.55), s4y = spring(t - TL.morph4 - 0.08, 1.15, 0.55);
+  const prog = easeOut(seg(t, TL.mark, TL.mark + 0.6)), dot = Math.max(0, spring(t - TL.mark - 0.42, 2.2, 0.4));
+  const mx = lerp(960, L.markX, s4), my = lerp(540, L.card.cy, s4y) + hover(t), msc = lerp(1.18, 1.0, s4);
+  drawMark(mx, my, msc, prog, dot, fade);
+  // title letters
+  ctx.font = F_TITLE; ctx.letterSpacing = '-3px'; ctx.textBaseline = 'alphabetic';
+  const tg = ctx.createLinearGradient(0, L.card.cy - 80, 0, L.card.cy + 40);
+  tg.addColorStop(0, '#ffffff'); tg.addColorStop(1, '#e2e4ff'); ctx.fillStyle = tg;
+  for (let i = 0; i < TITLE.length; i++) {
+    const u = seg(t, TL.title + i * 0.05, TL.title + i * 0.05 + 0.55);
+    if (u <= 0) continue;
+    ctx.globalAlpha = easeOut(seg(u, 0, 0.6)) * fade;
+    ctx.fillText(TITLE[i], L.textX + L.titleX[i], L.card.cy + 24 + 42 * (1 - easeOutBack(u)));
   }
-  // ── S2: widgets ──
-  const cIn = t0 => clamp((t - t0) / 0.35) * (1 - seg(t, T.contentOut, T.contentOut + .25));
-  const [A, B, C] = S;
-  // timer ring
-  const aT = cIn(T.split + .38);
-  if (aT > 0) {
-    const R = 150 * (A.hw / 205), x = A.cx, y = A.cy;
-    ctx.save(); ctx.globalAlpha = aT;
-    ctx.lineCap = 'round'; ctx.lineWidth = 16;
-    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.stroke();
-    const pr = 0.72 * eInOut(seg(t, T.ring, T.ring + 1.3)) + 0.01;
-    const a0 = -Math.PI / 2, a1 = a0 + TAU * pr;
-    const gr = ctx.createConicGradient(a0, x, y); gr.addColorStop(0, '#9fd8ff'); gr.addColorStop(0.72, '#ffffff'); gr.addColorStop(1, '#9fd8ff');
-    shadowOn(20, .0); ctx.shadowColor = 'rgba(160,220,255,0.8)';
-    ctx.strokeStyle = gr; ctx.beginPath(); ctx.arc(x, y, R, a0, a1); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + R * Math.cos(a1), y + R * Math.sin(a1), 11, 0, TAU); ctx.fill();
-    shadowOff(); ctx.restore();
-    // countdown: 25:00 → 24:5x while ring fills
-    const secs = 1500 - Math.max(0, Math.floor(t - T.ring - 0.6));   // ticks once per second
-    const mm = String(Math.floor(secs / 60)).padStart(2, '0'), ss = String(secs % 60).padStart(2, '0');
-    ctx.save(); shadowOn(16, .2);
-    ctx.font = `600 92px ${FONT}`; ctx.letterSpacing = '-3px'; ctx.fontVariantNumeric = 'tabular-nums';
-    ctx.textAlign = 'center'; ctx.globalAlpha = aT; ctx.fillStyle = '#fff'; ctx.fillText(`${mm}:${ss}`, x, y + 22);
-    ctx.restore(); shadowOff();
-    text('DEEP WORK', x, y + 74, 21, 650, 'rgba(255,255,255,0.8)', 'center', aT, 0.14);
+  // subtitle
+  const us = seg(t, TL.sub, TL.sub + 0.6);
+  if (us > 0) {
+    ctx.font = F_SUB; ctx.letterSpacing = '0.5px'; ctx.fillStyle = 'rgba(240,244,255,0.80)';
+    ctx.globalAlpha = easeOut(us) * fade;
+    ctx.fillText(SUB, L.textX + 4, L.card.cy + 88 + 14 * (1 - easeOut(us)));
   }
-  // Focus mode card
-  const aC = cIn(T.split + .46);
-  if (aC > 0) {
-    const L = B.cx - B.hw, Tp = B.cy - B.hh, Rt = B.cx + B.hw;
-    ctx.save(); shadowOn(16, .2);
-    letters('Focus mode', L + 56, Tp + 104, { size: 58, weight: 700, align: 'left', t0: T.split + .46, stagger: 0.022, t, out: 1 - seg(t, T.contentOut, T.contentOut + .25) });
-    ctx.restore(); shadowOff();
-    text('Only what matters gets through.', L + 57, Tp + 150, 27, 450, 'rgba(255,255,255,0.74)', 'left', aC);
-    // toggle
-    const on = spring(t - T.toggle, 2.0, 0.55);
-    const onC = clamp(spring(t - T.toggle, 1.6, 0.9));
-    const tw = 132, th = 78, tx = Rt - 56 - tw, ty = Tp + 44;
-    ctx.save(); ctx.globalAlpha = aC;
-    rrect(tx, ty, tw, th, th / 2); ctx.fillStyle = 'rgba(255,255,255,0.20)'; ctx.fill();
-    if (onC > 0) { ctx.globalAlpha = aC * onC; const g = ctx.createLinearGradient(tx, 0, tx + tw, 0); g.addColorStop(0, '#2fe39a'); g.addColorStop(1, '#27c7c0'); ctx.fillStyle = g; rrect(tx, ty, tw, th, th / 2); ctx.fill(); ctx.globalAlpha = aC; }
-    const vel = Math.abs(spring(t - T.toggle + .02, 2.0, .55) - spring(t - T.toggle - .02, 2.0, .55)) / .04;
-    const kr = 32, kw = kr + Math.min(vel * 9, 18);
-    const kx = lerp(tx + 7 + kr, tx + tw - 7 - kr, on);
-    shadowOn(12, .35); ctx.fillStyle = '#fff'; rrect(kx - kw, ty + th / 2 - kr, kw * 2, kr * 2, kr); ctx.fill(); shadowOff();
-    ctx.restore();
-    // absorbed notification row
-    const aR = clamp((t - T.row) / .35) * (1 - seg(t, T.contentOut, T.contentOut + .25));
-    if (aR > 0) {
-      const ry = B.cy + B.hh - 78, s = spring(t - T.row, 1.7, .6);
-      ctx.save(); ctx.globalAlpha = aR; ctx.translate(0, (1 - s) * 22);
-      rrect(L + 40, ry - 40, B.hw * 2 - 80, 84, 42); ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fill();
-      ctx.fillStyle = 'rgba(40,20,90,0.35)'; ctx.beginPath(); ctx.arc(L + 86, ry + 2, 26, 0, TAU); ctx.fill();
-      moon(L + 86, ry + 2, 15, '#ffd66e');
-      ctx.restore();
-      text('Notifications silenced', L + 130, ry + 12, 28, 600, '#fff', 'left', aR);
-      text('until 11:00', Rt - 66, ry + 12, 26, 450, 'rgba(255,255,255,0.66)', 'right', aR);
-    }
+  // pill label rides with the pill
+  const up = seg(t, TL.pillLabel, TL.pillLabel + 0.5);
+  if (up > 0) {
+    const py = lerp(L.card.cy + L.card.hy - 58, L.pill.cy, spring(t - TL.pill, 1.25, 0.5));
+    ctx.font = F_PILL; ctx.letterSpacing = '0.6px'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.globalAlpha = easeOut(up) * fade;
+    ctx.fillText(PILL, 960, py + 1 + 8 * (1 - easeOut(up)));
   }
-  // notification pill
-  if (C.a > 0.5 && t < T.merge + .5) {
-    const aN = clamp((t - T.split - .5) / .3) * (1 - seg(t, T.merge - .05, T.merge + .18));
-    if (aN > 0) {
-      const L = C.cx - C.hw;
-      chatIcon(L + 56, C.cy, 26, aN);
-      text('Team chat', L + 100, C.cy - 4, 26, 650, '#fff', 'left', aN);
-      text('3 new messages', L + 100, C.cy + 28, 24, 450, 'rgba(255,255,255,0.72)', 'left', aN);
-      text('now', C.cx + C.hw - 36, C.cy - 4, 22, 500, 'rgba(255,255,255,0.6)', 'right', aN);
-    }
-  }
-  // ── S3: tagline on the slab ──
-  if (t > T.tag1 - .1 && t < T.collapse + .4) {
-    const out = 1 - eOut(seg(t, T.tagOut, T.tagOut + .3));
-    const blur = (1 - out) * 12, lift = -30 * eInOut(seg(t, T.tagOut, T.tagOut + .3));
-    ctx.save(); shadowOn(24, .25); if (blur > .3) ctx.filter = `blur(${blur.toFixed(1)}px)`;
-    letters('Less noise.', CX, CY - 12 + lift, { size: 124, weight: 700, t0: T.tag1, stagger: 0.035, t, out });
-    const grad = (px, tot) => { const g = ctx.createLinearGradient(-px, 0, tot - px, 0); g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#d9ecff'); g.addColorStop(1, '#ffd3ec'); return g; };
-    letters('More you.', CX, CY + 118 + lift, { size: 124, weight: 700, t0: T.tag2, stagger: 0.04, t, out, fill: grad });
-    ctx.restore(); shadowOff();
-  }
-  // ── S4: wordmark under the orb ──
-  if (t > T.word) {
-    ctx.save();
-    letters('Focus', CX, 718, { size: 64, weight: 650, t0: T.word, stagger: 0.05, t, rise: .4, alpha: 0.95 });
-    ctx.restore();
-    text('Available this fall', CX, 768, 26, 450, 'rgba(255,255,255,0.62)', 'center', clamp((t - T.word - .35) / .4));
-  }
+  ctx.restore();
 }
 
+// ---------- frame ----------
 function render(t) {
-  const S = shapeAt(t);
-  glass(t, S);
-  ctx.globalAlpha = 1; ctx.filter = 'none';
-  ctx.drawImage(gc, 0, 0);
-  overlay(t, S);
-  // open from black, close to black
-  const fade = Math.max(1 - eOut(seg(t, 0, 0.7)), eInOut(seg(t, T.fadeA, T.fadeB)));
-  if (fade > 0) { ctx.globalAlpha = fade; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  const st = state(t);
+  drawIntro(t);
+  if (textDirty) {
+    gl.bindTexture(gl.TEXTURE_2D, textTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, txc);
+    textDirty = false;
+  }
+  const m = st.pal, lo = [], hi = [];
+  for (let i = 0; i < 4; i++) for (let c = 0; c < 3; c++) {
+    lo.push(lerp(PAL_A.lo[i][c], PAL_B.lo[i][c], m)); hi.push(lerp(PAL_A.hi[i][c], PAL_B.hi[i][c], m));
+  }
+  const rib = [];
+  RIB.forEach((r, i) => rib.push(r[0] + 0.012 * Math.sin(t * 0.3 + i * 1.7), r[1], r[2], r[3]));
+  pass(P.bg, T.bg, u => {
+    gl.uniform1f(u.uT, t); gl.uniform1f(u.uAur, st.aur);
+    gl.uniform3fv(u.uLo, lo); gl.uniform3fv(u.uHi, hi); gl.uniform4fv(u.uRib, rib);
+    bindTex(0, textTex, u.uText);
+  });
+  pass(P.down, T.q1, u => { gl.uniform2f(u.uOut, QW, QH); gl.uniform2f(u.uTexel, 1 / W, 1 / H); bindTex(0, T.bg.t, u.uSrc); });
+  for (let k = 0; k < 2; k++) {
+    pass(P.blur, T.q2, u => { gl.uniform2f(u.uOut, QW, QH); gl.uniform2f(u.uDir, 1 / QW, 0); bindTex(0, T.q1.t, u.uSrc); });
+    pass(P.blur, T.q1, u => { gl.uniform2f(u.uOut, QW, QH); gl.uniform2f(u.uDir, 0, 1 / QH); bindTex(0, T.q2.t, u.uSrc); });
+  }
+  const sh = [], rr = [];
+  st.S.forEach(s => { sh.push(s[0], s[1], s[2], s[3]); rr.push(s[4]); });
+  pass(P.glass, null, u => {
+    bindTex(0, T.bg.t, u.uBg); bindTex(1, T.q1.t, u.uBlur);
+    gl.uniform4fv(u.uS, sh); gl.uniform1fv(u.uRr, rr); gl.uniform1f(u.uK, 80);
+    gl.uniform4fv(u.uWob, st.w);
+    gl.uniform1f(u.uBevel, st.bevel); gl.uniform1f(u.uRefr, st.refr); gl.uniform1f(u.uFrost, st.frost);
+    gl.uniform1f(u.uDark, st.dark); gl.uniform1f(u.uDisp, 0.14); gl.uniform1f(u.uFade, st.fade);
+    gl.uniform1f(u.uShadow, 0.42); gl.uniform1f(u.uBloom, 0.38); gl.uniform3fv(u.uSweep, st.sweep);
+  });
+  ctx.globalAlpha = 1; ctx.drawImage(glc, 0, 0);
+  drawType(t, st);
 }
 
-window.ready = (async () => {
-  await Promise.all([450, 500, 600, 650, 700].map(w => document.fonts.load(`${w} 100px ${FONT}`, 'Meet Focus. Less noise. More you. 0123456789:')));
-  await document.fonts.ready;
-  initGL(); render(0);
-})();
 window.draw = ({ t }) => { render(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
-// audio cue list (read by events.mjs → events.json → audio.py)
+
+// sound cues for audio.py
 window.events = () => {
   const ev = [
-    { t: T.orb, k: 'drop' }, { t: T.pill - .04, k: 'whoosh', d: .55 }, { t: T.sweep1, k: 'shimmer' },
-    { t: T.titleOut, k: 'whoosh', d: .4, v: .5 }, { t: T.split, k: 'swish' },
-    { t: T.split + .38, k: 'tap', f: 880 }, { t: T.split + .47, k: 'tap', f: 1175 }, { t: T.split + .56, k: 'tap', f: 1320 },
-    { t: T.ring, k: 'rise', d: 1.3 }, { t: T.toggle, k: 'click' }, { t: T.toggle + .05, k: 'chime', f: 1318 },
-    { t: T.merge + .1, k: 'bloop' }, { t: T.row, k: 'tap', f: 988 },
-    { t: T.gather - .05, k: 'whoosh', d: .7 }, { t: T.tag1, k: 'chime', f: 1047 }, { t: T.tag2, k: 'chime', f: 1568 },
-    { t: T.sweep2, k: 'shimmer' }, { t: T.tagOut, k: 'whoosh', d: .4, v: .5 },
-    { t: T.collapse, k: 'suck' }, { t: T.collapse + .32, k: 'chord' }
+    { k: 'drip', t: 0.62 }, { k: 'fall', t: TL.release }, { k: 'land', t: TL.land },
+    { k: 'bead', t: TL.cL, pan: -0.45 }, { k: 'bead', t: TL.cR, pan: 0.45 },
+    { k: 'merge', t: 2.68, pan: -0.3 }, { k: 'merge', t: 2.88, pan: 0.3 },
+    { k: 'riser', t: TL.antic3 - 0.25, d: TL.morph3 - TL.antic3 + 0.25 }, { k: 'morph', t: TL.morph3, v: 0.8 },
+    { k: 'chime', t: TL.mark }, { k: 'shimmer', t: TL.sweep1, d: 0.7 },
+    { k: 'riser', t: TL.antic4 - 0.25, d: TL.morph4 - TL.antic4 + 0.25 }, { k: 'morph', t: TL.morph4, v: 1.0 },
+    { k: 'pop', t: 7.23 }, { k: 'shimmer', t: TL.sweep2, d: 0.95 },
   ];
-  const tick = (t0, n, st) => { for (let i = 0; i < n; i++) ev.push({ t: t0 + i * st + 0.02, k: 'tick', v: 0.5 + 0.5 * ((i * 7) % 5) / 5 }); };
-  tick(T.title, 10, 0.04); tick(T.tag1, 10, 0.035); tick(T.tag2, 8, 0.04); tick(T.word, 5, 0.05);
-  return ev.sort((a, b) => a.t - b.t);
+  for (let i = 0; i < INTRO.length; i++) ev.push({ k: 'tap', t: TL.introIn + i * 0.045 + 0.05, i, v: 0.4 });
+  for (let i = 0; i < TITLE.length; i++) ev.push({ k: 'tap', t: TL.title + i * 0.05 + 0.08, i, v: 1.0 });
+  ev.sort((a, b) => a.t - b.t);
+  return { dur: DUR, chords: [[0, 'I'], [3.78, 'vi'], [5.72, 'IV'], [7.3, 'I']], fadeOut: TL.fadeOut, ev };
 };
+
+window.ready = (async () => {
+  await Promise.all([F_INTRO, F_TITLE, F_SUB, F_PILL].map(f => document.fonts.load(f, 'AaOpline')));
+  await document.fonts.ready;
+  layout();
+  initGL();
+})();
 </script>
 </body></html>
