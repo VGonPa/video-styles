@@ -127,7 +127,8 @@ is acceptable when sound would hurt.
 
 - `node render.mjs <outDir> [fps=30] [t0=0] [t1=10] [workers=2] [times]` renders frames, or stills at a comma
   list of `times` (that is what `scripts/contact_sheet.sh` uses).
-- build.sh encodes H.264 at 30 fps, CRF 18, full range (`yuvj420p`), with AAC 48 kHz stereo audio, then makes
+- build.sh encodes H.264 at 30 fps, CRF 18, with AAC 48 kHz stereo audio; its `-pix_fmt yuv420p` from JPEG
+  frames comes out full range (ffprobe shows `yuvj420p` or color range `pc`), as the catalog's clips are. It then makes
   `preview.gif` (480 px wide, 6 fps, 96 colours). It deletes the frames and `audio.wav` afterwards.
 - build.sh needs bash, and so does contact_sheet.sh: macOS or Linux, or WSL on Windows.
 - Playwright is found via `$PLAYWRIGHT_DIR`, the global `@playwright/test`, then local packages.
