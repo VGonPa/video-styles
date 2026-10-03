@@ -2625,6 +2625,188 @@
    "recipe": false,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dada-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dada.mp4"
+  },
+  {
+   "slug": "grainy-flat",
+   "number": 133,
+   "name": "Grainy Flat Vector",
+   "feel": "Grain-shaded shapes, pastel blobs, confetti",
+   "best_for": "Cosy everyday stories, app onboarding and gentle explainers",
+   "family": "flat-graphics",
+   "use_cases": [
+    "story",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by the \"40,000 years of art history in 15 seconds\" reel by @cherry_mx_reds"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/grainy-flat-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/grainy-flat.mp4"
+  },
+  {
+   "slug": "ray-traced-cgi",
+   "number": 134,
+   "name": "Ray-Traced CGI",
+   "feel": "Chrome spheres over an endless checkerboard",
+   "best_for": "Retro tech openers, 90s nostalgia and shiny reveals",
+   "family": "nostalgia",
+   "use_cases": [
+    "titles",
+    "product"
+   ],
+   "credits": [
+    "Inspired by Turner Whitted's 1980 ray-traced spheres"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ray-traced-cgi-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ray-traced-cgi.mp4"
+  },
+  {
+   "slug": "flat-design",
+   "number": 135,
+   "name": "Flat Design",
+   "feel": "Long shadows, flat UI colours",
+   "best_for": "App launches, feature tours and clean onboarding",
+   "family": "flat-graphics",
+   "use_cases": [
+    "product",
+    "tutorial"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/flat-design-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/flat-design.mp4"
+  },
+  {
+   "slug": "corporate-memphis",
+   "number": 136,
+   "name": "Corporate Memphis",
+   "feel": "Noodle limbs, tiny heads, bold blobs",
+   "best_for": "Team stories, onboarding and friendly service explainers",
+   "family": "flat-graphics",
+   "use_cases": [
+    "explainer",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/corporate-memphis-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/corporate-memphis.mp4"
+  },
+  {
+   "slug": "renaissance",
+   "number": 137,
+   "name": "Renaissance",
+   "feel": "Sfumato, gold ground, deep perspective",
+   "best_for": "Origins, discovery and humanist storytelling",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by Leonardo da Vinci, Piero della Francesca and the Italian quattrocento"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/renaissance-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/renaissance.mp4"
+  },
+  {
+   "slug": "baroque",
+   "number": 138,
+   "name": "Baroque",
+   "feel": "Chiaroscuro, motion, gilded drama",
+   "best_for": "Reveals, dramatic turns and grand entrances",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Caravaggio and the tenebrist painters of the Baroque"
+   ],
+   "webgl": false,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/baroque-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/baroque.mp4"
+  },
+  {
+   "slug": "neoclassicism",
+   "number": 139,
+   "name": "Neoclassicism",
+   "feel": "Severe line, marble, civic calm",
+   "best_for": "Rules, principles and institutional explainers",
+   "family": "art-movements",
+   "use_cases": [
+    "explainer",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Jacques-Louis David, Antonio Canova and John Flaxman"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/neoclassicism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/neoclassicism.mp4"
+  },
+  {
+   "slug": "romanticism",
+   "number": 140,
+   "name": "Romanticism",
+   "feel": "Storm light, sublime scale, loose brush",
+   "best_for": "Scale, awe and turning points",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Romantic painting — Goya's Black Paintings, Turner's storms and Friedrich's lone figures"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/romanticism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/romanticism.mp4"
+  },
+  {
+   "slug": "impressionism",
+   "number": 141,
+   "name": "Impressionism",
+   "feel": "Broken colour, daylight, plein-air",
+   "best_for": "Everyday scenes, light and passing moments",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Inspired by Claude Monet, Camille Pissarro, Pierre-Auguste Renoir, Berthe Morisot and Alfred Sisley"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impressionism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impressionism.mp4"
   }
  ]
 }
