@@ -1,0 +1,8 @@
+/* Manrope (OFL), latin subset from Google Fonts: variable weight axis 200–800 */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: block;
+  src: url(fonts/Manrope-latin.woff2) format('woff2');
+}

@@ -70,7 +70,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Libre Franklin](https://fonts.google.com/specimen/Libre+Franklin) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [data-visualization](styles/data-visualization) |
 | [Lilita One](https://fonts.google.com/specimen/Lilita+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [cel-shaded-3d](styles/cel-shaded-3d), [clear-line](styles/clear-line) |
 | [Limelight](https://fonts.google.com/specimen/Limelight) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-deco](styles/art-deco) |
-| [Manrope](https://fonts.google.com/specimen/Manrope) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [liquid-motion](styles/liquid-motion) |
+| [Manrope](https://fonts.google.com/specimen/Manrope) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [corporate-memphis](styles/corporate-memphis), [liquid-motion](styles/liquid-motion) |
 | [Marcellus](https://fonts.google.com/specimen/Marcellus) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [egyptian-papyrus](styles/egyptian-papyrus), [islamic-geometric](styles/islamic-geometric) |
 | [Marcellus SC](https://fonts.google.com/specimen/Marcellus+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-deco](styles/art-deco), [egyptian-papyrus](styles/egyptian-papyrus), [islamic-geometric](styles/islamic-geometric) |
 | [Martian Mono](https://fonts.google.com/specimen/Martian+Mono) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [reel-chrome](styles/reel-chrome), [sci-fi-interface](styles/sci-fi-interface) |
