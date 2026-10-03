@@ -46,7 +46,7 @@ Styles borrowed from art and design history.
 - `renaissance` **Renaissance** — Sfumato, gold ground, deep perspective. Best for origins, discovery and humanist storytelling · story, explainer · Inspired by Leonardo da Vinci, Piero della Francesca and the Italian quattrocento · *no recipe yet*
 - `romanticism` **Romanticism** — Storm light, sublime scale, loose brush. Best for scale, awe and turning points · story, titles · Inspired by Romantic painting — Goya's Black Paintings, Turner's storms and Friedrich's lone figures · *no recipe yet*
 - `swiss-style` **Swiss Style** — Strict grid, giant type, red. Best for event titles, product launches, and clean announcements · titles, product · Inspired by International Typographic Style (Josef Müller-Brockmann, Armin Hofmann) · *no recipe yet*
-- `ukiyo-e` **Ukiyo-e** — Woodblock waves, washi and seal. Best for calm, crafted stories and elegant title openers · story, titles · *no recipe yet*
+- `ukiyo-e` **Ukiyo-e** — Woodblock waves, washi and seal. Best for calm, crafted stories and elegant title openers · story, titles
 
 ## Hand Drawn (`hand-drawn`)
 
