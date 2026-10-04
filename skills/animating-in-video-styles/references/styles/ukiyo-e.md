@@ -11,14 +11,14 @@ a snowy peak is rubbed in behind them, its cartouche prints and a seal is presse
 - Warm washi (`PAPER`) with the picture inside a thin sumi border (`FRAME`), the margin always showing; the film
   opens on the bare sheet and fades back to it.
 - The print is pulled on screen: the key block's black lines are rubbed in left to right behind a streaky baren edge
-  (0.06–0.78 s), then five colour blocks land one after another (0.86–1.76 s), each dropping into place off register.
-- Flat inks multiplied into the paper, streaked by wood grain: Prussian blue and indigo sea, beni-red sun, straw
-  cartouche, pink mist edges. The only gradients are bokashi bands (top of the sky, deepening sea, base of a form).
-- Bold sumi key lines of varied weight over the colour, and every white is bare paper: foam as outlined paper blobs,
-  near swells as rows with three-blob crests, far waves as hook marks, mist bands (kasumi) as paper bars cut out of
-  the colour with a pink lower edge, one of them across the lower part of the sun.
+  (0.06–0.78 s), then the colour blocks land one after another (0.86–1.76 s), each dropping into place off register.
+- Flat inks multiplied into the paper, streaked by wood grain: Prussian blue, indigo, beni red, straw, pink mist edges
+  (the demo's sea, sun, cartouche). The only gradients are bokashi bands (sky top, deepening water, a form's base).
+- Bold sumi key lines of varied weight over the colour; every white is bare paper; mist bands (kasumi) are paper bars
+  cut out of the colour with a pink lower edge, one across the main form or the sun (in the demo: foam as outlined paper
+  blobs, near swells as rows with three-blob crests, far waves as hook marks, a band across the sun's lower part).
 - A cartouche in a top corner: straw panel, beni band, double sumi border, a Zen Antique title, a paper-coloured
-  small-caps band line and a date. The second print adds the red seal as the sign-off.
+  small-caps band line and a date. The last print adds the red seal as the sign-off.
 
 ## Palette
 | Role | Colour | In code |
@@ -85,12 +85,14 @@ a snowy peak is rubbed in behind them, its cartouche prints and a seal is presse
   none in the demo; keep them small like the boats (sumi outline, paper face, readable head and shoulders).
 
 ## Composition and camera
-- One fixed print, no camera: no pan, zoom or shake. Depth is flat layers and drift speed: far landmass, hooks slowing
-  toward the horizon, near rows at 34 and 50 px/s, mist 5–9 px/s, boats 4–7 px/s.
-- 16:9: `FRAME` x 56, y 50, 1808 × 980; horizons at 640 and 642. Print one: cartouche top left (`BOX1`), sun at
-  (700, 292) under a mist band, wave crest right of centre, pine island at the right edge. Print two mirrors it: peak
-  left of centre, sun at its right foot (1292, 578), shore bottom left, flock high left, `BOX2`, `SEAL_AT` top right.
-  The seal sits right-aligned under its cartouche, 26 px below (x = box x + w − 136, y = box y + h + 26).
+- One fixed print, no camera: no pan, zoom or shake. Depth is flat layers drifting slower with distance (in the demo:
+  far landmass, hooks slowing toward the horizon, near rows 34 and 50 px/s, mist 5–9, boats 4–7 px/s).
+- 16:9: `FRAME` x 56, y 50, 1808 × 980. Each print puts the horizon near mid-height (640, 642), one dominant form
+  off-centre, a sun or moon (when it has one) beside it and clear of its key line, a mist band across, the cartouche in
+  a top corner away from the form's tallest part; the second print mirrors the first. In the demo, print one: cartouche
+  top left (`BOX1`), sun at (700, 292) under mist, wave crest right of centre, pine island at the right edge; print two:
+  peak left of centre, sun at its right foot (1292, 578), shore bottom left, flock high left, `BOX2`, `SEAL_AT` top
+  right. The seal sits right-aligned under its cartouche, 26 px below (x = box x + w − 136, y = box y + h + 26).
 - 9:16 and 1:1, rendered with the flock fix (Film grammar); Signature checked at every beat, birds probed per frame.
 ```js
 // 9:16, 1080 × 1920. MIST: [x, y, w, h, v]; ROWS1: [base, amp, per, v, off], prussian and indigo alternating; BOATS: [x, y, s, v]
@@ -135,9 +137,9 @@ FLOCK: [[4.4, 680, 440], [4.85, 700, 290], [5.3, 720, 190], [5.8, 630, 160], [6.
   right (`inOut`, 0.96 s), both behind `EDGE`; a block lands in 0.26 s (`landing()`: opaque in 0.1 s while dropping
   22 px with `outBack`, about 3 px past its place); letters print; the seal is pressed.
 - Eases: `inOut` (rise, sheet change, flock recession, fade), `inC` (lip falls), `outC` (collapse, letters, foam ring),
-  `outBack` (pops). The wave morphs between six `POSE` outlines; spray falls 470 px × age²; the flock path is a spline.
-- Ambient through every hold: mist, rows, hooks, ripples, boats, a ±5 px heave, glitter, wavelets, and the flock's bob
-  and wingbeat (eased to 45 %, 6.2–7.6 s). Its glide along `FLOCK` and its shrink are action: stop them before the
+  `outBack` (pops). Demo: the wave morphs through six `POSE` outlines, spray falls 470 px × age², birds fly a spline.
+- Ambient through every hold (in the demo: mist, rows, hooks, ripples, boats, a ±5 px heave, glitter, wavelets, the
+  flock's bob and wingbeat, eased to 45 %, 6.2–7.6 s). The flock's glide and shrink are action: stop them before the
   hold. Smooth 30 fps; never a camera move, shake, glow, motion blur, cross-dissolve, hard cut, sliding text or 3D turn.
 
 ## Film grammar
@@ -181,6 +183,10 @@ audio.py reads `events.json` (cues with a time `t` and kind `k`) and synthesizes
   `hiss` 4.1, `crash` 4.12, `taiko` 4.28; a `peep` per bird, two more at 4.95 and 5.25; `rub` 5.04 (sheet change); a
   falling `koto` line 6.1–7.5 (12, 8, 7, 5, 3); `tok` 6.66 (panel); a `tick` per character of `TITLE.join('')` from
   6.88; `stamp` 7.93, `rin` 7.96; the closing `koto` pair 8.6 (n 0) and 8.95 (n 7).
+- By role: `rub` per rub-in, a `tok` as the key lands; a `tok` and a rising `koto` note per block; a `tok` per cartouche
+  panel, a `tick` per letter; `stamp` and `rin` for the seal; for the one event, `swell` and a rising `koto` run, then
+  `hiss`, `crash`, `taiko`; `peep` only for birds; `sea` (`d` = `DUR`, the only bed) only with water; otherwise no bed,
+  or add one to `GEN` first.
 - Music is cued, no cue is looked up by name, and nothing is written at fixed times but the 0.8 s master fade (`fade`)
   at the end of `DUR`. Re-time the cues, `DUR`, the `sea` cue's `d`; keep the falling line before the stamp, the
   closing pair after it, nothing after the pair.

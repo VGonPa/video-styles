@@ -10,12 +10,14 @@ zigzag border draws itself, a tree of life grows, sun, moon and two peacocks are
 small flowers fill every gap, a title strip inks in and the sun smiles · `styles/madhubani/`
 
 ## Signature
-- A tight close-up (2.9×, `ZOOM`) on warm handmade paper where double outlines draw themselves (no pen is shown),
-  two ink lines with a band of vermilion or turmeric between (`dbl` ops), round a pond and two fish.
-- Colour follows the outline as flat, unshaded pigment brushed in as a diagonal sweep (bharni, `fill`): pale-blue
-  water, a turmeric ring, fish in bands of turmeric, pink, green, orange, lime and indigo.
-- Fine black patterns then cover the colour (kachni: `scales`, `hatch`, `dots`): fish scales, stripes, dot rows.
-- Creatures have a big almond eye in a white ring and a small smile; the fish swim among rippling indigo lines.
+- A tight close-up (2.9×, `ZOOM`) on warm handmade paper where double outlines (two ink lines with a band of vermilion
+  or turmeric between, `dbl` ops) draw themselves round the first motif, no pen shown (in the demo: a pond, two fish).
+- Colour follows the outline as flat, unshaded pigment brushed in as a diagonal sweep (bharni, `fill`), each shape
+  split into bands of contrasting pigments (in the demo: pale-blue water, a turmeric ring, fish in bands of turmeric,
+  pink, green, orange, lime and indigo).
+- Fine black patterns then cover the colour (kachni: `scales`, `hatch`, `dots`): scale arcs, stripes, dot rows.
+- Creatures have a big almond eye in a white ring and a small smile, and move gently in place once painted (in the
+  demo: the fish swim among rippling indigo wave lines).
 - Before 3 s the zigzag-triangle border starts along the bottom and the camera begins to pull back.
 
 ## Palette
@@ -36,8 +38,8 @@ small flowers fill every gap, a title strip inks in and the sun smiles · `style
 
 - Every fill is one flat pigment, no gradient or shade; shapes split into flat bands instead (fish in head,
   scaled body and striped band; leaves in two halves along the midrib).
-- The pigment between the two ink lines contrasts with what it surrounds: vermilion round the turmeric pond and
-  sun, turmeric round green leaves and the red tree, turmeric or pink round the indigo peacocks.
+- The pigment between the two ink lines contrasts with what it surrounds (in the demo: vermilion round the turmeric
+  pond and sun, turmeric round green leaves and the red tree, turmeric or pink round the indigo peacocks).
 
 ## Typography and copy
 - One face, Yatra One (`FT`, `fonts/YatraOne-400-latin.woff2`), for the title only: 50 px, mixed case, ink on the
@@ -74,9 +76,11 @@ small flowers fill every gap, a title strip inks in and the sun smiles · `style
   peacock at 2.2× gets 15 px outlines and 18 px hatch gaps, coarse beside everything else (rendered).
 
 ## Composition and camera
-- 16:9: a framed painting, a 48 px border between `BO` and `BI`. Tree on the axis x 960, pond under it (`POND`
-  640–1280 × 700–985), sun (`SUNP`) and moon (`MOONP`) in the top corners at 1.15 (`frame()`), title strip top
-  centre (`TR`), peacocks at x 452 and 1468 (`window.ready`), `PSC` 1.15, baseline 985, facing in; grass y 1004.
+- 16:9: a framed painting, a 48 px border between `BO` and `BI`. Frontal and symmetrical: one central motif on the
+  vertical axis (x 960), mirrored pairs facing inward on either side, a motif in each top corner, the title strip top
+  centre, a ground row along the bottom border, fillers in every gap. In the demo: the tree on the axis with the pond
+  under it (`POND` 640–1280 × 700–985), sun (`SUNP`) and moon (`MOONP`) in the top corners at 1.15 (`frame()`), title
+  strip `TR`, peacocks at x 452 and 1468 (`window.ready`), `PSC` 1.15, baseline 985, facing in; grass y 1004.
 - One continuous shot from `camera()`: `ZOOM.s` 2.9 on `ZOOM.c` (the pond), a pull-back over `TL.zoom` (`eInOut`
   on the log of the scale, the centre drifting to the frame centre), a 3.5 % push-in from 8.6 s; no cuts or pans.
 - Keep every zoom centre at least W / (2 s) from the side edges and H / (2 s) from top and bottom: `PAPER` covers only
@@ -121,9 +125,9 @@ const G = { dx: -420, dy: 330, k: 1 }, gx = x => G.dx + G.k * x, gy = y => G.dy 
   `scales` adds arcs column by column; `dots` and `pop` spring in with `eBack` (about 13 % overshoot). Trunk
   `eInOut`, branches `eOut` (`branchGeom()`), leaves spring out as the tip passes; parrots fly a curve eased by
   a 2.2 power, wings at 5 Hz, and land with a 7 px bounce.
-- Living finish, small and slow: fish swim (`fishMap()`: 28 px drift, 9 px tail wave at 1.25 Hz), waves ripple,
-  leaves sway ±0.03 rad, birds bob, peacocks nod, the sun smiles and blinks, the moon wakes. Fades: in 0.3 s, out
-  with `eInOut`. Never: cuts, shake, blur, 3D, squash, boiling lines, or colour before its outline.
+- Living finish, small and slow (in the demo: fish swim with `fishMap()`'s 28 px drift and 9 px tail wave at 1.25 Hz,
+  waves ripple, leaves sway ±0.03 rad, birds bob, peacocks nod, the sun smiles and blinks, the moon wakes). Fades: in
+  0.3 s, out with `eInOut`. Never: cuts, shake, blur, 3D, squash, boiling lines, or colour before its outline.
 
 ## Film grammar
 | Time (s) | What happens | In code |
@@ -167,11 +171,13 @@ audio.py synthesizes everything with NumPy (seeded `rs`) from cues `{k, t, …}`
 - Limits: `pen`, `brush`, `hatch`, `whoosh`, `grow`, `flap`, `rays`, `dots` read `d` with no default (KeyError);
   `d` ≤ 0 on any but `rays` and `dots` raises a ValueError (an empty FFT). `add()` clips pans (`np.clip`): no
   NaN. Cues past `DUR` drop silently. Master: 0.05 s fade-in, fixed 1.0 s fade-out (`fo`), tanh soft clip.
-- Emit `pen`, `brush`, `hatch` per motif, `water` if there is water (or delete its block), `whoosh` with the
-  camera, `bloom`, `pop`, `tick` for growth and fillers, and `end`. Offsets and `d` in `window.events` are in
-  motif time (fish `brush` at start + 0.85, d 0.65): divide both by the motif's speed-up. Tested in the 6 s plan,
-  each cue then lands on its phase; left as is, the fish's hatch comes 0.4 s late. The trunk's `grow` (d 0.8) and
-  `flap` (flight start + 0.3, d 0.7) are sized for the demo's 0.7 s trunk and 1.0 s flight: shorten them too.
+- Emit `pen`, `brush`, `hatch` per motif, `plip` per eye, `water` if there is water (or delete its block), `whoosh`
+  with the camera, `bloom`, `pop`, `tick` for growth and fillers, `grow` per growing stroke, `rays` and `dots` for
+  radiating marks and dot rows, `flap` and `land` per arrival, `title` with the title, `smile`, `wake` or `peacock`
+  for any motif's closing gesture, and `end`. Offsets and `d` in `window.events` are in motif time (fish `brush` at
+  start + 0.85, d 0.65): divide both by the motif's speed-up. Tested in the 6 s plan, each cue then lands on its
+  phase; left as is, the fish's hatch comes 0.4 s late. The trunk's `grow` (d 0.8) and `flap` (flight start + 0.3, d
+  0.7) are sized for the demo's 0.7 s trunk and 1.0 s flight: shorten them too.
 
 ## Reuse map
 | Piece | Where | Call / key params | Reuse |
@@ -192,10 +198,10 @@ audio.py synthesizes everything with NumPy (seeded `rs`) from cues `{k, t, …}`
 | Timeline and cues | `js/scene.js` → `TL`, `js/scene.js` → `frame` | draw order in `frame()`; `window.events` | replace |
 
 ## Adapting
-- **Style vs demo plot:** the style is paper and grain, the triangle border, pen-traced double outlines, bharni
-  then kachni, the pigments, almond eyes, mirrored frontal layout, no empty space, close-up and pull-back, a
-  living finish, drone and plucks. Tree, pond, fish, birds, sun and moon and the title are plot. A transformation:
-  the painting completing itself, a growth, birds landing, day to night (sun, then moon), a creature waking.
+- **Style vs demo plot:** the style is paper and grain, the triangle border, pen-traced double outlines, bharni then
+  kachni, the pigments, almond eyes, mirrored frontal layout, no empty space, close-up and pull-back, a living finish,
+  drone and plucks. Tree, pond, fish, birds, sun and moon and the title's words are plot. A transformation: the
+  painting completing itself, a growth, birds landing, day to night (sun, then moon), a creature waking.
 - **New subject:** motifs built with `S()` in the painter's order, each with a `TL` key. Traps: fillers cover what `buildFillers()` is not told about; `frame()` draws fillers above the
   peacocks and below parrots and title; without a white-ringed almond eye a creature reads as another style.
 - **Length:** add motifs and arrivals before the fill ripple, the one climax; more than about three similar
