@@ -89,7 +89,7 @@ Physical materials: paper, graphite, ink, clay.
 Recreations of older media and eras.
 
 - `documentary-16mm` **16 mm Documentary** — Vintage black-and-white film. Best for history and origin stories · story · Originally developed by Yasin Özmen · *no recipe yet*
-- `retro-1970s` **1970s Retro** — Vintage television titles. Best for nostalgic openings and series titles · titles, story · Originally developed by Yasin Özmen · *no recipe yet*
+- `retro-1970s` **1970s Retro** — Vintage television titles. Best for nostalgic openings and series titles · titles, story · Originally developed by Yasin Özmen
 - `anime-80s` **80s Anime** — Sunset cels, city-pop coastal drive. Best for retro title openers, road-trip stories, and nostalgic intros · titles, story
 - `weather-tv` **90s Weather Report** — Bevelled map, bouncy icons, synth bed. Best for forecasts, regional updates and nostalgic data roundups · news, data · *no recipe yet*
 - `frutiger-aero` **Frutiger Aero** — Glossy bubbles, blue skies, green grass. Best for cheerful app launches, playful promos, and nostalgic social posts · social, product · *no recipe yet*
