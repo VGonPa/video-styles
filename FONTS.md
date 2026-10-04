@@ -84,6 +84,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Montserrat](https://fonts.google.com/specimen/Montserrat) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bold-captions](styles/bold-captions), [cosmic-epic](styles/cosmic-epic), [mascot-beat-reel](styles/mascot-beat-reel) |
 | [Mr Dafoe](https://fonts.google.com/specimen/Mr+Dafoe) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [synthwave](styles/synthwave) |
 | [Newsreader](https://fonts.google.com/specimen/Newsreader) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [editorial-illustration](styles/editorial-illustration) |
+| [Noto Serif Display](https://fonts.google.com/specimen/Noto+Serif+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [surrealism](styles/surrealism) |
 | [Nunito](https://fonts.google.com/specimen/Nunito) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [blob-sim](styles/blob-sim), [frutiger-aero](styles/frutiger-aero), [history-comedy](styles/history-comedy) |
 | [Old Standard TT](https://fonts.google.com/specimen/Old+Standard+TT) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [dada](styles/dada), [documentary-16mm](styles/documentary-16mm), [impressionism](styles/impressionism), [newspaper](styles/newspaper) |
 | [Oleo Script](https://fonts.google.com/specimen/Oleo+Script) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [rubber-hose](styles/rubber-hose) |
