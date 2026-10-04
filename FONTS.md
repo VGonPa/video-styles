@@ -105,6 +105,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Rubik Mono One](https://fonts.google.com/specimen/Rubik+Mono+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [pop-art](styles/pop-art) |
 | [Russo One](https://fonts.google.com/specimen/Russo+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s) |
 | [Rye](https://fonts.google.com/specimen/Rye) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [rubber-hose](styles/rubber-hose) |
+| [Shippori Mincho](https://fonts.google.com/specimen/Shippori+Mincho) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [tonal-manga](styles/tonal-manga) |
 | [Short Stack](https://fonts.google.com/specimen/Short+Stack) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [minimal-strip](styles/minimal-strip) |
 | [Shrikhand](https://fonts.google.com/specimen/Shrikhand) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [memphis](styles/memphis), [retro-1970s](styles/retro-1970s), [underground-comix](styles/underground-comix) |
 | [Silkscreen](https://fonts.google.com/specimen/Silkscreen) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [dither-1bit](styles/dither-1bit), [flash-cartoon](styles/flash-cartoon), [voxel](styles/voxel) |
@@ -216,6 +217,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Rubik Mono One**: Copyright 2015 The Rubik Project Authors (mail@hubertfischer.com)
 - **Russo One**: Copyright (c) 2011-2012, Jovanny Lemonad (lemonad@jovanny.ru), with Reserved Font Name "Russo"
 - **Rye**: Copyright (c) 2012, Sorkin Type Co (eben@eyebytes.com) with Reserved Font Name 'Rye'
+- **Shippori Mincho**: Copyright 2021 The Shippori Mincho Project Authors (https://github.com/fontdasu/ShipporiMincho)
 - **Short Stack**: Copyright (c) 2011, Sorkin Type Co (www.sorkintype.com eben@eyebytes.com) with Reserved Font Names "Short Stack" and "Short Stack One".
 - **Shrikhand**: Copyright (c) 2015 Jonny Pinhorn (jonpinhorn.typedesign@gmail.com)
 - **Silkscreen**: Copyright 2001 The Silkscreen Project Authors (https://github.com/googlefonts/silkscreen)
