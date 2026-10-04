@@ -188,7 +188,7 @@ Video game looks from arcades to consoles.
 - `jrpg` **JRPG Battle** — 16-bit turn-based battle menus. Best for challenges overcome, skill unlocks, and playful explainers · explainer, social · *no recipe yet*
 - `pixel-art` **Pixel Art** — 16-bit video game level. Best for progress, milestones, and game-like scenes · social, story, data · Originally developed by Yasin Özmen
 - `point-and-click` **Point-and-Click Adventure** — Dithered early-90s adventure game. Best for wry quests, puzzles, reveals, and story beats with dialogue · story, social · *no recipe yet*
-- `vector-arcade` **Vector Arcade** — Glowing phosphor lines on black. Best for game-style openers, retro title cards, and punchy social clips · titles, social · *no recipe yet*
+- `vector-arcade` **Vector Arcade** — Glowing phosphor lines on black. Best for game-style openers, retro title cards, and punchy social clips · titles, social
 - `voxel` **Voxel Blocks** — Blocky sandbox, built block by block. Best for step-by-step tutorials, building processes and game-style explainers · tutorial, explainer · Inspired by Minecraft · *WebGL* · *no recipe yet*
 
 ## World & History (`world-history`)
