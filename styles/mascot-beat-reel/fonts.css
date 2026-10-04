@@ -1,0 +1,15 @@
+/* Anton (labels) and Montserrat (counter, lowercase lines): SIL Open Font License 1.1, latin subsets */
+@font-face {
+  font-family: 'Anton';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(fonts/Anton-400-latin.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url(fonts/Montserrat-latin.woff2) format('woff2');
+}
