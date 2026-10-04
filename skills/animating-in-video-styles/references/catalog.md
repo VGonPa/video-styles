@@ -37,7 +37,7 @@ Styles borrowed from art and design history.
 - `expressionism` **Expressionism** — Angular line, colour as sound. Best for tension, ideas and abstract explainers · explainer, story · Inspired by Wassily Kandinsky's Improvisations, Franz Marc and Der Blaue Reiter, with the woodcuts of Die Brücke · *no recipe yet*
 - `impasto` **Impasto Oil** — Thick ridged oil strokes, swirling night. Best for dreamy stories, painterly title cards and night scenes · story, titles · Inspired by Vincent van Gogh · *WebGL* · *no recipe yet*
 - `impressionism` **Impressionism** — Broken colour, daylight, plein-air. Best for everyday scenes, light and passing moments · story, social · Inspired by Claude Monet, Camille Pissarro, Pierre-Auguste Renoir, Berthe Morisot and Alfred Sisley · *WebGL* · *no recipe yet*
-- `memphis` **Memphis** — Playful, bouncing 1980s design. Best for fun announcements and short videos · social, product · Originally developed by Yasin Özmen · *no recipe yet*
+- `memphis` **Memphis** — Playful, bouncing 1980s design. Best for fun announcements and short videos · social, product · Originally developed by Yasin Özmen
 - `mid-century` **Mid-Century Modern** — 1950s limited animation, dry-brush colour. Best for retro explainers, jazzy title cards, and stylish openers · explainer, titles · *no recipe yet*
 - `neoclassicism` **Neoclassicism** — Severe line, marble, civic calm. Best for rules, principles and institutional explainers · explainer, story · Inspired by Jacques-Louis David, Antonio Canova and John Flaxman · *no recipe yet*
 - `pointillism` **Pointillism** — Sunlit park built from pure dots. Best for gentle stories, nostalgic scenes and painterly social posts · story, social · Inspired by Georges Seurat and Paul Signac · *no recipe yet*
