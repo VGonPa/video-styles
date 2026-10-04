@@ -17,8 +17,8 @@ board · `styles/whiteboard/`
 - Chunky handwriting in Kalam Bold, black, written on left to right letter by letter as the nib bobs, slightly
   tilted (the title is 96 px).
 - Objects build stroke by stroke in 6–7 px black lines with a gentle, fixed hand wobble (it never boils) and round
-  caps (the flower at 1.14–1.83 s), then get coloured in with a zig-zag scribble inside the outline (the red flower
-  centre at 1.75 s); a red dashed flight path follows at 2.06 s.
+  caps, then get coloured in with a zig-zag scribble inside the outline (in the demo, the flower at 1.14–1.83 s, its
+  red centre at 1.75 s); red marks motion as a dashed path or motion lines (the demo's flight path, 2.06 s).
 
 ## Palette
 | Role | Colour | In code |
@@ -26,13 +26,13 @@ board · `styles/whiteboard/`
 | Board | `#f6f6f3` | `BOARD` |
 | Ink: every outline, arrow and word | `#18181b` | `INK` |
 | Red marker: movement and emphasis (flower centre, flight path, nectar, fan lines, underlines) | `#d4352a` | `RED` |
-| Amber marker: honey | `#e9a21f` | `AMBER` |
+| Amber marker: the subject's material (honey) | `#e9a21f` | `AMBER` |
 | Glare bands; darkening toward the tray (bottom) | `rgba(255,255,255,0.55)`; `rgba(90,95,100,0.06)` | `paintBoard()` |
 | Ghost scribbles / wiped smears | `rgba(60,70,80,${0.018 + rand() * 0.03})` / `rgba(80,90,100,${0.008 + rand() * 0.01})` | `paintBoard()` |
 | Marker sprite (white barrel; nib, bands and cap) and shadow | `#ffffff` … `#9d9d99`; `#111`, `#3b3b40` … `#060607`; shadow `#2b3036` | `paintMarker()`, `mShadow` |
 | Corner falloff | `rgba(70,80,90,0.10)` | `frame()` |
 
-- Black carries every line and word; red marks motion and emphasis; amber is the subject's material (honey). A
+- Black carries every line and word; red marks motion and emphasis; amber is the subject's material (in the demo, honey). A
   fourth colour breaks the three-marker set. Colour is never a flat fill: it is scribbled in (Shapes).
 
 ## Typography and copy
@@ -81,8 +81,9 @@ board · `styles/whiteboard/`
   28 px/s (0.71 s).
 
 ## Composition and camera
-- 16:9: panel A is the frame at scale 1 (`A_C` [960, 540]): title at x 960, baseline 205; items near x 330, 910
-  and 1570, labels on baseline 850; panel B at `BX` 1760, `BY` 420, right of and below A (`B_C`).
+- 16:9: each panel is a frame-sized board with one row of items read left to right, labels on one baseline under
+  them, small arrows between. Panel A is the frame at scale 1 (`A_C` [960, 540]): title at x 960, baseline 205;
+  items near x 330, 910 and 1570, labels on baseline 850; panel B at `BX` 1760, `BY` 420, right of and below A (`B_C`).
 - `cameraFor(t)`: a 2 % push on panel A; a glide with `eio` to `B_C` over the long arrow's window ± 0.05 s that
   overtakes the arrow, so its tip sweeps from the right edge to the left third; a 2 % push on panel B; a pull-back with
   `eio` over `Z0`–`Z1` to `SUM`, fitted by `measureLabels()` (1720 × 940 box, scale 0.571); then a 1.2 % pull to 10 s.
@@ -169,7 +170,9 @@ audio.py reads `events.json` and synthesizes 48 kHz stereo, `DUR` 10.0, with 0.2
 - Derived from every move, so new drawings are scored for free: `marker` (`d`), a felt tap and squeak over `d` (at
   least 0.03 s), per stroke; `write` (`d`, `n`), `n` squeaks over `d`, per label (`n` = letters without spaces).
 - `buzz` (`pan`): a 218 Hz drone with a 7 Hz flutter to the end of the buffer, one per `bee()` (`BEES`), panned ±0.3;
-  the loop over `buzzes` ducks the first to 0.35 at fixed times (4.5 to 5.6, the glide): move them with `CONN`.
+  the loop over `buzzes` ducks the first to 0.35 at fixed times (4.5 to 5.6, the glide): move them with `CONN`. It is
+  the demo's bee sound, not the style's: a new doodle copied from `bee()` drops its `BEES.push` line unless the thing
+  really hums or buzzes; with no `buzz` cue the duck never runs.
 - Pushed by hand in `window.events`: `whoosh` (`d`), a noise swell at `CONN.t0` and `Z0`; `chord` at `Z1` − 0.1.
 - Bed: room tone (`room`) and an F major pad at fixed times, `tone(nt(m), 9.4, 1.5, 1.4)` from 0.3 s with `tt(9.4)`:
   set both 9.4 to `DUR` − 0.6 (a mismatch raises a shape error). No cue is looked up by name; unknown kinds are skipped.
@@ -194,8 +197,9 @@ audio.py reads `events.json` and synthesizes 48 kHz stereo, `DUR` 10.0, with 0.2
 
 ## Adapting
 - **Style vs demo plot:** always the style: board, marker, Kalam written on, black wobbly strokes, red and amber
-  scribbles, the question title, the glide to fresh board, the underlined answer, the pull-back, the fade (4 s and
-  shorter: see Shorter). Demo plot: the bees and all copy. Transformations: a colour-in, steps resolving, the pull-back.
+  scribbles, red motion marks, the question title, the glide to fresh board, the underlined answer, the pull-back, the
+  fade (4 s and shorter: see Shorter). Demo plot: the bees, their buzz, all copy. Transformations: a colour-in, steps
+  resolving, the pull-back.
 - **New subject:** a process in three to six steps, one doodle per step; replace every call between the title and
   the underlines, keep the kit. Traps: a label must clear its object by about 70 px; overlapping time windows make
   the marker jump; steam or vapour on the last object keeps rising into the hold (see Shapes); wrap every new drawer

@@ -91,11 +91,13 @@ closes on the lamp · `styles/cel-shaded-3d/`
 - One `THREE.PerspectiveCamera`, 34° vertical field of view, gliding the whole film: `camAt` moves from azimuth 16° to
   72°, radius 46 to 41 and height 13.5 to 6.8 round a drifting target; azimuth, radius and target follow 30 % linear
   plus 70 % `easeInOut` over 9.7 s, so the camera moves on frame 0, height `easeInOut` over 9.0 s. In 16:9 it starts
-  high, the island across the middle 60 % of the width under a horizon a quarter down, and ends low, the horizon
-  mid-frame, the lighthouse right of centre against the setting sun, the title top-left.
+  high, the toy world across the middle 60 % of the width under a horizon a quarter down, and ends low with the
+  horizon mid-frame, the hero prop right of centre against the setting sun and the title top-left (in the demo: the
+  island, then the lighthouse).
 - Axes: the camera sits at target + (sin az, cos az) × radius, starting on +z; `polar(th, rho)` places props by angle
-  from +x towards +z and fraction of the coast radius: cove, pier and boat on +z (`TH_COVE`), the lighthouse on the −x
-  headland (`TH_HEAD`), cottages on the +z half facing out.
+  from +x towards +z and fraction of the coast radius. The action and the props that face out go on the camera's side,
+  the hero on the far side, towards the sunset at −x (in the demo: cove, pier and boat on +z, `TH_COVE`; cottages on
+  the +z half facing out; the lighthouse on the −x headland, `TH_HEAD`).
 - The sun (`sunAz`, `sunElev`) sinks from 26° to −4° behind the island; the light stops at 7°, so the lit band never
   vanishes and shadows stay finite, stretching across the sea from about 6 s (the dusk look). Shadows reach ±27 units.
 - 9:16 (1080 × 1920, rendered at 0.3–9.4 s): field of view 60; in `camAt` radius 48 → 42, height 15 → 7, target x
@@ -120,9 +122,11 @@ closes on the lamp · `styles/cel-shaded-3d/`
 - Easing: `easeInOut` (cubic) for camera, sun and closing iris; `easeOut` for the opening iris, subtitle and letter
   tilt; `backOut()` for letters; `sstep()` for grade, windows and stars. The sails fill on a damped spring,
   `sailFill()` (about 20 % overshoot, settled in 0.8 s); the lamp comes on through `lampOn()`'s eight-step flicker.
-- Nothing is still: the boat bobs and rolls, slack sails flutter until the gust, palms sway (more after it), gulls
-  circle the lighthouse at 7.5–12.3 units, smoke puffs rise on a 3.5 s cycle, clouds drift and face the camera, foam
-  breathes, the beam turns at 1.25 rad/s. The boat sails 13.5 units left in 8 s after the gust (`boatX()`), heeled.
+- Nothing is still: something always moves on the water, in the air and in the sky, and every living or loose thing
+  has an idle motion, while ground, rock and buildings stay put (in the demo: the boat bobs and rolls, slack sails
+  flutter until the gust, palms sway, more after it, gulls circle the lighthouse at 7.5–12.3 units, smoke puffs rise
+  on a 3.5 s cycle, clouds drift and face the camera, foam breathes, the beam turns at 1.25 rad/s; after the gust the
+  boat sails 13.5 units left in 8 s, heeled, `boatX()`).
 - Never: stepping (everything is a smooth function of `t` at 30 fps; twos would read as `anime-80s`), cuts, camera
   shake, motion blur, smooth shading on objects, photographic textures or highlights.
 

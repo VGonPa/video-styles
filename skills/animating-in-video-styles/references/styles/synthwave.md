@@ -15,7 +15,8 @@ FRIDAYS 11 PM" and the CRT powers off · `styles/synthwave/`
 - A yellow-to-magenta sun on the horizon with horizontal cuts that drift downward and thicken toward its base, in a
   pink halo, clipped at the horizon (`drawSun()`), over a violet-to-pink sky with twinkling stars (`drawSky()`).
 - Dark wireframe mountains with cyan and violet wire, low at the centre and high at the edges (`drawMountains()`),
-  and black palm silhouettes whipping past on both sides (`drawPalms()`).
+  and near-black roadside silhouettes whipping past on both sides (palms in the demo, `drawPalms()`; pylons, cars or
+  the subject itself work the same).
 - Chrome type: Exo 2 Black Italic with a sky-blue top, a white horizon line, a dark band and a sunset-pink base, a
   30-step magenta extrusion, star glints and a light sweep (`buildTitle()`, `drawTitle()`), slammed in at 3.0 s.
 - A CRT/VHS finish on every frame: bloom, an RGB split widening toward the edges, scanlines, grain, vignette,
@@ -189,8 +190,9 @@ audio.py synthesizes 48 kHz stereo (`DUR` 10.0) from `events.json` cues `{t, k}`
   (the power-off). The fifth chord (Am tail at bar 4, 10.2 s) never sounds in 10 s.
 - Cues: `crton`, `zap`, `charge` (the 0.3 s laser ignition), `laser` (wipe), `fall`, `slam` (sub drop, crash, snare
   and a chord), `glint`, `sweep` (shimmer), `neon` (1.1 s buzz with flicker, for the write-on), `flickoff`, `whoosh`
-  (`d`, length), `laser2` (underline), `tick` (one per typed character but spaces), `pass` (a palm crossing the
-  camera: `pan` ±0.7, `v` 1 in the drive, 0.5 in the title view, computed in `window.events` from the cameras), `crtoff`.
+  (`d`, length), `laser2` (underline), `tick` (one per typed character but spaces), `pass` (a roadside prop crossing
+  the camera, in the demo each palm: `pan` ±0.7, `v` 1 in the drive, 0.5 in the title view, computed in
+  `window.events` from the cameras), `crtoff`.
 - No cue is looked up by name; unknown kinds and cues past `DUR` are dropped silently (glints left at 99 cost
   nothing). The drop is timed only by `M0`: keep slam = `M0` + 4 · `BEAT` (negative `M0` is fine, tested). Re-time
   `DUR`, `M0` and the 9.35 and 9.3 cut-offs to `T.off` (+0.05 for bass); more bars for a longer film (Adapting).
@@ -217,8 +219,8 @@ audio.py synthesizes 48 kHz stereo (`DUR` 10.0) from `events.json` cues `{t, k}`
 
 ## Adapting
 - **Style vs demo plot:** style is the world, chrome slam with glints and sweep, neon script, tracked Orbitron, laser
-  wipe, CRT on and off, the post chain and the score. Plot: the copy, the drive-then-title order, the sunset outro.
-  Transformations: drive to title view, the slam, sunset to dusk, a script appearing.
+  wipe, CRT on and off, the post chain and the score. Plot: the copy and the demo's beat order (drive, title, sunset
+  outro), which a film may change. Transformations: drive to title view, the slam, sunset to dusk, a script appearing.
 - **New subject:** replace the copy and, for a thing, put its silhouette among or instead of the palms. Traps: a
   long title outgrowing the frame or hiding the sun; the palm sprite ratios in `drawPalms()`; new sky, old cut colours.
 - **Length:** past 10 s hold the title view longer or add beats (another glint pair, a second script line). The

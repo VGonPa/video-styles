@@ -15,8 +15,9 @@ with a gentle POW! on her palm, it sweeps up, and the page closes on "THE END?" 
 - Areas of colour are cyan, magenta and yellow dot screens on a colour plate printed slightly off the black line; only
   lettering, bursts, sparkles and small accents (eyes, lips, lit windows) are flat ink. The dots stay visible at every
   zoom and grow on a dive.
-- The camera dives into panel 1 (0.95–1.4 s, 2.5×) and holds still. A yellow caption box unrolls, VROOOM! and BONK!
-  burst on letter by letter, and a zigzag balloon pops (all by 2.55 s).
+- The camera dives into panel 1 (0.95–1.4 s, 2.5×) and holds still. A yellow caption box unrolls, the panel's
+  sound-effect words burst on letter by letter beside their source, and a balloon pops, all by 2.55 s (in the demo:
+  VROOOM! and BONK!, and the robot's zigzag balloon).
 - Every shape is a cream fill, a screen and a round-jointed ink outline 3–11 units thick: no gradients, no blur.
 
 ## Palette
@@ -91,9 +92,10 @@ with a gentle POW! on her palm, it sweeps up, and the page closes on "THE END?" 
 ## Composition and camera
 - `PAGE`, the title block and `BOX` are in the format table's 16:9 column: a title band, then four panels with
   100-unit margins and 50-unit gutters, read in Z order.
-- Inside a panel: a caption box at a top corner (36, 34 from the box); a ground band in the lower quarter (a magenta-dot
-  floor with receding board lines); characters on the ground line; sound effects beside their source; balloons above
-  the speaker with the tail toward it. The climax panel is flooded with radiance and speed lines.
+- Inside a panel: a caption box at a top corner (36, 34 from the box); a ground band in the lower quarter (in the
+  demo, a magenta-dot floor, with receding board lines in panel 1); characters on the ground line; sound effects
+  beside their source; balloons above the speaker with the tail toward it. The climax panel is flooded with radiance
+  and speed lines.
 - `camera(t)` follows `STOPS` with `easeInOut`: 0.45 s for the dive and pans, 0.55 s for the pull back; dives centre a
   panel at 1.32 (P1, P2) or 0.99 (the wide P3). Holds are dead still, because slowly moving dot screens change every
   pixel; only the closing page drifts (0.53 → 0.545, 8.2–10 s). Other formats: Adapting.
@@ -102,8 +104,8 @@ with a gentle POW! on her palm, it sweeps up, and the page closes on "THE END?" 
 - Easing: `easeOut` (cubic) for border inking, caption unrolls and arrivals; `easeInOut` for camera, sweep and fade;
   `backOut()` overshoot for every pop (balloons 2.4, letters 2.6, the burst 2.4, the fly-in 1.3, arm raise 1.6, peek
   1.8). `boom()` pops letters one after another, alternate ones nudged up or down and leaning opposite ways.
-- Impacts: a contact frame (BONK!, POW!) and then damped sine motion. The vase rocks, the robot squashes and is knocked
-  back, the heroine recoils 10 units. Dizzy stars orbit for 0.35 s; streaks and shrinking dust puffs trail a charge.
+- Impacts: a contact frame (BONK!, POW!), then damped sine motion (in the demo: the vase rocks, the robot squashes and
+  is knocked back, the heroine recoils 10 units). Dizzy stars orbit for 0.35 s; streaks and shrinking dust puffs trail a charge.
 - Idle motion keeps running (cape flap, ponytail flick, breathing, the flyer's bob, antenna sway, brush spin, sparkle
   twinkle); text never leaves. Never: cuts, cross-fades, camera shake, motion blur, frame stepping, drift in a hold.
 

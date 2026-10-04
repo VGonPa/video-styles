@@ -10,12 +10,14 @@ Lissajous, a rotating cube, the word SIGNAL, a collapse to a parked dot, power-o
 
 ## Signature
 - The instrument from frame 0, locked off: a rounded CRT screen in a dark moulded bezel (left two-thirds) beside a
-  brushed-metal strip with the HALVARD nameplate, POWER and MODE lamps, a green readout and knurled FREQ and INTENSITY
-  knobs (`buildStatic()`, `panel()`); X/Y GAIN knobs, model line and AUDIO OUT jacks are dressing.
+  brushed-metal strip with an invented maker's nameplate (HALVARD in the demo), POWER and MODE lamps, a green readout
+  and knurled FREQ and INTENSITY knobs (`buildStatic()`, `panel()`); X/Y GAIN knobs, model line and AUDIO OUT jacks
+  are dressing.
 - Dark green-grey glass under an amber 10 × 8 graticule with ticked centre axes and 100 / 0% rise-time rows, faint at
   first and brightening with the power from 0.13 s (`GRAT`).
 - One green beam, white-hot where it dwells, with halo and bloom (`phosphor()`): a defocused dot appears at the left
-  edge at 0.22 s, crawls right drawing one slow cosine, then spins up until the trace stands still at 2.15 s.
+  edge at 0.22 s, crawls right drawing the opening waveform in one slow pass (in the demo, a three-cycle cosine; any
+  y = f(x)), then spins up until the trace stands still at 2.15 s.
 - Persistence: a long fading tail on the slow crawl, a crisp standing trace at audio rate (`decayAt`). The readout
   follows the signal (CH1 X 0.60 Hz climbing to 55.0 Hz), and the hum rising out of silence is the trace itself.
 
@@ -176,8 +178,8 @@ Lissajous, a rotating cube, the word SIGNAL, a collapse to a parked dot, power-o
 
 ## Adapting
 - **Style vs demo plot:** the style is the Signature plus a panel cause for every change, the collapse to a parked dot
-  and the power-off. Plot: cycle counts, ratios, the cube, SIGNAL. The transformation can be a morph between figures,
-  the Y–T to X–Y switch, a frequency glide, a word assembling, or the collapse.
+  and the power-off. Plot: HALVARD, cycle counts, ratios, the cube, SIGNAL. The transformation can be a morph between
+  figures, the Y–T to X–Y switch, a frequency glide, a word assembling, or the collapse.
 - **New subject:** translate it into figures the beam draws: a waveform in Y–T (a heartbeat, an envelope), an orbit or
   ratio as a Lissajous, an outline, wireframe or pictogram as a vector path, the message as beam lettering. Put your
   figure in the cube's slot and your word in the word's, so `panel()` and the exposure stay keyed, with readout

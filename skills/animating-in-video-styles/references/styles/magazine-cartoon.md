@@ -11,7 +11,7 @@ plays it straight; the wit is all in the caption, and it is dry, literate and un
 ## Signature
 - A cream magazine page, complete as soon as the 0.3 s fade-up from blank paper ends: the magazine's name and a date in tracked capitals over a thin rule, a ruled panel centred below with wide paper margins, an italic page number at the foot.
 - Inside the panel a cartoon draws itself at constant speed with a tapering, slightly wobbly dip-pen line: the speaker first, then the listener (both figures by 1.1 s), then a sparse setting of a few props (by 2.15 s).
-- Monochrome: a mottled grey wash blooms region by region after the line, one solid-black mass (her bob and dress) inks in, and a small italic signature appears in the panel's lower right. No colour anywhere.
+- Monochrome: a mottled grey wash blooms region by region after the line, one solid-black mass (on any figure or prop; in the demo, her bob and dress) inks in, and a small italic signature appears in the panel's lower right. No colour anywhere.
 - Well-dressed adults in strict profile, standing still in an everyday urban interior, each drawn with a few dozen lines: long-nosed profiles, closed or half-lidded eyes, plain suits and dresses.
 - After a beat (0.8 s after the line is finished) one line of italic caption in curly quotes starts to fade in, centred under the panel, at 2.95 s.
 
@@ -84,7 +84,7 @@ plays it straight; the wit is all in the caption, and it is dry, literate and un
 ## Composition and camera
 - 16:9 page: the panel `PX` 410, `PY` 64, `PW` 1100 × `PH` 720 (about 3 : 2), centred with 410 px of paper on each side, hanging 14 px under the running-head rule; caption baseline 92 px below the panel; folio near the foot. The wide margins are the look: this is a printed page, not a full-bleed frame.
 - In the panel: an eye-level, side-on stage. The wall meets the floor at about 0.78 of the panel height (y 560), drawn as a heavy stroke under a thin 0.35 one 12 px above; the floor is two or three loose short strokes. Feet stand at about 0.9 (y 645–657), heads near 0.16–0.22: the figures fill about three quarters of the panel height.
-- The pair stands side by side in profile (museum: on the right, both facing the canvas, about 40 px apart; party: in the middle, facing each other, about 90 px apart, props on both sides). The blank canvas takes 44 % of the panel width, because its emptiness is the joke.
+- The pair stands side by side in profile (museum: on the right, both facing the canvas, about 40 px apart; party: in the middle, facing each other, about 90 px apart, props on both sides). The odd thing the caption depends on gets as much of the panel as the joke needs (the demo's blank canvas takes 44 % of the panel width, because its emptiness is the joke).
 - No camera. The page never moves, zooms or cuts; the only movement of the frame is the page turn.
 - 9:16 (1080 × 1920), rendered with both demo scenes restaged, the page turn and the fades:
   - Canvas and `W`/`H` 1080 × 1920; a square panel `PX` 60, `PY` 300, `PW` 960, `PH` 960. Running head at baseline `PY - 24` from `PX` to `PX + PW`, rule at `PY - 14` with width `PW`: small print in the top band. Folio at `W / 2`, `H - 28`.

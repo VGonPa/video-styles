@@ -14,11 +14,12 @@ OVER, high-score initials, INSERT COIN; power-off · `styles/vector-arcade/`
 - Everything is beam line: thin white-hot strokes with a halo, bloom and a white dot at each polyline end, in three
   phosphors only, adding up where lines cross (`render()`). No fill or raster type anywhere.
 - Persistence: anything that moves leaves six fading ghost copies over 0.19 s (`TRAIL`), clear on the title's
-  27 strokes, which fly in from all sides, spinning, between 0.45 and 1.8 s and land with an overshoot flash.
-- Stroke-font capitals built from straight segments on a 4 × 6 grid (`G`), and a spinning wireframe object (the
-  O's planet, 0.95 s) whose see-through edges show front and back.
+  strokes (27 in the demo), which fly in from all sides, spinning, between 0.45 and 1.8 s and land with an overshoot flash.
+- Stroke-font capitals built from straight segments on a 4 × 6 grid (`G`), and a spinning wireframe object (in the
+  demo, the O's planet from 0.95 s) whose see-through edges show front and back.
 - At 1.8 s the letters extrude 64 px into cyan 3D depth with an overshoot and start to sway; a cyan rule, a green
-  "© 1981 NOVATRON" written on by the beam and a blinking "1 COIN 1 PLAY" appear (1.72–2.3 s).
+  © line with a year and an invented maker written on by the beam (in the demo, "© 1981 NOVATRON") and a blinking
+  "1 COIN 1 PLAY" appear (1.72–2.3 s).
 
 ## Palette
 | Role | Colour | In code |
@@ -132,8 +133,8 @@ if (t < T.game - 0.05) { const pre = 0.085 * seg(t, T.title, T.title + 0.5) * (1
   popping in 2); `eOut` for GAME OVER's write-on, the rule and expanding rings (other text writes on at a constant
   beam speed, `reveal` = `seg()`); `eIn` for the camera push; the power-off squashes to a line with `eOut` and to a
   dot with `eIn` to the power 0.6; `eInOut` for ship glides, 0.2 s aiming turns and the sway's ramp. Smooth 30 fps.
-- Strokes animate in: 27 title segments 0.036 s apart, each flying 0.42 s from 500–1200 px, spinning ±3.5 rad, z ±450,
-  landing with a 0.3 s flash; text is written by `reveal`.
+- Strokes animate in: the title's segments (27 in the demo) 0.036 s apart, each flying 0.42 s from 500–1200 px,
+  spinning ±3.5 rad, z ±450, landing with a 0.3 s flash; text is written by `reveal`.
 - Blinks are hard square waves from Math.floor(t × rate) % 2: 1 COIN 1 PLAY 4 toggles a second (dims to 0.45),
   PLAYER 1 6.5, the initials cursor 7, the confirmed row 8 (×1.9), INSERT COIN 2.6, the last life 12. Persistence
   softens each switch-off for 0.19 s.
@@ -172,7 +173,8 @@ if (t < T.game - 0.05) { const pre = 0.085 * seg(t, T.title, T.title + 0.5) * (1
 
 ## Sound
 audio.py reads `events.json` (a list of `{t, k}` cues, some with `v` or `d`) and synthesizes 48 kHz stereo, `DUR`
-10.0, through a 0.02 s fade-in, a 0.3 s fade-out and a tanh limiter; it prints the peak. Arcade board sounds:
+10.0, through a 0.02 s fade-in, a 0.3 s fade-out and a tanh limiter; it prints the peak. Arcade board sounds, sent by
+role (`planet` for any emblem forming, `boom` with `v` by size for each small burst, `shipboom` for the main one):
 - `on` (power-on thump and click), `zap` (one per landing title stroke, at least 0.045 s apart; `v` 0.7–1.0 sets
   the pitch), `planet` (rising sweep with tremolo), `swell` (220/330/440 Hz square chord, the extrusion), `warp`
   (`d`: riser and noise through push and tunnel, d = `T.game` − `T.fly` + 0.1), `flash` (noise boom, tunnel end),

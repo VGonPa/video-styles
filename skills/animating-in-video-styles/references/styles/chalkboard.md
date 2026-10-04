@@ -13,7 +13,7 @@ closing on a puff of chalk dust · `styles/chalkboard/`
 - A dark green slate fills the frame from the first frame (after a 0.3 s fade from near-black green): soft mottling, faint ghost swirls of old erasing, a vignette, and a wooden tray along the bottom with chalk powder and one white and one yellow stick at the right.
 - Handwriting in Caveat Bold writes itself on, left to right, with no hand or chalk visible: the lesson title at the top left from 0.25 s, then a wobbly chalk underline.
 - Every mark is grainy chalk: a fixed tooth mask breaks lines and letters into speckled, faintly streaked texture with a soft wide dust halo, and specks of dust fall from the chalk tip as it moves.
-- A diagram builds stroke by stroke with a slight hand wobble and round ends, outline first (the triangle 1.2–1.9 s, its three squares by 2.8 s), then labels written inside it.
+- A diagram builds stroke by stroke with a slight hand wobble and round ends, outline first, then labels written inside it; the first figure starts as the title settles and is outlined by about 2 s (in the demo: the triangle 1.2–1.9 s, its three squares by 2.8 s).
 
 ## Palette
 | Role | Colour | In code |
@@ -30,8 +30,8 @@ closing on a puff of chalk dust · `styles/chalkboard/`
 | Eraser felt / wooden back | `#5d605c` / `#b99670`, `#9a774f`, `#6c5033` | `paintEraser()` |
 | Fade in and out | `rgba(12,17,15,${dark})` | `frameAt()` |
 
-- Two chalks only. White carries everything; yellow is kept for what the lesson finds (count totals, 9 + 16 = 25,
-  h = ?, h = 4 m and their strokes), so the eye jumps to it. A third colour reads as another board.
+- Two chalks only. White carries everything; yellow is kept for what the lesson finds (in the demo: count totals, 9 + 16
+  = 25, h = ?, h = 4 m and their strokes), so the eye jumps to it. A third colour reads as another board.
 
 ## Typography and copy
 - One face: Caveat 700 (`fonts/Caveat-700-latin.woff2`, `fonts/Caveat-700-latin-ext.woff2`), loaded by `loadFont()`
@@ -194,8 +194,9 @@ sines, `DUR` 10.0. The film's events function derives the cues from the marks, s
 ## Adapting
 - **Style vs demo plot:** the style is slate and tray, grain, halo and dust, Caveat written on, white working and
   yellow findings, wobbly figures built in order, the eraser wipe and its ghost as the scene change, the push, the
-  fades, the yellow underlined answer (with the puff when there is time). Demo plot: Pythagoras, the counting, the
-  ladder, all copy. A transformation: the wipe to a new problem, a tally filling a figure, the unknown turning yellow.
+  fades, the yellow underlined answer (with the puff when there is time), and the tally (cells, dots or coins ticked
+  white, totalled in yellow). Demo plot: Pythagoras, the unit squares counted cell by cell, the ladder, all copy. A
+  transformation: the wipe to a new problem, a tally filling a figure, the unknown turning yellow.
 - **New subject:** one idea per board, in a teacher's order: title, figure, labels, rule, worked example, yellow
   result. Replace every call between the title and `PUFF`; keep the kit. Traps: anything with t0 before `ERASE.t0`
   in the eraser's reach becomes a ghost (keep survivors 140 px beside the outer passes, 60 px beyond the ends); turns

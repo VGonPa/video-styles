@@ -15,9 +15,9 @@ mug that fills with dithered coffee, a caption types, the cursor blinks, the CRT
   at power-on (0–0.42 s) and is never edge to edge.
 - **S2 One phosphor, one monospace grid:** JetBrains Mono 32 px on fixed 19.2 × 52 px cells, in four greens (dim,
   normal, bright bold, inverse), with bloom; no other hue anywhere, errors included.
-- **S3 A prompt and a typed command:** `dev@kitchen:~$` and a block cursor; the command appears key by key (about 32
-  characters a second, pauses after spaces), the cursor steady from the first key to Enter and blinking about once a
-  second whenever a prompt waits; phosphor trails ghost behind the cursor and every change.
+- **S3 A prompt and a typed command:** an invented user@host:~$ prompt ("dev@kitchen:~$" in the demo) and a block
+  cursor; the command appears key by key (about 32 characters a second, pauses after spaces), the cursor steady from
+  the first key to Enter, blinking about once a second at a waiting prompt; phosphor trails ghost behind every change.
 - **S4 Output as whole lines:** a banner at 0.44 s and `[ OK ]` boot lines from 0.54 s, then ASCII progress bars
   (filled and dithered cells in brackets, a percentage and a | / - \ spinner) from 2.2 s. Text pops in whole; it
   never fades, slides or scales.
@@ -48,7 +48,7 @@ mug that fills with dithered coffee, a caption types, the cursor blinks, the CRT
   letters to `glyphProbe` in the `window.ready` chain, or early frames may draw them in a fallback face.
 - **Voice:** an invented shell, lowercase and terse: a user@host:~$ prompt, long flags, `[ OK ]` lines (`OKL()`),
   "» " for progress, "ERROR:", "hint:", "x … exit 1"; values and units joined by "  ·  ". The joke is played straight.
-  Invent the tool and the OS banner (brewOS 3.1); Boundaries says what must never be typed.
+  Invent the tool and the OS banner (brewOS 3.1 in the demo); Boundaries says what must never be typed.
 - **Limits (FS 32), measured with a ruler render:**
 
 | Format | Grid used | Columns | Rows | A typed command after the 15-cell prompt |
@@ -77,10 +77,10 @@ mug that fills with dithered coffee, a caption types, the cursor blinks, the CRT
   bracket, filled █ cells (a 28 px band at 0.82 alpha, the leading cell bright while filling), dithered ░ cells (dim,
   same band), then the percentage and spinner, ending in "100%" and a bright value (`barLine()`).
 - Inverse runs ('i', 'e') get a lit box 4 px wider than the text each side and 10 px shorter than the line.
-- The card is pure ASCII line art (`CUPART`: . - | / \ ' ~), 9 rows by 35, in 'n' (its ~ row 'd'), its newest row
-  bright while it draws. Its ▒ fill (full-cell dither, dim) rises a row at a time; on the label row two 9-cell runs
-  from `c0` + 3 and `c0` + 20 stop one cell short of STRONG: move them for another label (up to 22 fit). Three steam
-  wisps of "(" and ")" step at 8 fps above it.
+- The card is pure ASCII line art (in the demo a mug, `CUPART`: . - | / \ ' ~), 9 rows by 35, in 'n' (its ~ row 'd'),
+  its newest row bright while it draws. Its ▒ fill (full-cell dither, dim) rises a row at a time; on the label row two
+  9-cell runs from `c0` + 3 and `c0` + 20 stop one cell short of STRONG: move them for another label (up to 22 fit).
+  The demo's three steam wisps of "(" and ")" step at 8 fps above it.
 - A new object belongs when it is ASCII line art on the grid: outline characters only, one cell per character, no
   diagonal smoothing, filled with ▒ runs between its outline's ends, labelled in capitals on a clear row. Its
   height follows from `r0` + rows + 1 < `ROWS` − 1 (the caption above the prompt row): with something above the art
@@ -89,8 +89,8 @@ mug that fills with dithered coffee, a caption types, the cursor blinks, the CRT
 ## Composition and camera
 - No camera; the picture moves only when squashed for power on/off. Text is top-left in the grid (`X0`, `Y0`), the
   newest line lowest; past `ROWS` lines each new line jumps the screen up a row. Focus: the newest line and cursor.
-- The card is centred: columns from `COLS` and `CUPW`, top row `r0` 3; steam rows `r0` − 3 to − 1, the caption on
-  row `r0` + 10, the final prompt on row `ROWS` − 1.
+- The card is centred: columns from `COLS` and `CUPW`, top row `r0` 3 (in the demo, steam rows `r0` − 3 to − 1), the
+  caption on row `r0` + 10, the final prompt on row `ROWS` − 1.
 - A terminal fills from the top. With the demo's three `[ OK ]` lines the bare glass stays over a fifth of the
   frame until about 4 s in every format (43 % at 1.5 s in 9:16); grain and scanlines are not content. Boot with
   twelve `[ OK ]` lines 0.035 s apart from 0.475 s, a blank at 0.895, P1 0.96: the prompt lands on row 14 and the
@@ -162,15 +162,15 @@ const BAR = 14;           // and label.padEnd(14) -> label.padEnd(13) in barLine
 ## Sound
 audio.py turns `events.json` (`{t, k}` cues, some with `v` or `d`) into 48 kHz stereo, `DUR` 10.0, with a 0.02 s
 fade-in, a 0.3 s fade-out and a tanh limiter; no music:
-- `key` (one per keystroke, `v` 0.6–1.0 sets the level; a 6 ms random delay, pan ±0.15), `enter` (a thunk),
-  `tick` (one per output line after 0.4 s and per mug row), `blip` (`v` = step / steps, pitch 900 + 700 `v` Hz;
-  `round(fill × 10)` per bar), `error` (two square-wave buzzes and a noise burst, 0.66 s), `success` (three chimes),
-  `roll` (a 0.22 s whirr), `hiss` (steam, `d` long), `on` (thump at 0.02), `off` (falling whine).
+- `key` (one per keystroke, `v` 0.6–1.0 sets the level; a 6 ms random delay, pan ±0.15), `enter` (a thunk), `tick`
+  (one per output line after 0.4 s and per card row: the demo's mug, `CUPART`), `blip` (`v` = step / steps, pitch
+  900 + 700 `v` Hz; `round(fill × 10)` per bar), `error` (two square-wave buzzes and a noise burst, 0.66 s), `success`
+  (three chimes), `roll` (a 0.22 s whirr), `hiss` (steam, `d` long), `on` (thump at 0.02), `off` (falling whine).
 - The bed (`hum` at 60, 120, 180 Hz and `room` noise) ramps in at fixed 0.05–0.45 s (power-on at 0.02) and out
   from `off` − 0.1 to + 0.2; audio.py finds `off` by name. Besides the end fades, every other sound follows cues.
-- A new scene gets `key` and `enter` from `window.events` (from `TT` and `ENT`) and a `tick` for every non-prompt
-  `LOG` line after 0.4 s; emit `blip` per bar step, `error` and `success` at those lines, `roll` at a clear, `on` and
-  `off`. `hiss` is emitted at `CUP` + 0.3 with `d` = `OFF` − `CUP` − 0.3.
+- A new scene gets `key` and `enter` from `window.events` (from `TT` and `ENT`) and a `tick` per non-prompt `LOG` line
+  after 0.4 s; emit `blip` per bar step, `error` and `success` at those lines, `roll` at a clear, `on` and `off`.
+  `hiss` (`CUP` + 0.3, `d` = `OFF` − `CUP` − 0.3) is the demo mug's steam: send it only for steam, wind or the like.
 - Breaks (tested): no `off` (StopIteration); `hiss` without `d` (KeyError) or with `d` under 1/48000 s (ValueError),
   even past `DUR`, so drop it with the card; `DUR` under 0.3 s. Pans are fixed (no NaN), a large `v` only gets
   louder, unknown kinds and cues outside 0–`DUR` are skipped; fractional `DUR` works (7.33 tested).
