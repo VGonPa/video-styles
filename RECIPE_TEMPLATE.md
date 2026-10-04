@@ -10,7 +10,12 @@ length and possibly in 9:16, that a viewer would recognise as this style.
 - **Style, not content.** The recipe describes the style: rules that transfer to any subject (palette, line,
   texture, type, composition, camera, motion, editing, sound). The demo's subject, story, objects and plot moments
   appear only as labelled examples ("in the demo: …"), never as the rule itself. Test: could another agent make a
-  film on an entirely different subject (a bakery, a train, an app) from the recipe alone?
+  film on an entirely different subject (a bakery, a train, an app) from the recipe alone? The usual slips: a
+  Signature that lists the demo's setting or objects as the look (state the rule, then "(in the demo: …)"); a
+  device mistaken for its demo instance (a tally is style, Pythagoras's squares are plot); composition given only as
+  demo coordinates (state the arrangement first); copy rules taken from the demo's premise; sound cues named after
+  demo objects with no "send by role" line; and a "Style vs demo plot" list that disagrees with the Signature or
+  with Film grammar's reusable beats.
 - **Look before you write.** Fetch the style into a scratch folder and render it:
   `python3 skills/animating-in-video-styles/scripts/fetch_style.py <slug> /tmp/<slug>-ref`, then
   `bash skills/animating-in-video-styles/scripts/contact_sheet.sh /tmp/<slug>-ref` and stills at 0.5, 1.5 and
