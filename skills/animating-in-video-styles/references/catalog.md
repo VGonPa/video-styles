@@ -29,7 +29,7 @@ Styles borrowed from art and design history.
 - `art-deco` **Art Deco** — Gold sunbursts, stepped frames, symmetry. Best for gala invitations, elegant openers, and period brand stories · titles, story · *no recipe yet*
 - `art-nouveau` **Art Nouveau** — Whiplash vines, mosaic halos, pastel lithograph. Best for perfume and beauty launches, storybook openers, heritage brands · story, product · *no recipe yet*
 - `baroque` **Baroque** — Chiaroscuro, motion, gilded drama. Best for reveals, dramatic turns and grand entrances · story, titles · Inspired by Caravaggio and the tenebrist painters of the Baroque · *no recipe yet*
-- `bauhaus` **Bauhaus** — Poster grid and basic shapes. Best for steps, principles, and bold messages · social, titles, explainer · Originally developed by Yasin Özmen · *no recipe yet*
+- `bauhaus` **Bauhaus** — Poster grid and basic shapes. Best for steps, principles, and bold messages · social, titles, explainer · Originally developed by Yasin Özmen
 - `constructivism` **Constructivism** — Red wedges and shouting diagonals. Best for calls to action, manifestos, and loud announcements · social, news · *no recipe yet*
 - `cubism` **Cubism** — Faceted planes, one object, many views. Best for showing several sides of one thing at once · explainer, product · Inspired by Pablo Picasso, Georges Braque and Juan Gris · *no recipe yet*
 - `title-sequence` **Cut-Paper Titles** — Ragged paper bars, jazzy credits. Best for film openers, series titles, and dramatic chapter cards · titles · Inspired by Saul Bass's title sequences · *no recipe yet*
