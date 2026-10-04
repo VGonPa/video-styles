@@ -60,7 +60,7 @@ Lines that appear as if drawn live.
 - `single-line` **Single Line** — One continuous, minimal line. Best for elegant intros, outros, and transitions · titles, story · Originally developed by Yasin Özmen · *no recipe yet*
 - `stick-action` **Stick-Figure Action** — Snappy stick-figure fights on paper. Best for punchy social clips, rivalries, and playful action beats · social · Inspired by Alan Becker · *no recipe yet*
 - `storytime` **Storytime Animation** — Expressive self-insert, deadpan inner thoughts. Best for personal anecdotes, embarrassing mishaps, and relatable confessions · story, social · Inspired by Jaiden Animations and TheOdd1sOut · *no recipe yet*
-- `whiteboard` **Whiteboard** — A lesson drawn as it unfolds. Best for step-by-step explanations · explainer, tutorial · Originally developed by Yasin Özmen · *no recipe yet*
+- `whiteboard` **Whiteboard** — A lesson drawn as it unfolds. Best for step-by-step explanations · explainer, tutorial · Originally developed by Yasin Özmen
 
 ## Texture & Craft (`texture-craft`)
 
