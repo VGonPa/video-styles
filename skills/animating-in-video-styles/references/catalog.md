@@ -213,4 +213,4 @@ Art traditions from cultures and eras around the world.
 - `viking-runes` **Norse Runestone** — Chiselled granite, ochre serpent, torchlight. Best for epic titles, legacy stories and things built to last · titles, story · *no recipe yet*
 - `papel-picado` **Papel Picado** — Cut tissue, string lights, fiesta dusk. Best for festive titles, event invites, and celebratory social posts · titles, social · *no recipe yet*
 - `persian-miniature` **Persian Miniature** — Jewel pigments, gold skies, tilted gardens. Best for fables, poetic proverbs, and gentle storybook journeys · story · *no recipe yet*
-- `roman-mosaic` **Roman Mosaic** — Stone tesserae laid row by row. Best for classical welcomes, grand titles and timeless heritage stories · story, titles · *no recipe yet*
+- `roman-mosaic` **Roman Mosaic** — Stone tesserae laid row by row. Best for classical welcomes, grand titles and timeless heritage stories · story, titles
