@@ -186,7 +186,7 @@ Panels, strips, and cartoon traditions from every decade.
 
 Video game looks from arcades to consoles.
 
-- `nes-8bit` **8-Bit Console** — Third-generation console cartridge game. Best for playful quests, streaks, scores, and level-up moments · social, data · *no recipe yet*
+- `nes-8bit` **8-Bit Console** — Third-generation console cartridge game. Best for playful quests, streaks, scores, and level-up moments · social, data
 - `atomic-wasteland` **Atomic Wasteland** — Cheerful 50s mascot, burning world. Best for dark satire, survival tips, and deadpan corporate optimism · social, explainer · Inspired by Fallout's Pip-Boy and Vault Boy · *no recipe yet*
 - `handheld-lcd` **Handheld LCD** — Four greens on a pocket console. Best for playful social posts, game moments and retro nostalgia · social · Inspired by the original Game Boy · *no recipe yet*
 - `jrpg` **JRPG Battle** — 16-bit turn-based battle menus. Best for challenges overcome, skill unlocks, and playful explainers · explainer, social · *no recipe yet*
