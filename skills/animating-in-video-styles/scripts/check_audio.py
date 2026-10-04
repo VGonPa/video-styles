@@ -33,7 +33,12 @@ def main():
     peak = float(level.max()) if len(level) else 0.0
     loud = np.nonzero(level > 0.001)[0]
     last = (loud[-1] + 1) / rate if len(loud) else 0.0
-    print(f"{path}: {seconds:.2f} s, {channels} ch, {rate} Hz, peak {peak:.3f}, last sound at {last:.2f} s")
+    first = loud[0] / rate if len(loud) else seconds
+    block = int(rate * 0.05)
+    audible = float((level[: len(level) // block * block].reshape(-1, block).max(axis=1) > 0.001).mean()) \
+        if len(level) >= block else 0.0
+    print(f"{path}: {seconds:.2f} s, {channels} ch, {rate} Hz, peak {peak:.3f}, "
+          f"sound from {first:.2f} to {last:.2f} s, audible {audible:.0%}")
 
     problems = []
     ends = [((np.nonzero(np.abs(pcm[:, c]) > 0.001)[0][-1:] + 1) / rate).sum() for c in range(channels)]
@@ -53,6 +58,9 @@ def main():
                 c = "LR"[int(np.nonzero(dead[hits[0]])[0][0])] if channels == 2 else "?"
                 problems.append(f"channel {c} is exactly silent at {hits[0] * block / rate:.2f} s while the other "
                                 "plays: a NaN in one cue (a pan past ±1) usually causes this")
+    if peak >= 0.001 and (first > max(1.0, 0.2 * seconds) or audible < 0.5):
+        problems.append(f"mostly silent (first sound at {first:.2f} s, audible {audible:.0%}): a cue placed after a fade "
+                        "or a NaN earlier in the mix usually causes this; every catalog film sounds from its first 0.6 s")
     if peak < 0.001:
         problems.append("silent: a NaN in the mix (a pan past ±1, a zero-length ramp) usually causes this")
     elif len(pcm) > 1 and float(pcm.std(axis=0).max()) < 1e-6:

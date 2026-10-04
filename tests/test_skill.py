@@ -170,7 +170,7 @@ class AudioCheckTests(unittest.TestCase):
         t = np.arange(48000 * 4) / 48000
         result = self.run_check(0.5 * np.sin(2 * np.pi * 440 * t), "4")
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("peak 0.500", result.stdout)
+        self.assertIn("peak 0.500", result.stdout); self.assertIn("audible 100%", result.stdout)
 
     def test_silent_short_or_early_tracks_are_flagged(self):
         import numpy as np
@@ -183,6 +183,8 @@ class AudioCheckTests(unittest.TestCase):
         result = self.run_check(tone, "4", right=np.where(t < 1, tone, 0))   # a NaN zeroed one channel at 1 s
         self.assertIn("channel R goes silent at 1.00 s", result.stdout)
         self.assertEqual(result.returncode, 1)
+        late = np.where(t > 3.2, tone, 0)                                    # silent until a late fade
+        self.assertIn("mostly silent", self.run_check(late, "4").stdout)
         gap = (t > 2) & (t < 2.35)                                           # one cue's NaN: 0.35 s of exact zeros
         result = self.run_check(tone, "4", right=np.where(gap, 0, tone))
         self.assertIn("channel R is exactly silent at 2.00 s", result.stdout)
