@@ -149,7 +149,7 @@ Code-driven systems, particles, and 3D forms.
 - `cel-shaded-3d` **Cel-Shaded 3D** — Toon-shaded 3D with ink outlines. Best for playful 3D worlds, game-style stories and product scenes · story, product · *WebGL*
 - `cosmic-epic` **Cosmic Epic** — Vast, glowing, awe-struck deep time. Best for epic title reveals and big-picture science timelines · titles, explainer · Inspired by melodysheep (John D. Boswell) · *WebGL* · *no recipe yet*
 - `feature-animation-3d` **Feature-Animation 3D** — Glossy PBR character, studio light. Best for character shorts and playful product stories · story, product · Inspired by @karanC_12's “Asked for a dot” post · *WebGL* · *no recipe yet*
-- `particles` **Generative Particles** — Luminous flow-field particle swarms. Best for tech title reveals, data stories, and abstract openers · titles, data · *WebGL* · *no recipe yet*
+- `particles` **Generative Particles** — Luminous flow-field particle swarms. Best for tech title reveals, data stories, and abstract openers · titles, data · *WebGL*
 - `inflated-3d` **Inflated 3D** — Puffy pastel balloon icons that squish. Best for playful app features, social teasers and UI reveals · product, social · *WebGL* · *no recipe yet*
 - `low-poly` **Low-Poly 3D** — Faceted, flat-shaded miniature 3D worlds. Best for friendly 3D explainers, world-building and product teasers · explainer, product · *WebGL*
 - `technical-cutaway` **Technical Cutaway** — Exploded 3D model with callouts. Best for how machines work, product internals and engineering explainers · explainer, product · Inspired by Branch Education and Animagraffs · *WebGL* · *no recipe yet*
