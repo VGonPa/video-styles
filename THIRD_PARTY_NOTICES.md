@@ -15,6 +15,7 @@ license text in `vendor/LICENSE-three.txt`, in:
 [feature-animation-3d](styles/feature-animation-3d/THIRD_PARTY_NOTICES.md),
 [inflated-3d](styles/inflated-3d/THIRD_PARTY_NOTICES.md),
 [low-poly](styles/low-poly/THIRD_PARTY_NOTICES.md),
+[mascot-beat-reel](styles/mascot-beat-reel/THIRD_PARTY_NOTICES.md),
 [origami](styles/origami/THIRD_PARTY_NOTICES.md),
 [technical-cutaway](styles/technical-cutaway/THIRD_PARTY_NOTICES.md),
 [voxel](styles/voxel/THIRD_PARTY_NOTICES.md).

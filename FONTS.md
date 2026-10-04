@@ -21,7 +21,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Alfa Slab One](https://fonts.google.com/specimen/Alfa+Slab+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [atomic-wasteland](styles/atomic-wasteland), [collage](styles/collage), [dada](styles/dada), [golden-age-comic](styles/golden-age-comic), [linocut](styles/linocut), [mesoamerican-codex](styles/mesoamerican-codex) |
 | [Amatic SC](https://fonts.google.com/specimen/Amatic+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [cave-painting](styles/cave-painting) |
 | [Amiri](https://fonts.google.com/specimen/Amiri) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [persian-miniature](styles/persian-miniature) |
-| [Anton](https://fonts.google.com/specimen/Anton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [constructivism](styles/constructivism), [dada](styles/dada), [newspaper](styles/newspaper), [title-sequence](styles/title-sequence) |
+| [Anton](https://fonts.google.com/specimen/Anton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [constructivism](styles/constructivism), [dada](styles/dada), [mascot-beat-reel](styles/mascot-beat-reel), [newspaper](styles/newspaper), [title-sequence](styles/title-sequence) |
 | [Archivo](https://fonts.google.com/specimen/Archivo) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bauhaus](styles/bauhaus) |
 | [Archivo Black](https://fonts.google.com/specimen/Archivo+Black) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [dada](styles/dada), [glitch](styles/glitch), [neo-brutalism](styles/neo-brutalism), [risograph](styles/risograph) |
 | [Bangers](https://fonts.google.com/specimen/Bangers) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [comic-book](styles/comic-book), [digital-comic](styles/digital-comic), [storytime](styles/storytime) |
@@ -81,7 +81,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Michroma](https://fonts.google.com/specimen/Michroma) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [ray-traced-cgi](styles/ray-traced-cgi) |
 | [Mochiy Pop One](https://fonts.google.com/specimen/Mochiy+Pop+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [kawaii](styles/kawaii) |
 | [Monoton](https://fonts.google.com/specimen/Monoton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [retro-1970s](styles/retro-1970s) |
-| [Montserrat](https://fonts.google.com/specimen/Montserrat) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bold-captions](styles/bold-captions), [cosmic-epic](styles/cosmic-epic) |
+| [Montserrat](https://fonts.google.com/specimen/Montserrat) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bold-captions](styles/bold-captions), [cosmic-epic](styles/cosmic-epic), [mascot-beat-reel](styles/mascot-beat-reel) |
 | [Mr Dafoe](https://fonts.google.com/specimen/Mr+Dafoe) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [synthwave](styles/synthwave) |
 | [Newsreader](https://fonts.google.com/specimen/Newsreader) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [editorial-illustration](styles/editorial-illustration) |
 | [Nunito](https://fonts.google.com/specimen/Nunito) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [blob-sim](styles/blob-sim), [frutiger-aero](styles/frutiger-aero), [history-comedy](styles/history-comedy) |
