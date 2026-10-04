@@ -127,7 +127,7 @@ Type- and rhythm-driven pieces.
 - `dada` **Dada** — Cut-up, absurd, deliberate mistranslation. Best for anti-advertising, jokes and rule-breaking · social, story · Inspired by Hannah Höch and Berlin Dada photomontage · *no recipe yet*
 - `flash-cartoon` **Flash Cartoon** — Mid-2000s web toon, tweened and glossy. Best for silly social loops, playful intros, and nostalgic web humor · social · *no recipe yet*
 - `glitch` **Glitch** — Corrupted digital signal, beat-synced. Best for bold title hits, reveals, and high-energy social openers · titles, social · *no recipe yet*
-- `kinetic-typography` **Kinetic Typography** — Words in rhythm. Best for quotes and strong opening lines · titles, social · Originally developed by Yasin Özmen · *no recipe yet*
+- `kinetic-typography` **Kinetic Typography** — Words in rhythm. Best for quotes and strong opening lines · titles, social · Originally developed by Yasin Özmen
 - `paint-doodle` **Paint Doodle** — Crude mouse lines, deadpan captions. Best for silly history bits and dry jokes for social feeds · social · Inspired by Sam O'Nella Academy · *no recipe yet*
 - `split-flap` **Split-Flap Board** — Clattering mechanical departures board. Best for headlines, schedules, announcements and big reveals · news, titles · *no recipe yet*
 - `stencil-street` **Stencil Street Art** — Spray, peel, reveal, red accent. Best for punchy social posts, protest messages, and witty one-liners · social, news · Inspired by Banksy's stencil street art · *no recipe yet*
