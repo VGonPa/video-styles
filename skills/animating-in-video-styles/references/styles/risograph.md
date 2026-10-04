@@ -41,9 +41,10 @@ It draws on zine and indie gig-poster riso printing; the mood is loud, warm, han
   with `letterSpacing`. By `measureText` a character advances 0.612 em plus the track: 9:16 lines (x 90–940) hold 30
   characters at 44 px, 43 at 30 px, the footer 46; 1:1 (x 84–650) 33 at 26 px bold; layout B's block in the solid
   yellow disc (632 px) 20 at 50 px. Longer copy: a new line or a shorter word; never below 26 px.
-- Copy: gig-poster shorthand in capitals (display words, strapline, date, time and venue, a lineup split by slashes,
-  genre tags by em dashes, "No. 026"), names invented. Text never types on: it arrives with its drum or roller pass and
-  leaves with the ink fade. The footer tags are knocked out of the pink bar (`destination-out`).
+- Copy: poster shorthand in capitals: one to three display words, a strapline, a when-and-where line, a list split by
+  slashes, tags split by em dashes, an issue number; names invented (in the demo's gig poster: date, doors and venue,
+  a lineup of acts, genre tags, "No. 026"). Text never types on: it arrives with its drum or roller pass and leaves
+  with the ink fade. The footer tags are knocked out of the pink bar (`destination-out`).
 - `window.ready` preloads the faces with a sample string: add every new character to it. Otherwise the first frame
   draws it in a fallback face, and `fit()` sizes display words from fallback metrics for the whole film. Both faces
   cover Latin and Latin Extended only (`fonts/` has latin and latin-ext files: no Greek, Cyrillic or Vietnamese).
@@ -77,10 +78,13 @@ It draws on zine and indie gig-poster riso printing; the mood is loud, warm, han
 - A new object belongs as a bold 200–700 px silhouette in two inks plus dots, with one knock-out detail.
 
 ## Composition and camera
-- A flat poster, no camera, depth from overprint only. A: type column left, sun with speaker right (`SPK`), a giant
-  yellow "&" behind the column, footer bar over a yellow strip. B: full-bleed SOUND and SIGNAL around a yellow disc
-  (solid to 330 px, dot halo to 640) holding the info block, a blue disc holding the pink "&", traces between, the
-  lineup rotated at the right edge (coordinates in `compA()`, `compB()`).
+- A flat poster, no camera, depth from overprint only. A layout sets display type against one emblem: the type as a
+  column or full-bleed; the emblem on a big disc of another ink, so part of it overprints; a giant glyph or shape in
+  yellow (the lightest ink) behind or between the type; mono info lines; a knocked-out footer bar (A only in the
+  demo). A re-print must differ visibly (column to full-bleed, emblem moved) so the change reads. In the demo, A: type
+  column left, sun with speaker right (`SPK`), a giant yellow "&" behind the column, footer bar over a yellow strip;
+  B: full-bleed SOUND and SIGNAL around a yellow disc (solid to 330 px, dot halo to 640) holding the info block, a
+  blue disc holding the pink "&", traces between, the lineup rotated at the right edge (`compA()`, `compB()`).
 - 9:16 (1080 × 1920; every shot rendered, values on the 16:9 code, `W`, `H` and the canvas tag changed):
 ```
 regMarks points [[W / 2, 34], [W / 2, H - 34], [34, H / 2], [W - 34, H / 2]]; START blue row [60, -2000]
@@ -120,8 +124,9 @@ layout B: yellow disc cx 340, cy 610; its halftone tone d < 270 ? 0 : grow * cla
 - Slides: 0.72 s each from `START` (−1500 px, +1560 px, −1120 px), staggered 0.48 s, yellow and pink turning 0.03 rad.
   Landed layers wobble ±1.6 / ±1.3 px (ramping in over 1.2 s); layout B's wobble ±4 / ±3 px around their `MISB`
   offsets until `offB()` snaps them to exact register. `DRIFT` moves them up to 46 px and 0.012 rad apart in 0.6 s.
-- Ambient: `beat()`, a 120 bpm pump on the 0.5 s grid (cone and driver rings 4.5 %, sun tone 16 %, blue disc 14 %);
-  four pink sound-ring pairs rippling from radius 200 to 460 at 0.55 cycles a second; the traces; the 10 fps boil.
+- Ambient: `beat()`, a 120 bpm pump on the 0.5 s grid, and the 10 fps boil (in the demo: cone and driver rings 4.5 %,
+  sun tone 16 %, blue disc 14 %; four pink sound-ring pairs rippling from radius 200 to 460 at 0.55 cycles a second;
+  the traces).
 - Never: camera moves, 3D, squash and stretch, or a layer that holds perfectly still in layout A.
 
 ## Film grammar
@@ -180,8 +185,9 @@ audio.py reads `events.json` (`{t, k, …}` cues) and synthesizes print-shop sou
 
 ## Adapting
 - **Style vs demo plot:** style is paper, three multiplied inks, per-ink screens, boil, registration marks, drums
-  clacking into register, drift and re-print, the lock, the ink fade, the type system, beat pump and print-shop sounds;
-  plot is the copy, speaker, rings, traces, sun and "&". Transformations: a re-print, a snap into register, dot growth.
+  clacking into register, drift and re-print, the lock, the ink fade, the type system, beat pump and print-shop
+  sounds; plot is the copy and the demo's shapes (speaker, rings, traces, sun, "&"), not the layout roles they fill
+  (Composition). Transformations: a re-print, a snap into register, dot growth.
 - **New subject:** a poster: one to three display words, three or four info lines, one emblem split into inks as in
   Shapes; rewrite `compA()` and `compB()`. Traps: before landing the ring phase is negative and `arc()` throws on a
   negative radius (keep the `t < land` guard on anything similar); `pumpB` starts at the literal 6.4; the growth and
@@ -223,8 +229,8 @@ both: compA grow = eOut(seg(t, T.inA[k] + .15, land + .5)); offA wobble ramp T.i
   lock: 99, lockD: 0.34, fade: [3.05, 3.15, 3.25], fadeD: 0.5 }; kicks if (bt > 1.0 && bt < 3.1), v .8
   audio.py DUR 4.0 (peak 0.454); poster A still 1.70-3.05 (1.35 s); inks gone at 3.75; no lock chord, the outro closes
 ```
-- **Other formats:** recompose by moving numbers (Composition), never by scaling the 16:9 frame. Layout B carries the
-  ending; the speaker leaves with layout A at the re-print.
+- **Other formats:** recompose by moving numbers (Composition), never by scaling the 16:9 frame. The re-printed layout
+  carries the ending; the first layout's emblem (the speaker) leaves with that layout at the re-print.
 
 ## Boundaries
 - **Distinct from:** `pop-art` prints CMY plus a black key with outlines and uniform, never size-modulated Ben-Day

@@ -13,10 +13,11 @@ faceted gem under the title · `styles/low-poly/`
   soft overshoot (0–1.5 s) out of a fade from the opening horizon colour (pale sky in the demo).
 - Every surface is visibly triangles: one flat colour per face with a slight random tint, so even flat grass reads as
   a mosaic of neighbouring greens (`faceted()`, `tint()`, `flatShading`).
-- Saturated toy colours under a warm sun with soft shadows: grass greens, sandy banks, a blue river and a stepped
-  waterfall, a brown banded rock underside tapering to a point.
-- Chunky props from a few low-segment primitives: six-sided cone pines, icosahedron crowns in greens and autumn
-  oranges, a turning windmill, a striped balloon inflating.
+- Saturated toy colours under a warm sun with soft shadows, standing on a brown banded `STRATA` underside that tapers
+  to a point (in the demo's island: grass greens, sandy banks, a blue river and a stepped waterfall).
+- Chunky props from a few low-segment primitives, at least one in motion within 3 s (in the demo: six-sided cone
+  pines, icosahedron crowns in greens and autumn oranges, a windmill turning from 0 s, a striped balloon inflating
+  from 0.7 s).
 - A smooth vertical gradient sky (2D, behind the 3D) with chunky icosahedron clouds drifting, small islets bobbing in
   the distance, and a camera that never stops orbiting.
 
@@ -89,12 +90,12 @@ faceted gem under the title · `styles/low-poly/`
 - The silhouette is a floating spinning top: the top surface over a `STRATA` underside tapering to a point about as
   deep as the radius (tip at −11.8 under radius 10; rings in `LV`). From the camera's 20–23° a shallower base hides
   behind the near rim and the miniature reads as a flat disc, so keep it under any plinth.
-- A new object: two to six low-segment primitives, `jitter()` on the organic ones. Colour each part with
-  `faceted(geometry, pick)`: `solid(hexes, amt)` for one to four close hexes (amt defaults to 1, the nature level;
-  pass 0.3–0.5 for made things) or a pick by face index. Each quad is two triangles: `f % 2` two-tones a side
-  diagonally (tower, roof), `f % 4 < 2` alternates quads (sails), a cone's sides show only odd faces; for bands
-  around a body pick by the face centre's angle, as `envelope` does. Wrap it with `mesh()` (unfaceted renders black:
-  `MAT` reads vertex colours) and add it to `world` (shrinks with the island) or `scene` (stays).
+- A new object: a few low-segment primitives (four in a pine, fourteen in the windmill), `jitter()` on the organic
+  ones. Colour each part with `faceted(geometry, pick)`: `solid(hexes, amt)` for one to four close hexes (amt defaults
+  to 1, the nature level; pass 0.3–0.5 for made things) or a pick by face index. Each quad is two triangles: `f % 2`
+  two-tones a side diagonally (tower, roof), `f % 4 < 2` alternates quads (sails), a cone's sides show only odd faces;
+  for bands around a body pick by the face centre's angle, as `envelope` does. Wrap it with `mesh()` (unfaceted
+  renders black: `MAT` reads vertex colours) and add it to `world` (shrinks with the island) or `scene` (stays).
 - No people in the demo. A figure, about 0.7 units tall (the windmill's door is 0.75): a low icosahedron head with a
   small wedge nose for a profile, a short neck, a tapered five-sided torso with box shoulders, two-box limbs whose
   parts pivot in groups at the joints, small box hands; never a smooth or rigged mesh.
@@ -113,11 +114,12 @@ faceted gem under the title · `styles/low-poly/`
   and −z screen-right. `rotation.y` = θ turns local +x to azimuth −θ and local +z to π/2 − θ, so a front on local +z
   faces the camera with `rotation.y = PI / 2 - FACE`, as the door and windows do; `FACE` is `camAz(3.6)`, so re-aim
   fronts if the orbit changes.
-- Moves are slow and continuous: distance 42 → 37 over 0–4 s, height 18 → 13.5 over 0–5 s, then 7.3–8.6 s a push to
-  29 and height 5.2 for the gem (`camDist()`, `camH()`). `sunAz()` swings the sun behind the island by 8 s as
+- Moves are slow and continuous: distance 42 → 37 over 0–4 s, height 18 → 13.5 over 0–5 s, then 7.3–8.6 s a push to 29
+  and height 5.2 onto the closing object (`camDist()`, `camH()`). `sunAz()` swings the sun behind the island by 8 s as
   `SUNEL` drops from 52° to 9°.
-- End card: gem in the upper half,
-  title baseline at y = 830 (`Y0` + 230), subtitle at 922; low clouds sink 7.2–8.8 s to clear it.
+- End card: the closing object (the demo's gem, or the brief's own resolution, held) in the upper half, title baseline
+  at y = 830 (`Y0` + 230), subtitle at 922; low clouds sink out of the card's band by the time the title lands
+  (7.2–8.8 s in the demo).
 - 9:16: the field of view is vertical, so at 31° a portrait frame shows a third of the 16:9 width. Change the
   camera's 31 to about 60 (tested: the island fills four fifths of the width, the middle third of the height);
   pulling back instead sinks the island into the fog unless you scale its 60 and 170 too. Set `Y0` to about `H` ×
@@ -146,13 +148,13 @@ faceted gem under the title · `styles/low-poly/`
 - Easing: `sstep()` for light, fade and palette ramps; `easeInOut` (cubic) for camera moves and the sun; `backOut()`
   for every arrival (island rise 1.2, balloon 1.3, gem pop 2.0, title letters 2.2); `easeIn` for the shrink;
   `easeOut` for the subtitle and the gem's spin settling.
-- Nothing is ever still: the island rocks slightly, trees sway (`sways`, 0.025 rad, random phases), clouds orbit,
-  islets bob, water ripples, the windmill's blades accelerate (`1.2 * t + 0.15 * t * t`).
-- Squash and anticipation stay small and physical: the balloon inflates from a flat pancake with overshoot, dips 6 %
-  before lift-off, then rises on an accelerating curve with a slight pendulum tilt.
+- Nothing is ever still: the island rocks slightly, clouds orbit, islets bob; in the demo, trees also sway (`sways`,
+  0.025 rad, random phases), water ripples and the windmill's blades accelerate (`1.2 * t + 0.15 * t * t`).
+- Squash and anticipation stay small and physical (in the demo, the balloon inflates from a flat pancake with
+  overshoot, dips 6 % before lift-off, then rises on an accelerating curve with a slight pendulum tilt).
 - The demo's snap (`setScene()`): a 5 % swell over 0.35 s, an accelerating spin-and-shrink up to the gem, the gem
   pop, a flash and 44 tetrahedron `shards` in the island's colours.
-- Never: cuts, motion blur, whip pans, rubbery squash beyond the balloon's few percent.
+- Never: cuts, motion blur, whip pans, rubbery squash beyond a few percent (the balloon's 6 % dip).
 
 ## Film grammar
 | Time (s) | What happens | In code |

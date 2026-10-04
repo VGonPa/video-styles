@@ -10,10 +10,10 @@ cake lands under "Tonight: Lemon Cake" · `styles/retro-1970s/`
 ## Signature
 - A CRT picture: it opens from a bright horizontal line (0–0.55 s, `switchOn()`), then stays inside a rounded dark
   bezel with vignette, 3 px RGB fringes, scanlines, coarse moving grain and a warm cast (`compose()`).
-- Cream ground with a slowly turning sunburst of 14 tan wedges (`C.cream2`, darker than the cream; paler on scene 2's
-  mustard) centred on the subject (`rays()`).
+- Cream ground with a slowly turning sunburst of 14 tan wedges centred on the subject (`rays()`, `C.cream2`).
 - The four-colour stripe motif (mustard, orange, rust, dark brown: `STRIPES`) as a ribbon that runs in along the
-  counter and turns up the left side round a 250 px corner (0.55–1.92 s, `rainbow()`); the same bands wrap the pot.
+  ground line under the props' feet and turns up one side round a 250 px corner (0.55–1.92 s, `rainbow()`); the same
+  bands repeat on the hero prop (in the demo: along the counter, then wrapping the pot).
 - Round props with even 6–7 px brown outlines and flat fills, landing with squash and bouncing on a 0.5 s beat
   (from 1.0 s, `vegPose()`); a channel bug pops in top right at 0.8–1.2 s (`ident()`).
 - From 1.45 s a heavy cream serif title pops in letter by letter, each letter rising, rocking upright and
@@ -78,10 +78,9 @@ cake lands under "Tonight: Lemon Cake" · `styles/retro-1970s/`
 - `outline(x, w)`: `C.brown`, round joins and caps; 6 px by default, 7 for pot and cake bodies, 5 for leaves and
   lemons, 4 for inner lines, 3 for splash drops. Every object is a closed, curvy silhouette (ellipses, quadratic and
   bezier curves) in one fill; details are brown strokes or cream dots; leaves come from `leaf()` (olive).
-- Props have their origin at the bottom centre and stand on `GROUND` over a soft shadow ellipse (`vegShadow()`).
-  Demo sizes: tomato 140 × 120, carrot 80 × 190, mushroom 168 wide, onion 140 × 178, pot 450 (582 with handles) × 170,
-  cake 500 × 260. Containers get the stripe bands clipped inside them (`potFront()`), a cream highlight bar and a
-  60 px brown side shade.
+- Props have their origin at the bottom centre and stand on `GROUND` over a soft shadow ellipse (`vegShadow()`). Demo
+  sizes: tomato 140 × 120, carrot 80 × 190, mushroom 168 wide, onion 140 × 178, pot 450 (582 with handles) × 170,
+  cake 500 × 260. Containers get the stripe bands clipped inside them (`potFront()`) and a cream highlight bar.
 - Small kit: `twinkle()` (four-point star, 5 px brown stroke, cream); for soup, `steam()` (wavy strokes, brown2 under
   a cream core), `splash()` (droplets) and the bubbles in `potBack()`.
 - A new object belongs when it is rounded and chunky, 120–200 px tall at 16:9 scale, outlined at 6–7 px, filled from
@@ -90,16 +89,18 @@ cake lands under "Tonight: Lemon Cake" · `styles/retro-1970s/`
   demo, and none tested: tell the story with props.
 
 ## Composition and camera
-- 16:9 kitchen: `POT` centred at x 1020, rim 740, `GROUND` 910; vegetables at x 520, 680 and 1370, 1540; the title
-  centred at x 1040 (baselines 200, 378; schedule line 446); the bug at (1700, 132); the sunburst on the pot (1020,
-  760). The ribbon (`BEND` x 470, y 735, r 250; `LANES` ±23, ±69: 47 px stripes 46 px apart) enters from x 2060 along
-  y 892–1078, under the props' feet, and rises (lane centres x 151–289) out of the top. Scene 2, centred on x 960:
-  `CAKE` top 640, bottom 900, stand to 1004 on a four-stripe tablecloth from y 948; kicker y 150, title baseline 420;
-  twinkles in the corners. Keep what must be read 40 px inside the bezel.
-- Camera: `kitchenCamera()` is a zoom lens on the pot: a pull-back from 1.75× (0.25–1.5 s, `eOut3`) and a crash zoom
-  of about 42× (`ZOOM_IN` to `S2` + 0.2, `eIn3`) that recentres the soup at (`W`/2, 0.55 `H`). Scene 2 pushes in from
-  1 to 1.05 (`eInOut`, `S2` to `DUR`). No pans, cuts or shake.
-- 9:16 and 1:1 recompose as a stack (bug, title, props on the counter, ground); the kitchen is drawn through one
+- Each set is a stage on one ground line: the hero prop at or just right of centre under the sunburst, any smaller
+  props in pairs either side, the title centred above, the bug top right, the stripes under the props' feet (a ribbon
+  turning up one side, or a cloth). In the demo's 16:9 kitchen: `POT` at x 1020, rim 740, `GROUND` 910; vegetables at
+  x 520, 680 and 1370, 1540; the title at x 1040 (baselines 200, 378; schedule line 446); the bug at (1700, 132); the
+  sunburst on the pot (1020, 760). The ribbon (`BEND` x 470, y 735, r 250; `LANES` ±23, ±69: 47 px stripes 46 px
+  apart) enters from x 2060 along y 892–1078 and rises (lane centres x 151–289) out of the top. Scene 2, centred on
+  x 960: `CAKE` top 640, bottom 900, stand to 1004 on a four-stripe tablecloth from y 948; kicker y 150, title
+  baseline 420; twinkles in the corners. Keep what must be read 40 px inside the bezel.
+- Camera: a zoom lens on the hero prop (`kitchenCamera()`; the demo's pot, then its soup): a 1.75× pull-back as the
+  set opens (0.25–1.5 s, `eOut3`) and, to leave, a crash zoom of about 42× into it (`ZOOM_IN` to `S2` + 0.2, `eIn3`),
+  recentred at (`W`/2, 0.55 `H`). Scene 2 pushes in from 1 to 1.05 (`eInOut`, `S2` to `DUR`).
+- 9:16 and 1:1 recompose as a stack (bug, title, props on the ground line, ground); the kitchen is drawn through one
   extra scale so its world coordinates stay those of 16:9. Every value was rendered (1:1 after `//`):
 
 ```js
@@ -140,12 +141,12 @@ tubeMask(): radii 0.35 * Math.min(W, H), 1.05 * Math.min(W, H); grain drawImage(
   kicker 1.6, lens title 1.5). Drops fall with gravity. Smooth 30 fps; only the grain steps (15 fps).
 - Bounce (`vegPose()`): a 120 px parabola per `BEAT` (0.5 s, the music's beat), squash 16 % at each contact plus 14 %
   on the first landing, 7 % stretch at the top, a small rock. Hop: a 0.45 s arc (`JUMP_D`), shrinking to 0.72 and
-  turning 1.6 rad, behind the pot's front from halfway, a splash at 55 %. Heavy landings ring with a damped spring
-  (cake 14 %, lemons 18 %).
+  turning 1.6 rad, behind the container's front from halfway, a splash at 55 %. Heavy landings ring with a damped
+  spring (cake 14 %, lemons 18 %).
 - Ambient, on film time, allowed through the final hold: the sunburst's turn (0.06 and −0.08 rad/s), steam, soup
   bubbles, the twinkles' 12–14 % pulse, the scene 2 push-in, grain, flicker and tracking slips. All else is action.
-- Never: held drawings or limited animation, camera shake, hard cuts (sets change by crash zoom and stripe iris), glow
-  or neon, 3D, desaturated or monochrome frames.
+- Never: held drawings or limited animation, camera shake or pans, hard cuts (sets change by crash zoom and stripe
+  iris), glow or neon, 3D, desaturated or monochrome frames.
 
 ## Film grammar
 | Time (s) | What happens | In code |
@@ -181,10 +182,10 @@ passes the mix through a TV-speaker band-pass (150–7000 Hz) and tanh.
   alternating F and B flat), faded in 0.4–0.7 s, ducked by a Gaussian around 4.55 s (the crash zoom); the master
   fades on `(9.98 - tm) / 0.86`. The demo's landings and bounces sit on this grid. A new length re-times 9.98 and 0.86,
   the duck's 4.55 (one per crash zoom, or none), 0.4 and the groove's 0.5.
-- Cue kinds (`v` defaults to 0): `on` (set switching on), `ident` (two blips, right), `land` (boing, pitch 220 +
-  140 v; v 0–1 pan left, 2 and up right), `bounce` (blip, 300 + 60 v), `hop` (rising sweep), `plop` (falling tone and
-  noise), `pop` (letter, 520 + 45 v, pan (v − 5) / 8), `whoosh` (0.55 s rising noise into a crash zoom), `iris` (saw
-  sweep), `thump` (heavy landing), `ding` (bell, v 0, 1, 2 = E, G, B), `chime` (four-note arpeggio, 1.8 s, the title).
+- Cue kinds (`v` defaults to 0): `on` (switch-on), `ident` (two blips, right), `land` (boing at 220 + 140 v Hz; v 0–1
+  pan left, 2 and up right), `bounce` (blip, 300 + 60 v), `hop` (rising sweep), `plop` (falling tone and noise), `pop`
+  (letter, 520 + 45 v, pan (v − 5) / 8), `whoosh` (0.55 s rising noise into a crash zoom), `iris` (saw sweep), `thump`
+  (heavy landing), `ding` (bell, small landings, v 0, 1, 2 = E, G, B), `chime` (four-note arpeggio, 1.8 s, the title).
 - The film's cue list derives `land`, `bounce` (one per beat), `hop` and `plop` from its prop rows; the `pop` times
   are literals there: re-time them with the title. No cue is looked up by name, so audio.py plays any subset.
 - What breaks it (tested): `pop` with v outside −3…13 pushes the pan past ±1; the band-pass spreads the NaN over that
@@ -261,7 +262,7 @@ let AMB = 0, ACT = t => t;               // compose(t): AMB = t; paintScene(ACT(
 //   schedule line seg(t, 1.9, 2.3); kitchen twinkles at 1.9, 2.0, 2.1; pops 1.0 + 0.05 n, 1.25 + 0.05 n; fade seg(t, 3.62, 3.96);
 //   master (3.98 - tm) / 0.36. Settled 2.5, held 1.12 s; peak 0.517.
 ```
-- **Other formats:** values in Composition and camera. Not carried over: a wider row of props (the 9:16 counter fits
+- **Other formats:** values in Composition and camera. Not carried over: a wider row of props (the 9:16 stage fits
   four at 0.65, no more) and anything entering from the top, which crosses the title band.
 
 ## Boundaries
@@ -286,6 +287,5 @@ let AMB = 0, ACT = t => t;               // compose(t): AMB = t; paintScene(ACT(
 - `potBack()` (bubbles), `twinkle()`, `steam()`, `rays()`, `ident()`, `lensTitle()` and the schedule line assign
   `globalAlpha` instead of multiplying it, so a scene faded by `globalAlpha` leaves them opaque; `poppedTitle()` and
   `splash()` multiply. Multiply and restore in new drawers.
-- Sizes a 9:16 version must change: the canvas tag; the grain's draw size in `compose()` and `tubeMask()`'s radii,
-  which follow `W` and `H` and stretch or shrink when they swap; and literal layout everywhere. The 9:16 block lists
-  each one.
+- Sizes a 9:16 version must change: the canvas tag, the grain's draw size in `compose()`, `tubeMask()`'s radii (both
+  follow `W` and `H`) and literal layout everywhere; the 9:16 block lists each one.

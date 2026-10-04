@@ -1,8 +1,8 @@
 # Generative Particles (`particles`)
 
 A creative-coding study in the tradition of Processing flow-field sketches and shader demos: 40,000 particles drift
-through a curl-noise field leaving hairline additive trails on near-black navy, gather into a word, burst into a
-galaxy and collapse into one point of light, framed as a lab-notebook entry. Cool, hypnotic and technical.
+through a curl-noise field leaving hairline additive trails on near-black navy and travel from chaos into one form
+after another (a word, a shape, a point of light), framed as a lab-notebook entry. Cool, hypnotic and technical.
 
 **Reference film:** a swirling swarm organises into the word EMERGE, bursts into a spiral galaxy, spirals into one
 glowing point and fades · `styles/particles/`
@@ -14,9 +14,9 @@ glowing point and fades · `styles/particles/`
   toward a target reads as warm streaks and a settled form as a fine violet stipple.
 - A small JetBrains Mono lab overlay: study title and spec line top left, phase number and name over a running
   `t = 00.00 s` timer top right, a violet-to-cream velocity bar bottom left, a live `mean |v|` readout bottom right.
-- From 1.85 s the swarm streams left to right toward one bold word made only of particles (warm streaks by 2.5 s; the
-  word reads from about 3.4 s, whole by 3.9 s); letters overshoot, then settle. Every change of form is particles
-  travelling: never a cut, a cross-fade or real type.
+- From 1.85 s the swarm streams toward one bold form made only of particles, built in order along one axis (warm
+  streaks by 2.5 s; readable from about 3.4 s, whole by 3.9 s); its parts overshoot, then settle (in the demo, the
+  word EMERGE, left to right). Every change of form is particles travelling: never a cut, a cross-fade or real type.
 
 ## Palette
 | Role | Colour | In code |
@@ -46,10 +46,10 @@ glowing point and fades · `styles/particles/`
   number and one noun (CHAOS, FORM…). Copy limits come from 9:16, where the phase label shares the header's row (25 /
   20 px are 18 / 13 px a character): header 30 characters (to x 616), phase label 15 (from x 680), spec line 52 (to
   x 752; the timer starts at x 807).
-- The particle word: one word in capitals, fitted to the mask width. Under the wave, 16:9 reads cleanly at 10 letters
+- A particle word: one word in capitals, fitted to the mask width. Under the wave, 16:9 reads cleanly at 10 letters
   (171 px type) and still at 14 (114 px); 9:16 cleanly at 8 (130 px), thinly at 10 (99 px), not at 14 (66 px). Longer
-  copy goes in the overlay. `letterSpacing` stays 6 px as the size shrinks, so
-  long words overrun the fit (x 972 in 9:16); 6 × size / 300 px set after the fit kept them inside x 131–944.
+  copy goes in the overlay. `letterSpacing` stays 6 px as the size shrinks, so long words overrun the fit (x 972 in
+  9:16); 6 × size / 300 px set after the fit kept them inside x 131–944.
 - Glyphs: Latin-1, general punctuation, €, ™, ↑ ↓ (`fonts.css`); the mask silently uses a system font for others.
 
 ## Texture and finish
@@ -78,9 +78,9 @@ glowing point and fades · `styles/particles/`
   `ROLL` (−0.2 rad). No figures or detailed objects: a form must read as a bold silhouette.
 
 ## Composition and camera
-- One centred formation about three quarters of the frame wide, a little above centre (`TEXT_CY`), the galaxy 30 px
-  below (`GAL_CY`), flow and dust around it. Overlay at 76 px margins: top baselines 88 and 116; bottom, the "velocity"
-  label 982, the bar at `ly` 1000, slow/fast and readout 1028; right column right-aligned at 1844.
+- One centred formation about three quarters of the frame wide, a little above centre (`TEXT_CY`), the demo's galaxy
+  30 px below (`GAL_CY`), flow and dust around it. Overlay at 76 px margins: top baselines 88 and 116; bottom, the
+  "velocity" label 982, the bar at `ly` 1000, slow/fast and readout 1028; right column right-aligned at 1844.
 - Camera: a fixed perspective (focal `F` 2400 px, centred) used only for depth and depth of field. `zoomAt` pushes in
   2.5 % over the film and another 7 % during the collapse (7.5–9.3 s). No orbit, pan or cut.
 - Other formats (rendered on the 10 s held-point plan): every shot keeps trails, speed colour, bloom and a whole
@@ -113,12 +113,12 @@ glowing point and fades · `styles/particles/`
   (smoothstep): the flow's grip, each particle's spring weight `w` over 0.75 s, the overlay, the fades.
 - Chaos: particles relax toward the flow (250 px/s, rate 2/s; dust 150 and 1.4); walls 60 px outside the frame.
 - Assembly: `del` from 1.85 s at the left to 2.90 s at the right, plus up to 0.25 s jitter (last ramp starts 3.15 s);
-  arrivals are fast (amber) and overshoot. Wave (4.05–4.95 s): a 90 px band sweeps right, lighting the letters cyan.
-- Inhale (5.0–5.35 s): a stiff spring pulls the word in by 7.5 % (anticipation). Burst (5.35 s): a radial kick of up to
-  about 1300 px/s, stronger farther out, a 420 px/s clockwise swirl and a scatter in depth.
-- Galaxy: from 5.6 s particles spring onto rotating slots (ζ 0.75, velocity-matched), text by 6.15 s, dust by 6.9 s.
-  Collapse: from `cDel` (7.55 s at the centre, up to 0.52 s later at the rim) each slot shrinks over 1.05 s on
-  `Math.pow(sstep(...), 1.6)`, turning 5.5 rad more; collapsing particles dim (`cw`) so the pile reads as a point.
+  arrivals are fast (amber) and overshoot. Wave (4.05–4.95 s): a 90 px band sweeps right, lighting the form cyan.
+- Inhale (5.0–5.35 s): a stiff spring pulls the form in by 7.5 % (anticipation). Burst (5.35 s): a radial kick of up
+  to about 1300 px/s, stronger farther out, a 420 px/s clockwise swirl and a scatter in depth.
+- The demo's galaxy: from 5.6 s particles spring onto rotating slots (ζ 0.75, velocity-matched), text by 6.15 s, dust
+  by 6.9 s. Collapse: from `cDel` (7.55 s at the centre, up to 0.52 s later at the rim) each slot shrinks over 1.05 s
+  on `Math.pow(sstep(...), 1.6)`, turning 5.5 rad more; collapsing particles dim (`cw`) so the pile reads as a point.
 - Never: camera rotation, bounce in the overlay, or unseeded randomness.
 
 ## Film grammar

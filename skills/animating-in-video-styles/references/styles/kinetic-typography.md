@@ -1,9 +1,8 @@
 # Kinetic Typography (`kinetic-typography`)
 
-A short line of copy performed word by word on warm paper: the words are the only actors. They drop, squash,
-stretch, stack, swing into a column, hesitate and shove each other on the beat, then lock up into a typeset phrase
-closed by a red full stop. It comes from motion-graphics quote and title animation; the mood is playful, sure of
-itself and editorial.
+A short line of copy performed word by word on warm paper: the words are the only actors. They drop, squash, stretch,
+stack and swing on the beat, then lock up into a typeset phrase closed by a red full stop. It comes from
+motion-graphics quote and title animation; the mood is playful, sure of itself and editorial.
 
 **Reference film:** "Start before you're ready.": "Start" drops in and stretches, three words stack and swing into a column, a thin "ready" types itself in and doubts itself with a "?", "Start" shoves it off and the phrase rebuilds into a lockup with a red full stop, then crushes out · `styles/kinetic-typography/`
 
@@ -40,14 +39,15 @@ itself and editorial.
 - **Glyphs** (woff2 cmaps): Latin and Latin Extended; no Vietnamese, Greek or Cyrillic; the serif lacks ± ½ ¼ ¾.
   Add letters beyond U+00FF (ğ ş ł ę ő ř…) to `needs` in `boot()`: until the latin-ext file loads, `layout()` measures
   them in a fallback face (fits and lockup slightly off). á é ñ ü are in the main file.
-- **Copy:** one sentence of four words, one per slot: hero (a verb of 7 letters or fewer), connector (before, if, of),
-  medium, doubting word (thin, letter by letter); the full stop becomes the red dot. A longer hero fits below its
-  partners' 170–180 px in 9:16 (9 letters: 161 px; "Publish" keeps 214) and loses the loudest voice: give long words
-  the medium or doubting slot. 9:16 stack rows are not fitted: connector ≤ 12 characters, medium ≤ 10. Three words
-  (tested, 16:9, "Ship it anyway."): delete the you're `partner()` call and its width and gap in `layout()`, park
-  `T.youre` and `T.you` at 99. Five or more words become two phrases. A hero with a descender (g j p q y) sits on the
-  connector's ascenders in the stack and column (tested: "Begin" over "before" in 16:9): set `SLOT.start` to −225 and
-  keep `T.stack` ≤ `T.before` − 0.2.
+- **Copy:** one sentence of up to four words, one slot each, each slot a voice: the hero (loudest, 7 letters or
+  fewer), a soft connector, a medium word, and a last word, the doubting word, that arrives thin (letter by letter
+  when there is a doubt beat) and turns bold in the lockup before the red full stop. Any part of speech fits (the
+  demo's hero is a verb). A longer hero fits below its partners' 170–180 px in 9:16 (9 letters: 161 px; "Publish"
+  keeps 214) and loses the loudest voice: give long words the medium or last slot. 9:16 stack rows are not fitted:
+  connector ≤ 12 characters, medium ≤ 10. Three words (tested, 16:9, "Ship it anyway."): delete the you're `partner()`
+  call and its width and gap in `layout()`, park `T.youre` and `T.you` at 99. Five or more words become two phrases. A
+  hero with a descender (g j p q y) sits on the connector's ascenders in the stack and column (tested: "Begin" over
+  "before" in 16:9): set `SLOT.start` to −225 and keep `T.stack` ≤ `T.before` − 0.2.
 - **Reading time:** the demo brings one new word per 0.5 s beat. A new word needs about 0.4 s before the next new
   one, or the finished phrase must then hold at least 0.35 s a word (the lockup can assemble at 0.2–0.25 s a word).
   The doubting word types over about 1 s at uneven gaps (0.12, 0.12, 0.43, 0.30 s): doubt is told by rhythm.
@@ -148,9 +148,9 @@ function layout() {
 ```
 - Words move whole. Only the doubting word goes letter by letter: each letter rises 70 px with `backOut()` 1.1, then
   all tremble (sines of 17 and 29.3 rad/s, up to ±4.5° and ±5 px) while the word sways (1.7 Hz, ±3.2°) and leans away.
-- The exit crushes words left to right 0.09 s apart, 0.36 s each (`exitMod()`); the lockup arrives on half-beats;
-  the bold "ready" ramps its weight 300 → 800 over 0.4 s. Never: scale-pop entrances for words (they drop, rise,
-  swing or slide in), fades as the main entrance, typewriter lines, camera moves, colour changes.
+- The exit crushes words left to right 0.09 s apart, 0.36 s each (`exitMod()`); the lockup arrives on half-beats; the
+  last word ramps its weight 300 → 800 over 0.4 s. Never: scale-pop entrances for words (they drop, rise, swing or
+  slide in), fades as the main entrance, typewriter lines, camera moves, colour changes.
 
 ## Film grammar
 | Time (s) | What happens | In code |
@@ -167,22 +167,21 @@ function layout() {
 | 7.75–8.6 | Lockup held; strictly still only from 8.4 s (0.2 s): the dot's tail and the "ready" spring still change pixels | |
 | 8.6–9.45 | Crush exit left to right; the dot shrinks to centre and fades; bare paper 9.45–9.5 | `T.out`, `T.end`, `exitMod()` |
 
-- Reusable: the drop-and-stretch entrance, stacking a word per beat, the group swing, the doubt beat (letters, "?",
-  beat drops out), the shove, the lockup on half-beats, the red full stop, the crush exit. The words are plot.
+- Reusable: the drop-and-stretch entrance, stacking a word per beat, the group swing, the doubt beat and the shove
+  (for a phrase with a turn), the lockup on half-beats, the red full stop, the crush exit. The words are plot.
 - Ending fix (tested): the two-cycle `ring()` cut, `T.stack` 1.25, `T.out` 8.85, `T.end` 9.7, the tink at `T.out` +
   0.45, audio.py `DUR` 10.0 and `fo` 0.3 s, build.sh `DUR=10`: held 8.0–8.85 s. Also change `word()`'s `translate(0, py)` to `translate(0, py * s)`, or a word
   whose s is not 1 jumps 0.35 × size × (1 − s) as the exit starts (Start: 12.6 px).
 - Review keys: KEYS=1.0,2.6,4.6,5.62,8.3,9.15 with the ending fix (stretch peak, swing, doubt, contact, lockup, crush).
 
 ## Sound
-audio.py reads `events.json` (`{t, k, v, d}` cues) into wooden percussion on a 120 bpm pulse, 48 kHz stereo, `DUR`
-9.5. Nothing listens to the audio: picture and cues both come from `T`, and the pulse is a list of times to keep in step.
+audio.py reads `events.json` (`{t, k, v, d}`) into wooden percussion on a 120 bpm pulse, 48 kHz stereo, `DUR` 9.5.
 - `beat` (`v` 0–11): a kick, a shaker 0.25 s later and a bass note from a 12-note line (MIDI 43–52) picked by `v`.
-  `knock`: a 330 Hz wood block plus a kick (landing, hit, bold "ready"). `wood` (`v` 0–2): blocks at 620, 740,
-  880 Hz panned −0.3, 0.3, 0 (stack and lockup arrivals). `stretch`: a rubbery pitch bend, 0.45 s.
+  `knock`: a 330 Hz wood block plus a kick (landing, hit, the last word's lockup). `wood` (`v` 0–2): blocks at 620,
+  740, 880 Hz panned −0.3, 0.3, 0 (stack and lockup arrivals). `stretch`: a rubbery pitch bend, 0.45 s.
 - `tick` (`v`): a click at 1500 + 180 × `v` Hz, one per letter. `tremble` (`v` mod 3): faint clicks. `soft`: an E5
-  tone under the "?". `rattle`: five clicks 45 ms apart. `whoosh` (`d`): swept noise lasting `d`. `swish`: a 0.5 s
-  whoosh (the exit). `pop`: the dot. `tink`: A4, E5, A5 chimes, 1.2 s, the closing sound.
+  tone under the "?". `rattle`: five clicks 45 ms apart (the itch). `whoosh` (`d`): swept noise lasting `d`. `swish`:
+  a 0.5 s whoosh (the exit). `pop`: the dot. `tink`: A4, E5, A5 chimes, 1.2 s, the closing sound.
 - Fixed in audio.py: room tone; the lockup chord (A3 C4 E4 A4, 2.2 s) at 7.15, the demo's `T.ready` (move it with
   your lockup); the shaker 0.25 s after each `beat`, half the demo's beat (0.2 s on a 0.4 s grid); a 0.1 s fade-in
   and a 0.6 s fade-out (`fi`, `fo`). Fixed in anim.html: the beats list in
@@ -212,8 +211,10 @@ audio.py reads `events.json` (`{t, k, v, d}` cues) into wooden percussion on a 1
 
 ## Adapting
 - **Style vs demo plot:** always the style: paper, ink, the red full stop, the type cast, words as bodies, a word per
-  beat, the group swing (dropped only below 6.5 s), the lockup and crush exit, the wooden percussion. Plot: the
-  phrase, the doubt, the shove. Any regrouping is a transformation: the swing, a shove, thin turning bold, the rebuild.
+  beat, the group swing (dropped only below 6.5 s), the lockup and crush exit, the wooden percussion. Plot: the phrase
+  and its meaning. The doubt beat and the shove serve a phrase with a turn (one word hesitates and is overruled);
+  without one, go from the swing to the lockup (the 6.5 s plan). The demo's "ready?" is plot. Any regrouping is a
+  transformation: the swing, a shove, thin turning bold, the rebuild.
 - **New subject (stand-in rendered in 16:9 and 9:16: "Publish before it's perfect."; long copy as in Fits):** replace
   the strings in `startWord()`, `frame()`, `RD`, `readyWord()` and `layout()`, and add letters beyond U+00FF to
   `needs`. What follows the copy: the fits and one `T.rd` time per letter (with five, "perfect" showed only
@@ -227,8 +228,8 @@ audio.py reads `events.json` (`{t, k, v, d}` cues) into wooden percussion on a 1
     2.95 s (2.45 s).
   - Ending cost: after the dot lands, 0.6 s to settle (with the `ring()` cut), 0.8 s held, 0.85 s exit. The lockup,
     the title card, costs at least 2.2 s from the hero's rise to the exit, plus the exit.
-  - Cutting order: first the doubt and the shove (plot; the 6.5 s plan keeps S1–S5), then below 6.5 s the stack and
-    the swing (the 4 s plan drops S5); never the landing, the lockup or the exit.
+  - Cutting order: first the doubt and the shove (optional; the 6.5 s plan keeps S1–S5), then below 6.5 s the stack
+    and the swing (the 4 s plan drops S5); never the landing, the lockup or the exit.
   - Re-time `T` only (move durations stay, nothing drifts on film time) and park dropped beats at 99. Keep
     `T.settle` + 0.1 ≤ `T.up`; `T.bef` and `T.you` at least 0.66 s after `T.colOut` (else a partner vanishes);
     `T.free0` ≥ `T.colOut` + 0.22 and, with the short-plan `startWord()`, `T.up` ≥ `T.colOut` + 0.25 (sooner, the hero
@@ -267,8 +268,7 @@ function startWord(t, ex) {   // 6.5 s and 4 s plans: the hero goes from the col
   exitMod(P, ex, 0); word('Start', F.start, P);
 }
 ```
-- **Other formats:** recompose by changing poses (Composition), with the shove made vertical and the lockup in three
-  fitted rows; timing and cues stay as in 16:9. Apply the ending fix as well.
+- **Other formats:** poses as in Composition (vertical shove, three lockup rows); timing, cues and ending fix as 16:9.
 
 ## Boundaries
 - **Distinct from:** `bold-captions` puts 1–3 uppercase Montserrat Black words with outlines and coloured highlights
