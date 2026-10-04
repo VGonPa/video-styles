@@ -7,12 +7,13 @@ A 1980s cel-anime TV opening with a city-pop mood: ink-lined characters and prop
 her profile, an iris opens on the night city and "MIDNIGHT COAST" slams in · `styles/anime-80s/`
 
 ## Signature
-- A painted sunset: indigo-to-amber sky with brush strokes, cel-shaded cloud banks lit amber from below, a pale
-  sun on the horizon, a teal sea with glitter (`paintSky()`, `cloudBank()`).
+- A hand-painted background behind the cels, in soft gradients and visible brush strokes, lit from one dramatic
+  source, a low sun or neon night (in the demo: an indigo-to-amber sunset sky, cel-shaded cloud banks lit amber from
+  below, a pale sun on the horizon, a teal sea with glitter; `paintSky()`, `cloudBank()`).
 - Flat cel figures with a plum ink line (`P.ink`): one hard-edged shade, a warm rim on the lit side, opaque cream
-  glints on the car body and a lilac highlight ring on the hair.
+  glints on glossy surfaces and a highlight ring on hair (in the demo: the car body; a lilac ring on plum hair).
 - Characters on held 12 fps cels (`cel(t, 12)`) over backgrounds that pan at a smooth 30 fps with deep parallax:
-  foreground palms whip past with a ghost smear.
+  a foreground object whips past with a ghost smear (palms in the demo).
 - Film finish: lens flare streak and ghost discs, bloom, warm bleed, grain, vignette, weave (`finish()`, `flare()`).
 
 ## Palette
@@ -44,8 +45,8 @@ her profile, an iris opens on the night city and "MIDNIGHT COAST" slams in · `s
   `fonts/BarlowCondensed-normal-600-latin.woff2`: small signage (the plate "MC 85" in `drawCarRear()`).
 - Fonts cover Latin-1 only (`fonts.css`): no Japanese, Cyrillic or Central European letters. Load each face in
   `window.ready` before `initTitle()` runs, since it measures the letters once.
-- Copy is a TV-series opening: a one-to-three-word show title, then "EPISODE 01 · AFTER THE SUN GOES DOWN" or
-  similar. Evocative, never jokey; no captions over the action.
+- Copy is a TV-series opening: a one-to-three-word show title, then an episode tagline ("EPISODE 01 · AFTER THE
+  SUN GOES DOWN" in the demo). Evocative, never jokey; no captions over the action.
 - Width: "MIDNIGHT COAST" is 1510 px at 160 px (about 108 px a letter with the gap; M and W 145–160 px): at most
   15 characters per line in 16:9, or lower `TT.size`. Two lines: `initTitle()` reads `TT.words` and overwrites
   `TT.letters`, so pass the words in, keep one letters array, one y per line (1.07 × `TT.size` apart) and one
@@ -60,8 +61,9 @@ her profile, an iris opens on the night city and "MIDNIGHT COAST" slams in · `s
   at `o.grain` (0.16); the plum vignette; zero to three dust specks or hairs per cel; `o.fade` for fades.
 - Backgrounds are painted once in the init functions (soft horizontal strokes, `dabs()`) and only moved per frame.
 - `flare(g, x, y, k, col)`: radial core, 1800 px horizontal streak and five coloured ghost discs on the line
-  through the frame centre, all additive. A weak flare rides the sun all through shots A and B; a strong one cuts.
-  Sun glitter is 60 short dashes under the sun, redrawn per held cel from `rng(500 + …)`.
+  through the frame centre, all additive. A weak flare rides the low sun through every sunlit shot; a strong one
+  cuts. Water glitter (the demo's sea) is 60 short dashes under the sun, redrawn per held cel from `rng(500 + …)`
+  (40 in the close-up, from `rng(900 + …)`).
 
 ## Shapes, line and figures
 - Build every cel with `celShape(g, build, fill, line, lw)` (fill, then a round-joined ink stroke) and paint its
@@ -70,22 +72,27 @@ her profile, an iris opens on the night city and "MIDNIGHT COAST" slams in · `s
 - Ink is `P.ink` at about 3–4 px on screen: for a small figure raise `lw` against the scale (`lw: 11` at 0.2 in
   shot A) and drop face details (`detail: false`). Background props take a darker line of their own colour
   (`cols.line` in `paintPalm()`); far layers have none. Outline weight tells foreground from background.
-- Machines are original with period cues: the wedge `carSidePath()`, five-spoke `wheel()`, louvered tail lights.
-- People have 80s anime proportions (`drawDriver()`): long neck, sharp nose and chin, a large teal eye with twin
-  highlights and a heavy upper lash, four blush hatches, a hoop earring, a padded jacket; hair in pointed streaming
-  locks (`hairMass()`, `strand()`) under a glossy highlight ring with a zig-zag lower edge.
+- Machines: original, with period cues (demo car: wedge `carSidePath()`, five-spoke `wheel()`, louvered tail lights).
+- People have 80s anime proportions (`drawDriver()`): long neck, sharp nose and chin, a large eye with twin
+  highlights and a heavy upper lash, four blush hatches; hair in pointed locks (`hairMass()`, `strand()`) under a
+  glossy highlight ring with a zig-zag lower edge. Costume, accessories and eye colour belong to the character (the
+  demo's driver: teal eyes, a hoop earring, a padded jacket, hair streaming in the wind).
 - A new object belongs when it has a path builder, a flat palette base, one shade and one lit edge in
-  `celClip()`, the plum line, and a light direction that matches the sun or city in that shot.
+  `celClip()`, the plum line, and a light direction that matches the shot's light source (sun or city in the demo).
 
 ## Composition and camera
-- Shot A, wide side-on tracking: horizon `A.HZ` (560) just below centre, sun right of centre (`A.SUNX`), car in
-  the lower third at scale 1.22. Layers pan at fractions of `A.SPEED`: sky 0.01, clouds 0.025, city 0.045, sea
-  0.09, mid palms 0.35, guardrail 0.85, dashes 1, foreground palms 1.9 with a 35 % ghost copy 60 px behind.
-- Shot B, close-up profile facing right: head near centre (`B.OX`, `B.OY`, `B.S`), sun low behind her (`B.SUNX`),
-  low horizon (`B.HZ`), A-pillar right, red door strip below, a 3 % push-in, palms streaking past in four copies.
-- Shot C, one-point perspective: vanishing point `C.VX`, `C.VY`, focal length `C.F`; `projX(X, z)` and
-  `projY(Y, z)` place lamps, dashes and the car. The camera tilts up 30 px; the title holds the upper third (`TT.y`).
-  One focus per shot: the car, then the face, then the title.
+- Wide tracking shot (the demo's shot A): side-on, horizon just below centre (`A.HZ` 560), the light source right
+  of centre (`A.SUNX`), the moving subject in the lower third (the car at scale 1.22). Layers pan at fractions of
+  `A.SPEED` by depth: sky 0.01, clouds 0.025, the far skyline 0.045, the far ground or water plane 0.09, mid props
+  0.35, a near rail 0.85, ground marks 1, foreground objects 1.9 with a 35 % ghost copy 60 px behind (in the demo:
+  city, sea, mid palms, guardrail, road dashes, palms).
+- Close-up (the demo's shot B): one face in profile facing right, the way the subject travels, near centre (`B.OX`,
+  `B.OY`, `B.S`), the low light source behind the head (`B.SUNX`), low horizon (`B.HZ`), a foreground edge framing
+  one side and the bottom (the car's A-pillar at the right and red door strip), a 3 % push-in, background objects
+  smeared past behind the head in four copies (palms).
+- Perspective shot (the demo's shot C), one-point: vanishing point `C.VX`, `C.VY`, focal length `C.F`; `projX(X, z)`
+  and `projY(Y, z)` place things on the ground (lamps, dashes, the car). The camera tilts up 30 px; the title holds
+  the upper third (`TT.y`). One focus per shot (in the demo: the car, then the face, then the title).
 - 9:16 (1080 × 1920; rendered):
   - Shot A: `A.HZ` 864 and every absolute y below it moved down 304 (guardrail 1004, road 1084, mid palms 1094,
     streaks 1104, dashes 1176, car 1239; the sea follows `A.HZ`); the car at scale 1.0 drifting from x 390 to 560;
@@ -130,8 +137,9 @@ her profile, an iris opens on the night city and "MIDNIGHT COAST" slams in · `s
 - Two clocks: `cel(t, 12)` drives what is drawn as animation (car bob and wheels, hair waves, smile, glitter,
   weave, grain, dust, the receding car in shot C, title letters); raw `t` drives pans, parallax, push-ins, flares,
   irises, slab, glint, fades, the on/off blink and the eye sparkle. Shot A's slow forward drift of the car runs on
-  raw `t` too: treat it as camera. Held drawings over smooth pans are the look. Secondary motion on cels: hair
-  waves, a 3 Hz bang wobble, a head bob, a car bob that jolts every fifth cel.
+  raw `t` too: treat it as camera. Held drawings over smooth pans are the look. Secondary motion runs on cels: hair
+  and cloth waves, small wobbles and bobs, a machine's jolt every few cels (in the demo: hair waves, a 3 Hz bang
+  wobble, a head bob, a car bob that jolts every fifth cel).
 - Easing: `eInOut` for camera drifts, the iris closing and the fade-out; `eIn` for the flare swell and the iris
   opening; `eOut` for the slab and the smile; `bump(t, a, b)` for one-shot pulses (eye sparkle, flare strength).
 - Overshoot appears once: `eBack` on the title letters (2.2× to 1×). Characters and cameras never overshoot,
@@ -167,7 +175,8 @@ audio.py synthesizes everything with NumPy (seeded `rs`), soft-clips, fades in 0
   eighths. The last, Cmaj7/E, starts at 7.55 s, under the title's C-major sting: start that bar at a new title.
 - `engine` (t, `d` = length): the car's low saw drone; for a bike, runner or animal leave it out and let `wind` and
   `pass` carry the speed, or add a cue in the same synthesized character. `pass` (t): a 0.6 s whoosh panned at
-  random that peaks 0.3 s in: emit it just before a foreground object crosses the centre (0.9, 2.05, 3.2, 4.4 s).
+  random that peaks 0.3 s in: emit it just before something whips across the centre, in the foreground of a wide
+  shot or smeared behind a close-up (in the demo 0.9, 2.05, 3.2 s for shot A's palms, 4.4 s for shot B's).
 - `flare` (t): shimmer chord and whoosh at a flash cut. `wind` (t, `d`): gusting noise under open-air close-ups.
   `city` (t, `d`): low night hum with no fade-out: run it to the end of the film or it stops dead.
 - `iris` (t, optional `v`): a 0.45 s zip, rising without `v` (closing), falling with any non-zero `v` (opening;
@@ -199,10 +208,11 @@ audio.py synthesizes everything with NumPy (seeded `rs`), soft-clips, fades in 0
 | Demo shots and timeline | `shotA.js` → `drawA`, `shotB.js` → `drawB`, `shotC.js` → `drawC`, `anim.html` → `drawFrame` | `T`, `window.events` | replace |
 
 ## Adapting
-- **Style vs demo plot:** the style is the brush-painted sky and sea, the plum line with one hard shade and a warm
-  rim, held 12 fps cels over smooth parallax with a foreground whip, the film finish, the flash cut, the iris and
-  the chrome title slam. The driver, convertible, coastal highway and "MIDNIGHT COAST" are plot. A transformation
-  can be the hour turning (sunset to night, as here), an iris from a detail into a new place, or the title slam.
+- **Style vs demo plot:** the style is the brush-painted background lit from one dramatic source (soft gradients,
+  brush strokes and glows; the demo's sunset sky, cloud banks, sea and headland city are its setting), the plum line
+  with one hard shade and a warm rim, held 12 fps cels over smooth parallax with a foreground whip, the film finish,
+  flash cut, iris and chrome title slam. Plot: the driver, convertible, coastal highway, palms, "MIDNIGHT COAST". A
+  transformation: the hour turning (sunset to night, as here), an iris from a detail into a new place, the title slam.
 - **New subject:** keep `finish()`, the palette, the cel primitives, painted backgrounds, the two clocks, the
   flare and the iris; draw the subject with `celShape()` and `celClip()`. Shot times live in the code, not in
   `T`: `drawB()` uses `t - 3.75`, `drawC()` `t - 6.6` and `seg(tc, 6.6, 9.9)`, `drawTitle()` `t - 7.7`, the flash

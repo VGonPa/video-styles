@@ -1,7 +1,7 @@
 # Pixel Art (`pixel-art`)
 
 A level of a 16-bit console game, painted on a tiny 320 × 180 screen and blown up six times with hard square
-pixels: a dithered sea, parallax layers scrolling at different speeds, a hero sprite with an ink outline,
+pixels: a dithered backdrop, parallax layers scrolling at different speeds, a hero sprite with an ink outline,
 collectibles that spark and pop score numbers, a HUD, a world-card title, a colour-cycling "LEVEL CLEAR!" and a
 world map with the next level waiting. It draws on the side-scrollers of the early nineties; the mood is bright,
 busy and triumphant.
@@ -10,10 +10,10 @@ busy and triumphant.
 
 ## Signature
 - Hard 6 × 6 pixels everywhere: the frame is a 320 × 180 picture (`LO`) enlarged 6× with smoothing off, and every sprite, letter and position lands on that grid. It opens with a mosaic from black (16-px blocks to clean, 0–0.45 s).
-- A side-scrolling level in layers: a Bayer-dithered water gradient with dotted light shafts and a shimmering surface band, hazy far rocks, a coral reef, rippled sand with moving caustics and foreground kelp, each scrolling at its own speed.
-- A HUD band over the top edge: pearl icon, PEARLS 00/12, SCORE 008400 and an AIR meter of eight cells, in a chunky 6 × 7 bitmap font with a 1-px ink ring and one- to three-band colour fills.
-- A sprite hero with a 1-px ink outline and a stepped six-frame kick cycle swims in from the left along a row of pearls; each pickup throws an eight-point pixel star and flashes the counter, and four of the twelve pop a score number that rises and blinks out.
-- A title card ("WORLD 3-2" over "CORAL DEEP") drops in from the top with an overshoot at 0.35–0.6 s.
+- A side-scrolling level in layers, each at its own speed: a Bayer-dithered backdrop gradient, a hazy far layer, a mid layer, the floor the hero moves along and a foreground layer that passes in front of the hero, plus at least one stepped ambient cycle (in the demo's reef: a water gradient with dotted light shafts and a shimmering surface band, far rocks, coral, rippled sand with moving caustics, foreground kelp).
+- A HUD band over the top edge: the collectible's icon and counter, a six-digit SCORE and a cell meter, in a chunky 6 × 7 bitmap font with a 1-px ink ring and one- to three-band colour fills (in the demo: a pearl icon, PEARLS 00/12, SCORE 008400, an AIR meter of eight cells).
+- A sprite hero with a 1-px ink outline and a stepped six-frame movement cycle enters from the left along a row of collectibles; each pickup throws an eight-point pixel star and flashes the counter, and some pop a score number that rises and blinks out (in the demo: a diver kicking past eleven pearls; three of them and the chest's big pearl pop scores).
+- A world card (a world-level number over the level's name; "WORLD 3-2" over "CORAL DEEP" in the demo) drops in from the top with an overshoot at 0.35–0.6 s.
 
 ## Palette
 | Role | Colour | In code |
@@ -79,17 +79,19 @@ Z ###### ....## ...##. ..##.. .##... ##.... ######
   draws each cell as one pixel and rings the silhouette with `P.ink`, 1 px outside. A part that must read over
   another gets its own ink first, as the near leg in `genDiver()`.
 - Shading is two or three flat tones plus one white highlight pixel on anything round. Motion is pre-generated
-  frames, never a scaled or rotated image: six kick phases per arm pose (`SPR.diver`, `SPR.diverUp`), 22 pufferfish
-  (radius 5–15, calm and angry), three chest states. Sizes: diver 52 × 30 (anchor `DV`), chest 34 × 32, pearl 9.
+  frames, never a scaled or rotated image (in the demo: six kick phases per arm pose, `SPR.diver`, `SPR.diverUp`; 22
+  pufferfish, radius 5–15, calm and angry; three chest states; diver 52 × 30, anchor `DV`, chest 34 × 32, pearl 9).
   A new object belongs at 8–50 px in three to five colours plus a highlight, ink-ringed, its states as frames.
 - The diver's legs mostly read as one mass (a known defect): ink each near limb of a figure separately. Effects
   are plotted pixel by pixel: `drawBurst()` computes twelve dashed rays with `px()`, turning in 8 fps steps.
 
 ## Composition and camera
-- 16:9 (320 × 180): HUD rows 0–16; surface 16–22; far layer from about y 88, reef mounds 118–156, floor at y 150 ± 2
-  (`floorY`), sand from `SAND_Y` 140; kelp grows from below the frame. `camX` follows the hero once it passes x 110
-  and eases to a stop near 190. Parallax: shafts 0.1, far layer 0.2, fish 0.35, reef and its vent bubbles 0.5, sand, props and actors
-  1.0, foreground kelp 1.35 (in front of the hero). Props stand on `floorY` at world x values in `paintLevel()`.
+- 16:9 (320 × 180): HUD rows 0–16; the floor line low, y 150 ± 2 (`floorY`); the far layer's highest peaks near
+  mid-height. Parallax by depth: backdrop details 0.1, far layer 0.2, distant movers 0.35, mid layer 0.5, floor,
+  props and actors 1.0, foreground 1.35 (in front of the hero). `camX` follows the hero once it passes x 110 and
+  eases to a stop near 190. Props stand on `floorY` at world x values in `paintLevel()`. In the demo's reef: surface
+  16–22, far rocks from about y 88, reef mounds 118–156, sand from `SAND_Y` 140; shafts 0.1, fish 0.35, reef and
+  its vent bubbles 0.5, kelp from below the frame at 1.35.
 - Cards: the world card fills x 164–308 (right of centre, away from the hero entering left) at y 32–72; the
   LEVEL CLEAR! box is 228 × 48 on (160, 56); the map is full screen inside a 2-px ink and 1-px gold border.
 - Other formats keep 6× (rendered): 9:16 is a 180 × 320 buffer, 1:1 a 180 × 180 one. 9:16 key text spans buffer
@@ -128,8 +130,9 @@ Z ###### ....## ...##. ..##.. .##... ##.... ######
 - Positions move only by whole buffer pixels (`R()` rounds every draw, `px()` truncates), so motion advances in
   6-screen-px steps. Keep it so: no sub-pixel offsets, never `imageSmoothingEnabled` back on (`mk()` turns it off),
   no rotated or scaled sprites, motion blur, cross-dissolve or alpha fade on an object.
-- Cycles are stepped: kick 11 fps swimming and 5 fps hovering (`hover`), caustics and surface 8, shafts 4, kelp 10,
-  fish tails 6, pearl glints 8, burst 8, confetti flips 8, title colour cycle 12, map glints 6.
+- Cycles are stepped at 4–12 fps, never smooth: the hero's cycle faster travelling than idle, ambient loops at 4–10,
+  effects at 8, colour cycling at 12 (in the demo: kick 11 fps swimming and 5 hovering, `hover`; caustics and surface
+  8, shafts 4, kelp 10, fish tails 6, pearl glints 8, burst 8, confetti flips 8, title colour cycle 12, map glints 6).
 - Easing: `easeOutBack` (k 1.9, about 12 % overshoot) for arrivals (card, pufferfish inflating in 0.22 s, NEXT box);
   the card leaves on `v * v`; the hero follows a cubic Hermite path through `PATH` (`pathAt()`) plus a 1.4-px sine
   bob; pearls bob 1 px. Shakes flip ±1 px 24 (chest rattle) or 30 (pufferfish shiver) times a second.
@@ -166,15 +169,17 @@ stepped triangle, `noise()`), `DUR` 10.0, from `events.json` cues `{t, k}`:
 - Music at fixed times, not from cues: a 128 `BPM` groove of eighths (`E8`) from 0.45 s (the mosaic-in's end) to
   `T_END` 6.7 (0.05 s before LEVEL CLEAR!), fading over its last 0.4 s: triangle bass, a 12.5 % pulse arpeggio
   panned ±0.35 and a noise tick, looping `prog` (Am, F, C, G, eight eighths each: 7.5 s a cycle).
-- Cues: `pearl` with `n` (a two-note chime climbing an 11-step scale by `n`), `bubble`, `warn`, `puff`, `deflate`,
-  `rattle` (sent three times), `open`, `bigpearl`, `fanfare` (seven-note melody over two bass notes, 1.35 s),
-  `tally` (14 blips, about 0.5 s), `swoosh_in` and `swoosh_out` (0.4 and 0.35 s sweeps), `card`, `flag`, `dot` (eight),
-  `hop` (three) and `select`, which carries the closing chord: a triangle arpeggio from 0.2 to 1.1 s after it.
+- Cues, sent by role, not by the demo's names: `pearl` per collectible, with `n` the pickup index from 0 (a two-note
+  chime climbing an 11-step scale by `n`); `warn`, `puff` and `deflate` for a hazard's alert, threat and retreat;
+  `rattle` (sent three times), `open` and `bigpearl` for the prize's container shaking, opening and the grab;
+  `bubble` for the hero's breath or any small puff; `card` for the world card; `fanfare` (seven-note melody over two
+  bass notes, 1.35 s) and `tally` (14 blips, about 0.5 s) for LEVEL CLEAR!; `swoosh_in` and `swoosh_out` (0.4 and
+  0.35 s sweeps) for the mosaic-in and mosaic-out; `flag` (node cleared), `dot` (eight), `hop` (three) and `select`
+  for the map, `select` carrying the closing chord: a triangle arpeggio from 0.2 to 1.1 s after it.
 - What breaks it (tested): `pearl` without `n` raises KeyError; `n` of 11 or more raises IndexError (extend the
   scale for a twelfth pickup, as the 4 s plan does); a negative `n` plays a wrong note. Pans are constants, so no
-  field reaches NaN. audio.py prints only "audio.wav ok", not a peak; the plans' peaks are the largest absolute
-  sample of audio.wav, as the skill's checker prints (python3 <skill>/scripts/check_audio.py audio.wav <seconds>,
-  which also gives the last sound and fails on a silent or constant track). Cues before 0 or past `DUR` and unknown kinds are dropped silently; none is looked up by name.
+  field reaches NaN. audio.py prints only "audio.wav ok"; the plans' peaks come from the skill's check_audio.py.
+  Cues before 0 or past `DUR` and unknown kinds drop silently; none is looked up by name.
 - No master fade (a tanh limiter only): a sound ringing at `DUR` clicks off, as the demo's chord does; send `select`
   1.1 s and a closing `swoosh_out` 0.35 s or more before `DUR`.
 - Re-timing: set `DUR`; move the groove's start (the `t` set beside `T_END`) to your mosaic-in's end and `T_END` to
@@ -196,8 +201,10 @@ stepped triangle, `noise()`), `DUR` 10.0, from `events.json` cues `{t, k}`:
 | Cues | `window.events` | one `cue(t, k, extra)` per sound, from the timing constants | adapt |
 
 ## Adapting
-- **Style vs demo plot:** style is everything in Signature plus LEVEL CLEAR!, the map and chiptune; plot is the sea,
-  diver, pearls, pufferfish, chest and names. Transformation: the counter filling to LEVEL CLEAR!, the node turning gold.
+- **Style vs demo plot:** style is everything in Signature (6× grid and mosaics, layered scroller with a dithered
+  backdrop, HUD band, ink-ringed stepped sprites, pickup stars and pops, dropping world card) plus the "!" warning,
+  prize burst, LEVEL CLEAR!, map and chiptune; plot is the sea and reef, diver, pearls, pufferfish, chest, the AIR
+  and PEARLS labels and all names. Transformation: the counter filling to LEVEL CLEAR!, the node turning gold.
 - **New subject:** make the brief a level: a hero, a collectible that counts the message (steps, coins, stars), one
   hazard, one prize. Replace the generators and the world; keep the kit. Traps: the count strings are literal;
   missing glyphs leave gaps; `hover` is the literal `t > 5.85`; `placeWorld()` puts each pickup at `pathAt()` +
@@ -212,12 +219,12 @@ stepped triangle, `noise()`), `DUR` 10.0, from `events.json` cues `{t, k}`:
   and 1:1) and set `SAND_W` to at least the camera's final value + `LW` + 40. The sand and caustic strips are drawn
   once at −`camX` and do not wrap: at 640 the floor ends at buffer x 640 − `camX` (rendered: `camX` 400 in 16:9
   leaves x 240–320 bare, 600 in 9:16 leaves x 40–180; `SAND_W` 1200 fixes both). Only the shafts, far and reef tiles
-  wrap (every 640 px). Add props and mid kelp along the route at world x (screen x = x − `camX`); vent streams sit on
-  the reef layer (screen x = vx − 0.5 · `camX`) and foreground kelp at 1.35 (kx − 1.35 · `camX`), so place them at 0.5
-  or 1.35 × the `camX` where they should show. Extend `EXHALES` every 1.1 s to the level's end (it stops at 7.05). One pickup run,
-  hazard or prize per 1–1.5 s; past 15 s, two levels with a map between. AIR empties at 17.6 s. Re-time anim.html's
-  `DUR` (unused in the demo, but the fix's closing fade reads it: left at 10 in a 14 s film, the whole map renders
-  black), `T_END`, audio.py's `DUR` and build.sh's `DUR`.
+  wrap (every 640 px). Add props and floor details (the demo's mid kelp) along the route at world x (screen x = x −
+  `camX`); mid-layer pieces move at 0.5 (screen x = vx − 0.5 · `camX`, the demo's vent streams) and foreground pieces
+  at 1.35 (kx − 1.35 · `camX`, the demo's kelp). Extend the hero's ambient puffs (`EXHALES`, every 1.1 s, stopping
+  at 7.05) to the level's end. One pickup run, hazard or prize per 1–1.5 s; past 15 s, two levels with a map between.
+  AIR empties at 17.6 s. Re-time anim.html's `DUR` (unused in the demo, but the fix's closing fade reads it: left at
+  10 in a 14 s film, the whole map renders black), `T_END`, audio.py's `DUR` and build.sh's `DUR`.
 - **Shorter:** to about 7 s keep every beat and shorten holds as the 6 s plan did: card hold 0.85 s, pickups 0.11 s
   apart, the swim up to twice the demo's 60–85 px a second, LEVEL CLEAR! until `T_CLEAR` + 0.8 (the tally's end,
   0.5 s after the title). Then drop the hazard (1.6 s), then the prize and the map, ending on LEVEL CLEAR!; never the

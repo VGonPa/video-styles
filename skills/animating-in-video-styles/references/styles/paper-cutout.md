@@ -9,17 +9,19 @@ moon rises, stars come down on threads, the fox curls up under a pine, cabin win
 lowered on strings · `styles/paper-cutout/`
 
 ## Signature
-- Landscape cards stacked in depth (mountains, hill, forest, near bank, foreground wings), each a flat silhouette
-  with a wavy, zigzag or scalloped top, rising from below with a small overshoot (0.15–1.59 s, `riseOffset`) and
-  throwing a blurred dark copy of itself onto the card behind (`bakeSheet()`, drawn offset in `paint()`).
+- Scenery cards stacked in depth (about five, from the far card to the foreground wings), each a flat silhouette
+  with a wavy, zigzag, scalloped or stepped top, rising from below with a small overshoot (0.15–1.59 s, `riseOffset`)
+  and throwing a blurred dark copy of itself onto the card behind (`bakeSheet()`, drawn offset in `paint()`; in the
+  demo: mountains, hill, forest, near bank, wings).
 - Every piece is matte paper: a flat fill, a 2 px paler lip on its upper-left cut edge, a faint fibre grain
   (`cutShape()`, `GRAIN`); details are separate pieces glued on with their own small shadow (`gluedShadow()`).
-- A paper sky: five scalloped dusk bands (`buildDusk()`) and a cut sun of curled petals, later covered by a navy card
-  slid in from the side (`buildNight()`); snow-capped pines of three tiers (`pine()`) at four sizes on three cards,
-  largest in front, and two giant pines cut off by the frame edges as theatre wings (`buildWings()`).
-- One light: every live cast (card shades, `place()` casts, the fox, the title words, snow) follows one light vector
-  that swings as dusk turns to night, and a multiply tint plus vignette warms or cools everything (`paint()`). The
-  lip and glued shadows are baked for a fixed upper-left light; kept at 2–5 px they read as paper relief.
+- A paper backdrop of layered scalloped bands; one cut motif repeated at several sizes across several cards, largest
+  in front; two oversized pieces cut off by the frame edges as theatre wings (in the demo: five dusk bands and a petal
+  sun, later covered by a navy card slid in from the side, `buildDusk()`, `buildNight()`; three-tier snow-capped
+  pines, `pine()`, at four sizes on three cards and as the wings, `buildWings()`).
+- One light: every live cast (card shades, `place()` casts, the puppet, title words, snow) follows one light vector,
+  swinging when the light changes (dusk to night in the demo); a multiply tint plus vignette warms or cools everything
+  (`paint()`). Lip and glued shadows are baked for a fixed upper-left light; at 2–5 px they read as paper relief.
 
 ## Palette
 | Role | Colour | In code |
@@ -39,8 +41,9 @@ lowered on strings · `styles/paper-cutout/`
 | Multiply tint; vignette edge (dusk to night) | `blendHex('#fff1e2', '#aab4e2', nightfall)`; `blendHex('#c9a98e', '#8e86a8', nightfall)` | `paint()` |
 | Lamp halo (screen); smoke; fade | `rgba(255,186,90,${0.5 * glow})`; `#f1eef4`; `rgba(12,10,20,${1 - shown})` | `paint()`, `chimneySmoke()` |
 
-- Flat fills only: shading comes from the lip, grain, shadows and global tint. Nearer layers are larger, with darker
-  greens and paler snow. The night tint dulls warm colours (the fox reads brown): give a warm subject a lighter fill.
+- Flat fills only: shading comes from the lip, grain, shadows and global tint. Nearer layers are larger and higher in
+  contrast: darker fills and paler highlights toward the front (in the demo: darker greens, paler snow). The night
+  tint dulls warm colours (the fox reads brown): give a warm subject a lighter fill.
 
 ## Typography and copy
 - Fraunces only (`fonts/*.woff2`, `fonts.css`: Latin and Latin Extended subsets), via `SERIF`. Kicker 700 at 58 px,
@@ -78,34 +81,34 @@ lowered on strings · `styles/paper-cutout/`
 - A moving piece on a card other than the puppet's is drawn in the `ART.cards` loop right after that card's
   `drawImage`, as the smoke is (light seen through holes goes just before it, as the lamps do), offset by that card's
   dx and dy so it pans and rises with it, with `place()` and a cast of about 0.5 × the light vector.
-- The puppet: `paintFox()` draws into `FOX.cv` (760 × 340) at `FOX_SCALE` 0.88: far legs (darker, unpinned), `TORSO`,
-  `CHEST`, `HAUNCH`, near legs, a three-bone tail smoothed by `chaikin()` into a tufted brush (`tailShape()`), `HEAD`
-  turned about its neck pin. Legs are two `limb()` capsules and a paw, angled from straight down (`foxLeg()`); pins
-  at hips, shoulders, neck, tail root; each part is `foxPart()` (glued shadow, then cut piece).
+- The demo's puppet: `paintFox()` draws into `FOX.cv` (760 × 340) at `FOX_SCALE` 0.88: far legs (darker, unpinned),
+  `TORSO`, `CHEST`, `HAUNCH`, near legs, a three-bone tail smoothed by `chaikin()` into a tufted brush (`tailShape()`),
+  `HEAD` turned about its neck pin. Legs are two `limb()` capsules and a paw, angled from straight down (`foxLeg()`);
+  pins at hips, shoulders, neck, tail root; each part is `foxPart()` (glued shadow, then cut piece).
 
 ## Composition and camera
-- 16:9, back to front: dusk card; sun at x 330 sinking from y 430 to 760; mountains (peaks y 385–470, foot 660);
-  hill (`hillTop`, about 668; `CABIN` x 640); forest (`forestTop`, about 800; `TALL_PINE` 1345); the fox on
-  `FOX_GROUND` 915 in the forest card's slot; bank (`bankTop`, about 958); wings (strip 1046, pines at x 110 and
-  SW + 90). The night card, moon (to 1650, 235) and stars (x 150, 320, 1790, 1880) are drawn between the sun and the
-  mountains, so the moon rises from behind the peaks; only the title (x 960, `TITLE.restY` 285) hangs in front of
-  everything.
+- Back to front: a backdrop card; any pieces that rise or sink behind the set (sky pieces such as the demo's sun and
+  moon), between it and the farthest card; about five scenery cards, each topped lower than the one behind so all
+  show, the nearest being wings at the frame edges; the puppet in the slot between two of them; the hung title in
+  front of everything. In the demo's 16:9 valley: dusk card; sun at x 330 sinking from y 430 to 760; night card,
+  moon (to 1650, 235) and stars (x 150, 320, 1790, 1880); mountains (peaks y 385–470, foot 660); hill (`hillTop`,
+  about 668; `CABIN` x 640); forest (`forestTop`, about 800; `TALL_PINE` 1345); the fox on `FOX_GROUND` 915; bank
+  (`bankTop`, about 958); wings (strip 1046, pines at x 110 and SW + 90); the title at x 960, `TITLE.restY` 285.
 - Camera: a horizontal pan only, `cameraX()` from −40 to 140 over 1.0–6.6 s. Cards move −0.22 × depth × cam (depth
-  1–5), the fox −0.66, sun and moon −0.15, stars −0.1; sky cards and title stay. Cards are baked at 1× and
-  overscan by `PADX` 160 px a side, so 0.22 × 5 × |cam| stays under 160: no zoom, cut or shake. 9:16 and 1:1
-  rebuild the set at the new size (Adapting).
+  1–5), the puppet −0.66, sun and moon −0.15, stars −0.1; sky cards and title stay. Cards are baked at 1× and
+  overscan by `PADX` 160 px a side, so 0.22 × 5 × |cam| stays under 160: no zoom, cut or shake (formats: Adapting).
 
 ## Motion
 - Easing: `inOutCubic` for sun, night card, tint, light swing, camera, lying down and tail curl; `outCubic` for the
   moonrise and word lift; `backOut(v, over)` for arrivals (cards 1.35, title drop 1.6, words 2.2, stars 2.6).
 - Smooth 30 fps, no held frames, stepping or jitter: rigid pieces turn about pins, never bend or morph; scale only
   fakes a turn (snow and stars flip edge-on) or a small squash (the lying fox 0.88 × 0.9, breath ±1.8 %).
-- Gait: the fox slows with 1 − (1 − u)^1.7 (`foxAt()`); phase = distance / 150 × 2π, so paws never skate; diagonal
-  legs swing together (0.5 × amp rad), the body bobs 3.5 px, the tail sways at half rate, the gait fades at the end.
+- Gait (any walker): phase = distance / stride × 2π, so feet never skate, fading as it stops. The demo's fox slows
+  with 1 − (1 − u)^1.7 (`foxAt()`) on a 150 px stride; diagonal legs swing together (0.5 × amp rad), the body bobs
+  3.5 px and the tail sways at half rate.
 - Ambient, on film time, allowed through the final hold: snow (`SNOWFALL`, 55–150 px/s, drifting and flipping),
   smoke (2.7 s loop), breathing, the stars' 0.03 rad sway and spin, the sun's turn. No jitter loop; all else is action.
-- The stars' damped swing never settles in the demo (fix in Adapting). The title's swing is tapered to zero at the
-  literal 8.45 s: write it as `TITLE.at` + 1.45 (+ 1.25 in the 6 and 4 s plans).
+- The title's swing tapers to zero at the literal 8.45 s: write it as `TITLE.at` + 1.45 (+ 1.25 in the 6 and 4 s plans).
 
 ## Film grammar
 | Time (s) | What happens | In code |
@@ -126,7 +129,8 @@ lowered on strings · `styles/paper-cutout/`
 | 9.35–10 | Dims to dark | `paint()` |
 
 - Scenes open by assembling (cards rise, nearest last), move by pull-tab cards, threads, light and the puppet, and
-  close on a card hung in front of the set; 0.5–1.5 s beats overlap. All but the fox, cabin and valley are reusable.
+  close on a card hung in front of the set; 0.5–1.5 s beats overlap. These devices are reusable; the fox, valley,
+  cabin, moon and stars are their demo instances.
 - Demo faults: the stars never settle (fix in Adapting); the fox turns dull brown at night (Palette); in 16:9 and 1:1
   the card hides the tall pine's apex from 7.4 s (accept it, or move `TALL_PINE` out of the card's x span).
 - `KEYS=0.5,2.5,3.6,5.0,7.0,8.5,9.2`: rise, fox, night pull, moon and stars, lamps, title landed, final hold.
@@ -137,10 +141,12 @@ and limits with tanh.
 - Bed, not from cues: wind (150–1400 Hz noise swelling every 2.9 s) on the whole buffer; a four-note D-major pad at
   fixed times, `tone()` from 0.2 s for 9.7 s (1.8 s attack, 1.4 s release) with a ±12 % tremolo at 0.21 Hz sized by
   `tt()` of the same 9.7. The master fade-in 0.3 s and last-0.8 s fade-out follow `DUR`.
-- Cues: `slide` (card; `v`), `tap` (knock; `f`, default 140; `v`), `step` (crunch; `v`), `tab` (pull tab; `d`), `moon`,
-  `star` (bell at `f`), `sniff`, `rustle` (`d`), `light` (click and bell at `f`), `whoosh` (`d`), `pop` (`f`), `chord`
-  (2.2 s close). Literal times: `tab`, the night card's `tap` (4.18), `moon`, `sniff`, `rustle`; the rest follow cards,
-  fox (a `step` per 75 px), stars, windows, title. No cue is looked up by name; unknown kinds and cues past `DUR` drop.
+- Cues, sent by role: `slide` (`v`) as a card starts to rise and `tap` (knock; `f`, default 140; `v`) as it lands;
+  `tab` (`d`) for a card pulled across; `moon` (a glassy four-note rise) for a piece rising into the sky; `star`
+  (bell at `f`) per thing lowered on a thread; `step` (crunch; `v`) per half stride; `sniff` and `rustle` (`d`) for
+  the puppet's small and large moves; `light` (click and bell at `f`) per lamp; for the title `whoosh` (`d`), a `tap`
+  as it lands and a `pop` (`f`) per word; `chord` (2.2 s close). Literal times in the demo: `tab`, the night card's
+  `tap` (4.18), `moon`, `sniff`, `rustle`. No cue is looked up by name; unknown kinds and cues past `DUR` drop.
 - What breaks it (tested): `star`, `light` or `pop` without `f` (KeyError; a fifth star or fourth window, as `f` comes
   from four chimes and three bells); `tab`, `rustle` or `whoosh` without `d` (KeyError) or with `d` ≤ 0 (ValueError);
   the pad's 9.7 changed in `tone()` but not `tt()` (ValueError); a pad attack of 0 (one NaN sample: "ok nan", and
@@ -157,7 +163,7 @@ and limits with tanh.
 | Shape kit and pine | `poly()`, `box()`, `disc()`, `ridge()`, `bandShape()`, `teeth()`, `starPts()`, `flakeShape()`, `tornRect()`, `pine()` | `pine(x, base, s, green)` returns parts | as is |
 | Sky and landscape cards | `buildDusk()`, `buildNight()`, `layBand()`, `buildMountains()`, `buildHill()`, `buildForest()`, `buildBank()`, `buildWings()`, `hillTop`, `forestTop`, `bankTop` | `ART.cards` rows `{ sheet, depth, fox }` | adapt per set |
 | Rise, parallax, light, finish | `riseStart`, `riseOffset`, `cameraX`, `paint()` | | as is; tint colours per time of day |
-| Snowfall | `SNOWFALL`, `snowfall()` | `snowfall(t, depth, sun)`: 0 behind the forest, 1 in front of the puppet, 2 in front of all | as is |
+| Snowfall | `SNOWFALL`, `snowfall()` | `snowfall(t, depth, sun)`: 0 behind the forest, 1 in front of the puppet, 2 in front of all | as is, for any falling paper pieces (snow is the demo's) |
 | Things on threads | `hangingStars()`, `HANGING`, `STARS_FROM` | rows of x, thread length, scale, phase | as is, plus the taper fix |
 | Puppet kit | `limb()`, `foxPart()`, `brad()`, `chaikin()`, `tailShape()`, `FOX` | `limb(x0, y0, r0, x1, y1, r1)` | as is |
 | The fox | `paintFox()`, `foxLeg()`, `HEAD`, `TORSO`, `CHEST`, `HAUNCH`, `foxAt()`, `pawPrints()` | | replace |
@@ -166,9 +172,11 @@ and limits with tanh.
 | Timeline, cues, sounds | `paint()`, `window.events`, `audio.py` | cue kinds in Sound | replace; audio.py as is but `DUR` and pad |
 
 ## Adapting
-- **Style vs demo plot:** style is the rising card stack, cut pieces with lip, grain and shadows, one light, paper sky,
-  capped pines, pinned puppet, pull-tab and thread moves, hanging title; plot is the fox, valley, cabin, moon, stars.
-  Transformations: a sky card pulled across, lamps lit through cut holes, things on threads, a puppet arriving.
+- **Style vs demo plot:** style is the rising card stack, cut pieces with lip, grain and shadows, one light, a banded
+  paper backdrop, a repeated cut motif sized by depth with oversized wings at the frame edges, pinned puppet,
+  pull-tab and thread moves, hanging title; plot is the fox, the winter valley (snow, snow-capped pines, mountains),
+  the dusk-to-night sky, cabin, moon and stars. Transformations: a sky card pulled across, lamps lit through cut
+  holes, things on threads, a puppet arriving.
 - **New subject:** build it by the rules in Shapes in its own canvas, in the card slot it walks in (the `fox` flag
   in `ART.cards`). A child (coat, scarf, pompom hat, capsule limbs, boots, pins at hip, shoulder and neck) read
   clearly at about 400 px tall in 16:9 and 420 px in 9:16 (420 px under the 16:9 card lost its pompom behind the
@@ -178,8 +186,7 @@ and limits with tanh.
   overshoot (+ 243 in 9:16), so in 16:9 a subject under it stays under 410 px.
 - **Fixes, tested:** multiply the damped term in `hangingStars()` by (1 − span(age, 0.7, 1.9)), set `TITLE.at` to 7.0
   and keep the swing's end at 8.45 (`TITLE.at` + 1.45): the demo settles at 8.433 s and holds 0.92 s in every
-  format. The action clock below compresses the film and measures holds: render every frame of the ending in the
-  project and in a copy with FORCE true; the hold runs from the first time every later pair is identical to the fade.
+  format. The action clock below compresses the film; FORCE true gives the end state to measure holds against.
 
 ```js
 let FORCE = false;                       // true: every action at its end state

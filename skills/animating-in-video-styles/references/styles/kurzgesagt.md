@@ -1,8 +1,7 @@
 # Kurzgesagt (`kurzgesagt`)
 
-A bright, layered science-documentary look inspired by Kurzgesagt – In a Nutshell. Each beat shows one consequence
-of a "what if" at scale; the camera dives into places and irises back out to the planet. Curious, cute but precise,
-never grim.
+A bright, layered science-documentary look inspired by Kurzgesagt – In a Nutshell. Each beat shows one idea at
+scale; the camera dives into places and irises back out to the big picture. Curious, cute but precise, never grim.
 
 **Reference film:** "What if the Moon disappeared?": the Moon bursts into sparks beside Earth; a dive to a dusk coast
 where a gauge shows the tides flattening; night, a critter with a lantern; an iris out to Earth, its axis wobbling
@@ -11,12 +10,14 @@ past season icons; Earth alone under the question · `styles/kurzgesagt/`
 ## Signature
 - A deep-space backdrop fading up from navy in 0.4 s: gradient `C.sky0` → `C.sky1`, three soft colour clouds
   (magenta, teal, violet), 320 twinkling stars whose largest are four-point sparkles, a dark vignette.
-- One big outline-free planet on the centre line, rising with a small overshoot (0.2–1.6 s): ocean gradient, blobby
-  continents with sandy cores, pill clouds, caps, a navy crescent lower right, a pale rim upper left, a cyan halo.
+- One big outline-free subject on the centre line, rising with a small overshoot (0.2–1.6 s), built from flat fills
+  with a navy crescent lower right, a pale rim upper left and a soft halo (in the demo: Earth, with an ocean
+  gradient, blobby continents with sandy cores, pill clouds, caps and a cyan halo).
 - A white rounded headline (Fredoka 600, 84 px) popping in word by word at top centre with a soft blue glow
   (0.55–1.41 s), and a small tracked-caps kicker fading up under it (1.05 s).
-- A companion on a tilted orbit pops in, swells, flashes white and bursts into four-point sparks, leaving a dashed
-  outline (the Moon, 0.75–2.45 s).
+- Within 3 s a first change happens to or beside the subject by the style's devices: a pop with overshoot and, for
+  anything that goes away, a swell, a white flash and a burst of four-point sparks leaving a dashed ghost outline (in
+  the demo: the Moon on a tilted orbit, 0.75–2.45 s).
 
 ## Palette
 | Role | Colour | In code |
@@ -43,8 +44,9 @@ past season icons; Earth alone under the question · `styles/kurzgesagt/`
 - Kicker, `kicker()`: 600, 32 px, letter-spacing 6 px, capitals, `#c3cfff` (warm `#ffd9a0` at night and on the
   diagram), 76–84 px under the headline; fades and rises 12 px over 0.4 s, leaves in 0.25 s. Diagram labels: 600,
   22–26 px, capitals, spacing 3–4 px; numbers 700, 52 px, gold, glowing.
-- Voice: a calm, curious explainer. A headline is one consequence in the conditional ("The tides would flatten") or
-  the question, 3–6 words; the kicker gives the reason or stakes in 2–5 words. No puns, exclamation marks or slang.
+- Voice: a calm, curious explainer. A headline states the beat's one idea (a fact, a consequence or the question) in
+  3–6 words; in the demo's "what if" film each is a consequence in the conditional ("The tides would flatten"). The
+  kicker gives the reason or stakes in 2–5 words. No puns, exclamation marks or slang.
 - Measured with `measureText` as `popText()` lays words out (space + 0.15 em gaps): 44.6 px a character at 88 px,
   42.5 at 84, 38.5 at 76, 36.5 at 72 ("What if the Moon disappeared?", 29 characters, is 1233 px at 84); kicker 24.5.
   16:9: one line under 1600 px (about 37 characters at 84). 9:16: lines under 820 px, about 19 characters at 84, 21
@@ -62,14 +64,17 @@ past season icons; Earth alone under the question · `styles/kurzgesagt/`
   Strokes are for diagrams: dashed white lines with round caps and a cyan glow, a gold arc, dashed ghosts of what is
   gone. Round forms get `shadeCircle(x, y, r, k, dark, lite)`: a translucent navy crescent on the lower right (k
   0.25–0.28) and a thin pale rim on the upper left; the light always comes from the top left.
-- Planet, `drawPlanet()`: continents from `CONT` through the orthographic `project()`, clouds 1.3× faster than the
-  surface, caps, shade, a bright stroke on the lit limb, `ATMO` behind; `tilt` turns the surface only.
-- Landscape, `sceneCoast()`: summed-sine hills, a smooth-step slope (`groundY()`), soil with a darker band 70 px
-  down, a 34 px sand crust, grass, lollipop trees, a hut (rounded box, triangle roof, round-topped door). Creature,
-  `drawCritter()`: round body, paler belly, shade cut-out, big white eye with navy pupil and catch-light, blush, short
-  legs, round ears, curled tail, `CS` 1.25 (150 px wide). Icons, `seasonIcon()`: navy disc, 6 px ring, one glyph.
+- The demo's planet, `drawPlanet()`: continents from `CONT` via the orthographic `project()`, clouds 1.3× faster than
+  the surface, caps, shade, a bright stroke on the lit limb, `ATMO` behind; `tilt` turns the surface only.
+- A place is a side-on cross-section: a sky gradient, layered silhouettes, the ground cut away to show soil bands
+  (the demo's coast, `sceneCoast()`: summed-sine hills, a smooth-step slope, `groundY()`; soil with a darker band
+  70 px down, a 34 px sand crust, grass, lollipop trees, a hut of rounded box, triangle roof and round-topped door).
+- Creatures (build rules): a round body with a paler belly and a shade cut-out, one big white eye with a navy pupil
+  and catch-light, blush, short legs; all else comes from the film's subject (the demo's `drawCritter()` adds round
+  ears, a curled tail and a lantern; `CS` 1.25, 150 px wide).
 - A new object: two or three flat palette fills (a base, a paler or darker patch), `shadeCircle()` on round parts, a
-  glow only if it gives light.
+  glow only if it gives light, except the one big subject, which always sits on a soft halo (the demo's `ATMO`).
+  Icons, `seasonIcon()`: navy disc, 6 px ring, one glyph.
 
 ## Composition and camera
 - 16:9: one subject on the centre line, low enough to leave the top 260 px to the text (`PA` 960, 660, radius 270;
@@ -123,8 +128,7 @@ past season icons; Earth alone under the question · `styles/kurzgesagt/`
   tides, nightfall, the iris circle and the end move, `eBack(k, over)` for pops: 1.9 (12 % overshoot) for words, the
   Moon and the lantern lift, 1.25 (6 %) for the planet's rise, 2.2 (15 %) for icons. Smooth 30 fps, no stepping.
 - Each word pops over 0.5 s, 0.09 s apart (0.06 on the end card), so five words land in 0.86 s; the kicker follows
-  about 0.5 s after the headline (0.25 s at the shortest, as in the 8 s plan, where it starts before the last words
-  pop); transitions take 0.65–0.7 s.
+  about 0.5 s after the headline (0.25 s at the shortest, in the 8 s plan); transitions take 0.65–0.7 s.
 - Ambient, always running: planet spin 0.22 rad/s, star twinkle and drift, water ripple, tree sway (±3 px), lantern
   flicker (±9 %), the critter's bob, legs and lantern sway while walking, icon shake tied to the wobble.
 - Never: a hard cut (every change is a dive with a cyan flash or an iris with a cyan rim), outlines on figures,
@@ -145,8 +149,8 @@ past season icons; Earth alone under the question · `styles/kurzgesagt/`
 | 8.5–10 | Diagram leaves (to 8.89), wobble dies (to 9.1), Earth drops; end card: question, empty orbit 8.8–9.3, "EARTH, ALONE" 9.1; fade to navy 9.65–10 | `endK`, `popText()`, `kicker()`, `veil()` |
 
 - A beat runs about 2 s: headline, kicker, the change under them, both leaving as the transition starts; dives (space
-  to place) alternate with irises (place to space). Reusable: opening, headline and kicker, vanish into sparks,
-  diagrams, nightfall by palette pairs, dive, iris, end card. One-off: Moon, tides, critter, wobble, seasons, copy.
+  to place) alternate with irises (place to space). Reusable: opening, headline, kicker, vanish into sparks, diagrams,
+  nightfall by palette pairs, dive, iris, end card. One-off: Earth, Moon, tides, critter, wobble, seasons, copy.
 - The demo settles at 9.5 s and fades at 9.65: a 0.15 s hold (measured as under Shorter); the 10 s plan fixes it.
 - KEYS for contact_sheet.sh: 2.2 (sparks), 2.95 (flash over the dive), 4.6 (tides nearly flat), 7.2 (iris half
   closed, rim visible, lantern up inside), 8.1 (wobble and icons), 9.55 (end card); the thirds miss vanish and wobble.
@@ -157,19 +161,19 @@ audio.py reads `events.json`, cues with a kind `k` and a time `t`, and synthesiz
 - At fixed times, not from cues: the `bed` pad (D major add9, `tone()` over all of `DUR`, attack 1.2 s, release
   1.0 s: it follows `DUR`) with a 45 % night dip from 5.0 s, back by 7.2 s; the `sea` bed 2.85–7.3 s, quietening from
   3.55 s over 1.4 s with the tides; crickets from 5.45 s until 7.0 s (seeded `rs`).
-- Cues: `pop` (`f` 820, 910, 1000 by word) per headline word, sent by the words helper in window.events with its
-  headline's t0 and stag; `blip` (`f`) the Moon's pop; `rise` and `land` an arrival and its landing (`land` also as an
-  iris closes); `suck` before the vanish and as the diagram clears; `shimmer` at the burst; `whoosh` (`d`); `splash`
-  at the coast; `wave` (`v`, tidal range 1 to 0.3) per high tide, from a loop over the tidal range; `dusk`; `step` per
-  footstep, from a loop over the critter's path; `tinkle`; `wobble` (`d` 1.4); `bloop` (`f` 300–480) per icon;
-  `chord`, five notes and a low D, 1.4 s each.
+- Cues, by role: `pop` (`f` 820, 910, 1000 by word) per headline word, from the words helper in window.events;
+  `blip` (`f`) a small pop-in (the Moon's); `rise` and `land` an arrival and its landing (`land` also as an iris
+  closes); `suck` before a vanish and as a diagram clears; `shimmer` at the burst; `whoosh` (`d`); `splash` on
+  arriving at water (the coast); `wave` (`v`, tidal range 1 to 0.3) per high tide, from a loop over the tidal range;
+  `dusk` at nightfall; `step` per footstep, from a loop over the critter's path; `tinkle` (two bells) as a small light
+  comes up (the lantern lift); `wobble` (`d` 1.4) under an oscillation; `bloop` (`f` 300–480) per icon; `chord`,
+  five notes and a low D, 1.4 s each.
 - What breaks it (tested): `pop`, `blip` or `bloop` without `f`, `whoosh` without `d`, `wave` without `v`: KeyError;
   `f` 0: ZeroDivisionError; `whoosh` with `d` ≤ 0: ValueError. Pans are fixed or random within ±0.6, so no field
   can make a NaN; a large `v` only saturates the limiter. Cues before 0 or past `DUR` drop silently. Master: 0.2 s
   fade-in, 0.5 s fade-out (`fo`), tanh limiter, so send `chord` at least 1.4 s before the end.
-- A new scene sends the words helper per headline, `whoosh` per dive or iris with `d` about its length (0.75 for the
-  0.65 s dive, 0.7 for the 0.7 s iris), `land` as an iris closes, `chord` with the end card; move or delete the `bed`
-  dip, `sea` and crickets, or they duck and chirp at the demo's times, even after a shorter film's closing chord.
+- A new scene sends `whoosh` per dive or iris (`d` 0.75 for the 0.65 s dive, 0.7 for the 0.7 s iris) and `chord`
+  with the end card; move or delete the `bed` dip, `sea` and crickets, or they duck and chirp at the demo's times.
 
 ## Reuse map
 | Piece | Where | Call / key params | Reuse |
@@ -185,9 +189,11 @@ audio.py reads `events.json`, cues with a kind `k` and a time `t`, and synthesiz
 | Timeline and cues | `renderFrame()`, `window.events` | scene gates `t < 3.0`, `t >= 6.85`, `t < 7.55` | replace |
 
 ## Adapting
-- **Style vs demo plot:** the style is the space backdrop, a glowing outline-free subject, the pops, diagrams in white,
-  cyan and gold, dive and iris, navy fades, pad and whooshes. Plot: the Moon, coast, gauge, critter, wobble, seasons,
-  copy. The transformation: any change at scale (vanishing in sparks, a gauge collapsing, nightfall).
+- **Style vs demo plot:** the style is the space backdrop, one glowing outline-free subject, headline and kicker
+  pops, the vanish into sparks, diagrams in white, cyan and gold, nightfall by palette pairs, dive and iris, the end
+  card, navy fades, pad and whooshes. Plot: Earth as the subject, the Moon and its vanishing, the coast, gauge,
+  critter, wobble, seasons and all copy, including the "what if" framing. The transformation: any change at scale
+  (vanishing in sparks, a gauge collapsing, nightfall).
 - **New subject:** one subject on the centre line, one headline at a time, new objects by the shape rules. Traps:
   the scene gates in `renderFrame()` move with the transitions; `T_VANISH` also times two cues; each `words()` call
   repeats its `popText()` t0; the `wave` and `step` loops run from their own windows even after their scene is gone.
