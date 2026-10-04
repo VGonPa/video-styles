@@ -1,0 +1,1188 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── surrealism · the melting hour, the wrong shadow, the empty horizon ─────────────────────────
+// One continuous world in cold, low daylight, painted like a 1930s veristic canvas: a licked ochre plain
+// that pales and cools toward a razor-straight horizon, a thin icy lemon band above it, then cerulean
+// deepening to ultramarine; every shadow long, hard, cool and transparent, thrown to the right.
+// Beat 1, the melting hour: the picture fades up on a tall pale stone pillar at the centre of the plain.
+// A gold pocket watch lies on its top, the front third over the edge, its blued second hand ticking.
+// The camera creeps in; the watch stiffens for an instant (its front lifts a hair and holds), then
+// softens and slides, and its front half rolls over the edge in one soft fold like warm wax: a thick
+// rounded lip, the flap bellied away from the stone and resting on it lower down, the enamel dial
+// stretching while the second hand keeps ticking. It stretches a touch too far, springs back, sways.
+// Beat 2, the wrong shadow: in one eased move the camera cranes up over the pillar (it sinks out of the
+// bottom of the frame), trucks right along its long shadow and settles on an egg standing on the bare
+// plain. Its shadow is a bird with spread wings. The shadow beats its wings and slides away across the
+// ground and out of frame, leaving the egg with no shadow at all. Far off on the horizon, small and pale,
+// a tall-case clock strides on impossibly long, thin, backward-jointed legs.
+// Beat 3, the empty horizon: the camera rises and turns so the empty plain and the empty sky take the
+// frame. The long cast shadow of the word SURREALISM appears on the plain first, whole;
+// then the stone letters that cast it fade in on top, whole; then the caption "Paris · from 1924".
+// A hold, a settle, a fade to black.
+// The sky, the plain and the composite of all ground shadows are painted in a 2D canvas; the objects
+// are drawn with WebGL2 into a second canvas and laid over it. Every ground shadow is the exact
+// projection of its object along the one light direction. The watch is a closed mesh of its enamel dial,
+// bezel, band and back, bent over the edge every frame (arc length kept, then stretched), its normals
+// recomputed from the bent mesh, shadowed by a shadow map; a second map along the face normal gives the
+// tight contact shadow where it rests on the stone. The canvas weave is painted once. Frames depend on t.
+'use strict';
+const W = 1920, H = 1080, DUR = 10.4, PI = Math.PI, DEG = PI / 180;
+const out = document.getElementById('c'), ctx = out.getContext('2d');
+
+// ── maths ──
+const clamp = (v, a = 0, b = 1) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, u) => a + (b - a) * u;
+const ramp = (t, a, b) => clamp((t - a) / (b - a));
+const sstep = u => (u = clamp(u), u * u * (3 - 2 * u));
+const sine = u => 0.5 - 0.5 * Math.cos(PI * clamp(u));
+const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+const mixc = (a, b, u) => [lerp(a[0], b[0], u), lerp(a[1], b[1], u), lerp(a[2], b[2], u)];
+const css = (c, a = 1) => `rgba(${Math.round(clamp(c[0]) * 255)},${Math.round(clamp(c[1]) * 255)},${Math.round(clamp(c[2]) * 255)},${a})`;
+const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+function noiseGen(seed) {                      // xorshift32 behind a multiplicative scramble of the seed
+  let s = Math.imul(seed ^ 0x5bd1e995, 0x27d4eb2d) >>> 0 || 7;
+  return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+}
+// damped spring response to a unit step that starts at time 0: overshoots once, settles
+const spring = (x, zeta = 0.42, w = 11) => {
+  if (x <= 0) return 0;
+  const wd = w * Math.sqrt(1 - zeta * zeta);
+  return 1 - Math.exp(-zeta * w * x) * (Math.cos(wd * x) + zeta * w / wd * Math.sin(wd * x));
+};
+const smax = (a, b, k) => 0.5 * (a + b + Math.sqrt((a - b) * (a - b) + k * k));   // a soft maximum
+
+// ── timeline (seconds) ──
+const T = {
+  fadeIn: [0, 0.7],
+  tick0: 0.3,                  // the second hand jumps on the second from here
+  lift: [0.78, 1.18],          // anticipation: the overhang rises a hair and holds stiff
+  sag: [1.18, 2.45],           // the soft roll
+  settle: 2.45,
+  egg: 4.62,                   // the bird shadow starts to beat its wings
+  birdGo: 4.95,                // and slides away
+  walk: 3.0,                   // the far walker, standing still until now, takes its first stride
+  shadowIn: [6.65, 7.1],       // the title's cast shadow, whole word
+  lettersIn: [7.45, 7.8],      // the letters, whole word
+  subIn: [8.05, 8.38],         // the caption, whole string
+  fadeOut: [9.9, 10.4],
+};
+
+// ── light: one low sun from the left; every shadow falls along +x. Faces are shaded by a light a little
+// higher and a little more frontal than the one that throws the shadows, as a painter would cheat it ──
+const SUN_AZ = 0;                                                 // shadows point this far from +x toward +z
+const SHADOW_EL = 8 * DEG, SHADE_EL = 25 * DEG, SHADE_AZ = 22 * DEG;
+const toSun = (el, az) => norm([-Math.cos(el) * Math.cos(az), Math.sin(el), -Math.cos(el) * Math.sin(az)]);
+const LS = toSun(SHADOW_EL, SUN_AZ), LSH = toSun(SHADE_EL, SHADE_AZ);
+
+// ── palette: the sky by elevation (degrees), the plain by view depth (metres) ──
+const SKY = [[0, [0.95, 0.93, 0.77]], [0.7, [0.91, 0.93, 0.86]], [2.0, [0.69, 0.81, 0.91]], [5, [0.43, 0.63, 0.87]],
+  [10, [0.24, 0.45, 0.80]], [18, [0.13, 0.29, 0.69]], [30, [0.07, 0.17, 0.53]], [50, [0.04, 0.10, 0.38]]];
+const GROUND = [[2, [0.58, 0.385, 0.215]], [5, [0.615, 0.415, 0.235]], [8, [0.64, 0.44, 0.25]], [11, [0.745, 0.535, 0.315]],
+  [16, [0.77, 0.57, 0.34]], [25, [0.80, 0.62, 0.39]], [45, [0.81, 0.66, 0.46]], [90, [0.80, 0.69, 0.53]],
+  [170, [0.79, 0.71, 0.59]], [400, [0.77, 0.72, 0.64]], [1500, [0.76, 0.72, 0.67]]];
+const AER = [0.80, 0.79, 0.80], AER_D = 110;      // objects pale and cool toward this with distance
+const aerAt = z => 1 - Math.exp(-Math.max(z - 6, 0) / AER_D);
+const SHADE_MUL = [0.64, 0.64, 0.81];             // shadows multiply the plain by this: cool, transparent
+const GLAZE = [0.28, 0.34, 0.62];                 // and a thin blue-violet glaze over them
+function stops(list, x) {
+  if (x <= list[0][0]) return list[0][1];
+  for (let i = 1; i < list.length; i++) if (x <= list[i][0]) return mixc(list[i - 1][1], list[i][1], (x - list[i - 1][0]) / (list[i][0] - list[i - 1][0]));
+  return list[list.length - 1][1];
+}
+const groundAt = z => stops(GROUND, z);
+const shadeAt = z => mixc(SHADE_MUL, [1, 1, 1], 0.8 * aerAt(z));
+
+// ── the world ──
+const PED = { x: 0, z: 0, rot: 1.2, top: 1.75, hz: 0.46 };   // a pillar on a two-step plinth
+const EGG = { x: 13.6, z: -0.25, h: 0.98, r: 0.335 };
+const WALKER = { at: 4.0, sx: 330, dist: 52, speed: 3.0, period: 1.35, s: 0.52 };  // on screen at `at`
+const TITLE = { text: 'SURREALISM', cap: 1.3, depth: 0.34, dist: 12, at: 9.4 };
+
+// ── camera: a level view camera (verticals stay vertical) with yaw, lens shift and focal length ──
+const KEYS = [                                                      // [time, pose], and when each move starts
+  [0, { x: -2.50, y: 2.75, z: -2.04, yaw: 0.85, f: 1450, hy: 150 }, 0],
+  [2.6, { x: -2.18, y: 2.15, z: -1.72, yaw: 0.85, f: 1450, hy: 330 }, 0],        // creep in and down to the watch
+  [3.5, { x: -2.10, y: 3.50, z: -1.62, yaw: 0.855, f: 1450, hy: 320 }, 2.58],    // crane up: the pillar sinks away
+  [4.6, { x: 4.38, y: 4.10, z: -8.79, yaw: 0.92, f: 1450, hy: 280 }, 3.18],      // truck right along the shadow
+  [5.9, { x: 4.62, y: 4.10, z: -8.90, yaw: 0.945, f: 1450, hy: 280 }, 4.55],     // a slow drift on the egg
+  [7.05, { x: 9.00, y: 6.00, z: -11.0, yaw: 1.45, f: 1150, hy: 240 }, 5.45],     // rise and turn: plain and sky
+  [DUR, { x: 9.06, y: 6.03, z: -11.1, yaw: 1.453, f: 1150, hy: 242 }, 6.9],      // the settle under the hold
+];
+function camera(t) {
+  const c = { ...KEYS[0][1] };
+  for (let i = 1; i < KEYS.length; i++) {
+    const e = sine(ramp(t, KEYS[i][2], KEYS[i][0]));
+    for (const k in c) c[k] += (KEYS[i][1][k] - KEYS[i - 1][1][k]) * e;
+  }
+  c.cy = Math.cos(c.yaw); c.sy = Math.sin(c.yaw);
+  return c;
+}
+const view = (c, p) => {                      // world → [x right, y up, z ahead] in camera space
+  const dx = p[0] - c.x, dz = p[2] - c.z;
+  return [dx * c.cy - dz * c.sy, p[1] - c.y, dx * c.sy + dz * c.cy];
+};
+const toScreen = (c, p) => { const v = view(c, p); return [W / 2 + c.f * v[0] / v[2], c.hy - c.f * v[1] / v[2], v[2]]; };
+
+// ═════════════════════════════════════════ WebGL ═══════════════════════════════════════════════
+const glc = mkCanvas(W, H);
+const gl = glc.getContext('webgl2', { antialias: true, premultipliedAlpha: true, preserveDrawingBuffer: true, alpha: true });
+
+const VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNrm; layout(location=2) in vec2 aUv; layout(location=3) in float aMat;
+uniform vec3 uCam; uniform vec2 uYaw; uniform vec2 uLens; uniform int uFlat; uniform vec3 uLs;
+out vec3 vPos; out vec3 vNrm; out vec2 vUv; flat out int vMat; out float vZ; out float vRay;
+void main() {
+  vec3 p = aPos;
+  vRay = p.y / uLs.y;                                // how far the ray runs from here to the plain
+  if (uFlat == 1) p -= uLs * vRay;                   // slide along it down onto the plain
+  vec3 d = p - uCam;
+  float xv = d.x * uYaw.x - d.z * uYaw.y, zv = d.x * uYaw.y + d.z * uYaw.x;
+  const float n = 0.05, f = 3000.0;
+  gl_Position = vec4(2.0 * uLens.x / ${W}.0 * xv, 2.0 * uLens.x / ${H}.0 * d.y + (1.0 - 2.0 * uLens.y / ${H}.0) * zv,
+                     (f + n) / (f - n) * zv - 2.0 * f * n / (f - n), zv);
+  vPos = p; vNrm = aNrm; vUv = aUv; vMat = int(aMat + 0.5); vZ = zv;
+}`;
+
+const FS_MASK = `#version 300 es
+precision highp float;
+in vec3 vPos; in vec3 vNrm; in vec2 vUv; flat in int vMat; in float vZ; in float vRay;
+uniform sampler2D uGlyph; uniform float uAlpha, uUmbra;
+out vec4 o;
+void main() {
+  float a = uAlpha * (1.0 - smoothstep(uUmbra * 0.35, uUmbra, vRay));   // a thin caster's umbra runs out
+  if (vMat == 5 || vMat == 6) a *= smoothstep(0.38, 0.62, texture(uGlyph, vUv).r);
+  o = vec4(a);
+}`;
+
+const VS_DEPTH = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+uniform vec3 uLO, uLR, uLU, uLF; uniform vec2 uLExt;
+void main() { vec3 q = aPos - uLO; gl_Position = vec4(dot(q, uLR) / uLExt.x, dot(q, uLU) / uLExt.x, dot(q, uLF) / uLExt.y, 1.0); }`;
+const FS_DEPTH = `#version 300 es
+precision highp float;
+void main() {}`;
+
+// materials: 0 stone, 1 enamel dial, 2 gold, 3 egg, 4 clock case, 5 letter face, 6 letter return,
+// 7 thin legs, 8 the walker's dial
+const FS_OBJ = `#version 300 es
+precision highp float; precision highp sampler2DShadow;
+in vec3 vPos; in vec3 vNrm; in vec2 vUv; flat in int vMat; in float vZ;
+uniform vec3 uCam, uSun, uSunCol, uAer, uSkyHor, uSkyMid, uSkyZen, uGndFar, uGndNear;
+uniform float uAerD, uPedTop, uCap, uContactK; uniform vec2 uPedAx;
+uniform sampler2D uDial, uGlyph, uFM;
+uniform sampler2DShadow uSM; uniform int uUseSM;
+uniform vec3 uLO, uLR, uLU, uLF; uniform vec2 uLExt;
+uniform vec3 uFO, uFR, uFN; uniform vec2 uFExt;
+uniform vec3 uLetR; uniform vec2 uTexel;
+out vec4 o;
+vec3 env(vec3 r) {
+  if (r.y > 0.0) return mix(mix(uSkyHor, uSkyMid, smoothstep(0.0, 0.1, r.y)), uSkyZen, smoothstep(0.1, 0.7, r.y));
+  return mix(uGndFar, uGndNear, smoothstep(0.0, -0.35, r.y));
+}
+float lit(vec3 p, vec3 n) {
+  if (uUseSM == 0) return 1.0;
+  vec3 q = p + n * 0.004 - uLO;
+  vec3 l = vec3(dot(q, uLR) / uLExt.x, dot(q, uLU) / uLExt.x, dot(q, uLF) / uLExt.y) * 0.5 + 0.5;
+  if (l.x < 0.0 || l.y < 0.0 || l.x > 1.0 || l.y > 1.0) return 1.0;
+  float s = 0.0;
+  for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++)
+    s += texture(uSM, vec3(l.xy + vec2(float(i), float(j)) * 0.6 / 2048.0, l.z - 0.0004));
+  return s / 9.0;
+}
+// how closely the melted watch lies over this point of the pillar's front face (0 none, 1 touching)
+float contact(vec3 p, vec3 n) {
+  if (uUseSM == 0 || dot(n, uFN) < 0.8) return 0.0;
+  vec3 q = p - uFO;
+  if (abs(dot(q, uFN)) > 0.03) return 0.0;
+  vec2 c = vec2(dot(q, uFR), q.y) / uFExt.x * 0.5 + 0.5;
+  float occ = 0.0;
+  for (int i = 0; i < 16; i++) {
+    float a = float(i) * 2.39996, r = sqrt((float(i) + 0.5) / 16.0) * 0.028 / uFExt.x * 0.5;
+    float d = texture(uFM, c + r * vec2(cos(a), sin(a))).r * uFExt.y;
+    occ += exp(-d / 0.045);
+  }
+  return occ / 16.0;
+}
+void main() {
+  vec3 N = normalize(vNrm), V = normalize(uCam - vPos);
+  float alpha = 1.0;
+  if (vMat == 5 || vMat == 6) {
+    float m = texture(uGlyph, vUv).r;
+    // the face keeps a soft edge; each return slab is solid where the next one in front stops, so the
+    // stacked slivers of the return never let the ground show through
+    alpha = vMat == 5 ? smoothstep(0.4, 0.6, m) : smoothstep(0.25, 0.5, m);
+    if (alpha < 0.02) discard;
+    if (vMat == 6) {                                   // the return: its normal is the glyph edge's outward direction
+      vec2 e = uTexel * 3.0;
+      vec2 g = vec2(texture(uGlyph, vUv + vec2(e.x, 0.0)).g - texture(uGlyph, vUv - vec2(e.x, 0.0)).g,
+                    texture(uGlyph, vUv + vec2(0.0, e.y)).g - texture(uGlyph, vUv - vec2(0.0, e.y)).g);
+      vec2 d = g / max(length(g), 1e-5);
+      N = normalize(uLetR * d.x - vec3(0.0, 1.0, 0.0) * d.y);
+    }
+  }
+  float sh = (vMat <= 2) ? lit(vPos, N) : 1.0;
+  float ndl = max(dot(N, uSun), 0.0);
+  vec3 Hh = normalize(uSun + V);
+  float ndh = max(dot(N, Hh), 0.0);
+  vec3 R = reflect(-V, N);
+  // the cool sky fills the shade from above; the ochre plain throws warm light back up onto low faces
+  vec3 skyFill = mix(vec3(0.30, 0.33, 0.42), vec3(0.42, 0.48, 0.63), 0.5 + 0.5 * N.y);
+  vec3 bounce = vec3(0.66, 0.46, 0.25) * 0.5 * (1.0 - smoothstep(0.0, 1.4, vPos.y)) * (1.0 - max(N.y, 0.0)) * (0.6 + 0.4 * max(-dot(N.xz, uSun.xz), 0.0));
+  vec3 col;
+  if (vMat == 0) {
+    // cold pale stone, painted: the sunlit face falls off from its top edge downward, the shade face is a
+    // cool slate that warms toward the ground with light thrown up by the plain, and the rounded vertical
+    // edges catch a thin pale line of light
+    float y = vPos.y, pillar = step(0.295, y);
+    float b0 = y < 0.165 ? 0.0 : 0.16, b1 = y < 0.165 ? 0.16 : 0.29;
+    float down = clamp((uPedTop - y) / 1.1, 0.0, 1.0);
+    float grad = mix(mix(0.5, 0.58, clamp((y - b0) / (b1 - b0), 0.0, 1.0)), mix(1.0, 0.5, pow(down, 0.85)), pillar);
+    float warm = mix(1.0, smoothstep(0.3, 1.1, uPedTop - y), pillar);
+    vec3 alb = vec3(0.86, 0.855, 0.84);
+    float sun = ndl * sh;
+    vec3 cool = skyFill * (0.3 + 0.55 * (1.0 - sun)) * (1.0 - 0.6 * warm * (1.0 - sun)) * mix(1.0, grad, sun);
+    col = alb * (uSunCol * sun * 1.12 * grad + cool + vec3(0.66, 0.46, 0.25) * 0.54 * warm * (1.0 - sun));
+    vec3 ax = vec3(uPedAx.x, 0.0, -uPedAx.y), az = vec3(uPedAx.y, 0.0, uPedAx.x);
+    float faceness = max(max(abs(dot(N, ax)), abs(N.y)), abs(dot(N, az)));
+    col += vec3(0.95, 0.93, 0.88) * 0.32 * (1.0 - smoothstep(0.9, 0.99, faceness)) * max(dot(N, uSun), 0.0) * sh * pillar;
+    col *= 1.0 - min(1.6 * contact(vPos, N), 0.8) * uContactK;
+  } else if (vMat == 1) {
+    vec3 alb = texture(uDial, vUv).rgb * vec3(0.95, 0.935, 0.9);
+    col = alb * (uSunCol * ndl * sh * 0.9 + skyFill * 0.95 + bounce * 0.6) + uSunCol * 0.14 * pow(ndh, 90.0) * sh + 0.03 * env(R);
+  } else if (vMat == 2) {
+    vec3 g = vec3(0.86, 0.64, 0.30);
+    vec3 e = env(R);
+    e = mix(e, vec3(dot(e, vec3(0.33))), 0.35);
+    float fres = 0.55 + 0.45 * pow(1.0 - max(dot(N, V), 0.0), 3.0);
+    col = g * (e * 1.05 * fres + 0.35 * (uSunCol * ndl * sh + skyFill * 0.5))
+        + vec3(1.0, 0.95, 0.82) * (1.6 * pow(max(dot(R, uSun), 0.0), 160.0) + 0.22 * pow(max(dot(R, uSun), 0.0), 18.0)) * sh;
+  } else if (vMat == 3) {
+    vec3 alb = vec3(0.95, 0.915, 0.85);
+    float wrap = max((dot(N, uSun) + 0.15) / 1.15, 0.0);
+    vec3 under = vec3(0.66, 0.46, 0.26) * max(-N.y, 0.0) * 0.55;
+    col = alb * (uSunCol * wrap * 0.9 + skyFill * 0.95 + under + bounce * 0.5) + uSunCol * 0.16 * pow(ndh, 45.0);
+  } else if (vMat == 4) {
+    col = vec3(0.58, 0.49, 0.42) * (uSunCol * ndl + skyFill) + uSunCol * 0.1 * pow(ndh, 40.0);
+  } else if (vMat == 5 || vMat == 6) {
+    // matte painted stone: warm ivory in the light, a cool grey-violet in the shade, the tops pale with the
+    // sky; a little lighter toward the top, darker in a tight band where each letter meets the ground
+    float v = clamp(vPos.y / uCap, 0.0, 1.0);
+    vec3 alb = vec3(0.945, 0.92, 0.80) * mix(0.93, 1.02, v) * mix(0.8, 1.0, smoothstep(0.0, 0.025, vPos.y));
+    col = alb * (vec3(0.50, 0.48, 0.58) * (1.0 - 0.44 * ndl) + uSunCol * ndl + vec3(0.17, 0.18, 0.2) * max(N.y, 0.0));
+  } else if (vMat == 7) {
+    col = vec3(0.40, 0.39, 0.40) * (uSunCol * ndl + skyFill);
+  } else {
+    col = vec3(0.92, 0.90, 0.84) * (uSunCol * ndl + skyFill);
+  }
+  col = mix(col, 0.8 + 0.2 * (1.0 - exp(-(col - 0.8) / 0.2)), step(0.8, col));   // a soft shoulder, no clipped whites
+  col = mix(col, uAer, 1.0 - exp(-max(vZ - 6.0, 0.0) / uAerD));                   // aerial perspective
+  o = vMat >= 5 && vMat <= 6 ? vec4(col, alpha) : vec4(col * alpha, alpha);   // letters: alpha only drives coverage
+}`;
+
+// a full-frame quad at the far plane: with depth test GREATER it touches exactly the samples something
+// covered, and sets their alpha to one (alpha-to-coverage also stores the fragment's partial alpha)
+const VS_FULL = `#version 300 es
+layout(location=0) in vec3 aPos;
+void main() { gl_Position = vec4(aPos.xy, 1.0, 1.0); }`;
+const FS_ONE = `#version 300 es
+precision highp float;
+out vec4 o;
+void main() { o = vec4(0.0, 0.0, 0.0, 1.0); }`;
+
+function compile(vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const loc = {};
+  p.u = name => (name in loc ? loc[name] : (loc[name] = gl.getUniformLocation(p, name)));
+  return p;
+}
+let P_OBJ, P_MASK, P_DEPTH, P_ONE, MESH_FULL;
+
+// interleaved vertices: position 3, normal 3, uv 2, material 1
+class Mesh {
+  constructor(data, idx, dynamic = false) {
+    this.vao = gl.createVertexArray(); gl.bindVertexArray(this.vao);
+    this.vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, data, dynamic ? gl.DYNAMIC_DRAW : gl.STATIC_DRAW);
+    [[0, 3, 0], [1, 3, 12], [2, 2, 24], [3, 1, 32]].forEach(([l, n, off]) => { gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, n, gl.FLOAT, false, 36, off); });
+    this.ibo = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, dynamic ? gl.DYNAMIC_DRAW : gl.STATIC_DRAW);
+    this.count = idx.length; gl.bindVertexArray(null);
+  }
+  update(data, idx) {
+    gl.bindVertexArray(this.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+    if (idx) { gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.DYNAMIC_DRAW); this.count = idx.length; }
+    gl.bindVertexArray(null);
+  }
+  draw() { gl.bindVertexArray(this.vao); gl.drawElements(gl.TRIANGLES, this.count, gl.UNSIGNED_INT, 0); }
+}
+
+// a growing vertex list
+class Geo {
+  constructor() { this.v = []; this.i = []; }
+  vert(p, n, uv, m) { this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], uv[0], uv[1], m); return this.v.length / 9 - 1; }
+  quad(a, b, c, d) { this.i.push(a, b, c, a, c, d); }
+  data() { return [new Float32Array(this.v), new Uint32Array(this.i)]; }
+}
+const rotY = (p, a) => [p[0] * Math.cos(a) + p[2] * Math.sin(a), p[1], -p[0] * Math.sin(a) + p[2] * Math.cos(a)];
+
+// a box with rounded edges, rotated about the vertical by `rot` and moved to `c`
+function roundedBox(g, c, h, r, rot, m) {
+  const axis = hx => [-hx, -hx + r * 0.3, -hx + r * 0.7, -hx + r, hx - r, hx - r * 0.7, hx - r * 0.3, hx];
+  const S = [axis(h[0]), axis(h[1]), axis(h[2])];
+  const inner = h.map(v => v - r);
+  for (let k = 0; k < 3; k++) for (const sgn of [-1, 1]) {
+    const a1 = (k + 1) % 3, a2 = (k + 2) % 3, base = g.v.length / 9;
+    const n1 = S[a1].length, n2 = S[a2].length;
+    for (let i = 0; i < n1; i++) for (let j = 0; j < n2; j++) {
+      const q = [0, 0, 0]; q[k] = sgn * h[k]; q[a1] = S[a1][i]; q[a2] = S[a2][j];
+      const ins = q.map((v, ax) => clamp(v, -inner[ax], inner[ax]));
+      const n = norm(sub(q, ins));
+      const p = add(ins, mul(n, r));
+      g.vert(add(c, rotY(p, rot)), rotY(n, rot), [0, 0], m);
+    }
+    for (let i = 0; i < n1 - 1; i++) for (let j = 0; j < n2 - 1; j++) {
+      const a = base + i * n2 + j;
+      g.quad(a, a + n2, a + n2 + 1, a + 1);
+    }
+  }
+}
+function lathe(g, c, prof, seg, m) {            // prof: [[radius, height]] bottom → top
+  const base = g.v.length / 9, n = prof.length;
+  for (let i = 0; i < n; i++) {
+    const pa = prof[Math.max(0, i - 1)], pb = prof[Math.min(n - 1, i + 1)];
+    const dr = pb[0] - pa[0], dy = pb[1] - pa[1];
+    for (let j = 0; j < seg; j++) {
+      const a = j / seg * 2 * PI, ca = Math.cos(a), sa = Math.sin(a);
+      const nn = norm([dy * ca, -dr, dy * sa]);
+      g.vert([c[0] + prof[i][0] * ca, c[1] + prof[i][1], c[2] + prof[i][0] * sa], nn, [0, 0], m);
+    }
+  }
+  for (let i = 0; i < n - 1; i++) for (let j = 0; j < seg; j++) {
+    const a = base + i * seg + j, b = base + i * seg + (j + 1) % seg;
+    g.quad(a, b, b + seg, a + seg);
+  }
+}
+function tube(g, p0, p1, r0, r1, seg, m) {      // a tapered rod between two points
+  const ax = norm(sub(p1, p0));
+  const ref = Math.abs(ax[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+  const u = norm(cross(ax, ref)), v = cross(ax, u), base = g.v.length / 9;
+  for (const [p, r] of [[p0, r0], [p1, r1]]) for (let j = 0; j < seg; j++) {
+    const a = j / seg * 2 * PI, n = add(mul(u, Math.cos(a)), mul(v, Math.sin(a)));
+    g.vert(add(p, mul(n, r)), n, [0, 0], m);
+  }
+  for (let j = 0; j < seg; j++) g.quad(base + j, base + (j + 1) % seg, base + seg + (j + 1) % seg, base + seg + j);
+}
+function ball(g, c, r, m, seg = 10) {
+  const prof = [];
+  for (let i = 0; i <= seg; i++) { const a = -PI / 2 + PI * i / seg; prof.push([r * Math.cos(a) + 1e-5, r * Math.sin(a)]); }
+  lathe(g, c, prof, seg * 2, m);
+}
+
+// ── the pedestal ──
+let MESH_PED;
+function buildPedestal() {
+  const g = new Geo(), c = [PED.x, 0, PED.z];
+  roundedBox(g, add(c, [0, 0.08, 0]), [0.80, 0.08, 0.80], 0.012, PED.rot, 0);
+  roundedBox(g, add(c, [0, 0.225, 0]), [0.64, 0.065, 0.64], 0.012, PED.rot, 0);
+  roundedBox(g, add(c, [0, (0.29 + PED.top) / 2, 0]), [PED.hz, (PED.top - 0.29) / 2, PED.hz], 0.014, PED.rot, 0);
+  MESH_PED = new Mesh(...g.data());
+}
+
+// ── the egg, standing on its broad end ──
+let MESH_EGG;
+function buildEgg() {
+  const g = new Geo(), prof = [];
+  for (let i = 0; i <= 48; i++) {
+    const a = PI * i / 48;                                  // 0 at the base, π at the tip
+    const y = EGG.h * (1 - Math.cos(a)) / 2;
+    const r = EGG.r * Math.sin(a) * (1 + 0.13 * Math.cos(a)) + 1e-5;
+    prof.push([r, y]);
+  }
+  lathe(g, [EGG.x, 0, EGG.z], prof, 72, 3);
+  MESH_EGG = new Mesh(...g.data());
+}
+
+// ═════════════════════════════════════════ the watch ═══════════════════════════════════════════
+const WR = 0.34, WT = 0.05, DR = 0.86 * WR, NJ = 200;
+const WC_W = -0.035, OMEGA = 14 * DEG;          // where it lies along the edge, and how it is turned
+let WBASE, WIDX, WVERT, WNRM, MESH_WATCH;
+function buildWatch() {
+  const verts = [];                              // a, b, h, material, u, v
+  const idx = [];
+  const push = (a, b, h, m) => { verts.push(a, b, h, m, 0.5 + a / (2 * DR), 0.5 - b / (2 * DR)); return verts.length / 6 - 1; };
+  // the closed profile: dial centre → dial edge │ bezel → band → back → back centre
+  const prof = [];
+  const ND = 36;
+  for (let i = 1; i <= ND; i++) prof.push([DR * i / ND, WT / 2, 1]);
+  const bez = [[DR, WT / 2], [DR + 0.002, WT / 2 + 0.005], [DR + 0.006, WT / 2 + 0.0095], [DR + 0.012, WT / 2 + 0.012],
+    [DR + 0.019, WT / 2 + 0.012], [DR + 0.024, WT / 2 + 0.0095]];
+  bez.forEach(([r, h]) => prof.push([r, h, 2]));
+  for (let i = 0; i <= 14; i++) {                // the band: a half round, fuller above than below
+    const a = 70 * DEG - 160 * DEG * i / 14;
+    prof.push([WR - 0.022 + 0.022 * Math.cos(a), (a > 0 ? WT / 2 + 0.006 : WT / 2) * Math.sin(a), 2]);
+  }
+  for (let i = 1; i <= 9; i++) prof.push([(WR - 0.022) * (1 - i / 10), -WT / 2, 2]);
+  const top = push(0, 0, WT / 2, 1);
+  const ringStart = [];
+  for (const [r, h, m] of prof) {
+    ringStart.push(verts.length / 6);
+    for (let j = 0; j < NJ; j++) { const a = j / NJ * 2 * PI; push(r * Math.sin(a), r * Math.cos(a), h, m); }
+  }
+  const back = push(0, 0, -WT / 2, 2);
+  for (let j = 0; j < NJ; j++) idx.push(top, ringStart[0] + j, ringStart[0] + (j + 1) % NJ);
+  for (let i = 0; i < prof.length - 1; i++) {
+    if (i === ND - 1) continue;                   // dial edge and bezel start share a position: a crease, no faces
+    for (let j = 0; j < NJ; j++) {
+      const a = ringStart[i] + j, b = ringStart[i] + (j + 1) % NJ, c = ringStart[i + 1] + (j + 1) % NJ, d = ringStart[i + 1] + j;
+      idx.push(a, d, c, a, c, b);
+    }
+  }
+  const last = ringStart[prof.length - 1];
+  for (let j = 0; j < NJ; j++) idx.push(back, last + (j + 1) % NJ, last + j);
+  // pendant at twelve: stem, knurled crown, and the bow lying flat
+  const cyl = (b0, b1, rad, seg, knurl) => {
+    const s = verts.length / 6;
+    for (const b of [b0, b1]) for (let j = 0; j < seg; j++) {
+      const a = j / seg * 2 * PI, rr = rad * (1 + knurl * Math.cos(a * 18));
+      push(rr * Math.cos(a), b, rr * Math.sin(a), 2);
+    }
+    for (let j = 0; j < seg; j++) { const a = s + j, b = s + (j + 1) % seg; idx.push(a, b, b + seg, a, b + seg, a + seg); }
+    const c0 = push(0, b0, 0, 2), c1 = push(0, b1, 0, 2);
+    for (let j = 0; j < seg; j++) { idx.push(c0, s + (j + 1) % seg, s + j); idx.push(c1, s + seg + j, s + seg + (j + 1) % seg); }
+  };
+  cyl(WR - 0.01, WR + 0.022, 0.0085, 18, 0);
+  cyl(WR + 0.022, WR + 0.03, 0.0125, 18, 0);
+  cyl(WR + 0.03, WR + 0.055, 0.0195, 36, 0.06);
+  {
+    const s = verts.length / 6, R1 = 0.047, r2 = 0.0068, bc = WR + 0.055 + R1 - 0.004, NU = 48, NV = 12;
+    for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) {
+      const u = i / NU * 2 * PI, v = j / NV * 2 * PI, rr = R1 + r2 * Math.cos(v);
+      push(rr * Math.sin(u), bc + rr * Math.cos(u), -WT / 2 + r2 + r2 * Math.sin(v), 2);
+    }
+    for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) {
+      const a = s + i * NV + j, b = s + ((i + 1) % NU) * NV + j, c = s + ((i + 1) % NU) * NV + (j + 1) % NV, d = s + i * NV + (j + 1) % NV;
+      idx.push(a, b, c, a, c, d);
+    }
+  }
+  WBASE = new Float32Array(verts); WIDX = new Uint32Array(idx);
+  const n = WBASE.length / 6;
+  WVERT = new Float32Array(n * 9); WNRM = new Float32Array(n * 3);
+  for (let k = 0; k < n; k++) { WVERT[k * 9 + 6] = WBASE[k * 6 + 4]; WVERT[k * 9 + 7] = WBASE[k * 6 + 5]; WVERT[k * 9 + 8] = WBASE[k * 6 + 3]; }
+  MESH_WATCH = new Mesh(WVERT, WIDX, true);
+}
+
+// the state of the melt at time t
+function melt(t) {
+  const lf = ramp(t, T.lift[0], T.lift[1]);
+  const lift = 3.4 * DEG * (sstep(lf / 0.3) - sstep((lf - 0.78) / 0.22));           // rise, stiff hold, release
+  const s = ramp(t, T.sag[0], T.sag[1]);
+  const go = s < 0.5 ? 4 * s * s * s : 1 - (2 - 2 * s) ** 3 / 2;                     // slow start, slow arrival
+  const after = t - T.settle;
+  const bounce = after > 0 ? 0.045 * Math.exp(-after / 0.32) * Math.sin(after * 2 * PI / 0.62) : 0;
+  const k = clamp(go) + bounce;
+  const st = clamp(sstep(ramp(t, T.sag[0] + 0.35, T.sag[1] + 0.05))) + (after > 0 ? 0.16 * Math.exp(-after / 0.3) * Math.sin(after * 2 * PI / 0.7 + 0.5) : 0);
+  return {
+    lift,
+    uc: lerp(-0.205, 0.0, sstep(s)),
+    theta: 116 * DEG * k,                        // past vertical: the flap leans back onto the stone lower down
+    lf: lerp(0.36, 0.22, sstep(s)),              // the length of the bend: a soft roll, not a crease
+    lip: sstep(ramp(s, 0.25, 1)),                // the wax gathering in the fold
+    stretch: 0.85 * st,
+    sway: after > 0 ? 0.03 * Math.exp(-after / 0.45) * Math.sin(after * 2 * PI / 0.85) : 0,
+  };
+}
+
+// bend the watch for time t: the material on the top stays flat; past the edge it follows a curve whose
+// angle grows smoothly to θ over a short length, its arc length stretched further down. The fold swells
+// into a rounded lip, the flap's sides curl back toward the stone, and wherever it would pass into the
+// face it is laid against it instead
+const NCOL = 17, NSTEP = 180, UMAX = 2.2 * WR;
+const CX = new Float32Array(NCOL * (NSTEP + 1)), CY = new Float32Array(NCOL * (NSTEP + 1)), CT = new Float32Array(NCOL * (NSTEP + 1));
+function deformWatch(t) {
+  const S = melt(t), du = UMAX / NSTEP, s0 = S.lf * 0.6;
+  for (let c = 0; c < NCOL; c++) {
+    const w = lerp(-WR * 1.1, WR * 1.1, c / (NCOL - 1));
+    const th = Math.min(S.theta * (1 + 0.04 * w / WR), 120 * DEG);
+    let x = 0, y = 0;
+    for (let i = 0; i <= NSTEP; i++) {
+      const u = i * du;
+      const a = th * sstep(u / S.lf);
+      CX[c * (NSTEP + 1) + i] = x; CY[c * (NSTEP + 1) + i] = y; CT[c * (NSTEP + 1) + i] = a;
+      const ds = du * (1 + 2 * S.stretch * Math.max(0, u - s0) / WR);
+      const am = th * sstep((u + du / 2) / S.lf);
+      x += Math.cos(am) * ds; y -= Math.sin(am) * ds;
+    }
+  }
+  const co = Math.cos(OMEGA), so = Math.sin(OMEGA), n = WBASE.length / 6;
+  const pivot = S.uc - WR - 0.14, cr = Math.cos(PED.rot), sr = Math.sin(PED.rot);
+  for (let k = 0; k < n; k++) {
+    const a = WBASE[k * 6], b = WBASE[k * 6 + 1];
+    let h = WBASE[k * 6 + 2];
+    let w = a * co - b * so + WC_W, u = -(a * so + b * co) + S.uc;
+    let X, Y, th = 0;
+    if (u <= 0) { X = u; Y = (u - pivot) * Math.tan(S.lift); }
+    else {
+      const cf = clamp((w / (WR * 1.1) + 1) / 2 * (NCOL - 1), 0, NCOL - 1.001), c0 = Math.floor(cf), fc = cf - c0;
+      const sf = Math.min(u / du, NSTEP - 0.001), i0 = Math.floor(sf), fs = sf - i0;
+      const L = (arr) => {
+        const p = c0 * (NSTEP + 1) + i0, q = (c0 + 1) * (NSTEP + 1) + i0;
+        return lerp(lerp(arr[p], arr[p + 1], fs), lerp(arr[q], arr[q + 1], fs), fc);
+      };
+      X = L(CX); Y = L(CY) + (u - pivot) * Math.tan(S.lift); th = L(CT);
+      const down = clamp((u - s0) / WR);
+      const hs = 1 + 1.1 * S.lip * Math.sin(PI * clamp(u / (S.lf * 1.5))) ** 2;      // the rounded lip
+      h *= hs;
+      X *= 1 - 0.3 * S.lip * (w / (WR * 1.1)) ** 2 * clamp(u / S.lf);                // the sides curl in
+      const face = clamp((-Y - 0.02) / 0.06);                                        // below the top edge
+      X = lerp(X, smax(X, WT / 2 * hs * Math.abs(Math.sin(th)) + 0.002, 0.012), face);
+      w = w * (1 - 0.33 * S.stretch * down) + S.sway * down * down;
+    }
+    const lx = w, ly = PED.top + WT / 2 + 0.0008 + Y + h * Math.cos(th), lz = -PED.hz - (X + h * Math.sin(th));
+    WVERT[k * 9] = PED.x + lx * cr + lz * sr; WVERT[k * 9 + 1] = ly; WVERT[k * 9 + 2] = PED.z - lx * sr + lz * cr;
+  }
+  // normals from the bent mesh
+  WNRM.fill(0);
+  for (let i = 0; i < WIDX.length; i += 3) {
+    const a = WIDX[i] * 9, b = WIDX[i + 1] * 9, c = WIDX[i + 2] * 9;
+    const e1 = [WVERT[b] - WVERT[a], WVERT[b + 1] - WVERT[a + 1], WVERT[b + 2] - WVERT[a + 2]];
+    const e2 = [WVERT[c] - WVERT[a], WVERT[c + 1] - WVERT[a + 1], WVERT[c + 2] - WVERT[a + 2]];
+    const nx = e1[1] * e2[2] - e1[2] * e2[1], ny = e1[2] * e2[0] - e1[0] * e2[2], nz = e1[0] * e2[1] - e1[1] * e2[0];
+    for (const v of [WIDX[i], WIDX[i + 1], WIDX[i + 2]]) { WNRM[v * 3] += nx; WNRM[v * 3 + 1] += ny; WNRM[v * 3 + 2] += nz; }
+  }
+  for (let k = 0; k < n; k++) {
+    const x = WNRM[k * 3], y = WNRM[k * 3 + 1], z = WNRM[k * 3 + 2], l = Math.hypot(x, y, z) || 1;
+    WVERT[k * 9 + 3] = x / l; WVERT[k * 9 + 4] = y / l; WVERT[k * 9 + 5] = z / l;
+  }
+  MESH_WATCH.update(WVERT);
+}
+
+// ── the dial: white enamel, a railway minute track, upright Roman numerals, blued Breguet hands ──
+const DIAL_PX = 2048;
+let DIAL0, DIAL, dialTex;
+function paintDial() {
+  DIAL0 = mkCanvas(DIAL_PX, DIAL_PX);
+  const g = DIAL0.getContext('2d'), C = DIAL_PX / 2, R = DIAL_PX / 2;
+  const enamel = g.createRadialGradient(C * 0.86, C * 0.8, 40, C, C, R * 1.02);
+  enamel.addColorStop(0, '#f8f5ec'); enamel.addColorStop(0.75, '#f2eee2'); enamel.addColorStop(1, '#e4ddcc');
+  g.fillStyle = enamel; g.fillRect(0, 0, DIAL_PX, DIAL_PX);
+  const ink = '#1d1a17';
+  g.strokeStyle = ink; g.fillStyle = ink;
+  const ring = (r, w) => { g.lineWidth = w; g.beginPath(); g.arc(C, C, r, 0, 2 * PI); g.stroke(); };
+  ring(R * 0.962, 5); ring(R * 0.905, 4); ring(R * 0.58, 3);
+  for (let k = 0; k < 60; k++) {
+    const a = k * 6 * DEG, s = Math.sin(a), c = -Math.cos(a), five = k % 5 === 0;
+    g.lineWidth = five ? 11 : 4.5;
+    g.beginPath(); g.moveTo(C + s * R * 0.905, C + c * R * 0.905); g.lineTo(C + s * R * (five ? 0.975 : 0.962), C + c * R * (five ? 0.975 : 0.962)); g.stroke();
+  }
+  const NUM = ['XII', 'I', 'II', 'III', 'IIII', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
+  g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  for (let k = 0; k < 12; k++) {
+    const a = k * 30 * DEG, s = Math.sin(a), c = -Math.cos(a);
+    const sz = NUM[k].length > 3 ? 124 : 138;
+    g.font = `500 ${sz}px "Noto Serif Display"`;
+    g.save(); g.translate(C + s * R * 0.745, C + c * R * 0.745);
+    g.scale(NUM[k].length > 2 ? 0.86 : 1, 1);
+    g.fillText(NUM[k], 0, sz * 0.355); g.restore();
+  }
+  DIAL = mkCanvas(DIAL_PX, DIAL_PX);
+  dialTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, dialTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const an = gl.getExtension('EXT_texture_filter_anisotropic');
+  if (an) gl.texParameterf(gl.TEXTURE_2D, an.TEXTURE_MAX_ANISOTROPY_EXT, 8);
+}
+// the second hand jumps on each tick with a small rebound
+function secondAngle(t) {
+  const k = Math.floor(t - T.tick0) + 1, frac = t - T.tick0 - Math.floor(t - T.tick0);
+  const j = t < T.tick0 ? 0 : k - 1 + spring(frac * 1.0, 0.35, 42);
+  return (162 + 6 * j) * DEG;
+}
+function hand(g, ang, len, tail, width, ringAt, ringR) {
+  const C = DIAL_PX / 2;
+  g.save(); g.translate(C, C); g.rotate(ang);
+  g.beginPath();
+  g.moveTo(-width * 0.5, tail); g.lineTo(-width * 0.38, -ringAt + ringR); g.lineTo(width * 0.38, -ringAt + ringR); g.lineTo(width * 0.5, tail); g.closePath(); g.fill();
+  if (ringR) {
+    g.beginPath(); g.arc(0, -ringAt, ringR, 0, 2 * PI); g.arc(0, -ringAt + ringR * 0.18, ringR * 0.58, 0, 2 * PI, true); g.fill('evenodd');
+    g.beginPath(); g.moveTo(-width * 0.62, -ringAt - ringR * 0.8); g.quadraticCurveTo(-width * 0.3, -len * 0.92, 0, -len);
+    g.quadraticCurveTo(width * 0.3, -len * 0.92, width * 0.62, -ringAt - ringR * 0.8); g.closePath(); g.fill();
+  } else {
+    g.beginPath(); g.moveTo(-width * 0.38, -ringAt); g.lineTo(0, -len); g.lineTo(width * 0.38, -ringAt); g.fill();
+  }
+  g.restore();
+}
+function updateDial(t) {
+  const g = DIAL.getContext('2d'), C = DIAL_PX / 2;
+  g.drawImage(DIAL0, 0, 0);
+  const blue = g.createLinearGradient(C - 600, C - 600, C + 600, C + 600);
+  blue.addColorStop(0, '#2c4a9c'); blue.addColorStop(0.5, '#1b2d6e'); blue.addColorStop(1, '#13204f');
+  g.fillStyle = blue;
+  hand(g, 347.5 * DEG, 520, 90, 26, 372, 52);                       // hour, up towards XI
+  hand(g, 210.6 * DEG, 820, 120, 19, 610, 40);                      // minute, down into the fold
+  const sa = secondAngle(t);
+  g.save(); g.translate(C, C); g.rotate(sa);
+  g.beginPath(); g.moveTo(-4.5, 240); g.lineTo(-3, -880); g.lineTo(3, -880); g.lineTo(4.5, 240); g.closePath(); g.fill();
+  g.beginPath(); g.arc(0, 190, 26, 0, 2 * PI); g.fill();
+  g.restore();
+  const cap = g.createRadialGradient(C - 10, C - 12, 2, C, C, 40);
+  cap.addColorStop(0, '#5f7cc4'); cap.addColorStop(1, '#14204c');
+  g.fillStyle = cap; g.beginPath(); g.arc(C, C, 38, 0, 2 * PI); g.fill();
+  gl.bindTexture(gl.TEXTURE_2D, dialTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, DIAL);
+  gl.generateMipmap(gl.TEXTURE_2D);
+}
+
+// ═════════════════════════════════════════ the walker ══════════════════════════════════════════
+// a tall-case clock on two impossibly long legs whose middle joints bend backwards, heron-like. It is
+// built at unit scale and shrunk by WALKER.s as a whole, so its planted feet stay planted
+const LEG = { thigh: 2.15, shin: 2.35, hipW: 0.24, lift: 0.85, duty: 0.6, hip: 4.12 };
+// its own clock: still before T.walk, then easing into its stride over the first 0.6 s
+const walkTime = t => { const u = Math.max(0, t - T.walk), a = 0.6; return u < a ? u * u / (2 * a) : u - a / 2; };
+function placeWalker() {                         // put it at WALKER.sx on screen at WALKER.at, crossing leftward
+  const c = camera(WALKER.at), ang = c.yaw + Math.atan((WALKER.sx - W / 2) / c.f);
+  const p = [c.x + Math.sin(ang) * WALKER.dist, c.z + Math.cos(ang) * WALKER.dist];
+  WALKER.dir = norm([-c.cy + 0.18 * c.sy, 0, c.sy + 0.18 * c.cy]);
+  const back = WALKER.speed * WALKER.s * walkTime(WALKER.at);
+  WALKER.start = [(p[0] - WALKER.dir[0] * back) / WALKER.s, (p[1] - WALKER.dir[2] * back) / WALKER.s];
+}
+let MESH_WALK;
+function walkerPose(t) {                         // in unit space
+  const W0 = WALKER, d = W0.dir, side = [d[2], 0, -d[0]];   // side points to the walker's right
+  const tt = walkTime(t), travel = W0.speed * tt, stride = W0.speed * W0.period;
+  const base = [W0.start[0] + d[0] * travel, 0, W0.start[1] + d[2] * travel];
+  const phase = tt / W0.period;
+  const bob = 0.08 * Math.cos(phase * 4 * PI);
+  const hipY = LEG.hip + bob;
+  const feet = [], hips = [];
+  for (let l = 0; l < 2; l++) {
+    const tau = phase - l * 0.5, n = Math.floor(tau), q = tau - n;
+    const off = l ? -1 : 1;
+    let along, lift = 0;
+    if (q < LEG.duty) along = stride * (n + l * 0.5 + LEG.duty / 2);
+    else {
+      const e = (q - LEG.duty) / (1 - LEG.duty);
+      along = lerp(stride * (n + l * 0.5 + LEG.duty / 2), stride * (n + 1 + l * 0.5 + LEG.duty / 2), sine(e));
+      lift = LEG.lift * Math.sin(PI * e) ** 1.4;
+    }
+    feet.push([W0.start[0] + d[0] * along + side[0] * off * LEG.hipW * 1.15, lift, W0.start[1] + d[2] * along + side[2] * off * LEG.hipW * 1.15]);
+    hips.push([base[0] + side[0] * off * LEG.hipW, hipY, base[2] + side[2] * off * LEG.hipW]);
+  }
+  return { base, hipY, feet, hips, d, side, phase };
+}
+const walkerAt = t => mul(walkerPose(t).base, WALKER.s);
+// the walker's frame and leg joints at time t, in unit space: hip → joint (pushed back, heron-like) → foot
+function walkerRig(t) {
+  const P = walkerPose(t), d = P.d;
+  const rock = 0.025 * Math.sin(P.phase * 2 * PI);                     // a slight side-to-side rock
+  const up = norm([P.side[0] * rock, 1, P.side[2] * rock]);
+  const at = (h, s, f) => add(add(add([P.base[0], P.hipY, P.base[2]], mul(up, h)), mul(P.side, s)), mul(d, f));
+  const legs = [0, 1].map(l => {
+    const hip = add(P.hips[l], [0, -0.02, 0]), foot = P.feet[l];
+    const v = sub(foot, hip), dist = Math.min(Math.hypot(...v), LEG.thigh + LEG.shin - 0.02);
+    const dir = norm(v);
+    const a = (LEG.thigh ** 2 - LEG.shin ** 2 + dist ** 2) / (2 * dist), hgt = Math.sqrt(Math.max(0, LEG.thigh ** 2 - a * a));
+    let bend = mul(d, -1);                                          // the joint points backwards
+    bend = norm(sub(bend, mul(dir, dot(bend, dir))));
+    const knee = add(add(hip, mul(dir, a)), mul(bend, hgt));
+    return { hip, knee, foot, toeF: add(foot, mul(d, 0.36)), toeB: add(foot, add(mul(d, -0.2), mul(P.side, l ? -0.12 : 0.12))) };
+  });
+  return { P, d, up, at, legs };
+}
+function buildWalker(t) {
+  const { P, d, up, at, legs } = walkerRig(t), g = new Geo();
+  // the clock faces the walker's right side (towards the viewer as it crosses)
+  const boxAt = (h0, h1, hw, hd, m) => roundedBox(g, at((h0 + h1) / 2, 0, 0), [hd, (h1 - h0) / 2, hw], 0.02, Math.atan2(P.side[0], P.side[2]) - PI / 2, m);
+  const ang = Math.atan2(P.side[0], P.side[2]), face = mul(P.side, -1);
+  boxAt(0.0, 0.22, 0.38, 0.25, 4);        // plinth
+  boxAt(0.22, 1.7, 0.31, 0.21, 4);        // trunk
+  boxAt(1.7, 2.45, 0.38, 0.25, 4);        // hood
+  boxAt(2.45, 2.6, 0.42, 0.27, 4);        // cornice
+  roundedBox(g, at(2.68, 0, 0), [0.2, 0.12, 0.34], 0.1, ang - PI / 2, 4);       // the domed bonnet
+  // the dial on the hood's face: a pale disc and two hands
+  {
+    const n = face, ctr = add(at(2.08, 0, 0), mul(n, 0.255));
+    tube(g, add(ctr, mul(n, 0.012)), add(add(ctr, mul(n, 0.012)), add(mul(up, 0.15), mul(d, 0.06))), 0.022, 0.014, 4, 7);
+    tube(g, add(ctr, mul(n, 0.014)), add(add(ctr, mul(n, 0.014)), add(mul(up, -0.05), mul(d, -0.21))), 0.018, 0.012, 4, 7);
+    const u = d, v = up, base = g.v.length / 9;
+    g.vert(add(ctr, mul(n, 0.005)), n, [0, 0], 8);
+    for (let j = 0; j < 28; j++) { const a = j / 28 * 2 * PI; g.vert(add(add(ctr, mul(u, 0.27 * Math.cos(a))), mul(v, 0.27 * Math.sin(a))), n, [0, 0], 8); }
+    for (let j = 0; j < 28; j++) g.i.push(base, base + 1 + j, base + 1 + (j + 1) % 28);
+  }
+  for (const { hip, knee, foot, toeF, toeB } of legs) {
+    tube(g, hip, knee, 0.1, 0.07, 8, 7);
+    tube(g, knee, foot, 0.07, 0.045, 8, 7);
+    ball(g, knee, 0.13, 7, 6); ball(g, hip, 0.14, 7, 6);
+    tube(g, foot, toeF, 0.05, 0.02, 6, 7);                                       // a toe forward, one back
+    tube(g, foot, toeB, 0.045, 0.018, 6, 7);
+  }
+  const [vd, id] = g.data();
+  for (let i = 0; i < vd.length; i += 9) { vd[i] *= WALKER.s; vd[i + 1] *= WALKER.s; vd[i + 2] *= WALKER.s; }
+  if (!MESH_WALK) MESH_WALK = new Mesh(vd, id, true); else MESH_WALK.update(vd, id);
+}
+
+// its shadow, drawn as strokes: every joint pressed onto the plain along the sun ray, then to the screen.
+// Each stroke is as thick as that part's shadow really is across its length, but far off that is a
+// fraction of a pixel, so it keeps a floor: the legs a fine line, the clock's body a slightly heavier one
+function drawWalkerShadow(g, c, t) {
+  const { at, legs } = walkerRig(t), k = WALKER.s, across = [0, 0, 1];   // across the sun's direction
+  const flat = p => { const q = mul(p, k); return toScreen(c, sub(q, mul(LS, q[1] / LS[1]))); };
+  const seg = (a, b, w, floor) => {
+    const A = flat(a), B = flat(b);
+    if (A[2] < 1 || B[2] < 1) return;
+    const dx = B[0] - A[0], dy = B[1] - A[1], l = Math.hypot(dx, dy) || 1;
+    const m = mul(add(a, b), 0.5), P0 = flat(add(m, mul(across, w / 2))), P1 = flat(sub(m, mul(across, w / 2)));
+    const thick = Math.abs((P1[0] - P0[0]) * -dy / l + (P1[1] - P0[1]) * dx / l);
+    g.lineWidth = Math.max(thick, floor);
+    g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke();
+  };
+  g.strokeStyle = '#fff'; g.lineCap = 'round';
+  for (const { hip, knee, foot, toeF, toeB } of legs) {
+    seg(hip, knee, 0.17, 1.6); seg(knee, foot, 0.12, 1.6); seg(foot, toeF, 0.07, 1.4); seg(foot, toeB, 0.06, 1.4);
+  }
+  seg(at(0, 0, 0), at(1.7, 0, 0), 0.62, 3.0); seg(at(1.7, 0, 0), at(2.6, 0, 0), 0.8, 3.6); seg(at(2.6, 0, 0), at(2.8, 0, 0), 0.4, 2.2);
+}
+
+// ═════════════════════════════════════════ the title ═══════════════════════════════════════════
+// the word is a stack of thin slabs cut from one glyph mask; the front slab is the face, the others
+// show at the edges as the return, lit by the outward normal of the glyph edge
+const GW = 4096, GH = 640, SLABS = 200;
+let glyphTex, MESH_TITLE, TITLE_POS, TITLE_R, TITLE_F, TITLE_PX, LSH_T;
+// signed distance (texels, positive outside) to the glyph outline: an exact Euclidean transform each way
+// (lower envelope of parabolas, rows then columns), lightly smoothed so the edge normals follow the curves
+// and not the pixel steps of the mask
+function glyphDistance(A) {
+  const n = GW * GH, BIG = 1e20, N = Math.max(GW, GH);
+  const f = new Float64Array(N), d = new Float64Array(N), v = new Int32Array(N), z = new Float64Array(N + 1);
+  const line = len => {
+    let k = 0; v[0] = 0; z[0] = -BIG; z[1] = BIG;
+    for (let q = 1; q < len; q++) {
+      let s;
+      while ((s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k])) <= z[k]) k--;
+      k++; v[k] = q; z[k] = s; z[k + 1] = BIG;
+    }
+    k = 0;
+    for (let q = 0; q < len; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) ** 2 + f[v[k]]; }
+  };
+  const edt = feature => {
+    const g = new Float64Array(n);
+    for (let i = 0; i < n; i++) g[i] = feature(i) ? 0 : BIG;
+    for (let x = 0; x < GW; x++) { for (let y = 0; y < GH; y++) f[y] = g[y * GW + x]; line(GH); for (let y = 0; y < GH; y++) g[y * GW + x] = d[y]; }
+    for (let y = 0; y < GH; y++) { for (let x = 0; x < GW; x++) f[x] = g[y * GW + x]; line(GW); for (let x = 0; x < GW; x++) g[y * GW + x] = d[x]; }
+    return g;
+  };
+  const inside = i => A[i * 4 + 3] >= 128;
+  const toIn = edt(inside), toOut = edt(i => !inside(i));
+  let s = new Float32Array(n);
+  for (let i = 0; i < n; i++) s[i] = Math.sqrt(toIn[i]) - Math.sqrt(toOut[i]);
+  const t = new Float32Array(n), R = 2;
+  for (let pass = 0; pass < 3; pass++) {                       // three 5x5 box passes, about 2.5 texels
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      let a = 0;
+      for (let k = -R; k <= R; k++) a += s[y * GW + clamp(x + k, 0, GW - 1)];
+      t[y * GW + x] = a / (2 * R + 1);
+    }
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      let a = 0;
+      for (let k = -R; k <= R; k++) a += t[clamp(y + k, 0, GH - 1) * GW + x];
+      s[y * GW + x] = a / (2 * R + 1);
+    }
+  }
+  return s;
+}
+function paintGlyphs() {
+  const font = '640 400px "Noto Serif Display"';
+  const a = mkCanvas(GW, GH), ga = a.getContext('2d');
+  ga.font = font; ga.letterSpacing = '60px';
+  const m = ga.measureText(TITLE.text);
+  const inkW = m.actualBoundingBoxLeft + m.actualBoundingBoxRight, cap = m.actualBoundingBoxAscent;
+  const base = GH - 110, x0 = GW / 2 - inkW / 2 + m.actualBoundingBoxLeft;
+  ga.fillStyle = '#fff'; ga.fillText(TITLE.text, x0, base);
+  const A = ga.getImageData(0, 0, GW, GH).data, sdf = glyphDistance(A);
+  const px = new Uint8Array(GW * GH * 4);
+  for (let i = 0; i < GW * GH; i++) { px[i * 4] = A[i * 4 + 3]; px[i * 4 + 1] = clamp(128 + sdf[i] * 6, 0, 255); px[i * 4 + 3] = 255; }
+  glyphTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, glyphTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, GW, GH, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const an = gl.getExtension('EXT_texture_filter_anisotropic');
+  if (an) gl.texParameterf(gl.TEXTURE_2D, an.TEXTURE_MAX_ANISOTROPY_EXT, 8);
+  TITLE_PX = { cap, base, inkW };
+}
+function buildTitle() {
+  // the word stands on the plain square to the final view
+  const cEnd = camera(TITLE.at), fwd = [cEnd.sy, 0, cEnd.cy], right = [cEnd.cy, 0, -cEnd.sy];
+  TITLE_POS = [cEnd.x + fwd[0] * TITLE.dist, 0, cEnd.z + fwd[2] * TITLE.dist];
+  TITLE_R = right; TITLE_F = fwd;
+  // the letters are lit from the front left of this view, a little higher than the sun that casts their shadow
+  LSH_T = norm(add(add(mul(fwd, -0.8), mul(right, -0.42)), [0, 0.42, 0]));
+  const s = TITLE.cap / TITLE_PX.cap, hw = GW / 2 * s, top = TITLE_PX.base * s, bot = -(GH - TITLE_PX.base) * s;
+  const g = new Geo();
+  for (let k = SLABS - 1; k >= 0; k--) {
+    const dz = TITLE.depth * k / (SLABS - 1), m = k === 0 ? 5 : 6;
+    const o = add(TITLE_POS, mul(fwd, dz)), n = mul(fwd, -1);
+    const p = (x, y) => add(o, add(mul(right, x), [0, y, 0]));
+    const a = g.vert(p(-hw, bot), n, [0, 1], m), b = g.vert(p(hw, bot), n, [1, 1], m);
+    const c = g.vert(p(hw, top), n, [1, 0], m), d = g.vert(p(-hw, top), n, [0, 0], m);
+    g.quad(a, b, c, d);
+  }
+  MESH_TITLE = new Mesh(...g.data());
+}
+
+// ═════════════════════════════════════════ shadow maps ═════════════════════════════════════════
+// SM: depth of pillar and watch seen from the sun. FM: depth of the watch seen along the pillar's front
+// face normal, i.e. how far the melted watch stands off the stone at each point of the face
+const SM_SIZE = 2048, FM_SIZE = 1024;
+let smFbo, smTex, fmFbo, fmTex;
+const SM = { o: [PED.x, 1.45, PED.z], ext: 1.35, dext: 4 };
+const FM = { ext: 0.62, dmax: 0.3 };
+function depthTarget(size, compare) {
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, size, size);
+  const filt = compare ? gl.LINEAR : gl.NEAREST;
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filt); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filt);
+  if (compare) {
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
+  }
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, tex, 0);
+  gl.drawBuffers([gl.NONE]); gl.readBuffer(gl.NONE);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return [fbo, tex];
+}
+function buildShadowMaps() {
+  [smFbo, smTex] = depthTarget(SM_SIZE, true);
+  const f = mul(LS, -1), r = norm(cross(f, [0, 1, 0])), u = cross(r, f);
+  Object.assign(SM, { f, r, u });
+  [fmFbo, fmTex] = depthTarget(FM_SIZE, false);
+  const n = [-Math.sin(PED.rot), 0, -Math.cos(PED.rot)], fr = [Math.cos(PED.rot), 0, -Math.sin(PED.rot)];
+  const o = [PED.x + n[0] * PED.hz, PED.top - FM.ext + 0.06, PED.z + n[2] * PED.hz];
+  Object.assign(FM, { o, n, r: fr, oz: add(o, mul(n, FM.dmax / 2)) });
+}
+function setLightSpace(p) {
+  gl.uniform3fv(p.u('uLO'), SM.o); gl.uniform3fv(p.u('uLR'), SM.r); gl.uniform3fv(p.u('uLU'), SM.u); gl.uniform3fv(p.u('uLF'), SM.f);
+  gl.uniform2f(p.u('uLExt'), SM.ext, SM.dext);
+}
+
+// ═════════════════════════════════════════ per frame ═══════════════════════════════════════════
+const SKY_GL = { hor: SKY[0][1], mid: stops(SKY, 8), zen: stops(SKY, 40), gFar: [0.80, 0.67, 0.51], gNear: [0.79, 0.60, 0.36] };   // what the gold reflects
+function setCamera(p, c, flat, ls = LS) {
+  gl.uniform3f(p.u('uCam'), c.x, c.y, c.z); gl.uniform2f(p.u('uYaw'), c.cy, c.sy); gl.uniform2f(p.u('uLens'), c.f, c.hy);
+  gl.uniform1i(p.u('uFlat'), flat ? 1 : 0); gl.uniform3fv(p.u('uLs'), ls);
+}
+const watchOn = t => t < 3.4, pedOn = t => t < 3.4, castOn = t => t < 7.4, walkOn = t => t < 6.9;
+const titleShadow = t => sstep(ramp(t, T.shadowIn[0], T.shadowIn[1]));
+const titleFace = t => sstep(ramp(t, T.lettersIn[0], T.lettersIn[1]));
+
+function glFrame(t) {
+  if (castOn(t)) deformWatch(Math.min(t, 3.6));
+  if (watchOn(t)) updateDial(t);
+  if (walkOn(t)) buildWalker(t);
+  if (!pedOn(t)) return;
+  gl.enable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+  gl.useProgram(P_DEPTH);
+  // the sun's view of pillar and watch
+  gl.bindFramebuffer(gl.FRAMEBUFFER, smFbo); gl.viewport(0, 0, SM_SIZE, SM_SIZE);
+  gl.clear(gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.5, 3);
+  setLightSpace(P_DEPTH);
+  MESH_PED.draw(); if (watchOn(t)) MESH_WATCH.draw();
+  gl.disable(gl.POLYGON_OFFSET_FILL);
+  // the face's view of the watch
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fmFbo); gl.viewport(0, 0, FM_SIZE, FM_SIZE);
+  gl.clear(gl.DEPTH_BUFFER_BIT);
+  gl.uniform3fv(P_DEPTH.u('uLO'), FM.oz); gl.uniform3fv(P_DEPTH.u('uLR'), FM.r); gl.uniform3fv(P_DEPTH.u('uLU'), [0, 1, 0]);
+  gl.uniform3fv(P_DEPTH.u('uLF'), FM.n); gl.uniform2f(P_DEPTH.u('uLExt'), FM.ext, FM.dmax / 2);
+  if (watchOn(t)) MESH_WATCH.draw();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H);
+}
+// a mask of every caster pressed flat onto the plain along `ls` (the sun's ray, or for the letters'
+// contact shadow a ray tilted just off the vertical toward the camera)
+function glMask(t, c, contact) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.disable(gl.DEPTH_TEST); gl.enable(gl.BLEND); gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(P_MASK);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, glyphTex); gl.uniform1i(P_MASK.u('uGlyph'), 1);
+  gl.uniform1f(P_MASK.u('uAlpha'), 1); gl.uniform1f(P_MASK.u('uUmbra'), 1e4);
+  if (contact) {
+    setCamera(P_MASK, c, true, norm([TITLE_F[0] * 0.2, 1, TITLE_F[2] * 0.2]));
+    gl.uniform1f(P_MASK.u('uUmbra'), 0.09);
+    MESH_TITLE.draw();
+  } else {
+    setCamera(P_MASK, c, true);
+    if (castOn(t)) { MESH_PED.draw(); MESH_WATCH.draw(); }
+    const ts = titleShadow(t);
+    if (ts > 0) { gl.uniform1f(P_MASK.u('uAlpha'), 0.78 * ts); MESH_TITLE.draw(); }
+  }
+  gl.blendEquation(gl.FUNC_ADD);
+}
+function setObjUniforms(p, c, sun) {
+  setCamera(p, c, false);
+  gl.uniform3fv(p.u('uSun'), sun); gl.uniform3f(p.u('uSunCol'), 1.06, 0.99, 0.86);
+  gl.uniform3fv(p.u('uAer'), AER); gl.uniform1f(p.u('uAerD'), AER_D);
+  gl.uniform1f(p.u('uPedTop'), PED.top); gl.uniform1f(p.u('uCap'), TITLE.cap); gl.uniform2f(p.u('uPedAx'), Math.cos(PED.rot), Math.sin(PED.rot));
+  gl.uniform3fv(p.u('uSkyHor'), SKY_GL.hor); gl.uniform3fv(p.u('uSkyMid'), SKY_GL.mid); gl.uniform3fv(p.u('uSkyZen'), SKY_GL.zen);
+  gl.uniform3fv(p.u('uGndFar'), SKY_GL.gFar); gl.uniform3fv(p.u('uGndNear'), SKY_GL.gNear);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, dialTex); gl.uniform1i(p.u('uDial'), 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, glyphTex); gl.uniform1i(p.u('uGlyph'), 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, smTex); gl.uniform1i(p.u('uSM'), 2);
+  gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, fmTex); gl.uniform1i(p.u('uFM'), 3);
+  setLightSpace(p);
+  gl.uniform3fv(p.u('uFO'), FM.o); gl.uniform3fv(p.u('uFR'), FM.r); gl.uniform3fv(p.u('uFN'), FM.n); gl.uniform2f(p.u('uFExt'), FM.ext, FM.dmax);
+  gl.uniform3fv(p.u('uLetR'), TITLE_R); gl.uniform2f(p.u('uTexel'), 1 / GW, 1 / GH);
+}
+// the objects themselves
+function glObjects(t, c) {
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.BLEND);
+  gl.useProgram(P_OBJ); setObjUniforms(P_OBJ, c, LSH);
+  gl.uniform1i(P_OBJ.u('uUseSM'), pedOn(t) ? 1 : 0);
+  gl.uniform1f(P_OBJ.u('uContactK'), sstep(ramp(t, T.sag[0] + 0.4, T.sag[1])));
+  if (pedOn(t)) MESH_PED.draw();
+  if (watchOn(t)) MESH_WATCH.draw();
+  gl.uniform1i(P_OBJ.u('uUseSM'), 0);
+  MESH_EGG.draw();
+  if (walkOn(t)) MESH_WALK.draw();
+}
+// the letters, alone, so the whole word can fade as one
+function glTitle(t, c) {
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.BLEND);
+  gl.enable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+  gl.useProgram(P_OBJ); setObjUniforms(P_OBJ, c, LSH_T); gl.uniform1i(P_OBJ.u('uUseSM'), 0);
+  MESH_TITLE.draw();
+  gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+  gl.colorMask(false, false, false, true); gl.depthMask(false); gl.depthFunc(gl.GREATER);
+  gl.useProgram(P_ONE); MESH_FULL.draw();
+  gl.colorMask(true, true, true, true); gl.depthMask(true); gl.depthFunc(gl.LEQUAL);
+}
+
+// ── 2D: the sky and the plain, as gradients in screen rows (the camera never rolls or pitches) ──
+function paintWorld(c) {
+  const hy = c.hy;
+  if (hy > 0) {
+    const g = ctx.createLinearGradient(0, 0, 0, hy);
+    for (let i = 0; i <= 40; i++) {
+      const u = 1 - (1 - i / 40) ** 2, y = hy * u, el = Math.atan((hy - y) / c.f) / DEG;
+      g.addColorStop(u, css(stops(SKY, el)));
+    }
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, Math.ceil(hy));
+    // the low sky is a touch paler on the side of the sun (off frame, to the left)
+    const rel = Math.atan2(-Math.cos(SUN_AZ), -Math.sin(SUN_AZ)) - c.yaw;
+    const k = clamp(-Math.sin(rel)) * 0.18;
+    if (k > 0.01) {
+      ctx.save(); ctx.translate(-300, hy); ctx.scale(1, 0.22);
+      const r = ctx.createRadialGradient(0, 0, 0, 0, 0, 1600);
+      r.addColorStop(0, `rgba(250,246,228,${k})`); r.addColorStop(1, 'rgba(250,246,228,0)');
+      ctx.fillStyle = r; ctx.fillRect(0, -hy / 0.22, 2300, hy / 0.22); ctx.restore();
+    }
+  }
+  ctx.fillStyle = groundGradient(c, groundAt); ctx.fillRect(0, Math.ceil(hy), W, H - Math.ceil(hy));
+}
+function groundGradient(c, colour) {              // a vertical gradient of colour(view depth) below the horizon
+  const hy = Math.ceil(c.hy), g = ctx.createLinearGradient(0, hy, 0, H);
+  for (let i = 0; i <= 40; i++) {
+    const u = (i / 40) ** 2.4, y = hy + u * (H - hy), z = y - c.hy < 0.5 ? 2e3 : c.f * c.y / (y - c.hy);
+    const col = colour(z);
+    g.addColorStop(u, css(col, col.length > 3 ? col[3] : 1));
+  }
+  return g;
+}
+
+// the bird: a plan silhouette (head +x, right wing +y) for a wing beat at phase ph, its wings folded
+// against the body at open = 0 and spread at open = 1
+function birdOutline(ph, open) {
+  const sp = (0.74 + 0.26 * Math.cos(ph)) * lerp(0.16, 1, open), sw = 0.06 * Math.sin(ph);
+  const right = [[0.5, 0], [0.47, 0.035], [0.39, 0.068], [0.29, 0.095],
+    [0.27 + sw, 0.25 * sp], [0.23 + sw * 1.5, 0.5 * sp], [0.14 + sw * 2, 0.8 * sp], [0.01 + sw * 2.5, 1.03 * sp],
+    [-0.06 + sw * 2.4, 0.98 * sp], [-0.02 + sw * 2.2, 0.91 * sp], [-0.1 + sw * 2, 0.87 * sp], [-0.06 + sw * 1.8, 0.79 * sp],
+    [-0.14 + sw * 1.4, 0.69 * sp], [-0.16 + sw, 0.46 * sp], [-0.14 + sw * 0.5, 0.23 * sp], [-0.13, 0.105],
+    [-0.23, 0.09], [-0.3, 0.08], [-0.45, 0.15], [-0.52, 0.09], [-0.535, 0.0]];
+  // smooth the outline with a Catmull-Rom through the points (right side, then mirrored)
+  const pts = [...right, ...right.slice(1, -1).reverse().map(([x, y]) => [x, -y])];
+  const outp = [], n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+    for (let s = 0; s < 4; s++) {
+      const u = s / 4, u2 = u * u, u3 = u2 * u;
+      outp.push([0, 1].map(k => 0.5 * ((2 * p1[k]) + (-p0[k] + p2[k]) * u + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * u2 + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * u3)));
+    }
+  }
+  return outp;
+}
+// the shadow's tail starts under the egg's foot; its body points a little toward the viewer's side of
+// the sun line so that, seen from here, the whole bird lies to the right of the egg
+const BIRD = { len: 3.2, wing: 0.81, flap: 0.46, yaw: -0.15 };
+function birdState(t) {
+  const go = Math.max(0, t - T.birdGo);
+  const flapping = t > T.egg;
+  const ph = flapping ? (t - T.egg) / BIRD.flap * 2 * PI : 0;
+  // it slides off gathering speed, wheeling round to swoop past the viewer's right
+  const dist = 7.5 * go * go + 2.4 * go, turnOver = 4, steps = 48;
+  const heading = s => BIRD.yaw - 1.2 * sstep(s / turnOver);
+  const pos = [EGG.x + Math.cos(BIRD.yaw) * EGG.r * 0.9, EGG.z + Math.sin(BIRD.yaw) * EGG.r * 0.9];
+  for (let i = 0; i < steps; i++) {
+    const a = heading(dist * (i + 0.5) / steps);
+    pos[0] += Math.cos(a) * dist / steps; pos[1] += Math.sin(a) * dist / steps;
+  }
+  return { pos, ang: heading(dist), ph, open: sstep(ramp(t, T.egg - 0.45, T.egg)) };
+}
+function birdPoints(t) {                          // the outline on the ground, in world x, z
+  const B = birdState(t), ca = Math.cos(B.ang), sa = Math.sin(B.ang), L = BIRD.len;
+  return birdOutline(B.ph, B.open).map(([x, y]) => {
+    const lx = (x + 0.535) * L, ly = y * L * BIRD.wing;   // the tail at the anchor, the head ahead of it
+    return [B.pos[0] + lx * ca + ly * sa, B.pos[1] + lx * sa - ly * ca];
+  });
+}
+function drawBird(g, c, t) {
+  g.beginPath();
+  let ok = true;
+  birdPoints(t).forEach(([wx, wz], i) => {
+    const s = toScreen(c, [wx, 0, wz]);
+    if (s[2] < 0.3) ok = false;
+    if (i) g.lineTo(s[0], s[1]); else g.moveTo(s[0], s[1]);
+  });
+  g.closePath();
+  if (ok) g.fill();
+}
+
+// ── static finish, painted once: a fine canvas weave and a warm varnished vignette ──
+let WEAVE, VIG;
+function paintFinish() {
+  WEAVE = mkCanvas(W, H);
+  const g = WEAVE.getContext('2d'), img = g.createImageData(W, H), rnd = noiseGen(1924);
+  const P = 3.4, Q = 3.1, NX = Math.ceil(W / P) + 2, NY = Math.ceil(H / Q) + 2;
+  const tx = Float32Array.from({ length: NX }, () => rnd() - 0.5), ty = Float32Array.from({ length: NY }, () => rnd() - 0.5);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const u = x / P, v = y / Q, iu = Math.floor(u), iv = Math.floor(v);
+    const over = ((iu + iv) & 1) ? Math.sin(PI * (u - iu)) : Math.sin(PI * (v - iv));   // the thread on top shows its bump
+    const val = 0.6 * (over - 0.64) + 0.35 * (((iu + iv) & 1) ? tx[iu] : ty[iv]) + 0.3 * (rnd() - 0.5);
+    const o = (y * W + x) * 4;
+    img.data[o] = img.data[o + 1] = img.data[o + 2] = 128 + val * 22; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  VIG = mkCanvas(W, H);
+  const v = VIG.getContext('2d'), r = v.createRadialGradient(W / 2, H * 0.47, H * 0.42, W / 2, H * 0.47, H * 1.12);
+  r.addColorStop(0, 'rgb(255,255,255)'); r.addColorStop(0.55, 'rgb(246,242,236)'); r.addColorStop(1, 'rgb(196,186,176)');
+  v.fillStyle = r; v.fillRect(0, 0, W, H);
+}
+
+const SHADE_LAYER = mkCanvas(W, H), sctx = SHADE_LAYER.getContext('2d');
+// the mask now in the GL canvas (plus the casters drawn in 2D, if asked) filled with a gradient, then laid on the frame
+function layShadow(c, t, fill, op, alpha, flat2d) {
+  sctx.globalCompositeOperation = 'source-over'; sctx.clearRect(0, 0, W, H);
+  sctx.drawImage(glc, 0, 0);
+  if (flat2d) { sctx.fillStyle = '#fff'; drawBird(sctx, c, t); if (walkOn(t)) drawWalkerShadow(sctx, c, t); }
+  sctx.globalCompositeOperation = 'source-in'; sctx.fillStyle = fill; sctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = op; ctx.globalAlpha = alpha; ctx.drawImage(SHADE_LAYER, 0, 0);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+}
+const birdOn = t => t < 6.6;
+function render(t) {
+  const c = camera(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  paintWorld(c);
+  glFrame(t);
+  // cast shadows: multiplied onto the plain with a cool tint, then a thin glaze, both fading with distance
+  glMask(t, c, false);
+  layShadow(c, t, groundGradient(c, shadeAt), 'multiply', 1, birdOn(t));
+  layShadow(c, t, groundGradient(c, z => [...GLAZE, 0.2 * (1 - 0.8 * aerAt(z))]), 'source-over', 1, birdOn(t));
+  // the letters' contact with the ground, with the letters
+  const fa = titleFace(t);
+  if (fa > 0) { glMask(t, c, true); layShadow(c, t, 'rgb(118,104,120)', 'multiply', fa, false); }
+  // objects
+  glObjects(t, c);
+  ctx.drawImage(glc, 0, 0);
+  // the word, whole
+  if (fa > 0) { glTitle(t, c); ctx.globalAlpha = fa; ctx.drawImage(glc, 0, 0); ctx.globalAlpha = 1; }
+  // the caption, whole: dark ink on the lit plain
+  const sa = sstep(ramp(t, T.subIn[0], T.subIn[1]));
+  if (sa > 0) {
+    const b = toScreen(c, TITLE_POS);
+    ctx.font = 'italic 430 52px "Noto Serif Display"'; ctx.letterSpacing = '5px';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = `rgba(26,27,52,${sa})`;
+    ctx.fillText('Paris · from 1924', b[0], b[1] + 92);
+    ctx.letterSpacing = '0px';
+  }
+  // finish
+  ctx.globalCompositeOperation = 'soft-light'; ctx.drawImage(WEAVE, 0, 0);
+  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(VIG, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  const fin = 1 - sstep(ramp(t, T.fadeIn[0], T.fadeIn[1])), fout = sine(ramp(t, T.fadeOut[0], T.fadeOut[1]));
+  const k = Math.max(fin, fout);
+  if (k > 0) { ctx.fillStyle = `rgba(4,5,9,${k})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.draw = ({ t }) => { render(t); return out.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+
+// sound cues for audio.py; pans come from where things are on screen (-1 left … 1 right)
+const panAt = (t, p) => { const s = toScreen(camera(t), p); return s[2] > 0 ? clamp((s[0] - W / 2) / (W / 2), -1, 1) : 0; };
+window.events = () => {
+  const ev = [{ k: 'drone', t: 0, d: DUR }];
+  const watchPos = [PED.x - 0.25, PED.top, PED.z - 0.1];
+  for (let k = 0; T.tick0 + k < 4.4; k++) {
+    const t = T.tick0 + k;
+    ev.push({ k: 'tick', t, v: clamp(1.1 - 0.4 * Math.max(0, t - 2.4)), pan: panAt(t, watchPos) * 0.6 });
+  }
+  ev.push({ k: 'creak', t: T.lift[0], d: T.lift[1] - T.lift[0] });
+  ev.push({ k: 'melt', t: T.sag[0], d: T.sag[1] - T.sag[0] });
+  ev.push({ k: 'settle', t: T.settle });
+  ev.push({ k: 'air', t: KEYS[2][2], d: KEYS[3][0] - KEYS[2][2] }, { k: 'air', t: KEYS[5][2], d: KEYS[5][0] - KEYS[5][2] });
+  const eggPos = [EGG.x, 0.5, EGG.z];
+  for (let k = 0; T.egg + (k + 0.5) * BIRD.flap < T.birdGo + 0.9; k++) {
+    const t = T.egg + (k + 0.5) * BIRD.flap, b = birdState(t);
+    ev.push({ k: 'wing', t, v: 1 - 0.12 * k, pan: panAt(t, [b.pos[0], 0, b.pos[1]]) });
+  }
+  ev.push({ k: 'glide', t: T.birdGo, d: 1.0, pan0: panAt(T.birdGo, eggPos), pan1: 1 });
+  for (let k = 1; k < 12; k++) {
+    const wt = k * 0.5 * WALKER.period;                              // a foot lands every half cycle
+    const t = T.walk + (wt < 0.3 ? Math.sqrt(1.2 * wt) : wt + 0.3); // (walkTime inverted)
+    if (t > 5.5) break;
+    ev.push({ k: 'stride', t, v: 1, pan: panAt(t, walkerAt(t)) });
+  }
+  ev.push({ k: 'shadow', t: T.shadowIn[0], d: T.shadowIn[1] - T.shadowIn[0] });
+  ev.push({ k: 'chime', t: T.lettersIn[0] + 0.1 });
+  ev.push({ k: 'shimmer', t: T.subIn[0] });
+  ev.push({ k: 'end', t: T.fadeOut[0], d: DUR - T.fadeOut[0] });
+  return ev.sort((a, b) => a.t - b.t);
+};
+
+window.ready = (async () => {
+  await Promise.all([['640 400px "Noto Serif Display"', TITLE.text], ['500 138px "Noto Serif Display"', 'XIVL'],
+    ['italic 430 52px "Noto Serif Display"', 'Paris · from 1924']].map(([f, s]) => document.fonts.load(f, s)));
+  await document.fonts.ready;
+  P_OBJ = compile(VS, FS_OBJ); P_MASK = compile(VS, FS_MASK); P_DEPTH = compile(VS_DEPTH, FS_DEPTH); P_ONE = compile(VS_FULL, FS_ONE);
+  { const g = new Geo(), n = [0, 0, 1]; g.quad(g.vert([-1, -1, 0], n, [0, 0], 0), g.vert([1, -1, 0], n, [0, 0], 0), g.vert([1, 1, 0], n, [0, 0], 0), g.vert([-1, 1, 0], n, [0, 0], 0)); MESH_FULL = new Mesh(...g.data()); }
+  buildPedestal(); buildEgg(); buildWatch(); paintDial(); paintGlyphs(); buildTitle(); buildShadowMaps();
+  placeWalker();
+  buildWalker(4);
+  paintFinish();
+})();
+</script>
+</body></html>
