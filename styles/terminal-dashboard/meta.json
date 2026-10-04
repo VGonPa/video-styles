@@ -1,0 +1,12 @@
+{
+  "number": 148,
+  "name": "Terminal Dashboard",
+  "feel": "Dense multi-panel TUI with live metrics",
+  "best_for": "Agent runs, benchmarks and cost comparisons told by numbers",
+  "family": "technical",
+  "use_cases": ["data", "explainer", "product"],
+  "credits": [
+    {"role": "Inspired by", "name": "the multi-model terminal walkthrough posted by delost (@thedelost)", "url": "https://x.com/thedelost/status/2106121351798927652"},
+    {"role": "Inspired by", "name": "the text-based user interfaces of Unix terminal tools, from curses to today's dashboards", "url": "https://en.wikipedia.org/wiki/Text-based_user_interface"}
+  ]
+}
