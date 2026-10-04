@@ -1,0 +1,1171 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#EFEADD;overflow:hidden}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+'use strict';
+// Tonal Manga: a quiet two-tone manga reel. Bone paper and matte ink only; every mid-tone is a 45-degree
+// round-dot screen, a dot field graded by dot size, or ruled line tone. A residential lane at noon opens as line
+// art and lays its tones in up the ladder (light dots, mid dots, solid ink) while the camera drifts in whole
+// pixels; a crow crouches on the top wire and climbs out of the frame, and the wire wobbles. A diagonal band of
+// growing dots passes through ink onto laundry swaying on a balcony, whose ink then breaks up into paper.
+// Evening rooftops ink in and lay their tones under a dotted dusk sky with a thin crescent; the title lands
+// through one shared screen and a single marker stroke underlines it. The ladder then runs back down until only
+// the town's brush contours, the title and the marker remain, held to the end. Frames depend only on t.
+const W = 1920, H = 1080, DUR = 10.0, FPS = 30;
+const PAPER = '#EFEADD', INK = '#141311', MARKER = '#F4E23A';
+const CELL = 12;                       // dot tile: dots on its corners and centre make a 45-degree screen of pitch 8.5 px
+const FULL = CELL / 2 * 1.06;          // dot radius at which neighbours fuse into solid ink
+const T1 = 1.62, T2 = 2.62, T3 = 3.56; // the tone ladder: ~11 %, ~30 %, ~55 % ink
+const HATCH = 10;                      // line-tone tile: 45-degree rules at a pitch of 7.07 px
+const WEIGHT = 1.15;                   // every brush line is this much heavier than its nominal width
+const TITLE = 'Tonal Manga', SERIF = '"Shippori Mincho"';
+const TAU = Math.PI * 2;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d', { alpha: false });
+
+// Every moment of the film, in seconds. events() reads the same table.
+const TL = {
+  lay: [[0.04, 0.34], [0.30, 0.62], [0.58, 0.90]],  // shot 1 tone groups: light dots, mid dots + rules, solid ink
+  crouch: [1.70, 2.00], lift: 2.00, fly: 1.12, beat: 0.22,
+  front: [3.15, 3.95], two: 3.50,                    // ink front from the lane into the balcony
+  paper: [6.42, 6.70], three: 6.70,                  // the balcony breaks up into paper
+  lines: [6.70, 6.80], rise: [6.80, 7.18],           // the dusk contours ink in, then the tones lay in
+  title: [7.28, 7.58], swipe: [8.10, 8.46],          // the title lands, then the marker underlines it
+  fall: [9.10, 9.65],                                // back down the ladder to the outlines, held to the end
+};
+
+/* ------------------------------------------------------------ numbers */
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const mix = (a, b, k) => a + (b - a) * k;
+const ramp = (t, a, b) => clamp((t - a) / (b - a));
+const ease = k => k * k * (3 - 2 * k);
+const easeOut = k => 1 - (1 - k) ** 3;
+const frameOf = t => Math.round(t * FPS);
+function xorshift(seed) {
+  let s = (seed * 2654435761) >>> 0 || 7;
+  return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+}
+function sheet(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+
+/* ------------------------------------------------------------ tone kit */
+const tones = new Map();
+// A flat field of round dots of radius r on the 45-degree screen, anchored to the user-space origin.
+function dots(r, color = INK) {
+  if (r < 0.2) return null;
+  if (r >= FULL) return color;
+  const key = color + Math.round(r * 40);
+  if (!tones.has(key)) {
+    const c = sheet(CELL, CELL), g = c.getContext('2d');
+    g.fillStyle = color; g.beginPath();
+    for (const [x, y] of [[0, 0], [CELL, 0], [0, CELL], [CELL, CELL], [CELL / 2, CELL / 2]]) { g.moveTo(x + r, y); g.arc(x, y, r, 0, TAU); }
+    g.fill();
+    tones.set(key, ctx.createPattern(c, 'repeat'));
+  }
+  return tones.get(key);
+}
+// Paper dots centred in the gaps of the same screen: they eat ink from the paper side.
+function holes(r) {
+  if (r < 0.2) return null;
+  if (r >= FULL) return PAPER;
+  const key = 'h' + Math.round(r * 40);
+  if (!tones.has(key)) {
+    const c = sheet(CELL, CELL), g = c.getContext('2d'), m = CELL / 2;
+    g.fillStyle = PAPER; g.beginPath();
+    for (const [x, y] of [[m, 0], [0, m], [CELL, m], [m, CELL]]) { g.moveTo(x + r, y); g.arc(x, y, r, 0, TAU); }
+    g.fill();
+    tones.set(key, ctx.createPattern(c, 'repeat'));
+  }
+  return tones.get(key);
+}
+// Ruled line tone: rules falling left to right at 45 degrees, w px thick; crossed adds the other diagonal.
+function rules(w, crossed = false) {
+  if (w < 0.3) return null;
+  const key = 'l' + Math.round(w * 20) + (crossed ? 'x' : '');
+  if (!tones.has(key)) {
+    const c = sheet(HATCH, HATCH), g = c.getContext('2d');
+    g.strokeStyle = INK; g.lineWidth = w; g.beginPath();
+    for (let k = -2; k <= 2; k++) {
+      g.moveTo(k * HATCH - 2, -2); g.lineTo(k * HATCH + HATCH + 2, HATCH + 2);
+      if (crossed) { g.moveTo(k * HATCH - 2, HATCH + 2); g.lineTo(k * HATCH + HATCH + 2, -2); }
+    }
+    g.stroke();
+    tones.set(key, ctx.createPattern(c, 'repeat'));
+  }
+  return tones.get(key);
+}
+// Per-dot field on the same lattice; radius(x, y) sets every dot. Paths stay under ~1500 contours.
+function field(g, box, radius, color = INK) {
+  const [x0, y0, x1, y1] = box, half = CELL / 2;
+  g.fillStyle = color;
+  let p = new Path2D(), n = 0;
+  for (let j = Math.floor(y0 / half) - 1; j * half <= y1 + half; j++) {
+    const y = j * half, off = (j & 1) ? half : 0;
+    for (let x = Math.floor(x0 / CELL) * CELL - CELL + off; x <= x1 + CELL; x += CELL) {
+      const r = radius(x, y);
+      if (!(r >= 0.2)) continue;
+      p.moveTo(x + r, y); p.arc(x, y, r, 0, TAU);
+      if (++n === 1200) { g.fill(p); p = new Path2D(); n = 0; }
+    }
+  }
+  if (n) g.fill(p);
+}
+
+// How far the tones have come in. Shot 1 lays in by group (g1 light dots, g2 mid dots and rules,
+// g3 solid ink); the evening shot uses one ladder radius R that clamps every dot, so solids break
+// into dots first and the lightest tones go last.
+class Ink {
+  constructor(k = { g1: 1, g2: 1, g3: 1 }, R = Infinity) { this.k = k; this.R = R; }
+  rad(r, grp) { return Math.min(r * this.k[grp || (r <= T1 + 0.01 ? 'g1' : r < FULL ? 'g2' : 'g3')], this.R); }
+  tone(r) { return dots(this.rad(r)); }
+  solid() { return dots(this.rad(FULL, 'g3')); }
+  line() { return this.R >= FULL ? INK : dots(this.R); }
+  rules(w, crossed) { return this.R < FULL ? null : rules(w * this.k.g2, crossed); }
+}
+const DONE = new Ink();
+
+/* ------------------------------------------------------------ geometry and brush */
+function bez(a, b, c, d, n = 18) {
+  const out = [];
+  for (let i = 0; i <= n; i++) {
+    const u = i / n, v = 1 - u, A = v * v * v, B = 3 * v * v * u, C = 3 * v * u * u, D = u * u * u;
+    out.push([A * a[0] + B * b[0] + C * c[0] + D * d[0], A * a[1] + B * b[1] + C * c[1] + D * d[1]]);
+  }
+  return out;
+}
+function curve(a, b, c, n = 12) {
+  const out = [];
+  for (let i = 0; i <= n; i++) { const u = i / n, v = 1 - u; out.push([v * v * a[0] + 2 * v * u * b[0] + u * u * c[0], v * v * a[1] + 2 * v * u * b[1] + u * u * c[1]]); }
+  return out;
+}
+function straight(a, b, n = 6) { const out = []; for (let i = 0; i <= n; i++) out.push([mix(a[0], b[0], i / n), mix(a[1], b[1], i / n)]); return out; }
+function oval(cx, cy, rx, ry, a0 = 0, a1 = TAU, n = 40) {
+  const out = [];
+  for (let i = 0; i <= n; i++) { const a = mix(a0, a1, i / n); out.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]); }
+  return out;
+}
+// Concatenate point runs, dropping a run's first point when it repeats the previous run's last.
+function join(...parts) {
+  const out = [];
+  for (const p of parts) {
+    const last = out[out.length - 1], same = last && Math.abs(last[0] - p[0][0]) + Math.abs(last[1] - p[0][1]) < 0.01;
+    out.push(...(same ? p.slice(1) : p));
+  }
+  return out;
+}
+function region(pts) { const p = new Path2D(); p.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) p.lineTo(pts[i][0], pts[i][1]); p.closePath(); return p; }
+function paint(g, path, style) { if (!style) return; g.fillStyle = style; g.fill(path); }
+// A solid-ink shape that keeps its contour from the first frame, while its fill lays in through the dots.
+function solidShape(g, ink, pts, w = 1.8) {
+  paint(g, region(pts), ink.solid());
+  outline(g, [...pts, pts[0]], w, { every: 1, tip: 0.8, taper: 6 });
+}
+
+// A brush contour: a filled ribbon along pts, w px wide, tapering to tip*w over the first and last few px.
+function brush(g, pts, w, o = {}) {
+  const n = pts.length;
+  if (n < 2 || w <= 0) return;
+  const tip = o.tip ?? 0.35, acc = [0];
+  w *= WEIGHT;
+  for (let i = 1; i < n; i++) acc.push(acc[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const len = acc[n - 1] || 1, tl = Math.min(len * 0.35, o.taper ?? 24), L = [], R = [];
+  let w0 = 0, w1 = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1];
+    const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
+    const s = acc[i], k = tip + (1 - tip) * ease(clamp(Math.min(s, len - s) / tl));
+    const hw = (o.width ? o.width(s / len) * WEIGHT : w) * k / 2;
+    if (i === 0) w0 = hw; if (i === n - 1) w1 = hw;
+    L.push([pts[i][0] - dy * hw, pts[i][1] + dx * hw]); R.push([pts[i][0] + dy * hw, pts[i][1] - dx * hw]);
+  }
+  const p = new Path2D();
+  p.moveTo(L[0][0], L[0][1]);
+  for (let i = 1; i < n; i++) p.lineTo(L[i][0], L[i][1]);
+  for (let i = n - 1; i >= 0; i--) p.lineTo(R[i][0], R[i][1]);
+  p.closePath();
+  p.moveTo(pts[0][0] + w0, pts[0][1]); p.arc(pts[0][0], pts[0][1], w0, 0, TAU);
+  p.moveTo(pts[n - 1][0] + w1, pts[n - 1][1]); p.arc(pts[n - 1][0], pts[n - 1][1], w1, 0, TAU);
+  g.fillStyle = o.color || INK; g.fill(p);
+}
+// Outline a closed point loop as separate strokes, each with its own taper, the way an inker goes round a shape.
+function outline(g, pts, w, o = {}) {
+  const every = o.every ?? 14;
+  for (let i = 0; i < pts.length - 1; i += every) brush(g, pts.slice(i, Math.min(pts.length, i + every + 1)), w, o);
+}
+// Foliage, drawn the manga way: masses whose edges break into pointed leaf tips (never arcs), toned by the light.
+// A wobbly closed outline around (cx, cy), sampled finely.
+function blob(cx, cy, rx, ry, seed, n = 140, wild = 1) {
+  const rnd = xorshift(seed), p = [rnd() * TAU, rnd() * TAU, rnd() * TAU];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = i / n * TAU, k = 1 + wild * (0.13 * Math.sin(2 * a + p[0]) + 0.08 * Math.sin(3 * a + p[1]) + 0.04 * Math.sin(5 * a + p[2]));
+    out.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * k]);
+  }
+  return out;
+}
+// Serrate a line into leaf tips: every few px a pointed leaf stands off it, leaning a little, now and then a
+// deeper notch. Closed loops put the tips outward (side 1) or inward (side -1); open lines put them on the
+// left of travel (side 1) or the right (side -1). `size` may be a number or a function of the point.
+function leaves(base, size, seed, closed = true, side = 1) {
+  const rnd = xorshift(seed), n = base.length, segs = closed ? n : n - 1, acc = [0];
+  for (let i = 1; i <= segs; i++) acc.push(acc[i - 1] + Math.hypot(base[i % n][0] - base[i - 1][0], base[i % n][1] - base[i - 1][1]));
+  const total = acc[segs];
+  let area = 0;
+  for (let i = 0; i < n; i++) { const q = base[(i + 1) % n]; area += base[i][0] * q[1] - q[0] * base[i][1]; }
+  const turn = closed ? Math.sign(area) * side : -side;
+  const at = d => {
+    d = clamp(d, 0, total);
+    let i = 1; while (i < segs && acc[i] < d) i++;
+    const p0 = base[i - 1], p1 = base[i % n], f = (d - acc[i - 1]) / Math.max(1e-6, acc[i] - acc[i - 1]), tl = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
+    return [[mix(p0[0], p1[0], f), mix(p0[1], p1[1], f)], [(p1[0] - p0[0]) / tl, (p1[1] - p0[1]) / tl]];
+  };
+  const out = [];
+  for (let d = 0; d < total - 2;) {
+    const [p0] = at(d), sz = typeof size === 'function' ? size(p0) : size;
+    const step = Math.min(total - d, sz * (0.8 + 0.5 * rnd()));
+    const h = sz * (0.32 + 0.3 * rnd()) * (rnd() < 0.08 ? -0.7 : 1), apex = 0.5 + 0.18 * rnd();
+    out.push(p0);
+    // each leaf is an almond profile: it swells off the line, comes to a point past its middle, and tucks back
+    for (const [f, k] of [[apex * 0.45, 0.62], [apex, 1], [apex + (1 - apex) * 0.5, 0.42]]) {
+      const [q, t] = at(d + step * f);
+      out.push([q[0] + t[1] * turn * h * k, q[1] - t[0] * turn * h * k]);
+    }
+    d += step;
+  }
+  out.push(closed ? out[0] : at(total)[0]);
+  return out;
+}
+// Round-cornered pen line for leaf edges (tips stay sharp, joints stay clean).
+function pen(g, pts, w, color = INK) {
+  if (!color || pts.length < 2) return;
+  g.save(); g.strokeStyle = color; g.lineWidth = w * WEIGHT; g.lineJoin = 'round'; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) g.lineTo(q[0], q[1]); g.stroke();
+  g.restore();
+}
+const tri = x => Math.abs(((x % 2) + 2) % 2 - 1);
+// One mass of leaves: paper, then dots stepped by the light (T1 sunlit top edge, T2 body, T3 underside and
+// shadow side, and a band of T3 under each inner chain of leaves), then the leaf-tip edges.
+function leafMass(m, seed) {
+  const base = blob(m.cx, m.cy, m.rx, m.ry, seed), edge = leaves(base, m.size, seed + 1);
+  const chains = (m.chains || []).map(([x0, x1, yb, depth], i) => {
+    const pts = [];
+    for (let k = 0; k <= 24; k++) pts.push([mix(x0, x1, k / 24), yb + depth * Math.sin(Math.PI * k / 24)]);
+    return { x0, x1, yb, depth, edge: leaves(pts, m.size * 0.8, seed + 10 + i, false, -1) };
+  });
+  return { ...m, edge, chains, path: region(edge) };
+}
+function massTone(m, x, y) {
+  const v = (y - m.cy) / m.ry, u = (x - m.cx) / m.rx;
+  let s = 0.4 + 0.52 * v + 0.26 * u + 0.1 * tri((x * 0.7 + y) / 13);
+  for (const c of m.chains) {
+    if (x < c.x0 || x > c.x1) continue;
+    const yc = c.yb + c.depth * Math.sin(Math.PI * (x - c.x0) / (c.x1 - c.x0));
+    if (y > yc && y < yc + 34) s += 0.45 * (1 - (y - yc) / 34);
+  }
+  return s < 0.24 ? T1 : s < 0.7 ? T2 : T3;
+}
+function paintMass(g, ink, m, tone = massTone) {
+  paint(g, m.path, PAPER);
+  g.save(); g.clip(m.path);
+  field(g, [m.cx - m.rx * 1.5, m.cy - m.ry * 1.5, m.cx + m.rx * 1.5, m.cy + m.ry * 1.5], (x, y) => ink.rad(tone(m, x, y), 'g2'));
+  g.restore();
+  for (const c of m.chains) pen(g, c.edge, 1.8);
+  pen(g, m.edge, 2.2);
+}
+
+/* ------------------------------------------------------------ shot 1: the lane at noon */
+const VP = [980, 640];
+// The point at x on the line from p to the vanishing point.
+const toVP = (p, x) => [x, p[1] + (VP[1] - p[1]) * (x - p[0]) / (VP[0] - p[0])];
+const LANE_W = W + 140;                 // background layer, drifting 1 px a frame
+const POLE_X = 1545, POLE_W = 640;      // near pole at t = 0, its layer drifting 2 px a frame
+const WALL = { top: [0, 352], base: [0, 1110], end: 770 };
+const wallZ = x => 2940 / (980 - x), wallX = z => 980 - 2940 / z;
+const wallPt = (x, f) => [x, mix(toVP(WALL.top, x)[1], toVP(WALL.base, x)[1], f)];
+const RWALL = { top: [2040, 712], base: [2040, 1140], hedge: [2040, 400], end: 1205 };
+const HOUSE = { ridge: [300, 40], tiles: [300, 82], eave: [300, 98], soffit: [300, 128], cast: [300, 176], x0: 300, x1: 760 };
+const FARPOLE = { x: 885, top: 366, foot: 712 };
+const FAR_UP = [[851, 384], [872, 384], [898, 384], [919, 384]], FAR_LOW = [[884, 424]];
+
+function paintFarHouse(g, ink) {
+  const roof = region([[776, 471], [1204, 471], [1152, 428], [828, 428]]);
+  paint(g, roof, ink.tone(T2));
+  for (const y of [440, 452, 462]) brush(g, [[828 - (y - 428) * 1.2, y], [1152 + (y - 428) * 1.2, y]], 1.5, { tip: 0.6 });
+  brush(g, join([[776, 471]], [[828, 428]], [[1152, 428]], [[1204, 471]]), 2.4, { tip: 0.5 });
+  solidShape(g, ink, [[776, 471], [1204, 471], [1204, 479], [776, 479]]);
+  for (const x of [846, 1066]) {
+    solidShape(g, ink, [[x, 502], [x + 66, 502], [x + 66, 544], [x, 544]]);
+    brush(g, [[x + 33, 502], [x + 33, 544]], 2.2, { tip: 1, color: ink.solid() === INK ? PAPER : INK });
+  }
+  solidShape(g, ink, [[792, 590], [1188, 590], [1188, 598], [792, 598]]);
+  for (const x of [792, 1188]) brush(g, [[x, 479], [x, 704]], 2.2, { tip: 0.6 });
+  brush(g, [[930, 612], [930, 704]], 1.8, { tip: 0.6 }); brush(g, [[1050, 612], [1050, 704]], 1.8, { tip: 0.6 });
+  brush(g, [[930, 612], [1050, 612]], 1.8, { tip: 0.6 });
+  brush(g, [[770, 706], [1210, 704]], 2, { tip: 0.5 });
+}
+function paintFarPole(g, ink) {
+  const { x, top, foot } = FARPOLE, hw = y => mix(4.5, 6.5, (y - top) / (foot - top));
+  const body = region([[x - hw(top), top], [x + hw(top), top], [x + hw(foot), foot], [x - hw(foot), foot]]);
+  paint(g, body, PAPER);
+  paint(g, region([[x + hw(top) * 0.2, top], [x + hw(top), top], [x + hw(foot), foot], [x + hw(foot) * 0.2, foot]]), ink.solid());
+  brush(g, [[x - hw(top), top], [x - hw(foot), foot]], 1.8, { tip: 0.6 });
+  brush(g, [[x + hw(top), top], [x + hw(foot), foot]], 1.8, { tip: 0.6 });
+  solidShape(g, ink, [[846, 384], [924, 384], [924, 390], [846, 390]]);
+  solidShape(g, ink, [[878, 422], [892, 422], [892, 427], [878, 427]]);
+  for (const [px, py] of FAR_UP) brush(g, [[px, py], [px, py - 7]], 3, { tip: 1 });
+}
+let HEDGE = null;
+function hedgeShape(x0, x1) {
+  const top = [], rnd = xorshift(311);
+  // gentle domes, one per shrub, shrinking toward the far end
+  for (let x = x1 + 20; x >= x0 - 6; x -= 4) {
+    const k = (x - 980) / 1060, w = 150 * k, ph = ((x1 - x) % w) / w;
+    top.push([x, toVP(RWALL.hedge, x)[1] + 26 * k - 18 * k * Math.sin(Math.PI * ph)]);
+  }
+  const bottom = [toVP(RWALL.top, x0 - 6), toVP(RWALL.top, x1 + 20)].map(([x, y]) => [x, y + 6]);
+  const base = [...top, ...bottom];
+  const size = ([x]) => 3 + 13 * clamp((x - 1100) / 940);
+  const edge = leaves(base, size, 312);
+  const chains = [3.5, 4.8, 6.6, 9.4].map((z, i) => {
+    const x = 980 + 3150 / z, t = toVP(RWALL.hedge, x)[1] + 20, b = toVP(RWALL.top, x)[1];
+    const pts = []; for (let k = 0; k <= 12; k++) pts.push([x - 6 * Math.sin(Math.PI * k / 12) * (x - 980) / 1060, mix(t, b, k / 12)]);
+    return { x0: 0, x1: -1, edge: leaves(pts, size, 320 + i, false, 1) };
+  });
+  return { cx: (x0 + x1) / 2, cy: 560, rx: (x1 - x0) / 2 + 40, ry: 200, edge, chains, path: region(edge) };
+}
+// Hedge light: sunlit crown, dotted body, dense dots where it meets the fence.
+function hedgeTone(m, x, y) {
+  const t = toVP(RWALL.hedge, x)[1] + 10, b = toVP(RWALL.top, x)[1], v = (y - t) / (b - t);
+  const s = 0.12 + 0.95 * v + 0.1 * tri((x * 0.6 + y) / 11);
+  return s < 0.24 ? T1 : s < 0.72 ? T2 : T3;
+}
+function paintRightSide(g, ink) {
+  const x0 = RWALL.end, x1 = LANE_W + 10;
+  const face = region([toVP(RWALL.top, x0), toVP(RWALL.top, x1), toVP(RWALL.base, x1), toVP(RWALL.base, x0)]);
+  // the hedge behind the low wall: one long row of shrubs, flat-topped, leaf tips along its crown, dark at its foot
+  HEDGE ||= hedgeShape(x0, x1);
+  paintMass(g, ink, HEDGE, hedgeTone);
+  paint(g, face, PAPER);
+  solidShape(g, ink, [toVP(RWALL.top, x0), toVP(RWALL.top, x1), toVP([2040, 724], x1), toVP([2040, 724], x0)]);
+  brush(g, [toVP(RWALL.top, x0), toVP(RWALL.top, x1)], 3.2, { tip: 0.4, taper: 60 });
+  brush(g, [toVP(RWALL.base, x0), toVP(RWALL.base, x1)], 3, { tip: 0.4, taper: 60 });
+  brush(g, [toVP(RWALL.top, x0), toVP(RWALL.base, x0)], 2.4, { tip: 0.5 });
+  for (const z of [3.4, 4.6, 6.2, 8.4]) {
+    const x = 980 + 3170 / z;
+    brush(g, [toVP([2040, 726], x), toVP(RWALL.base, x)], 2, { tip: 0.4 });
+  }
+}
+function foliage(g, ink, c, lean = 0.22) {
+  paint(g, c.path, PAPER);
+  g.save(); g.clip(c.path);
+  field(g, [c.cx - c.r * 1.4, c.cy - c.r * 1.4, c.cx + c.r * 1.4, c.cy + c.r * 1.4], (x, y) => {
+    const v = (y - c.cy) / c.r, u = (x - c.cx) / c.r;
+    return ink.rad(mix(c.lo, c.hi, ease(clamp(0.42 + 0.6 * v + lean * u))), 'g2');
+  });
+  g.restore();
+  const w = Math.max(1.6, Math.min(3, c.r / 18));
+  for (const s of c.scallops) brush(g, s, w, { tip: 0.2, taper: 10 });
+}
+function paintHouse(g, ink) {
+  const { x0, x1 } = HOUSE, at = (p, x) => toVP(p, x);
+  // upper-floor wall, eave shadow in rules, a dark window, the soffit in solid ink, then the tiled edge
+  paint(g, region([at(HOUSE.soffit, x0), at(HOUSE.soffit, x1), [x1, 600], [x0, 600]]), PAPER);
+  paint(g, region([at(HOUSE.soffit, x0), at(HOUSE.soffit, x1), at(HOUSE.cast, x1), at(HOUSE.cast, x0)]), ink.rules(2.4));
+  const win = [at([300, 214], 548), at([300, 214], 660), at([300, 352], 660), at([300, 352], 548)];
+  paint(g, region(win), ink.solid());
+  brush(g, [[604, at([300, 214], 604)[1]], [604, at([300, 352], 604)[1]]], 3, { tip: 1, color: PAPER });
+  for (const k of [0.18, 0.3]) brush(g, [[mix(552, 600, k), at([300, 214], 552)[1] + 60], [mix(552, 600, k) + 30, at([300, 214], 552)[1] + 18]], 2.2, { tip: 0.3, color: PAPER });
+  outline(g, join(win, [win[0]]), 2.4, { every: 1, tip: 0.6 });
+  solidShape(g, ink, [at(HOUSE.eave, x0), at(HOUSE.eave, x1), at(HOUSE.soffit, x1), at(HOUSE.soffit, x0)]);
+  paint(g, region([at(HOUSE.ridge, x0), at(HOUSE.ridge, x1), at(HOUSE.eave, x1), at(HOUSE.eave, x0)]), PAPER);
+  brush(g, [at(HOUSE.ridge, x0), at(HOUSE.ridge, x1 + 6)], 3, { tip: 0.4 });
+  brush(g, [at(HOUSE.eave, x0), at(HOUSE.eave, x1)], 3.2, { tip: 0.5, taper: 60 });
+  // round tile ends along the eave, each with its channel running up the roof
+  for (let x = x1 - 4; x > x0 - 30;) {
+    const k = (980 - x) / 680, s = 34 * k, e = at(HOUSE.eave, x), top = at(HOUSE.ridge, x);
+    brush(g, oval(x, e[1] - s * 0.3, s * 0.3, s * 0.3, Math.PI * 0.1, Math.PI * 1.9, 14), Math.max(1.5, 2.4 * k), { tip: 0.5 });
+    brush(g, [[x, e[1] - s * 0.6], [x + s * 0.1, top[1] + 3]], Math.max(1.4, 2 * k), { tip: 0.4 });
+    x -= s;
+  }
+  brush(g, [at(HOUSE.ridge, x1 + 6), [x1, at(HOUSE.eave, x1)[1]], [x1, 600]], 2.4, { tip: 0.5 });
+}
+function paintWall(g, ink) {
+  const e = WALL.end;
+  const face = region([wallPt(-4, 0), wallPt(e, 0), wallPt(e, 1), wallPt(-4, 1)]);
+  paint(g, face, PAPER);
+  paint(g, face, ink.tone(T1));
+  const rnd = xorshift(77);
+  // courses of block: horizontal joints run to the vanishing point, vertical joints thin out with distance
+  for (let i = 1; i < 11; i++) {
+    const f = i / 11, far = wallX(10 + rnd() * 2);
+    brush(g, [wallPt(-4, f), wallPt(far, f)], 2, { tip: 0.25, taper: 80 });
+    for (let z = 2.9 + (i & 1) * 0.2; z < 7.6; z += 0.4) {
+      if (rnd() < 0.1 + (z - 3) * 0.07) continue;
+      const x = wallX(z);
+      brush(g, [wallPt(x, (i - 1) / 11 + 0.004), wallPt(x, f - 0.004)], 1.9, { tip: 0.5, taper: 4 });
+    }
+  }
+  solidShape(g, ink, [wallPt(-4, 0), wallPt(e, 0), wallPt(e, 0.016), wallPt(-4, 0.016)]);
+  brush(g, [wallPt(-4, -0.012), wallPt(e, -0.012)], 4.2, { tip: 0.4, taper: 60 });
+  brush(g, [wallPt(e, -0.012), wallPt(e, 1)], 3.2, { tip: 0.5 });
+  brush(g, [wallPt(-4, 1), wallPt(e, 1)], 3.4, { tip: 0.5, taper: 60 });
+}
+// The tree behind the wall: a solid-ink trunk forking into limbs, under five leaf masses of different sizes,
+// with leaf-shaped gaps where the limbs show against the sky.
+const CANOPY = [
+  { cx: 80, cy: 58, rx: 224, ry: 150, size: 19, chains: [[-70, 140, 70, 42], [120, 262, 36, 34]] },
+  { cx: 372, cy: 88, rx: 150, ry: 106, size: 17, chains: [[290, 440, 96, 30]] },
+  { cx: 476, cy: 198, rx: 62, ry: 44, size: 12 },
+  { cx: 28, cy: 292, rx: 142, ry: 88, size: 16, chains: [[-70, 112, 286, 28]] },
+  { cx: 300, cy: 228, rx: 124, ry: 88, size: 15, chains: [[222, 362, 230, 24]] },
+];
+// sky gaps laid along the limbs they show, so a limb crosses each one end to end
+const GAPS = [[134, 200, 44, 19, 1.13], [212, 118, 40, 17, -1.1], [92, 124, 34, 15, 1.07], [46, 34, 32, 14, 1.1]];
+const TWIGS = [[[136, 204], [114, 190], [100, 176]], [[212, 118], [232, 108], [248, 94]], [[95, 128], [112, 114], [120, 98]], [[48, 36], [32, 26], [20, 14]]];
+const LIMBS = [[[194, 430], [200, 372], [206, 330]], [[206, 330], [176, 286], [150, 236], [118, 168], [86, 110], [56, 54], [34, 12]],
+  [[206, 330], [244, 290], [272, 236], [298, 150], [330, 92]], [[272, 236], [300, 222], [322, 212]], [[150, 236], [176, 190], [244, 56]]];
+const LIMB_W = [[44, 36], [28, 8], [30, 10], [14, 6], [14, 5]];
+function limbPath(pts, w0, w1) {
+  const L = [], R = [], n = pts.length;
+  pts.forEach((p, i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1;
+    const hw = mix(w0, w1, i / (n - 1)) / 2;
+    L.push([p[0] - dy / d * hw, p[1] + dx / d * hw]); R.push([p[0] + dy / d * hw, p[1] - dx / d * hw]);
+  });
+  return { left: L, right: R, path: region([...L, ...R.slice().reverse()]) };
+}
+let LIMB_SHAPES = null, CANOPY_MASSES = null, GAP_SHAPES = null;
+let THIN_LIMBS = null;
+function paintLimbs(g, ink, clipped) {
+  LIMB_SHAPES ||= LIMBS.map((pts, i) => limbPath(smooth(pts, false, 6), ...LIMB_W[i]));
+  // seen through the leaves, the limbs are the thinner upper wood, with a few twigs off them
+  THIN_LIMBS ||= [...LIMBS.map((pts, i) => limbPath(smooth(pts, false, 6), LIMB_W[i][0] * 0.55, LIMB_W[i][1] * 0.6)),
+    ...TWIGS.map(pts => limbPath(smooth(pts, false, 6), 6, 2))];
+  const shapes = clipped ? THIN_LIMBS : LIMB_SHAPES, fill = ink.solid();
+  for (const l of shapes) paint(g, l.path, fill);
+  for (const l of shapes) {
+    brush(g, l.right, 2.6, { tip: 0.5, taper: 20 });
+    brush(g, l.left, 2.2, { tip: 0.5, taper: 20 });
+    if (fill === INK && !clipped) brush(g, l.left.map(([x, y]) => [x + 3, y]), 1.3, { tip: 0.2, taper: 20, color: PAPER });
+  }
+}
+function paintTree(g, ink) {
+  CANOPY_MASSES ||= CANOPY.map((m, i) => leafMass(m, 40 + i * 7));
+  GAP_SHAPES ||= GAPS.map(([x, y, rx, ry, rot], i) => {
+    const b = blob(0, 0, rx, ry, 90 + i, 70, 2.2).map(([px, py]) => [x + px * Math.cos(rot) - py * Math.sin(rot), y + px * Math.sin(rot) + py * Math.cos(rot)]);
+    const edge = leaves(b, 9, 95 + i, true, -1);
+    return { edge, path: region(edge) };
+  });
+  for (const m of CANOPY_MASSES) paintMass(g, ink, m);
+  // sky through the leaves, the limbs crossing it; a gap that reaches the canopy's edge just becomes a notch
+  const canopy = new Path2D();
+  for (const m of CANOPY_MASSES) canopy.addPath(m.path);
+  g.save(); g.clip(canopy);
+  for (const gp of GAP_SHAPES) {
+    paint(g, gp.path, PAPER);
+    g.save(); g.clip(gp.path); paintLimbs(g, ink, true); g.restore();
+    pen(g, gp.edge, 1.9);
+  }
+  g.restore();
+}
+function paintRoad(g, ink) {
+  // the wall's cast shadow: a crisp band of line tone along its foot, with a ragged bite where the tree's shadow joins
+  const edge = join(curve([410, 1092], [470, 1040], [452, 1004], 8), curve([452, 1004], [520, 1000], [540, 962], 8),
+    curve([540, 962], [600, 950], [588, 912], 8), [toVP([410, 1092], 640), toVP([410, 1092], 836)]);
+  const band = region(join(edge, [[WALL.end, toVP(WALL.base, WALL.end)[1]], wallPt(-4, 1), [-4, 1092]]));
+  paint(g, band, ink.rules(2.6));
+  brush(g, edge, 2, { tip: 0.4, taper: 30 });
+  // a manhole lid in the sun
+  const lid = oval(1060, 902, 84, 19, 0, TAU, 48);
+  paint(g, region(lid), ink.tone(T1));
+  brush(g, lid, 2.4, { tip: 1 });
+  brush(g, oval(1060, 902, 64, 14, 0.2, Math.PI - 0.2, 20), 1.6, { tip: 0.4 });
+}
+function paintLane(g, ink) {
+  g.fillStyle = PAPER; g.fillRect(0, 0, LANE_W, H);
+  paintFarHouse(g, ink);
+  paintFarPole(g, ink);
+  paintRightSide(g, ink);
+  paintRoad(g, ink);
+  paintHouse(g, ink);
+  paintLimbs(g, ink);
+  paintWall(g, ink);
+  paintTree(g, ink);
+}
+
+// The near pole: a tapered concrete column shaded by a graded field, crossarms, insulators, a transformer drum, steps.
+const poleHW = y => 25 + 13 * (y / H);
+const UP_ARM = [-172, -96, 96, 172], LOW_ARM = [-122];
+function insulator(g, ink, x, base, s = 1) {
+  // a pin, two porcelain sheds and a grooved cap, stacked bottom to top
+  paint(g, region([[x - 3 * s, base], [x + 3 * s, base], [x + 3 * s, base - 8 * s], [x - 3 * s, base - 8 * s]]), INK);
+  for (const [y, hw, hh] of [[13, 16, 5], [24, 12, 5], [33, 8, 6]]) {
+    const cy = base - y * s, top = oval(x, cy - hh * s, hw * s * 0.55, 2.5 * s, Math.PI, TAU, 8);
+    const pts = join([[x - hw * s, cy]], top, [[x + hw * s, cy]], oval(x, cy, hw * s, 3 * s, 0, Math.PI, 12));
+    const p = region(pts);
+    paint(g, p, PAPER);
+    g.save(); g.clip(p);
+    paint(g, region([[x + 2 * s, cy - 20 * s], [x + 20 * s, cy - 20 * s], [x + 20 * s, cy + 6 * s], [x + 2 * s, cy + 6 * s]]), ink.tone(T2));
+    g.restore();
+    brush(g, join(pts, [pts[0]]), 1.9, { tip: 0.9, taper: 3 });
+  }
+  return [x, base - 38 * s];
+}
+function cylinderDots(g, ink, path, lx, rx, y0, y1) {
+  g.save(); g.clip(path);
+  field(g, [lx(y0) - 4, y0, rx(y1) + 4, y1], (x, y) => {
+    const u = (x - lx(y)) / (rx(y) - lx(y));
+    return ink.rad(u < 0.38 ? 0 : T3 * 1.08 * ease(clamp((u - 0.38) / 0.42)), 'g2');
+  });
+  g.restore();
+}
+function paintPole(g, ink) {
+  const X = POLE_X, top = 44, bot = H + 20;
+  const L = y => X - poleHW(y), R = y => X + poleHW(y);
+  // steps first, the column over their roots
+  const steps = [];
+  for (let i = 0, y = 196; y < H + 30; i++, y += 70) if ((i & 1) ? y > 500 : (y < 300 || y > 500)) steps.push([y, i & 1 ? 1 : -1]);
+  for (const [y, side] of steps) {
+    const root = side < 0 ? L(y) + 6 : R(y) - 6, tipx = root + side * 40;
+    solidShape(g, ink, [[root, y - 3], [tipx, y - 3], [tipx, y + 3], [root, y + 3]]);
+    solidShape(g, ink, [[tipx - side * 5, y - 12], [tipx, y - 12], [tipx, y + 3], [tipx - side * 5, y + 3]]);
+    brush(g, [[root, y - 3.5], [tipx, y - 3.5], [tipx, y - 12]], 1.6, { tip: 0.8 });
+  }
+  const column = region(join([[L(top), top]], oval(X, top, poleHW(top), 12, Math.PI, TAU, 12), [[R(bot), bot], [L(bot), bot]]));
+  paint(g, column, PAPER);
+  cylinderDots(g, ink, column, L, R, top - 14, bot);
+  paint(g, region([[X + poleHW(top) * 0.62, top + 4], [R(top), top + 4], [R(bot), bot], [X + poleHW(bot) * 0.62, bot]]), ink.solid());
+  brush(g, oval(X, top, poleHW(top), 12, Math.PI, TAU, 14), 2.6, { tip: 0.5 });
+  brush(g, [[L(top), top], [L(bot), bot]], 4, { tip: 0.5, taper: 40 });
+  brush(g, [[R(top), top], [R(bot), bot]], 4.4, { tip: 0.5, taper: 40 });
+  brush(g, oval(X, top + 22, poleHW(top + 22), 4, 0.15, Math.PI - 0.15, 10), 1.6, { tip: 0.3 });
+  // crossarms with braces, insulators on top
+  for (const [y, half, hgt] of [[150, 204, 15], [270, 146, 12]]) {
+    solidShape(g, ink, [[X - half, y], [X + half, y], [X + half, y + hgt], [X - half, y + hgt]]);
+    brush(g, [[X - half + 4, y + 2.5], [X + half - 4, y + 2.5]], 1.6, { tip: 0.4, color: PAPER });
+    for (const s of [-1, 1]) brush(g, [[X + s * half * 0.62, y + hgt], [X + s * poleHW(y + 70) * 0.9, y + hgt + 64]], 5, { tip: 0.7 });
+  }
+  const ends = { up: UP_ARM.map(dx => insulator(g, ink, X + dx, 150)), low: LOW_ARM.map(dx => insulator(g, ink, X + dx, 270, 0.8)) };
+  // the transformer drum on the lane side, strapped to the column
+  const cx = X - 112, ty = 318, by = 470, hw = 46;
+  for (const y of [342, 446]) {
+    solidShape(g, ink, [[cx + 30, y - 5], [X, y - 5], [X, y + 5], [cx + 30, y + 5]]);
+  }
+  const drum = region(join(oval(cx, ty, hw, 9, Math.PI, TAU, 16), oval(cx, by, hw, 10, 0, Math.PI, 16)));
+  paint(g, drum, PAPER);
+  cylinderDots(g, ink, drum, () => cx - hw, () => cx + hw, ty - 10, by + 12);
+  paint(g, region(join(oval(cx, by - 14, hw, 10, 0, Math.PI, 16), oval(cx, by, hw, 10, Math.PI, 0, 16))), ink.solid());
+  paint(g, region([[cx + hw * 0.66, ty], [cx + hw, ty], [cx + hw, by], [cx + hw * 0.66, by]]), ink.solid());
+  for (const y of [362, 398, 432]) brush(g, oval(cx, y, hw + 1, 8, 0.05, Math.PI - 0.05, 16), 1.8, { tip: 0.4 });
+  paint(g, region(oval(cx, ty, hw, 9)), PAPER);
+  brush(g, oval(cx, ty, hw, 9, 0, TAU, 32), 2.2, { tip: 1 });
+  brush(g, [[cx - hw, ty], [cx - hw, by]], 2.8, { tip: 0.5 });
+  brush(g, [[cx + hw, ty], [cx + hw, by]], 2.8, { tip: 0.5 });
+  brush(g, oval(cx, by, hw, 10, 0, Math.PI, 18), 2.6, { tip: 0.5 });
+  const bush = [-20, 18].map(dx => insulator(g, ink, cx + dx, ty - 2, 0.55));
+  brush(g, curve(bush[0], [bush[0][0] - 12, 250], ends.low[0], 10), 2, { tip: 1 });
+  return ends;
+}
+
+// The wires: sagging rules from the near insulators to the far pole, recomputed each frame from both layers' offsets.
+let POLE_ENDS = null;
+function wirePath(a, b, sag, bump = 0, at = 0.5) {
+  const pts = [];
+  for (let i = 0; i <= 40; i++) {
+    const u = i / 40, s = u < at ? u / at : (1 - u) / (1 - at);
+    pts.push([mix(a[0], b[0], u), mix(a[1], b[1], u) + sag * 4 * u * (1 - u) * (1 - 0.25 * u) + bump * Math.sin(s * Math.PI / 2)]);
+  }
+  return pts;
+}
+const PERCH = { wire: 0, at: 0.3 };      // on the top wire, a third of the way out from the near pole
+function wireBump(t) {
+  if (t < TL.lift) return 4 + 6 * ease(ramp(t, ...TL.crouch));
+  const s = t - TL.lift;
+  return 16 * Math.exp(-s / 0.45) * Math.cos(TAU * 2.7 * s);
+}
+function wires(t, poleOff, laneOff) {
+  const near = POLE_ENDS.up.map(([x, y]) => [x - poleOff, y + 2]), far = FAR_UP.map(([x, y]) => [x - laneOff, y]);
+  const out = near.map((a, i) => wirePath(a, far[i], 70 - i * 6, i === PERCH.wire ? wireBump(t) : 0, PERCH.at));
+  const lowA = POLE_ENDS.low[0];
+  out.push(wirePath([lowA[0] - poleOff, lowA[1] + 2], [FAR_LOW[0][0] - laneOff, FAR_LOW[0][1]], 104));
+  // two service wires swinging off toward the viewer
+  for (const [i, dx, dy] of [[2, 860, -300], [3, 900, -210]]) out.push(wirePath(near[i], [near[i][0] + dx, dy], -40));
+  return out;
+}
+function drawWires(g, list) {
+  list.forEach((pts, i) => brush(g, pts, 1, { tip: 1, width: u => (i < 5 ? mix(3.6, 1.9, u) : mix(3.4, 5.2, u)) }));
+}
+
+/* ------------------------------------------------------------ the crow */
+// Facing left, feet at the origin. Perched silhouette, folded wing edge and rim light as paper strokes.
+const CROW_BODY = join(
+  bez([-104, -94], [-94, -108], [-78, -118], [-60, -121], 8), bez([-60, -121], [-56, -134], [-40, -140], [-26, -132], 8),
+  bez([-26, -132], [-14, -126], [-8, -114], [-4, -108], 6),
+  bez([-4, -108], [14, -100], [24, -94], [36, -84], 8), bez([36, -84], [54, -72], [62, -62], [70, -52], 6),
+  straight([70, -52], [106, -22], 4), straight([106, -22], [97, -10], 2), straight([97, -10], [58, -34], 4),
+  bez([58, -34], [40, -28], [22, -26], [8, -28], 6), bez([8, -28], [-14, -30], [-34, -46], [-42, -66], 8),
+  bez([-42, -66], [-44, -80], [-52, -90], [-60, -94], 6), bez([-60, -94], [-74, -92], [-92, -90], [-104, -94], 6));
+const CROW_FLY = join(
+  bez([-100, -2], [-90, -14], [-76, -22], [-62, -24], 6), bez([-62, -24], [-58, -36], [-40, -40], [-28, -28], 6),
+  bez([-28, -28], [0, -22], [30, -16], [52, -10], 8), straight([52, -10], [106, -22], 3), straight([106, -22], [112, 12], 3),
+  straight([112, 12], [50, 10], 3), bez([50, 10], [20, 20], [-20, 20], [-44, 12], 8), bez([-44, 12], [-54, 8], [-62, 4], [-68, 2], 4),
+  bez([-68, 2], [-78, 2], [-90, 0], [-100, -2], 4));
+// Wing planform: s = 0 at the shoulder to 1 at the tip; c = px behind the leading edge.
+const WING = [[0, -6], [0.45, -12], [0.78, -4], [1.0, 8], [0.84, 16], [1.02, 22], [0.84, 28], [0.98, 36], [0.8, 40], [0.9, 50], [0.7, 52],
+  [0.62, 62], [0.48, 58], [0.38, 68], [0.24, 64], [0.12, 72], [0, 66]];
+function wingPts(sx, sy, span, chord) { return WING.map(([s, c]) => [sx + s * span[0] + c * chord, sy + s * span[1]]); }
+function crowPerched(g, ink, x, y, sc, crouch, flick) {
+  g.save(); g.translate(x, y); g.scale(sc, sc);
+  g.rotate(-0.12 * crouch + flick); g.scale(1, 1 - 0.1 * crouch); g.translate(0, 8 * crouch);
+  const body = region(CROW_BODY);
+  for (const dx of [-7, 3]) brush(g, join([[dx - 2, -30]], [[dx, -2]]), 4.2, { tip: 0.8 });
+  for (const dx of [-7, 3]) brush(g, curve([dx - 12, 3], [dx - 2, -4], [dx + 8, 4], 6), 3, { tip: 0.5 });
+  paint(g, body, ink.solid());
+  brush(g, CROW_BODY, 2.6, { tip: 1 });
+  const full = ink.rad(FULL, 'g3') >= FULL;
+  if (full) {
+    brush(g, bez([-28, -97], [0, -96], [36, -78], [80, -46], 12), 1.8, { tip: 0.2, color: PAPER });
+    for (const k of [0, 1, 2]) brush(g, curve([48 + k * 9, -60 + k * 6], [62 + k * 9, -56 + k * 6], [76 + k * 8, -46 + k * 5], 5), 1.4, { tip: 0.2, color: PAPER });
+    brush(g, bez([-50, -133], [-36, -137], [-18, -124], [0, -104], 8), 1.6, { tip: 0.2, color: PAPER });
+    brush(g, bez([-96, -101], [-86, -110], [-74, -116], [-64, -118], 6), 1.3, { tip: 0.2, color: PAPER });
+    g.fillStyle = PAPER; g.beginPath(); g.arc(-44, -117, 3.6, 0, TAU); g.fill();
+    g.fillStyle = INK; g.beginPath(); g.arc(-44.5, -117, 1.7, 0, TAU); g.fill();
+  }
+  g.restore();
+}
+function crowFlying(g, x, y, sc, flap, pitch) {
+  // flap 0 = wings up, 1 = wings at the bottom of the stroke, swept forward; seen from a little below,
+  // so the near wing swings lower than the far one
+  const phi = mix(0.2, 2.25, flap), beta = 0.3, span = 150, sweep = mix(34, -26, flap);
+  g.save(); g.translate(x, y); g.scale(sc, sc); g.rotate(pitch);
+  g.fillStyle = INK;
+  // the far wing never drops below the horizon of the body, so every frame keeps one wing clearly up
+  const far = wingPts(-6, -20, [mix(34, 6, flap) * 0.8, -span * Math.cos(mix(0.15, 1.15, flap) - beta)], 0.86);
+  g.fill(region(far));
+  g.fill(region(CROW_FLY));
+  const near = wingPts(-14, -14, [sweep, -span * Math.cos(phi + beta)], 1);
+  g.fill(region(near));
+  brush(g, near.slice(0, 4), 1.4, { tip: 0.2, color: PAPER });
+  g.fillStyle = PAPER; g.beginPath(); g.arc(-46, -22, 3.2, 0, TAU); g.fill();
+  g.fillStyle = INK; g.beginPath(); g.arc(-46.5, -22, 1.6, 0, TAU); g.fill();
+  g.restore();
+}
+function crowFlight(t, perch) {
+  const s = t - TL.lift, k = clamp(s / TL.fly);
+  // a steep climb straight out of the top of the frame, drifting only a little toward the lane
+  const x = perch[0] - 110 * k, y = perch[1] - 14 - (perch[1] + 270) * k ** 1.6;
+  const beats = s / TL.beat, ph = beats - Math.floor(beats);
+  const flap = ph < 0.45 ? ease(ph / 0.45) : 1 - ease((ph - 0.45) / 0.55);
+  return { x, y, flap, pitch: mix(0.95, 0.75, k) };
+}
+
+/* ------------------------------------------------------------ shot 2: laundry on a balcony */
+const SHADE = [84, 66];                 // hard afternoon sun: the offset of a shadow thrown a hand's depth onto the wall
+const DOOR = { x0: 1080, x1: 1842, top: 92, sill: 1002, meet: 1462 };
+const RAIL = { top: 762, face: 772, foot: 798, pitch: 76, bar: 14 };
+const barY = x => 204 + 0.006 * x;      // the drying pole's centre line, a touch out of level
+// Catmull-Rom through the given points; closed loops wrap round.
+function smooth(pts, closed = true, n = 6) {
+  const out = [], m = pts.length, at = i => pts[closed ? (i + m) % m : clamp(i, 0, m - 1)];
+  for (let i = 0; i < (closed ? m : m - 1); i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    for (let k = 0; k < n; k++) {
+      const u = k / n, u2 = u * u, u3 = u2 * u;
+      out.push([0, 1].map(d => 0.5 * (2 * p1[d] + (-p0[d] + p2[d]) * u + (2 * p0[d] - 5 * p1[d] + 4 * p2[d] - p3[d]) * u2 + (-p0[d] + 3 * p1[d] - 3 * p2[d] + p3[d]) * u3)));
+    }
+  }
+  out.push(closed ? out[0].slice() : pts[m - 1].slice());
+  return out;
+}
+const mirror = pts => pts.map(([x, y]) => [-x, y]).reverse();
+const both = half => join(half, mirror(half));
+function wallClip() {
+  const p = new Path2D();
+  p.rect(0, 64, W, H - 64);
+  p.rect(DOOR.x0 + 20, DOOR.top + 20, DOOR.meet - DOOR.x0 - 20, DOOR.sill - DOOR.top - 20);
+  p.rect(DOOR.meet + 16, DOOR.top + 36, DOOR.x1 - 36 - DOOR.meet, DOOR.sill - DOOR.top - 52);
+  return p;
+}
+// A cast shadow on the wall: the paper under it cleared and ruled.
+function castShadow(g, path) {
+  g.save(); g.clip(wallClip(), 'evenodd');
+  paint(g, path, PAPER); paint(g, path, rules(3.1));
+  g.restore();
+}
+function paintBalconyBack(g) {
+  g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
+  paint(g, region([[0, 64], [W, 64], [W, DOOR.sill], [0, DOOR.sill]]), dots(T2));
+  // the floor seen through the railing, light dots and a few joints
+  paint(g, region([[0, DOOR.sill], [W, DOOR.sill], [W, H], [0, H]]), dots(T1));
+  for (const y of [1030, 1066]) brush(g, [[0, y], [W, y]], 1.8, { tip: 1 });
+  brush(g, [[0, DOOR.sill], [W, DOOR.sill]], 3, { tip: 1 });
+  // the sliding door: aluminium frame, the open half dark, a curtain caught at its edge, the closed half glazed
+  const { x0, x1, top, sill, meet } = DOOR;
+  paint(g, region([[x0, top], [x1, top], [x1, sill], [x0, sill]]), PAPER);
+  paint(g, region([[x0 + 20, top + 20], [meet, top + 20], [meet, sill], [x0 + 20, sill]]), INK);
+  const curtain = smooth([[x0 + 20, top + 20], [x0 + 112, top + 20], [x0 + 92, 300], [x0 + 118, 520], [x0 + 96, 760], [x0 + 124, sill - 6], [x0 + 20, sill - 6]], false, 8);
+  const cpath = region(join(curtain, [[x0 + 20, sill - 6]]));
+  paint(g, cpath, PAPER);
+  g.save(); g.clip(cpath);
+  for (const [a, b] of [[x0 + 44, x0 + 58], [x0 + 78, x0 + 92]]) paint(g, region([[a, top], [b, top], [b + 6, sill], [a + 6, sill]]), dots(T1));
+  g.restore();
+  for (const dx of [36, 62, 94]) brush(g, smooth([[x0 + dx, top + 30], [x0 + dx - 6, 380], [x0 + dx + 6, 640], [x0 + dx, sill - 20]], false, 8), 2, { tip: 0.2, taper: 80 });
+  brush(g, curtain.slice(1, -1), 2.8, { tip: 0.3, taper: 60 });
+  paint(g, region([[meet + 16, top + 36], [x1 - 20, top + 36], [x1 - 20, sill - 16], [meet + 16, sill - 16]]), INK);
+  for (const [a, w] of [[0, 34], [52, 12]]) {
+    // reflections on the glass: two paper bands on the diagonal
+    const y0 = top + 120 + a, y1 = sill - 120 + a;
+    paint(g, region([[meet + 40, y1], [meet + 40 + w, y1 - w * 0.9], [x1 - 40, y0 - w * 0.9 + 60], [x1 - 40 - 0, y0 + 60]]), PAPER);
+  }
+  paint(g, region([[meet + 30, top + 36], [meet + 16, top + 36], [meet + 16, sill - 16], [meet + 30, sill - 16]]), PAPER);
+  paint(g, region([[meet + 22, 520], [meet + 28, 520], [meet + 28, 590], [meet + 22, 590]]), INK);
+  outline(g, [[x0, top], [x1, top], [x1, sill], [x0, sill], [x0, top]], 3.4, { every: 1, tip: 0.5 });
+  outline(g, [[x0 + 20, top + 20], [meet, top + 20], [meet, sill]], 2.4, { every: 1, tip: 0.5 });
+  brush(g, [[x0 + 20, top + 20], [x0 + 20, sill]], 2.4, { tip: 0.5 });
+  outline(g, [[meet, top + 20], [x1 - 20, top + 20], [x1 - 20, sill]], 2.4, { every: 1, tip: 0.5 });
+  outline(g, [[meet + 16, sill - 16], [meet + 16, top + 36], [x1 - 36, top + 36], [x1 - 36, sill - 16], [meet + 16, sill - 16]], 2, { every: 1, tip: 0.6 });
+  brush(g, [[meet + 30, top + 36], [meet + 30, sill - 16]], 1.8, { tip: 0.6 });
+  // the railing's and the pole's shadows on the wall
+  const rail = new Path2D();
+  rail.rect(0, RAIL.top + SHADE[1], W, RAIL.foot - RAIL.top);
+  for (let x = 22 + SHADE[0] - RAIL.pitch * 3; x < W; x += RAIL.pitch) rail.rect(x, RAIL.foot + SHADE[1], RAIL.bar, H);
+  const poleShadow = region([[0, barY(-SHADE[0]) + SHADE[1] - 8], [W, barY(W - SHADE[0]) + SHADE[1] - 8], [W, barY(W - SHADE[0]) + SHADE[1] + 8], [0, barY(-SHADE[0]) + SHADE[1] + 8]]);
+  castShadow(g, rail); castShadow(g, poleShadow);
+  // the slab above: its face, then its underside in solid ink, and the rods that hold the pole
+  paint(g, region([[0, 0], [W, 0], [W, 30], [0, 30]]), PAPER);
+  paint(g, region([[0, 30], [W, 30], [W, 64], [0, 64]]), INK);
+  brush(g, [[0, 30], [W, 30]], 3.4, { tip: 1 });
+  brush(g, [[0, 8], [W, 8]], 1.8, { tip: 1 });
+  for (const x of [150, 1760]) {
+    paint(g, region([[x - 4, 40], [x + 4, 40], [x + 4, barY(x) + 4], [x - 4, barY(x) + 4]]), INK);
+    brush(g, oval(x, barY(x), 13, 13, 0, TAU, 20), 3, { tip: 1 });
+  }
+  // the drying pole: sunlit above, solid ink below
+  const pole = region([[-10, barY(-10) - 8], [W + 10, barY(W + 10) - 8], [W + 10, barY(W + 10) + 8], [-10, barY(-10) + 8]]);
+  paint(g, pole, PAPER);
+  paint(g, region([[-10, barY(-10) + 1], [W + 10, barY(W + 10) + 1], [W + 10, barY(W + 10) + 8], [-10, barY(-10) + 8]]), INK);
+  brush(g, [[-10, barY(-10) - 8], [W + 10, barY(W + 10) - 8]], 2.6, { tip: 1 });
+  brush(g, [[-10, barY(-10) + 8], [W + 10, barY(W + 10) + 8]], 2.6, { tip: 1 });
+}
+function paintRailing(g) {
+  // the top rail in the sun and a row of bars, each with a dark edge
+  paint(g, region([[0, RAIL.top], [W, RAIL.top], [W, RAIL.foot], [0, RAIL.foot]]), PAPER);
+  paint(g, region([[0, RAIL.foot - 7], [W, RAIL.foot - 7], [W, RAIL.foot], [0, RAIL.foot]]), INK);
+  for (const y of [RAIL.top, RAIL.face]) brush(g, [[0, y], [W, y]], y === RAIL.top ? 3.2 : 2, { tip: 1 });
+  for (let x = 22; x < W; x += RAIL.pitch) {
+    paint(g, region([[x, RAIL.foot], [x + RAIL.bar, RAIL.foot], [x + RAIL.bar, H], [x, H]]), PAPER);
+    paint(g, region([[x + RAIL.bar - 4, RAIL.foot], [x + RAIL.bar, RAIL.foot], [x + RAIL.bar, H], [x + RAIL.bar - 4, H]]), INK);
+    brush(g, [[x, RAIL.foot], [x, H + 4]], 2.4, { tip: 1 });
+    brush(g, [[x + RAIL.bar, RAIL.foot], [x + RAIL.bar, H + 4]], 2.4, { tip: 1 });
+  }
+}
+
+// The laundry. Each item hangs from a hook on the pole (local origin), points in px, +y down.
+// Parts are drawn in order: fill (paper, a dot level or ink), then an optional brush line.
+const TEE = (() => {
+  const half = [[0, 46], [18, 42], [30, 30], [64, 38], [108, 54], [150, 90], [172, 118], [142, 150], [110, 128], [110, 240], [112, 350], [58, 356], [0, 358]];
+  const body = smooth(both(half).slice(0, -1));
+  return { x: 290, len: 360, amp: 0.05, freq: 1 / 2.2, ph: 0.4, flut: 6, parts: [
+    { pts: body, fill: 'paper', sil: true },
+    { pts: body, fill: T3 },
+    { pts: smooth([[-30, 30], [0, 22], [30, 30], [18, 42], [0, 46], [-18, 42]]), fill: 'ink' },
+    // fold shadows hanging from the armpits, thick at the seam and thinning to nothing
+    { pts: smooth([[-106, 130], [-84, 196], [-62, 258], [-46, 318]], false), line: 1, width: u => 15 * (1 - u) ** 1.1 + 0.4, tip: 1 },
+    { pts: smooth([[-100, 146], [-90, 190], [-80, 236]], false), line: 1, width: u => 8 * (1 - u) + 0.4, tip: 1 },
+    { pts: smooth([[104, 132], [86, 204], [74, 270], [72, 330]], false), line: 1, width: u => 15 * (1 - u) ** 1.1 + 0.4, tip: 1 },
+    { pts: smooth([[98, 150], [92, 196], [90, 238]], false), line: 1, width: u => 8 * (1 - u) + 0.4, tip: 1 },
+    { pts: smooth([[-150, 96], [-130, 112], [-112, 126], [-128, 104]]), fill: 'ink' },
+    { pts: body, line: 3.2 },
+    { pts: smooth([[-30, 64], [-6, 160], [10, 260]], false), line: 2, color: PAPER },
+    { pts: smooth([[30, 70], [40, 150], [34, 250]], false), line: 1.8, color: PAPER },
+  ] };
+})();
+const SHIRT = (() => {
+  const body = smooth(both([[0, 30], [32, 30], [42, 38], [122, 62], [128, 160], [118, 300], [118, 438], [92, 456], [44, 472], [0, 476]]).slice(0, -1));
+  const sleeve = s => smooth([[s * 116, 60], [s * 150, 104], [s * 162, 250], [s * 164, 380], [s * 132, 394], [s * 126, 260], [s * 118, 120]]);
+  const cuff = s => smooth([[s * 164, 350], [s * 132, 362]], false);
+  return { x: 660, len: 480, amp: 0.048, freq: 1 / 1.9, ph: 2.1, flut: 10, parts: [
+    { pts: body, fill: 'paper', sil: true },
+    { pts: smooth([[-40, 40], [0, 54], [40, 40], [30, 120], [0, 130], [-30, 120]]), fill: T1 },
+    { pts: smooth([[-110, 170], [-80, 260], [-70, 420], [-100, 440], [-112, 300]]), fill: T1 },
+    { pts: smooth([[86, 120], [70, 260], [96, 430], [112, 300]]), fill: T2 },
+    { pts: body, line: 3.2 },
+    { pts: smooth([[-30, 30], [0, 26], [30, 30], [24, 66], [0, 52], [-24, 66]]), fill: 'paper' },
+    { pts: smooth([[-30, 30], [0, 26], [30, 30], [24, 66], [0, 52], [-24, 66]]), line: 2.6 },
+    { pts: [[0, 54], [0, 470]], line: 2.2 },
+    { pts: [[-84, 128], [-44, 128], [-44, 180], [-84, 180], [-84, 128]], line: 2 },
+    { pts: smooth([[-44, 64], [-70, 200], [-76, 330]], false), line: 2 },
+    { pts: smooth([[54, 70], [60, 220], [84, 400]], false), line: 2 },
+    { pts: sleeve(-1), fill: 'paper', sil: true }, { pts: sleeve(-1), line: 3 }, { pts: cuff(-1), line: 2.2 },
+    { pts: smooth([[-150, 140], [-146, 250], [-152, 340], [-136, 330], [-134, 230], [-138, 140]]), fill: T1 },
+    { pts: sleeve(1), fill: 'paper', sil: true },
+    { pts: smooth([[136, 120], [146, 250], [150, 350], [160, 340], [158, 200], [148, 110]]), fill: T2 },
+    { pts: sleeve(1), line: 3 }, { pts: cuff(1), line: 2.2 },
+    ...[110, 170, 230, 290, 350, 410].map(y => ({ pts: oval(-1, y, 4, 4, 0, TAU, 10), line: 1.6 })),
+  ] };
+})();
+const TOWEL = (() => {
+  // a flat rectangle folded over the pole, its hem a little wavy
+  const body = join([[-114, -8], [114, -8]], smooth([[114, -8], [118, 160], [116, 330]], false, 8),
+    smooth([[116, 330], [60, 336], [0, 330], [-60, 338], [-116, 332]], false, 8), smooth([[-116, 332], [-119, 160], [-114, -8]], false, 8));
+  return { x: 1300, len: 340, amp: 0.044, freq: 1 / 2.4, ph: 4.0, flut: 11, parts: [
+    { pts: body, fill: 'paper', sil: true },
+    { pts: body, fill: T2 },
+    { pts: [[-120, 270], [120, 270], [120, 284], [-120, 284]], fill: 'paper' },
+    { pts: [[-120, 296], [120, 296], [120, 304], [-120, 304]], fill: 'paper' },
+    { pts: body, line: 3 },
+    { pts: smooth([[-40, 8], [-34, 140], [-46, 320]], false), line: 2 },
+    { pts: smooth([[50, 8], [58, 160], [48, 320]], false), line: 2 },
+    ...[-100, -70, -40, -10, 20, 50, 80, 104].map(x => ({ pts: [[x, 330], [x + 1, 346]], line: 1.8 })),
+    ...[-96, 96].map(x => ({ pts: [[x - 6, -24], [x + 6, -24], [x + 6, 14], [x - 6, 14]], fill: 'paper' })),
+    ...[-96, 96].map(x => ({ pts: [[x - 6, -24], [x + 6, -24], [x + 6, 14], [x - 6, 14], [x - 6, -24]], line: 2.2 })),
+  ] };
+})();
+const SOCKS = (() => {
+  const sock = s => smooth([[s - 18, 62], [s + 18, 62], [s + 20, 170], [s + 34, 196], [s + 30, 222], [s - 4, 214], [s - 20, 182]]);
+  return { x: 1640, len: 230, amp: 0.07, freq: 1 / 1.6, ph: 5.2, flut: 4, parts: [
+    { pts: [[0, -12], [0, 40]], line: 2.6, color: PAPER },
+    { pts: oval(0, 46, 70, 12, 0, TAU, 32), line: 3, color: PAPER },
+    ...[-40, 40].flatMap(s => [
+      { pts: sock(s), fill: 'paper', sil: true }, { pts: sock(s), line: 2.8 },
+      { pts: smooth([[s - 18, 160], [s + 18, 150], [s + 20, 176], [s - 14, 182]]), fill: T1 },
+      { pts: [[s - 8, 42], [s + 8, 42], [s + 8, 76], [s - 8, 76]], fill: 'paper' },
+      { pts: [[s - 8, 42], [s + 8, 42], [s + 8, 76], [s - 8, 76], [s - 8, 42]], line: 2.2 },
+    ]),
+  ] };
+})();
+const LAUNDRY = [TEE, SHIRT, TOWEL, SOCKS];
+const gust = t => 0.9 + 0.1 * Math.sin(TAU * 0.21 * (t - TL.two) - 0.6);
+function sway(it, t) { return it.amp * gust(t) * Math.sin(TAU * it.freq * (t - TL.two) + it.ph); }
+function hang(it, t) {
+  // the hanger turns a few degrees about its hook, the cloth lags a little lower down and the hem flutters
+  const th = sway(it, t), hx = it.x, hy = barY(it.x), w = gust(t);
+  return ([x, y]) => {
+    const v = clamp(y / it.len), a = th * (1 + 0.25 * v), c = Math.cos(a), s = Math.sin(a);
+    const fl = it.flut * w * v * v * Math.sin(TAU * 1.7 * t + 5 * v + x * 0.02 + it.ph);
+    return [hx + x * c - y * s + fl, hy + x * s + y * c + fl * 0.15];
+  };
+}
+function drawItem(g, it, t) {
+  const at = hang(it, t);
+  // the wire hook over the pole
+  brush(g, oval(it.x, barY(it.x) - 2, 9, 9, Math.PI * 0.95, Math.PI * 2.3, 14), 2.6, { tip: 0.6 });
+  for (const p of it.parts) {
+    const pts = p.pts.map(at);
+    if (p.fill) paint(g, region(pts), p.fill === 'paper' ? PAPER : p.fill === 'ink' ? INK : dots(p.fill));
+    if (p.line) brush(g, pts, p.line, { tip: p.tip ?? 0.4, taper: 30, color: p.color, width: p.width });
+  }
+}
+function itemShadow(g, it, t) {
+  const at = hang(it, t), p = new Path2D();
+  for (const part of it.parts) if (part.sil) {
+    const pts = part.pts.map(at);
+    p.moveTo(pts[0][0] + SHADE[0], pts[0][1] + SHADE[1]);
+    for (const q of pts) p.lineTo(q[0] + SHADE[0], q[1] + SHADE[1]);
+    p.closePath();
+  }
+  castShadow(g, p);
+}
+let BACK = null, FRONT = null;
+function shotTwo(g, t) {
+  g.drawImage(BACK, 0, 0);
+  for (const it of LAUNDRY) itemShadow(g, it, t);
+  for (const it of LAUNDRY) drawItem(g, it, t);
+  g.drawImage(FRONT, 0, 0);
+}
+
+/* ------------------------------------------------------------ transitions */
+// Through ink: a soft diagonal front of dots on the screen grid, eased in and out. Ahead of it the lane,
+// inside it a narrow core where the dots fuse into solid ink, behind it the dots shrink away off the
+// balcony. The fringes on both sides are wide graded bands, so the ink never slams across the frame.
+const SLANT = 0.40, CORE = 10, FRINGE = 600, ENTRY = 260;
+function frontRadius(d, amp) {
+  const k = clamp((Math.abs(d) - CORE) / FRINGE);
+  return FULL * 1.04 * amp * (1 - ease(k)) ** 2;
+}
+function inkFront(g, t) {
+  // mostly steady travel with only a little easing, so the band never whips across the middle of the frame
+  const k = ramp(t, ...TL.front), F = mix(-ENTRY, W + SLANT * H + ENTRY, mix(k, ease(k), 0.35));
+  const amp = ease(clamp(Math.min(k, 1 - k) / 0.15));   // the band breathes in at the start and out at the end
+  shotOne(g, t);
+  g.save();
+  g.clip(region([[-10, -10], [F + 10 * SLANT + 10, -10], [F - SLANT * (H + 10), H + 10], [-10, H + 10]]));
+  shotTwo(g, t);
+  g.restore();
+  const reach = CORE + FRINGE;
+  field(g, [Math.max(0, F - reach - SLANT * H), 0, Math.min(W, F + reach), H], (x, y) => {
+    const d = x + SLANT * y - F;
+    return Math.abs(d) >= reach ? 0 : frontRadius(d, amp);
+  });
+}
+// Through paper: paper dots grow in the gaps of the balcony's screen, the top of the frame first.
+function paperBreak(g, t) {
+  shotTwo(g, t);
+  const k = ramp(t, ...TL.paper);
+  g.save(); g.translate(CELL / 2, 0);
+  field(g, [-CELL, 0, W, H], (x, y) => FULL * 1.1 * ease(clamp(k * 1.7 - (y / H) * 0.7)), PAPER);
+  g.restore();
+}
+
+/* ------------------------------------------------------------ shot 3: evening rooftops and the title */
+const SKY_W = W + 40, ROOF_W = W + 60;       // sky drifts 1 px every sixth frame, the roofs 1 px every third
+const DUSK = { paper: 440, solid: 0 };       // the sky's dots start at `paper` (well clear of the title) and fuse into solid ink at the top edge
+const MOON = { x: 1330, y: 168, r: 60, bite: [17, -11, 56] };   // a thin crescent, opening up and to the right
+const LAYOUT = { size: 176, x: 340, base: 565 };
+function skyRadius(y) { return FULL * 1.12 * clamp((DUSK.paper - y) / (DUSK.paper - DUSK.solid)) ** 1.25; }
+// The crescent: the moon's disc with a bite taken out, cut from the dots as paper, with its own contour.
+function paintMoon(g, line) {
+  const [dx, dy, r2] = MOON.bite, disc = new Path2D(), bite = new Path2D(), outside = new Path2D();
+  disc.arc(MOON.x, MOON.y, MOON.r, 0, TAU);
+  bite.arc(MOON.x + dx, MOON.y + dy, r2, 0, TAU);
+  outside.rect(MOON.x - 200, MOON.y - 200, 400, 400); outside.arc(MOON.x + dx, MOON.y + dy, r2, 0, TAU);
+  g.save(); g.clip(outside, 'evenodd');
+  paint(g, disc, PAPER);
+  if (line) { g.lineWidth = 3; g.strokeStyle = line; g.stroke(disc); }
+  g.restore();
+  if (line) { g.save(); g.clip(disc); g.lineWidth = 2.4; g.strokeStyle = line; g.stroke(bite); g.restore(); }
+}
+function paintSky(g, ink, line) {
+  field(g, [0, 0, SKY_W, DUSK.paper], (x, y) => ink.rad(skyRadius(y), 'g2'));
+  paintMoon(g, line);
+}
+// The skyline: one ink silhouette. A gable with its ridge tile and an antenna on the left, low roofs under
+// the title, a utility pole and an apartment block with a water tank on the right, lit windows cut out of it,
+// and the nearer roofs picked out by thin paper rims. Under the ink every shape is also drawn as a brush
+// contour, so when the ink recedes at the end the town is left as line art.
+const SKYLINE = [[-20, 612], [-10, 604], [20, 584], [146, 486], [142, 476], [156, 466], [170, 476], [166, 486], [296, 584], [326, 604], [334, 612],
+  [318, 612], [318, 700], [346, 700], [412, 668], [600, 668], [664, 700], [652, 706], [720, 676], [880, 676], [940, 708], [930, 708], [930, 694],
+  [1040, 694], [1040, 682], [1090, 682], [1090, 694], [1160, 694], [1160, 712], [1148, 716], [1290, 686], [1432, 716], [1420, 716],
+  [1420, 724], [1700, 724], [1700, 500], [1792, 500], [1792, 492], [ROOF_W + 10, 492], [ROOF_W + 10, H + 10], [-20, H + 10]];
+const RIMS = [
+  [[-20, 842], [96, 790], [520, 790], [644, 846]], [[602, 884], [770, 800], [938, 884]], [[900, 826], [1316, 826], [1400, 858]],
+  [[1296, 914], [1500, 846], [1716, 914]], [[1700, 500], [1700, 830]],
+];
+const INNER = [
+  [[-10, 612], [334, 612]], [[318, 700], [318, 790]], [[30, 612], [30, 820]],
+  [[346, 700], [664, 700]], [[364, 700], [364, 790]], [[648, 700], [648, 862]],
+  [[652, 708], [940, 708]], [[930, 708], [930, 826]], [[930, 704], [1160, 704]],
+  [[1148, 716], [1432, 716]], [[1172, 716], [1172, 826]], [[1408, 716], [1408, 838]], [[1420, 734], [1700, 734]],
+  [[1700, 540], [ROOF_W + 10, 540]], [[1700, 640], [ROOF_W + 10, 640]], [[1700, 740], [ROOF_W + 10, 740]],
+  [[150, 818], [150, H + 10]], [[500, 790], [500, H + 10]], [[700, 842], [700, H + 10]], [[860, 842], [860, H + 10]],
+  [[1150, 826], [1150, H + 10]], [[1380, 873], [1380, H + 10]], [[1640, 893], [1640, H + 10]],
+];
+const LIT = [[84, 628, 66, 50, 1], [500, 718, 40, 30, 0], [990, 742, 56, 38, 0], [1900, 560, 48, 54, 0], [1080, 900, 60, 40, 1]];
+const POLE3 = 1640;
+function paintRoofs(g, ink, line) {
+  const fill = ink.solid(), P = POLE3;
+  // the ink masses: the town, the pole, its crossarm and drum, the water tank
+  const land = region(SKYLINE);
+  paint(g, land, PAPER);
+  paint(g, land, fill);
+  const pole = [[P - 6, 356], [P + 6, 356], [P + 9, H + 10], [P - 9, H + 10]], arm = [[P - 60, 386], [P + 60, 386], [P + 60, 394], [P - 60, 394]];
+  const drum = join(oval(P + 30, 450, 20, 5, Math.PI, TAU, 10), oval(P + 30, 500, 20, 5, 0, Math.PI, 10));
+  const tank = join(oval(1910, 390, 70, 12, Math.PI, TAU, 16), oval(1910, 442, 70, 12, 0, Math.PI, 16));
+  for (const shape of [pole, arm, drum, tank]) paint(g, region(shape), fill);
+  for (const [x, y, w, h, curtain] of LIT) {
+    paint(g, region([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]), PAPER);
+    if (curtain) paint(g, region([[x, y], [x + w * 0.46, y], [x + w * 0.38, y + h], [x, y + h]]), ink.tone(T1));
+  }
+  // the nearer roofs catch the last light just above their edges
+  if (fill) {
+    for (const r of RIMS) brush(g, r.map(([x, y]) => [x + 3, y - 4]), 2.4, { tip: 0.4, taper: 50, color: PAPER });
+    for (let x = 140; x < 500; x += 46) brush(g, [[x, 800], [x - 16, 860]], 1.8, { tip: 0.3, taper: 20, color: PAPER });
+  }
+  if (!line) return;
+  // the contours
+  outline(g, SKYLINE.slice(0, -2), 4, { every: 1, tip: 0.55, taper: 14, color: line });
+  for (const l of INNER) brush(g, l, 2.8, { tip: 0.35, taper: 40, color: line });
+  for (const r of RIMS) brush(g, r, 3.4, { tip: 0.4, taper: 50, color: line });
+  outline(g, join(pole, [pole[0]]), 3, { every: 1, tip: 0.6, color: line });
+  outline(g, join(arm, [arm[0]]), 2.6, { every: 1, tip: 0.7, color: line });
+  brush(g, join(drum, [drum[0]]), 2.2, { tip: 1, color: line });
+  brush(g, join(tank, [tank[0]]), 2.6, { tip: 1, color: line });
+  brush(g, oval(1910, 390, 70, 12, 0, Math.PI, 16), 2, { tip: 0.5, color: line });
+  for (const x of [1850, 1874, 1946, 1970]) brush(g, [[x, 492], [x + (x < 1910 ? 6 : -6), 450]], 3.6, { tip: 1, color: line });
+  brush(g, [[1862, 466], [1958, 466]], 2.6, { tip: 1, color: line });
+  // antenna on the gable: a mast, a boom and its row of elements
+  brush(g, [[200, 500], [200, 352]], 3.4, { tip: 1, color: line });
+  brush(g, [[136, 376], [270, 376]], 3, { tip: 1, color: line });
+  for (let x = 142; x <= 266; x += 13) brush(g, [[x - 4, 368], [x + 4, 384]], 2.4, { tip: 1, color: line });
+  brush(g, [[170, 414], [230, 414]], 2.6, { tip: 1, color: line });
+  // wires sweeping off to the right
+  for (const [a, b, sag] of [[[P - 54, 382], [ROOF_W + 20, 330], 46], [[P + 54, 382], [ROOF_W + 20, 370], 30]]) brush(g, wirePath(a, b, sag), 2.6, { tip: 1, color: line });
+  for (const [x, y, w, h, curtain] of LIT) {
+    outline(g, [[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]], 2.2, { every: 1, tip: 0.7, color: line });
+    if (curtain) brush(g, [[x + w * 0.46, y], [x + w * 0.38, y + h]], 2, { tip: 0.6, color: line });
+    const m = x + w / 2 + (curtain ? 6 : 0);
+    brush(g, [[m, y], [m, y + h]], 2.4, { tip: 1, color: line });
+  }
+}
+// The ladder radius of the evening shot: up as it lays in, then down to nothing for the final outlines.
+const RMAX = FULL * 1.1;
+function duskR(t) { return t < TL.fall[0] ? RMAX * ease(ramp(t, ...TL.rise)) : RMAX * (1 - ease(ramp(t, ...TL.fall))); }
+const lineR = t => RMAX * ease(ramp(t, ...TL.lines));
+const titleR = t => RMAX * ease(ramp(t, ...TL.title));
+// The accent: one low marker stroke under the words, from just above the baseline into the descender zone,
+// tilted 1.5 degrees down to the right. It lands on a small pooled blob, runs flat, and runs dry into a few
+// broken, tapering streaks; while it is being drawn its front is the slanted, slightly rounded chisel nib.
+let STROKE = null;
+function markerStroke(x0, x1, top, h) {
+  const rnd = xorshift(29), a = 1.5 * Math.PI / 180, L = x1 - x0, ca = Math.cos(a), sa = Math.sin(a);
+  const at = (u, v) => [x0 + u * ca - v * sa, top + u * sa + v * ca];
+  const wob = [rnd() * TAU, rnd() * TAU];
+  const edgeV = (u, side) => side ? h + 1.2 * Math.sin(u / 47 + wob[1]) : 1.2 * Math.sin(u / 61 + wob[0]);
+  const p = new Path2D(), poly = pts => { const q = pts.map(([u, v]) => at(u, v)); p.moveTo(...q[0]); for (const r of q.slice(1)) p.lineTo(...r); p.closePath(); };
+  // the pooled start
+  const egg = [];
+  for (let i = 0; i < 32; i++) { const a = i / 32 * TAU; egg.push([h * 0.52 + h * 0.62 * Math.cos(a), h * 0.5 + h * 0.545 * Math.sin(a) * (1 - 0.18 * Math.cos(a))]); }
+  poly(egg);
+  // the body, ending in a chisel edge where the felt starts to run dry
+  const end = L * 0.8, upper = [], bot = [];
+  for (let i = 0; i <= 40; i++) { const u = mix(h * 0.3, end, i / 40); upper.push([u, edgeV(u, 0)]); bot.push([u, edgeV(u, 1)]); }
+  poly([...upper, [end + h * 0.18, edgeV(end, 0) + 2], [end - h * 0.18, edgeV(end, 1)], ...bot.reverse()]);
+  // the dry finish: four streaks of unequal length, some broken, each tapering to a point
+  for (const [vc, th, len, gap] of [[0.13, 0.17, 0.91, 0], [0.38, 0.24, 0.97, 0.88], [0.63, 0.2, 0.86, 0], [0.87, 0.15, 0.93, 0.84]]) {
+    const u0 = end - h * 0.2, u1 = L * len, c = vc * h, t2 = th * h / 2;
+    const dashes = gap ? [[u0, L * gap], [L * gap + 9 + rnd() * 8, u1]] : [[u0, u1]];
+    for (const [s0, s1] of dashes) poly([[s0, c - t2], [mix(s0, s1, 0.7), c - t2 * 0.8], [s1, c + t2 * 0.1], [mix(s0, s1, 0.7), c + t2 * 0.8], [s0, c + t2]]);
+  }
+  // the nib's front at reveal position u: slanted about 20 degrees, its two corners rounded off
+  const nib = u => {
+    const pts = [[-200, -60]];
+    for (let v = -60; v <= h + 60; v += 3) {
+      const corner = Math.min(Math.abs(v), Math.abs(v - h)), round = v < 0 || v > h ? 6 : 6 * (1 - ease(clamp(corner / 7)));
+      pts.push([u + (v - h / 2) * Math.tan(20 * Math.PI / 180) - round, v]);
+    }
+    pts.push([-200, h + 60]);
+    return region(pts.map(([uu, vv]) => at(uu, vv)));
+  };
+  return { x0, x1, L, h, path: p, nib };
+}
+let TEXT = null, MARK = null, SCRATCH = null;
+// Draw `layer` through the shared title screen of radius r; `op` is how it lands on the frame.
+function throughScreen(g, layer, r, op = 'source-over') {
+  if (r < 0.2) return;
+  let src = layer;
+  if (r < FULL) {
+    const s = SCRATCH.getContext('2d');
+    s.globalCompositeOperation = 'copy'; s.drawImage(layer, 0, 0);
+    s.globalCompositeOperation = 'destination-in'; s.fillStyle = dots(r); s.fillRect(0, 0, W, H);
+    s.globalCompositeOperation = 'source-over';
+    src = SCRATCH;
+  }
+  g.save(); g.globalCompositeOperation = op; g.drawImage(src, 0, 0); g.restore();
+}
+let SKY = null, ROOFS = null;
+function shotThree(g, t) {
+  // the drift stops when the ink has gone and the outlines hold
+  const n = Math.min(frameOf(t), frameOf(TL.fall[1])) - frameOf(TL.three), skyOff = Math.floor(n / 6), roofOff = Math.floor(n / 3);
+  const R = duskR(t), lr = lineR(t);
+  if (R >= RMAX - 1e-6) { g.drawImage(SKY, -skyOff, 0); g.drawImage(ROOFS, -roofOff, 0); }
+  else {
+    const ink = new Ink(undefined, R), line = lr >= RMAX - 1e-6 ? INK : dots(lr);
+    g.save(); g.translate(-skyOff, 0); paintSky(g, ink, line); g.restore();
+    g.save(); g.translate(-roofOff, 0); paintRoofs(g, ink, line); g.restore();
+  }
+  // the marker stroke under the words, then the words over it
+  const k = ease(ramp(t, ...TL.swipe));
+  if (k > 0) {
+    const m = MARK.getContext('2d');
+    m.clearRect(0, 0, W, H);
+    m.save();
+    if (k < 1) m.clip(STROKE.nib(-STROKE.h + k * (STROKE.L + 2 * STROKE.h)));
+    m.fillStyle = MARKER; m.globalAlpha = 0.9; m.fill(STROKE.path);
+    m.restore();
+    g.save(); g.globalCompositeOperation = 'multiply'; g.drawImage(MARK, 0, 0); g.restore();
+  }
+  throughScreen(g, TEXT, titleR(t));
+}
+
+/* ------------------------------------------------------------ shot drawing */
+let LANE = null, POLE = null;
+function laneState(t) { return new Ink({ g1: ease(ramp(t, ...TL.lay[0])), g2: ease(ramp(t, ...TL.lay[1])), g3: ease(ramp(t, ...TL.lay[2])) }); }
+function shotOne(g, t) {
+  const n = frameOf(t), laneOff = n, poleOff = 2 * n;
+  const ink = t < TL.lay[2][1] ? laneState(t) : DONE;
+  if (ink === DONE) g.drawImage(LANE, -laneOff, 0);
+  else { g.save(); g.translate(-laneOff, 0); paintLane(g, ink); g.restore(); }
+  const list = wires(t, poleOff, laneOff);
+  drawWires(g, list);
+  const px = POLE_X - POLE_W / 2;
+  if (ink === DONE) g.drawImage(POLE, px - poleOff, 0);
+  else { g.save(); g.translate(-poleOff, 0); paintPole(g, ink); g.restore(); }
+  // the crow rides the perch wire until it lifts off
+  const wire = list[PERCH.wire], perch = wire[Math.round(PERCH.at * 40)], SC = 0.9;
+  const flick = Math.sin(Math.PI * ramp(t, 1.08, 1.3)) * 0.05;
+  if (t < TL.lift) crowPerched(g, ink, perch[0], perch[1] - 1, SC, ease(ramp(t, ...TL.crouch)), flick);
+  else if (t < TL.lift + TL.fly) {
+    const lift = wires(TL.lift, 2 * frameOf(TL.lift), frameOf(TL.lift))[PERCH.wire][Math.round(PERCH.at * 40)];
+    const f = crowFlight(t, [lift[0] - (poleOff - 2 * frameOf(TL.lift)) * 0.7, lift[1]]);
+    crowFlying(g, f.x, f.y, SC, f.flap, f.pitch);
+  }
+}
+
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+  if (t < TL.front[0]) shotOne(ctx, t);
+  else if (t < TL.front[1]) inkFront(ctx, t);
+  else if (t < TL.paper[0]) shotTwo(ctx, t);
+  else if (t < TL.three) paperBreak(ctx, t);
+  else shotThree(ctx, t);
+}
+
+window.draw = function ({ t }) { render(t); const u = cv.toDataURL('image/jpeg', 0.92); return u.slice(u.indexOf(',') + 1); };
+
+window.events = function () {
+  const r3 = v => Math.round(v * 1000) / 1000, pan = x => r3(clamp((x - W / 2) / (W / 2), -1, 1)), ev = [];
+  ev.push({ k: 'bed', t: 0, end: DUR });
+  // the lane's tones burnished in, light dots, mid dots and rules, then solid ink
+  TL.lay.forEach(([a, b], i) => ev.push({ k: 'lay', t: a, d: r3(b - a), v: [0.55, 0.8, 1][i], p: [-0.35, 0.05, 0.3][i] }));
+  // the crow: the wire creaks as it crouches, one whoosh per downstroke, then the wire hums as it wobbles
+  const n0 = frameOf(TL.lift), perch = wires(TL.lift, 2 * n0, n0)[PERCH.wire][Math.round(PERCH.at * 40)];
+  ev.push({ k: 'creak', t: TL.crouch[0], d: r3(TL.crouch[1] - TL.crouch[0]), p: pan(perch[0]) });
+  for (let i = 0; i < 4; i++) {
+    const t = TL.lift + i * TL.beat + 0.03, f = crowFlight(t, perch);
+    ev.push({ k: 'wing', t: r3(t), d: r3(TL.beat * 0.5), v: r3(1 - 0.16 * i), p: pan(f.x) });
+  }
+  ev.push({ k: 'thrum', t: TL.lift, d: 1.5, hz: 2.7, p: pan(perch[0]) });
+  ev.push({ k: 'swell', t: TL.front[0], d: r3(TL.front[1] - TL.front[0]), dark: 1 });
+  // the breeze in the laundry: how hard the cloth is moving, frame by frame
+  const env = [];
+  for (let n = frameOf(TL.front[0]); n <= frameOf(TL.paper[1]); n++) {
+    const t = n / FPS;
+    let m = 0;
+    for (const it of LAUNDRY) m += Math.abs(sway(it, t + 1 / 60) - sway(it, t - 1 / 60)) * FPS / (TAU * it.freq * it.amp);
+    env.push(r3(gust(t) * (0.45 + 0.55 * m / LAUNDRY.length)));
+  }
+  ev.push({ k: 'cloth', t: r3(frameOf(TL.front[0]) / FPS), rate: FPS, env });
+  ev.push({ k: 'swell', t: TL.paper[0], d: r3(TL.paper[1] - TL.paper[0]), dark: 0 });
+  ev.push({ k: 'lay', t: TL.lines[0], d: r3(TL.rise[1] - TL.lines[0]), v: 0.9, p: 0 });
+  ev.push({ k: 'drone', t: TL.rise[0], end: DUR });
+  ev.push({ k: 'bell', t: r3(TL.title[0] + 0.05), p: pan(LAYOUT.x + 560) });
+  ev.push({ k: 'marker', t: TL.swipe[0], d: r3(TL.swipe[1] - TL.swipe[0]), p0: pan(STROKE.x0), p1: pan(STROKE.x1) });
+  ev.push({ k: 'unlay', t: TL.fall[0], d: r3(TL.fall[1] - TL.fall[0]) });
+  ev.push({ k: 'fade', t: TL.fall[0], end: DUR });
+  return ev.sort((a, b) => a.t - b.t);
+};
+
+window.ready = (async () => {
+  await document.fonts.load(`600 150px ${SERIF}`);
+  await document.fonts.ready;
+  LANE = sheet(LANE_W, H); paintLane(LANE.getContext('2d'), DONE);
+  POLE = sheet(POLE_W, H);
+  { const g = POLE.getContext('2d'); g.translate(-(POLE_X - POLE_W / 2), 0); POLE_ENDS = paintPole(g, DONE); }
+  BACK = sheet(W, H); paintBalconyBack(BACK.getContext('2d'));
+  FRONT = sheet(W, H); paintRailing(FRONT.getContext('2d'));
+  SKY = sheet(SKY_W, H); paintSky(SKY.getContext('2d'), DONE, INK);
+  ROOFS = sheet(ROOF_W, H); paintRoofs(ROOFS.getContext('2d'), DONE, INK);
+  // the title, set once; the swipe sits behind its lowercase band
+  TEXT = sheet(W, H); MARK = sheet(W, H); SCRATCH = sheet(W, H);
+  const tg = TEXT.getContext('2d');
+  tg.font = `600 ${LAYOUT.size}px ${SERIF}`; tg.fillStyle = INK; tg.textBaseline = 'alphabetic';
+  tg.fillText(TITLE, LAYOUT.x, LAYOUT.base);
+  const m = tg.measureText(TITLE), x0 = LAYOUT.x + m.actualBoundingBoxLeft * -1, x1 = LAYOUT.x + m.actualBoundingBoxRight;
+  STROKE = markerStroke(x0 - 4, x1 + 26, LAYOUT.base + 3, 45);
+})();
+</script>
+</body></html>
