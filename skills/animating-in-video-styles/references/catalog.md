@@ -139,7 +139,7 @@ Type- and rhythm-driven pieces.
 Glossy materials, glass, and light.
 
 - `classical-collage` **Classical Collage** — White-field collage of classical engravings. Best for fast brand and product announcements that look print-editorial · product, titles, social · Inspired by the Claude Opus 5.5 ad posted by Leon Lin (@LexnLin) · Inspired by the engraved plates of Andreas Vesalius, Albrecht Dürer, Leonardo da Vinci and Johannes Hevelius · *no recipe yet*
-- `liquid-glass` **Liquid Glass** — Refractive glass morphing over a glowing aurora. Best for premium product reveals, feature launches, and polished title cards · product, titles · *WebGL* · *no recipe yet*
+- `liquid-glass` **Liquid Glass** — Refractive glass morphing over a glowing aurora. Best for premium product reveals, feature launches, and polished title cards · product, titles · *WebGL*
 - `liquid-motion` **Liquid Motion** — Gooey blobs in warm flowing gradients. Best for wellness brands, calm title cards, and soft product intros · titles, product · *WebGL* · *no recipe yet*
 - `reel-chrome` **Reel Chrome** — Ember title card, studio chrome. Best for reels, openers and identity title cards · titles, social · Inspired by the "Claude motion reel" teaser posted by @Saccc_c · *no recipe yet*
 
