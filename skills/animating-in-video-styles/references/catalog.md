@@ -74,7 +74,7 @@ Physical materials: paper, graphite, ink, clay.
 - `collage` **Mixed-Media Collage** — Torn paper, tape and halftone cutouts. Best for manifestos, handmade brands, and scroll-stopping social posts · story, social · *no recipe yet*
 - `neon-sign` **Neon Sign** — Glass tubes buzzing on wet brick. Best for night-time titles, venue openers, and moody channel intros · titles · *no recipe yet*
 - `origami` **Origami** — Folded paper, crisp creases, soft shadows. Best for step-by-step explainers, transformations and gentle brand stories · explainer, story · *WebGL* · *no recipe yet*
-- `paper-cutout` **Paper Cutout** — Layered cardboard diorama. Best for storytelling and emotional openings · story, titles · Originally developed by Yasin Özmen · *no recipe yet*
+- `paper-cutout` **Paper Cutout** — Layered cardboard diorama. Best for storytelling and emotional openings · story, titles · Originally developed by Yasin Özmen
 - `pencil-sketch` **Pencil Sketch** — Graphite sketchbook. Best for showing how an idea develops · story, explainer · Originally developed by Yasin Özmen · *no recipe yet*
 - `picture-book` **Picture Book** — Gouache storybook with turning pages. Best for bedtime-gentle stories, fables, and warm step-by-step lessons · story, tutorial · *no recipe yet*
 - `risograph` **Risograph** — Fluorescent overprint with halftone dots. Best for event posters, bold titles, and punchy social hooks · social, titles
