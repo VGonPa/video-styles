@@ -22,6 +22,8 @@ length and possibly in 9:16, that a viewer would recognise as this style.
   review.md. Re-render once with a stand-in subject of another silhouette (taller, or not a vehicle) and say
   which values depend on the demo subject's shape. Give only values you rendered; if you could not test one, say so. Untested format advice was the
   most common serious error in the pilot recipes.
+- **Check every soundtrack you make** with `python3 skills/animating-in-video-styles/scripts/check_audio.py
+  audio.wav <seconds>`: most audio.py print only "ok", even for a track a NaN made silent.
 - **Derive every fact from the current code** (`styles/<slug>/anim.html` and the scripts it loads, `audio.py`,
   `render.json`, `fonts.css`). The style's original brief or PR description, when you have them, explain the
   intent; where they disagree with the code, the code wins.
@@ -124,7 +126,10 @@ that passes ±1 gives NaN and a silent track).>
   title card costs (its final hold counted from the moment everything on it has settled, ramps of brightness or
   glow included: measure it by pixel difference against the same moment with every action forced to its end
   state, ambient motion kept (see review.md), not by eye), and any helper that
-  must be removed with a dropped scene; a tested plan for 4 s if you can>
+  must be removed with a dropped scene; a tested plan for 4 s if you can. Re-time actions and their cues only:
+  ambient drift (water, clouds, idle loops) stays on film time or it visibly speeds up, and anything still
+  travelling to a destination counts as an action. Measure the demo's own ending the same way: several demos
+  hold their final state for less than 0.8 s, and a recipe that reuses their times must give a tested fix>
 - **Other formats:** <9:16 and 1:1: what recomposes easily and what does not; rendered values for the subject
   staying on screen to the end, not only for the demo's end card>
 
