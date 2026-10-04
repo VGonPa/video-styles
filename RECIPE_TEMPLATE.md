@@ -28,7 +28,8 @@ length and possibly in 9:16, that a viewer would recognise as this style.
   of the frame remains (even if painted in one tone); the 9:16 bottom caption band (y 1440–1920) may stay
   low in detail, but carries the scene's ground and texture rather than a flat fill, because without captions it
   shows, and key text stays out of the bands in
-  review.md. Re-render once with a stand-in subject of another silhouette (taller, or not a vehicle) and say
+  review.md. If bare paper is the style's ground, say so in Composition and give the test that separates deliberate
+  space from an unfinished frame (what fills the paper, where the drawing sits, how much may stay bare above it). Re-render once with a stand-in subject of another silhouette (taller, or not a vehicle) and say
   which values depend on the demo subject's shape. Give only values you rendered; if you could not test one, say so. Untested format advice was the
   most common serious error in the pilot recipes.
 - **Check every soundtrack you make** with `python3 skills/animating-in-video-styles/scripts/check_audio.py
