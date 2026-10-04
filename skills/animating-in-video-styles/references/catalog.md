@@ -112,7 +112,7 @@ Interfaces, terminals, and charts.
 - `dark-documentary` **Dark Documentary** — Cold, quiet, redacted mystery. Best for unsolved mysteries, investigations, and slow-burn true stories · story, news · Inspired by LEMMiNO · *no recipe yet*
 - `data-visualization` **Data Visualization** — Editorial charts. Best for evidence in numbers and before/after comparisons · data, news · Originally developed by Yasin Özmen · *no recipe yet*
 - `isotype` **Isotype Pictograms** — Counting people with repeated symbols. Best for honest comparisons of quantities between groups or years · data, explainer · Inspired by Otto Neurath and Gerd Arntz (Isotype) · *no recipe yet*
-- `oscilloscope` **Oscilloscope** — Green phosphor beam drawing sound. Best for tech titles, signal and sound explainers, audio-reactive openers · titles, explainer · *no recipe yet*
+- `oscilloscope` **Oscilloscope** — Green phosphor beam drawing sound. Best for tech titles, signal and sound explainers, audio-reactive openers · titles, explainer
 - `product-ui` **Product UI** — Polished SaaS app demo with cursor, zooms and callouts. Best for feature launches, app walkthroughs, and onboarding · product, tutorial · *no recipe yet*
 - `sci-fi-interface` **Sci-Fi Interface** — Cool HUD, radar, and analysis. Best for measurement, scoring, and diagnostics · data, product · Originally developed by Yasin Özmen · *no recipe yet*
 - `terminal` **Terminal** — Green phosphor command line. Best for technical processes and what happens behind the scenes · explainer, product · Originally developed by Yasin Özmen · *no recipe yet*

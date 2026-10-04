@@ -2504,7 +2504,7 @@
    "render": {
     "signal": "xy.f32"
    },
-   "recipe": false,
+   "recipe": true,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/oscilloscope-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/oscilloscope.mp4"
   },
