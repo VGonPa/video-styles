@@ -6,5 +6,8 @@ catalog/*.mp4
 **/out/
 **/__pycache__/
 
+# Videos made with the agent skill inside a clone
+projects/
+
 # Support files and working documents
 zz-support-files/

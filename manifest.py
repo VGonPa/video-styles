@@ -5,6 +5,8 @@ import hashlib
 import json
 
 ROOT = Path(__file__).resolve().parent
+# The agent skill that teaches other agents to reuse these styles (see skills/README.md).
+SKILL = ROOT / "skills" / "animating-in-video-styles"
 
 
 def load():
@@ -15,6 +17,20 @@ def load():
     numbers = [s["number"] for s in manifest["styles"]]
     assert len(numbers) == len(set(numbers)), f"duplicate style numbers: {numbers}"
     return manifest
+
+
+# Files that hold a style's own code (anim.html, its scripts, shaders, audio.py, fonts.css, render.json).
+CODE_SUFFIXES = {".html", ".js", ".mjs", ".py", ".css", ".json", ".glsl", ".frag", ".vert"}
+NOT_STYLE_CODE = {"render.mjs", "events.mjs", "meta.json", "events.json"}
+
+
+def style_sources(slug):
+    """Every file of the style's own code, in subfolders too (some styles keep scripts in js/), without the
+    shared scripts, generated files, fonts and vendored libraries."""
+    folder = ROOT / "styles" / slug
+    return sorted(f for f in folder.rglob("*")
+                  if f.is_file() and f.suffix in CODE_SUFFIXES and f.name not in NOT_STYLE_CODE
+                  and not {"vendor", "fonts"} & set(f.relative_to(folder).parts[:-1]))
 
 
 def shuffled(styles):
