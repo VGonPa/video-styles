@@ -77,7 +77,7 @@ Physical materials: paper, graphite, ink, clay.
 - `paper-cutout` **Paper Cutout** — Layered cardboard diorama. Best for storytelling and emotional openings · story, titles · Originally developed by Yasin Özmen · *no recipe yet*
 - `pencil-sketch` **Pencil Sketch** — Graphite sketchbook. Best for showing how an idea develops · story, explainer · Originally developed by Yasin Özmen · *no recipe yet*
 - `picture-book` **Picture Book** — Gouache storybook with turning pages. Best for bedtime-gentle stories, fables, and warm step-by-step lessons · story, tutorial · *no recipe yet*
-- `risograph` **Risograph** — Fluorescent overprint with halftone dots. Best for event posters, bold titles, and punchy social hooks · social, titles · *no recipe yet*
+- `risograph` **Risograph** — Fluorescent overprint with halftone dots. Best for event posters, bold titles, and punchy social hooks · social, titles
 - `sand-animation` **Sand Animation** — Backlit sand, shaped by fingertips. Best for poetic stories, transformations and quiet title sequences · story, titles · *no recipe yet*
 - `scientific-plate` **Scientific Plate** — Engraved specimens, hand-tinted, numbered. Best for anatomy, classification, and patient close looks at things · explainer · *no recipe yet*
 - `silhouette` **Silhouette Theater** — Backlit cut-paper shadow puppets. Best for fables, fairy tales and gentle, wordless storytelling · story · *no recipe yet*
