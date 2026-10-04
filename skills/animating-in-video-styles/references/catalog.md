@@ -18,7 +18,7 @@ Clean vector shapes and bold color.
 - `infographic` **Infographic Explainer** — Flat icons, counters and simple characters. Best for fast explainers with stats, steps, and everyday examples · explainer · *no recipe yet*
 - `isometric` **Isometric** — Miniature model world. Best for showing the parts of a system or process · explainer, product · Originally developed by Yasin Özmen · *no recipe yet*
 - `kawaii` **Kawaii** — Pastel chibi stickers that bounce. Best for cheerful social posts, cute products and friendly greetings · social, product · *no recipe yet*
-- `kurzgesagt` **Kurzgesagt** — Bright, layered science documentary. Best for explaining a scientific idea with a sense of wonder · explainer, story · Originally developed by Yasin Özmen · Inspired by Kurzgesagt – In a Nutshell · *no recipe yet*
+- `kurzgesagt` **Kurzgesagt** — Bright, layered science documentary. Best for explaining a scientific idea with a sense of wonder · explainer, story · Originally developed by Yasin Özmen · Inspired by Kurzgesagt – In a Nutshell
 - `neo-brutalism` **Neo-Brutalism** — Chunky UI cards, hard shadows. Best for app launches, product promos, and punchy social clips · social, product · *no recipe yet*
 - `symmetric-pastel` **Symmetric Pastel** — Centred pastel dollhouse, deadpan chapters. Best for whimsical stories, chapter titles and precise deadpan gags · story, titles · Inspired by Wes Anderson's films · *no recipe yet*
 
