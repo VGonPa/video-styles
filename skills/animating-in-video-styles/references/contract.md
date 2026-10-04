@@ -52,8 +52,9 @@ The output file is named after the project folder (`SLUG=$(basename "$PWD")` in 
   transparent gradient `fillRect()` at the end of `window.ready` so every frame starts in that state.
   Paint every pixel in every frame (a full background fill, or `clearRect()` first): a shake, pan or zoom that
   uncovers the canvas edge otherwise shows whatever the previous `draw()` left there.
-  Where a scene fades by setting `globalAlpha` before its drawers, a drawer that assigns `globalAlpha` instead of
-  multiplying it (`ctx.globalAlpha *= a`) ignores the fade: its figure stays opaque, then vanishes in one frame.
+  Where a scene fades by setting `globalAlpha` before its drawers, a drawer that assigns `globalAlpha` ignores the
+  fade: its figure stays opaque, then vanishes in one frame. Multiply and restore instead (`const a0 =
+  ctx.globalAlpha; ctx.globalAlpha = a0 * a; … ctx.globalAlpha = a0`), or wrap the drawer in `save()`/`restore()`.
   A simulation that depends on its history must pre-simulate inside `window.ready` and look the
   result up by `t`. Ten catalog styles still set `"schedule": "contiguous"`: a leftover, since their frames pass
   the stills test and their contact sheets are valid. Do not add it to new code; stills cannot honour it.
