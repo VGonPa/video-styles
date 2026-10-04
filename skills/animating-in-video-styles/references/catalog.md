@@ -164,7 +164,7 @@ Panels, strips, and cartoon traditions from every decade.
 - `single-panel-absurd` **Absurd Single Panel** — Deadpan rural absurdity, ink and wash. Best for one-line punchlines about nature, science and odd points of view · social · Inspired by The Far Side (Gary Larson) · *no recipe yet*
 - `absurd-webcomic` **Absurd Webcomic** — Loud flat cartoons, unhinged overreactions. Best for relatable gripes, product pain points, and escalating social gags · social, product · Inspired by The Oatmeal (Matthew Inman) · *no recipe yet*
 - `clear-line` **Clear-Line Comic** — Clean ink, flat colour, adventure. Best for journeys, places, and stories told panel by panel · explainer, story · Inspired by Hergé's ligne claire · *no recipe yet*
-- `comic-book` **Comic Book** — Newspaper comic panels. Best for dialogue, humor, and tension · story, social · Originally developed by Yasin Özmen · *no recipe yet*
+- `comic-book` **Comic Book** — Newspaper comic panels. Best for dialogue, humor, and tension · story, social · Originally developed by Yasin Özmen
 - `golden-age-comic` **Golden Age Comic** — Pulpy, off-register 1940s heroics. Best for origin stories, heroic reveals, and cliffhanger teasers · story, social · *no recipe yet*
 - `magazine-cartoon` **Magazine Cartoon** — Dry wit, pen and wash. Best for punchlines, wry observations, and understated social commentary · social, story · Inspired by The New Yorker's cartoons
 - `manga` **Manga** — Inked panels, screentone and speed lines. Best for tense moments, big reveals, and dramatic countdowns · story, social · *no recipe yet*
