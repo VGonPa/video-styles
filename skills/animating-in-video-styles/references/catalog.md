@@ -124,7 +124,7 @@ Type- and rhythm-driven pieces.
 
 - `dither-1bit` **1-Bit Dither** — Two inks, ordered dither, stormy night. Best for moody stories, mysteries and atmospheric title cards · story, titles · Inspired by Return of the Obra Dinn (Lucas Pope) · *no recipe yet*
 - `absurd-minimal` **Absurd Minimal** — Fast deadpan doodles on loud color. Best for rapid-fire explainers and history told with a shrug · explainer, social · Inspired by Bill Wurtz · *no recipe yet*
-- `bold-captions` **Bold Captions** — Word-by-word punchy short-form captions. Best for reels, Shorts and quick tips that must hook fast · social, tutorial · *no recipe yet*
+- `bold-captions` **Bold Captions** — Word-by-word punchy short-form captions. Best for reels, Shorts and quick tips that must hook fast · social, tutorial
 - `dada` **Dada** — Cut-up, absurd, deliberate mistranslation. Best for anti-advertising, jokes and rule-breaking · social, story · Inspired by Hannah Höch and Berlin Dada photomontage · *no recipe yet*
 - `flash-cartoon` **Flash Cartoon** — Mid-2000s web toon, tweened and glossy. Best for silly social loops, playful intros, and nostalgic web humor · social · *no recipe yet*
 - `glitch` **Glitch** — Corrupted digital signal, beat-synced. Best for bold title hits, reveals, and high-energy social openers · titles, social · *no recipe yet*
