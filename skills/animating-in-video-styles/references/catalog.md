@@ -16,7 +16,7 @@ Clean vector shapes and bold color.
 - `grainy-flat` **Grainy Flat Vector** — Grain-shaded shapes, pastel blobs, confetti. Best for cosy everyday stories, app onboarding and gentle explainers · story, explainer · Inspired by the "40,000 years of art history in 15 seconds" reel by @cherry_mx_reds · *no recipe yet*
 - `history-comedy` **History Comedy** — Big-headed kings on parchment maps. Best for funny history, wars, treaties, and absurd true-ish stories · explainer, story · Inspired by Oversimplified · *no recipe yet*
 - `infographic` **Infographic Explainer** — Flat icons, counters and simple characters. Best for fast explainers with stats, steps, and everyday examples · explainer · *no recipe yet*
-- `isometric` **Isometric** — Miniature model world. Best for showing the parts of a system or process · explainer, product · Originally developed by Yasin Özmen · *no recipe yet*
+- `isometric` **Isometric** — Miniature model world. Best for showing the parts of a system or process · explainer, product · Originally developed by Yasin Özmen
 - `kawaii` **Kawaii** — Pastel chibi stickers that bounce. Best for cheerful social posts, cute products and friendly greetings · social, product · *no recipe yet*
 - `kurzgesagt` **Kurzgesagt** — Bright, layered science documentary. Best for explaining a scientific idea with a sense of wonder · explainer, story · Originally developed by Yasin Özmen · Inspired by Kurzgesagt – In a Nutshell
 - `neo-brutalism` **Neo-Brutalism** — Chunky UI cards, hard shadows. Best for app launches, product promos, and punchy social clips · social, product · *no recipe yet*
