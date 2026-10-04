@@ -49,5 +49,7 @@ Check the frames against the Guardrails in SKILL.md.
   times in order, so run b reaches T after other frames). A difference means an unseeded random number, a
   clock or state carried between frames crept in. WebGL styles can differ by GPU rounding alone: compare with
   `ffmpeg -i <a> -i <b> -lavfi psnr -f null - 2>&1 | grep average`, where above about 60 dB is rounding and a
-  real leak shows as visibly different content. Run the test once on the untouched project for a baseline.
+  real leak shows as visibly different content. Canvas 2D drawing an image with `imageSmoothingQuality = 'high'`
+  can differ the same way by a level or two (about 88 dB). Run the test once on the untouched project for a
+  baseline.
 - Every character on screen renders in the intended font (missing glyphs show as boxes or a fallback face).
