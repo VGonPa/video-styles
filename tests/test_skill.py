@@ -183,6 +183,9 @@ class AudioCheckTests(unittest.TestCase):
         result = self.run_check(tone, "4", right=np.where(t < 1, tone, 0))   # a NaN zeroed one channel at 1 s
         self.assertIn("channel R goes silent at 1.00 s", result.stdout)
         self.assertEqual(result.returncode, 1)
+        gap = (t > 2) & (t < 2.35)                                           # one cue's NaN: 0.35 s of exact zeros
+        result = self.run_check(tone, "4", right=np.where(gap, 0, tone))
+        self.assertIn("channel R is exactly silent at 2.00 s", result.stdout)
 
 
 class FetchTests(unittest.TestCase):

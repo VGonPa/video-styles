@@ -41,6 +41,18 @@ def main():
         quiet = "LR"[int(np.argmin(ends))] if channels == 2 else str(int(np.argmin(ends)))
         problems.append(f"channel {quiet} goes silent at {min(ends):.2f} s while another sounds to {max(ends):.2f} s: "
                         "a NaN in that channel usually causes this")
+    if channels > 1 and peak >= 0.001:
+        # A NaN in one cue zeroes that channel exactly (astype int16) for the cue's length while the other plays on.
+        block = int(rate * 0.05)
+        n = len(pcm) // block
+        if n:
+            blocks = np.abs(pcm[: n * block]).reshape(n, block, channels)
+            dead = (blocks.max(axis=1) == 0) & (blocks.max(axis=(1, 2)) > 0.01)[:, None]
+            hits = np.nonzero(dead.any(axis=1))[0]
+            if len(hits) >= 2:
+                c = "LR"[int(np.nonzero(dead[hits[0]])[0][0])] if channels == 2 else "?"
+                problems.append(f"channel {c} is exactly silent at {hits[0] * block / rate:.2f} s while the other "
+                                "plays: a NaN in one cue (a pan past ±1) usually causes this")
     if peak < 0.001:
         problems.append("silent: a NaN in the mix (a pan past ±1, a zero-length ramp) usually causes this")
     elif len(pcm) > 1 and float(pcm.std(axis=0).max()) < 1e-6:
