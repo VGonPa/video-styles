@@ -1,0 +1,2982 @@
+{
+ "repository": "VGonPa/video-styles",
+ "ref": "main",
+ "use_cases": {
+  "explainer": {
+   "title": "Explainers",
+   "description": "Explaining how something works: concepts, science, systems."
+  },
+  "tutorial": {
+   "title": "Tutorials & Training",
+   "description": "Step-by-step teaching: onboarding, courses, how-to guides."
+  },
+  "product": {
+   "title": "Product & Launches",
+   "description": "Feature announcements, product demos, and launch videos."
+  },
+  "social": {
+   "title": "Social & Short-Form",
+   "description": "Reels, Shorts, ads, hooks, and quick announcements."
+  },
+  "story": {
+   "title": "Storytelling & Brand",
+   "description": "Origin stories, manifestos, and brand films."
+  },
+  "data": {
+   "title": "Data & Results",
+   "description": "Metrics, before/after comparisons, and reports."
+  },
+  "news": {
+   "title": "News & Current Affairs",
+   "description": "Updates, surprising facts, and commentary."
+  },
+  "titles": {
+   "title": "Intros, Titles & Transitions",
+   "description": "Openers, outros, series titles, and scene breaks."
+  }
+ },
+ "families": {
+  "flat-graphics": {
+   "title": "Flat Graphics",
+   "description": "Clean vector shapes and bold color."
+  },
+  "art-movements": {
+   "title": "Art Movements",
+   "description": "Styles borrowed from art and design history."
+  },
+  "hand-drawn": {
+   "title": "Hand Drawn",
+   "description": "Lines that appear as if drawn live."
+  },
+  "texture-craft": {
+   "title": "Texture & Craft",
+   "description": "Physical materials: paper, graphite, ink, clay."
+  },
+  "nostalgia": {
+   "title": "Nostalgia",
+   "description": "Recreations of older media and eras."
+  },
+  "technical": {
+   "title": "Technical",
+   "description": "Interfaces, terminals, and charts."
+  },
+  "experimental": {
+   "title": "Experimental",
+   "description": "Type- and rhythm-driven pieces."
+  },
+  "polished": {
+   "title": "Polished & Premium",
+   "description": "Glossy materials, glass, and light."
+  },
+  "generative-3d": {
+   "title": "Generative & 3D",
+   "description": "Code-driven systems, particles, and 3D forms."
+  },
+  "comics": {
+   "title": "Comics & Cartoons",
+   "description": "Panels, strips, and cartoon traditions from every decade."
+  },
+  "games": {
+   "title": "Games",
+   "description": "Video game looks from arcades to consoles."
+  },
+  "world-history": {
+   "title": "World & History",
+   "description": "Art traditions from cultures and eras around the world."
+  }
+ },
+ "styles": [
+  {
+   "slug": "kurzgesagt",
+   "number": 1,
+   "name": "Kurzgesagt",
+   "feel": "Bright, layered science documentary",
+   "best_for": "Explaining a scientific idea with a sense of wonder",
+   "family": "flat-graphics",
+   "use_cases": [
+    "explainer",
+    "story"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen",
+    "Inspired by Kurzgesagt – In a Nutshell"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/kurzgesagt-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/kurzgesagt.mp4"
+  },
+  {
+   "slug": "isometric",
+   "number": 2,
+   "name": "Isometric",
+   "feel": "Miniature model world",
+   "best_for": "Showing the parts of a system or process",
+   "family": "flat-graphics",
+   "use_cases": [
+    "explainer",
+    "product"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/isometric-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/isometric.mp4"
+  },
+  {
+   "slug": "bauhaus",
+   "number": 3,
+   "name": "Bauhaus",
+   "feel": "Poster grid and basic shapes",
+   "best_for": "Steps, principles, and bold messages",
+   "family": "art-movements",
+   "use_cases": [
+    "social",
+    "titles",
+    "explainer"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/bauhaus-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/bauhaus.mp4"
+  },
+  {
+   "slug": "memphis",
+   "number": 4,
+   "name": "Memphis",
+   "feel": "Playful, bouncing 1980s design",
+   "best_for": "Fun announcements and short videos",
+   "family": "art-movements",
+   "use_cases": [
+    "social",
+    "product"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/memphis-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/memphis.mp4"
+  },
+  {
+   "slug": "whiteboard",
+   "number": 5,
+   "name": "Whiteboard",
+   "feel": "A lesson drawn as it unfolds",
+   "best_for": "Step-by-step explanations",
+   "family": "hand-drawn",
+   "use_cases": [
+    "explainer",
+    "tutorial"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/whiteboard-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/whiteboard.mp4"
+  },
+  {
+   "slug": "chalkboard",
+   "number": 6,
+   "name": "Chalkboard",
+   "feel": "Chalk-drawn classroom lesson",
+   "best_for": "Teaching a rule or memorable point",
+   "family": "hand-drawn",
+   "use_cases": [
+    "tutorial",
+    "explainer"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/chalkboard-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/chalkboard.mp4"
+  },
+  {
+   "slug": "blueprint",
+   "number": 7,
+   "name": "Blueprint",
+   "feel": "Engineering drawing",
+   "best_for": "Measurements, technical details, and inner workings",
+   "family": "hand-drawn",
+   "use_cases": [
+    "explainer",
+    "product"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/blueprint-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/blueprint.mp4"
+  },
+  {
+   "slug": "single-line",
+   "number": 8,
+   "name": "Single Line",
+   "feel": "One continuous, minimal line",
+   "best_for": "Elegant intros, outros, and transitions",
+   "family": "hand-drawn",
+   "use_cases": [
+    "titles",
+    "story"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/single-line-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/single-line.mp4"
+  },
+  {
+   "slug": "paper-cutout",
+   "number": 9,
+   "name": "Paper Cutout",
+   "feel": "Layered cardboard diorama",
+   "best_for": "Storytelling and emotional openings",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/paper-cutout-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/paper-cutout.mp4"
+  },
+  {
+   "slug": "pencil-sketch",
+   "number": 10,
+   "name": "Pencil Sketch",
+   "feel": "Graphite sketchbook",
+   "best_for": "Showing how an idea develops",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "explainer"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pencil-sketch-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pencil-sketch.mp4"
+  },
+  {
+   "slug": "linocut",
+   "number": 11,
+   "name": "Linocut",
+   "feel": "Carved print in black and red",
+   "best_for": "A strong single message or manifesto",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/linocut-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/linocut.mp4"
+  },
+  {
+   "slug": "clay",
+   "number": 12,
+   "name": "Clay",
+   "feel": "Warm stop motion",
+   "best_for": "Friendly, playful storytelling",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clay-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clay.mp4"
+  },
+  {
+   "slug": "retro-1970s",
+   "number": 13,
+   "name": "1970s Retro",
+   "feel": "Vintage television titles",
+   "best_for": "Nostalgic openings and series titles",
+   "family": "nostalgia",
+   "use_cases": [
+    "titles",
+    "story"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/retro-1970s-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/retro-1970s.mp4"
+  },
+  {
+   "slug": "pixel-art",
+   "number": 14,
+   "name": "Pixel Art",
+   "feel": "16-bit video game level",
+   "best_for": "Progress, milestones, and game-like scenes",
+   "family": "games",
+   "use_cases": [
+    "social",
+    "story",
+    "data"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pixel-art-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pixel-art.mp4"
+  },
+  {
+   "slug": "documentary-16mm",
+   "number": 15,
+   "name": "16 mm Documentary",
+   "feel": "Vintage black-and-white film",
+   "best_for": "History and origin stories",
+   "family": "nostalgia",
+   "use_cases": [
+    "story"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/documentary-16mm-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/documentary-16mm.mp4"
+  },
+  {
+   "slug": "comic-book",
+   "number": 16,
+   "name": "Comic Book",
+   "feel": "Newspaper comic panels",
+   "best_for": "Dialogue, humor, and tension",
+   "family": "comics",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/comic-book-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/comic-book.mp4"
+  },
+  {
+   "slug": "terminal",
+   "number": 17,
+   "name": "Terminal",
+   "feel": "Green phosphor command line",
+   "best_for": "Technical processes and what happens behind the scenes",
+   "family": "technical",
+   "use_cases": [
+    "explainer",
+    "product"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/terminal-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/terminal.mp4"
+  },
+  {
+   "slug": "sci-fi-interface",
+   "number": 18,
+   "name": "Sci-Fi Interface",
+   "feel": "Cool HUD, radar, and analysis",
+   "best_for": "Measurement, scoring, and diagnostics",
+   "family": "technical",
+   "use_cases": [
+    "data",
+    "product"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/sci-fi-interface-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/sci-fi-interface.mp4"
+  },
+  {
+   "slug": "data-visualization",
+   "number": 19,
+   "name": "Data Visualization",
+   "feel": "Editorial charts",
+   "best_for": "Evidence in numbers and before/after comparisons",
+   "family": "technical",
+   "use_cases": [
+    "data",
+    "news"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/data-visualization-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/data-visualization.mp4"
+  },
+  {
+   "slug": "kinetic-typography",
+   "number": 20,
+   "name": "Kinetic Typography",
+   "feel": "Words in rhythm",
+   "best_for": "Quotes and strong opening lines",
+   "family": "experimental",
+   "use_cases": [
+    "titles",
+    "social"
+   ],
+   "credits": [
+    "Originally developed by Yasin Özmen"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/kinetic-typography-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/kinetic-typography.mp4"
+  },
+  {
+   "slug": "map-documentary",
+   "number": 21,
+   "name": "Map Documentary",
+   "feel": "Pinned paper map with red string",
+   "best_for": "Journeys, how things spread, and well-researched stories",
+   "family": "texture-craft",
+   "use_cases": [
+    "explainer",
+    "news",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/map-documentary-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/map-documentary.mp4"
+  },
+  {
+   "slug": "liquid-glass",
+   "number": 22,
+   "name": "Liquid Glass",
+   "feel": "Refractive glass morphing over a glowing aurora",
+   "best_for": "Premium product reveals, feature launches, and polished title cards",
+   "family": "polished",
+   "use_cases": [
+    "product",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": true,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-glass-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-glass.mp4"
+  },
+  {
+   "slug": "product-ui",
+   "number": 23,
+   "name": "Product UI",
+   "feel": "Polished SaaS app demo with cursor, zooms and callouts",
+   "best_for": "Feature launches, app walkthroughs, and onboarding",
+   "family": "technical",
+   "use_cases": [
+    "product",
+    "tutorial"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/product-ui-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/product-ui.mp4"
+  },
+  {
+   "slug": "3blue1brown",
+   "number": 24,
+   "name": "3Blue1Brown",
+   "feel": "Manim-style math on black",
+   "best_for": "Math intuition, visual proofs, and step-by-step derivations",
+   "family": "technical",
+   "use_cases": [
+    "explainer",
+    "tutorial",
+    "data"
+   ],
+   "credits": [
+    "Inspired by 3Blue1Brown (Grant Sanderson)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/3blue1brown-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/3blue1brown.mp4"
+  },
+  {
+   "slug": "collage",
+   "number": 25,
+   "name": "Mixed-Media Collage",
+   "feel": "Torn paper, tape and halftone cutouts",
+   "best_for": "Manifestos, handmade brands, and scroll-stopping social posts",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/collage-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/collage.mp4"
+  },
+  {
+   "slug": "risograph",
+   "number": 26,
+   "name": "Risograph",
+   "feel": "Fluorescent overprint with halftone dots",
+   "best_for": "Event posters, bold titles, and punchy social hooks",
+   "family": "texture-craft",
+   "use_cases": [
+    "social",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/risograph-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/risograph.mp4"
+  },
+  {
+   "slug": "newspaper",
+   "number": 27,
+   "name": "Newspaper Headline",
+   "feel": "Broadsheet front page, ink and halftone",
+   "best_for": "Breaking facts, surprising findings, and documentary hooks",
+   "family": "nostalgia",
+   "use_cases": [
+    "news",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/newspaper-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/newspaper.mp4"
+  },
+  {
+   "slug": "neo-brutalism",
+   "number": 28,
+   "name": "Neo-Brutalism",
+   "feel": "Chunky UI cards, hard shadows",
+   "best_for": "App launches, product promos, and punchy social clips",
+   "family": "flat-graphics",
+   "use_cases": [
+    "social",
+    "product"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/neo-brutalism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/neo-brutalism.mp4"
+  },
+  {
+   "slug": "infographic",
+   "number": 29,
+   "name": "Infographic Explainer",
+   "feel": "Flat icons, counters and simple characters",
+   "best_for": "Fast explainers with stats, steps, and everyday examples",
+   "family": "flat-graphics",
+   "use_cases": [
+    "explainer"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/infographic-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/infographic.mp4"
+  },
+  {
+   "slug": "lofi-anime",
+   "number": 30,
+   "name": "Lo-Fi Anime",
+   "feel": "Rainy cozy 90s anime dusk",
+   "best_for": "Calm moods, quiet stories, and study-night atmosphere",
+   "family": "nostalgia",
+   "use_cases": [
+    "story"
+   ],
+   "credits": [
+    "Inspired by the Lofi Girl stream"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/lofi-anime-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/lofi-anime.mp4"
+  },
+  {
+   "slug": "liquid-motion",
+   "number": 31,
+   "name": "Liquid Motion",
+   "feel": "Gooey blobs in warm flowing gradients",
+   "best_for": "Wellness brands, calm title cards, and soft product intros",
+   "family": "polished",
+   "use_cases": [
+    "titles",
+    "product"
+   ],
+   "credits": [],
+   "webgl": true,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-motion-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/liquid-motion.mp4"
+  },
+  {
+   "slug": "synthwave",
+   "number": 32,
+   "name": "Synthwave",
+   "feel": "Neon grid, chrome logo, sunset",
+   "best_for": "Retro-futurist openers, series titles, and hype reels",
+   "family": "nostalgia",
+   "use_cases": [
+    "titles",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/synthwave-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/synthwave.mp4"
+  },
+  {
+   "slug": "frutiger-aero",
+   "number": 33,
+   "name": "Frutiger Aero",
+   "feel": "Glossy bubbles, blue skies, green grass",
+   "best_for": "Cheerful app launches, playful promos, and nostalgic social posts",
+   "family": "nostalgia",
+   "use_cases": [
+    "social",
+    "product"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/frutiger-aero-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/frutiger-aero.mp4"
+  },
+  {
+   "slug": "vhs-camcorder",
+   "number": 34,
+   "name": "VHS Camcorder",
+   "feel": "90s home video on a VCR",
+   "best_for": "Nostalgic memories, throwbacks, and found-footage hooks",
+   "family": "nostalgia",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/vhs-camcorder-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/vhs-camcorder.mp4"
+  },
+  {
+   "slug": "retro-desktop",
+   "number": 35,
+   "name": "Retro Desktop",
+   "feel": "Mid-90s desktop on a CRT",
+   "best_for": "Nostalgic stories, tech humor, and step-by-step computer tutorials",
+   "family": "nostalgia",
+   "use_cases": [
+    "story",
+    "tutorial"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/retro-desktop-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/retro-desktop.mp4"
+  },
+  {
+   "slug": "vector-arcade",
+   "number": 36,
+   "name": "Vector Arcade",
+   "feel": "Glowing phosphor lines on black",
+   "best_for": "Game-style openers, retro title cards, and punchy social clips",
+   "family": "games",
+   "use_cases": [
+    "titles",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/vector-arcade-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/vector-arcade.mp4"
+  },
+  {
+   "slug": "art-deco",
+   "number": 37,
+   "name": "Art Deco",
+   "feel": "Gold sunbursts, stepped frames, symmetry",
+   "best_for": "Gala invitations, elegant openers, and period brand stories",
+   "family": "art-movements",
+   "use_cases": [
+    "titles",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/art-deco-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/art-deco.mp4"
+  },
+  {
+   "slug": "ukiyo-e",
+   "number": 38,
+   "name": "Ukiyo-e",
+   "feel": "Woodblock waves, washi and seal",
+   "best_for": "Calm, crafted stories and elegant title openers",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ukiyo-e-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ukiyo-e.mp4"
+  },
+  {
+   "slug": "constructivism",
+   "number": 39,
+   "name": "Constructivism",
+   "feel": "Red wedges and shouting diagonals",
+   "best_for": "Calls to action, manifestos, and loud announcements",
+   "family": "art-movements",
+   "use_cases": [
+    "social",
+    "news"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/constructivism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/constructivism.mp4"
+  },
+  {
+   "slug": "art-nouveau",
+   "number": 40,
+   "name": "Art Nouveau",
+   "feel": "Whiplash vines, mosaic halos, pastel lithograph",
+   "best_for": "Perfume and beauty launches, storybook openers, heritage brands",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "product"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/art-nouveau-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/art-nouveau.mp4"
+  },
+  {
+   "slug": "rubber-hose",
+   "number": 41,
+   "name": "Rubber Hose",
+   "feel": "1930s bouncing sepia cartoon",
+   "best_for": "Playful gags, mascots, and nostalgic brand shorts",
+   "family": "hand-drawn",
+   "use_cases": [
+    "social",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/rubber-hose-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/rubber-hose.mp4"
+  },
+  {
+   "slug": "silhouette",
+   "number": 42,
+   "name": "Silhouette Theater",
+   "feel": "Backlit cut-paper shadow puppets",
+   "best_for": "Fables, fairy tales and gentle, wordless storytelling",
+   "family": "texture-craft",
+   "use_cases": [
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/silhouette-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/silhouette.mp4"
+  },
+  {
+   "slug": "manga",
+   "number": 43,
+   "name": "Manga",
+   "feel": "Inked panels, screentone and speed lines",
+   "best_for": "Tense moments, big reveals, and dramatic countdowns",
+   "family": "comics",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/manga-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/manga.mp4"
+  },
+  {
+   "slug": "ink-wash",
+   "number": 44,
+   "name": "Ink & Watercolor",
+   "feel": "Sumi-e brush and blooming washes",
+   "best_for": "Quiet, poetic stories and graceful title openers",
+   "family": "hand-drawn",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ink-wash-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ink-wash.mp4"
+  },
+  {
+   "slug": "stained-glass",
+   "number": 45,
+   "name": "Stained Glass",
+   "feel": "Leaded jewel glass, sunlight through",
+   "best_for": "Warm openings, luminous titles and quietly grand stories",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stained-glass-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stained-glass.mp4"
+  },
+  {
+   "slug": "bold-captions",
+   "number": 46,
+   "name": "Bold Captions",
+   "feel": "Word-by-word punchy short-form captions",
+   "best_for": "Reels, Shorts and quick tips that must hook fast",
+   "family": "experimental",
+   "use_cases": [
+    "social",
+    "tutorial"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/bold-captions-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/bold-captions.mp4"
+  },
+  {
+   "slug": "chat-story",
+   "number": 47,
+   "name": "Chat Story",
+   "feel": "A story told in phone messages",
+   "best_for": "Funny exchanges, twists, and relatable social moments",
+   "family": "technical",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/chat-story-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/chat-story.mp4"
+  },
+  {
+   "slug": "split-flap",
+   "number": 48,
+   "name": "Split-Flap Board",
+   "feel": "Clattering mechanical departures board",
+   "best_for": "Headlines, schedules, announcements and big reveals",
+   "family": "experimental",
+   "use_cases": [
+    "news",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/split-flap-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/split-flap.mp4"
+  },
+  {
+   "slug": "particles",
+   "number": 49,
+   "name": "Generative Particles",
+   "feel": "Luminous flow-field particle swarms",
+   "best_for": "Tech title reveals, data stories, and abstract openers",
+   "family": "generative-3d",
+   "use_cases": [
+    "titles",
+    "data"
+   ],
+   "credits": [],
+   "webgl": true,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/particles-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/particles.mp4"
+  },
+  {
+   "slug": "ascii-art",
+   "number": 50,
+   "name": "ASCII Art",
+   "feel": "Pictures built from glowing characters",
+   "best_for": "Title reveals and playful technical explainers",
+   "family": "technical",
+   "use_cases": [
+    "titles",
+    "explainer"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ascii-art-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ascii-art.mp4"
+  },
+  {
+   "slug": "low-poly",
+   "number": 51,
+   "name": "Low-Poly 3D",
+   "feel": "Faceted, flat-shaded miniature 3D worlds",
+   "best_for": "Friendly 3D explainers, world-building and product teasers",
+   "family": "generative-3d",
+   "use_cases": [
+    "explainer",
+    "product"
+   ],
+   "credits": [],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous"
+   },
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/low-poly-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/low-poly.mp4"
+  },
+  {
+   "slug": "inflated-3d",
+   "number": 52,
+   "name": "Inflated 3D",
+   "feel": "Puffy pastel balloon icons that squish",
+   "best_for": "Playful app features, social teasers and UI reveals",
+   "family": "generative-3d",
+   "use_cases": [
+    "product",
+    "social"
+   ],
+   "credits": [],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/inflated-3d-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/inflated-3d.mp4"
+  },
+  {
+   "slug": "dither-1bit",
+   "number": 53,
+   "name": "1-Bit Dither",
+   "feel": "Two inks, ordered dither, stormy night",
+   "best_for": "Moody stories, mysteries and atmospheric title cards",
+   "family": "experimental",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Return of the Obra Dinn (Lucas Pope)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dither-1bit-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dither-1bit.mp4"
+  },
+  {
+   "slug": "glitch",
+   "number": 54,
+   "name": "Glitch",
+   "feel": "Corrupted digital signal, beat-synced",
+   "best_for": "Bold title hits, reveals, and high-energy social openers",
+   "family": "experimental",
+   "use_cases": [
+    "titles",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/glitch-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/glitch.mp4"
+  },
+  {
+   "slug": "embroidery",
+   "number": 55,
+   "name": "Embroidery",
+   "feel": "Hand-stitched thread in a wooden hoop",
+   "best_for": "Heartfelt stories, handmade brands, and cozy social posts",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/embroidery-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/embroidery.mp4"
+  },
+  {
+   "slug": "origami",
+   "number": 56,
+   "name": "Origami",
+   "feel": "Folded paper, crisp creases, soft shadows",
+   "best_for": "Step-by-step explainers, transformations and gentle brand stories",
+   "family": "texture-craft",
+   "use_cases": [
+    "explainer",
+    "story"
+   ],
+   "credits": [],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/origami-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/origami.mp4"
+  },
+  {
+   "slug": "golden-age-comic",
+   "number": 57,
+   "name": "Golden Age Comic",
+   "feel": "Pulpy, off-register 1940s heroics",
+   "best_for": "Origin stories, heroic reveals, and cliffhanger teasers",
+   "family": "comics",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/golden-age-comic-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/golden-age-comic.mp4"
+  },
+  {
+   "slug": "comic-strip",
+   "number": 58,
+   "name": "Newspaper Comic Strip",
+   "feel": "Four panels, ink on newsprint",
+   "best_for": "Dry wit, a setup, a beat, and a punchline",
+   "family": "comics",
+   "use_cases": [
+    "social",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/comic-strip-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/comic-strip.mp4"
+  },
+  {
+   "slug": "clear-line",
+   "number": 59,
+   "name": "Clear-Line Comic",
+   "feel": "Clean ink, flat colour, adventure",
+   "best_for": "Journeys, places, and stories told panel by panel",
+   "family": "comics",
+   "use_cases": [
+    "explainer",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Hergé's ligne claire"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clear-line-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/clear-line.mp4"
+  },
+  {
+   "slug": "dark-comic",
+   "number": 60,
+   "name": "80s Dark Comic",
+   "feel": "Rain, neon and spotted blacks",
+   "best_for": "Brooding stories, noir narration and slow-burn reveals",
+   "family": "comics",
+   "use_cases": [
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dark-comic-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dark-comic.mp4"
+  },
+  {
+   "slug": "digital-comic",
+   "number": 61,
+   "name": "2000s Digital Comic",
+   "feel": "Glossy airbrush, rim light, flares",
+   "best_for": "Launch teasers, hero moments and high-energy product reveals",
+   "family": "comics",
+   "use_cases": [
+    "product",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/digital-comic-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/digital-comic.mp4"
+  },
+  {
+   "slug": "underground-comix",
+   "number": 62,
+   "name": "Underground Comix",
+   "feel": "Boiling hatching, melting psychedelic swagger",
+   "best_for": "Irreverent social clips, laid-back gags and trippy reveals",
+   "family": "comics",
+   "use_cases": [
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/underground-comix-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/underground-comix.mp4"
+  },
+  {
+   "slug": "magazine-cartoon",
+   "number": 63,
+   "name": "Magazine Cartoon",
+   "feel": "Dry wit, pen and wash",
+   "best_for": "Punchlines, wry observations, and understated social commentary",
+   "family": "comics",
+   "use_cases": [
+    "social",
+    "story"
+   ],
+   "credits": [
+    "Inspired by The New Yorker's cartoons"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/magazine-cartoon-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/magazine-cartoon.mp4"
+  },
+  {
+   "slug": "editorial-illustration",
+   "number": 64,
+   "name": "Editorial Illustration",
+   "feel": "Witty op-ed metaphor, riso-grained",
+   "best_for": "Opinion pieces, big ideas and thoughtful news explainers",
+   "family": "flat-graphics",
+   "use_cases": [
+    "news",
+    "explainer"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/editorial-illustration-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/editorial-illustration.mp4"
+  },
+  {
+   "slug": "victorian-engraving",
+   "number": 65,
+   "name": "Victorian Engraving",
+   "feel": "Engraved cut-outs, hinged heads, giant feet",
+   "best_for": "Droll satire, absurd explainers, and witty social posts",
+   "family": "texture-craft",
+   "use_cases": [
+    "social",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/victorian-engraving-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/victorian-engraving.mp4"
+  },
+  {
+   "slug": "scientific-plate",
+   "number": 66,
+   "name": "Scientific Plate",
+   "feel": "Engraved specimens, hand-tinted, numbered",
+   "best_for": "Anatomy, classification, and patient close looks at things",
+   "family": "texture-craft",
+   "use_cases": [
+    "explainer"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/scientific-plate-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/scientific-plate.mp4"
+  },
+  {
+   "slug": "anime-80s",
+   "number": 67,
+   "name": "80s Anime",
+   "feel": "Sunset cels, city-pop coastal drive",
+   "best_for": "Retro title openers, road-trip stories, and nostalgic intros",
+   "family": "nostalgia",
+   "use_cases": [
+    "titles",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/anime-80s-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/anime-80s.mp4"
+  },
+  {
+   "slug": "kawaii",
+   "number": 68,
+   "name": "Kawaii",
+   "feel": "Pastel chibi stickers that bounce",
+   "best_for": "Cheerful social posts, cute products and friendly greetings",
+   "family": "flat-graphics",
+   "use_cases": [
+    "social",
+    "product"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/kawaii-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/kawaii.mp4"
+  },
+  {
+   "slug": "nes-8bit",
+   "number": 69,
+   "name": "8-Bit Console",
+   "feel": "Third-generation console cartridge game",
+   "best_for": "Playful quests, streaks, scores, and level-up moments",
+   "family": "games",
+   "use_cases": [
+    "social",
+    "data"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/nes-8bit-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/nes-8bit.mp4"
+  },
+  {
+   "slug": "handheld-lcd",
+   "number": 70,
+   "name": "Handheld LCD",
+   "feel": "Four greens on a pocket console",
+   "best_for": "Playful social posts, game moments and retro nostalgia",
+   "family": "games",
+   "use_cases": [
+    "social"
+   ],
+   "credits": [
+    "Inspired by the original Game Boy"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/handheld-lcd-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/handheld-lcd.mp4"
+  },
+  {
+   "slug": "jrpg",
+   "number": 71,
+   "name": "JRPG Battle",
+   "feel": "16-bit turn-based battle menus",
+   "best_for": "Challenges overcome, skill unlocks, and playful explainers",
+   "family": "games",
+   "use_cases": [
+    "explainer",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/jrpg-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/jrpg.mp4"
+  },
+  {
+   "slug": "voxel",
+   "number": 72,
+   "name": "Voxel Blocks",
+   "feel": "Blocky sandbox, built block by block",
+   "best_for": "Step-by-step tutorials, building processes and game-style explainers",
+   "family": "games",
+   "use_cases": [
+    "tutorial",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by Minecraft"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/voxel-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/voxel.mp4"
+  },
+  {
+   "slug": "point-and-click",
+   "number": 73,
+   "name": "Point-and-Click Adventure",
+   "feel": "Dithered early-90s adventure game",
+   "best_for": "Wry quests, puzzles, reveals, and story beats with dialogue",
+   "family": "games",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/point-and-click-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/point-and-click.mp4"
+  },
+  {
+   "slug": "history-comedy",
+   "number": 74,
+   "name": "History Comedy",
+   "feel": "Big-headed kings on parchment maps",
+   "best_for": "Funny history, wars, treaties, and absurd true-ish stories",
+   "family": "flat-graphics",
+   "use_cases": [
+    "explainer",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Oversimplified"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/history-comedy-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/history-comedy.mp4"
+  },
+  {
+   "slug": "absurd-minimal",
+   "number": 75,
+   "name": "Absurd Minimal",
+   "feel": "Fast deadpan doodles on loud color",
+   "best_for": "Rapid-fire explainers and history told with a shrug",
+   "family": "experimental",
+   "use_cases": [
+    "explainer",
+    "social"
+   ],
+   "credits": [
+    "Inspired by Bill Wurtz"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/absurd-minimal-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/absurd-minimal.mp4"
+  },
+  {
+   "slug": "storytime",
+   "number": 76,
+   "name": "Storytime Animation",
+   "feel": "Expressive self-insert, deadpan inner thoughts",
+   "best_for": "Personal anecdotes, embarrassing mishaps, and relatable confessions",
+   "family": "hand-drawn",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Inspired by Jaiden Animations and TheOdd1sOut"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/storytime-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/storytime.mp4"
+  },
+  {
+   "slug": "blob-sim",
+   "number": 77,
+   "name": "Blob Simulation",
+   "feel": "Cute 3D blobs obeying simple rules",
+   "best_for": "Game theory, evolution sims, and data-driven explainers",
+   "family": "generative-3d",
+   "use_cases": [
+    "explainer",
+    "data"
+   ],
+   "credits": [
+    "Inspired by Primer (Justin Helps)"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous",
+    "eventsGpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/blob-sim-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/blob-sim.mp4"
+  },
+  {
+   "slug": "dark-documentary",
+   "number": 78,
+   "name": "Dark Documentary",
+   "feel": "Cold, quiet, redacted mystery",
+   "best_for": "Unsolved mysteries, investigations, and slow-burn true stories",
+   "family": "technical",
+   "use_cases": [
+    "story",
+    "news"
+   ],
+   "credits": [
+    "Inspired by LEMMiNO"
+   ],
+   "webgl": false,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dark-documentary-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dark-documentary.mp4"
+  },
+  {
+   "slug": "cosmic-epic",
+   "number": 79,
+   "name": "Cosmic Epic",
+   "feel": "Vast, glowing, awe-struck deep time",
+   "best_for": "Epic title reveals and big-picture science timelines",
+   "family": "generative-3d",
+   "use_cases": [
+    "titles",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by melodysheep (John D. Boswell)"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cosmic-epic-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cosmic-epic.mp4"
+  },
+  {
+   "slug": "technical-cutaway",
+   "number": 80,
+   "name": "Technical Cutaway",
+   "feel": "Exploded 3D model with callouts",
+   "best_for": "How machines work, product internals and engineering explainers",
+   "family": "generative-3d",
+   "use_cases": [
+    "explainer",
+    "product"
+   ],
+   "credits": [
+    "Inspired by Branch Education and Animagraffs"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/technical-cutaway-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/technical-cutaway.mp4"
+  },
+  {
+   "slug": "stick-action",
+   "number": 81,
+   "name": "Stick-Figure Action",
+   "feel": "Snappy stick-figure fights on paper",
+   "best_for": "Punchy social clips, rivalries, and playful action beats",
+   "family": "hand-drawn",
+   "use_cases": [
+    "social"
+   ],
+   "credits": [
+    "Inspired by Alan Becker"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-action-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-action.mp4"
+  },
+  {
+   "slug": "paint-doodle",
+   "number": 82,
+   "name": "Paint Doodle",
+   "feel": "Crude mouse lines, deadpan captions",
+   "best_for": "Silly history bits and dry jokes for social feeds",
+   "family": "experimental",
+   "use_cases": [
+    "social"
+   ],
+   "credits": [
+    "Inspired by Sam O'Nella Academy"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/paint-doodle-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/paint-doodle.mp4"
+  },
+  {
+   "slug": "neon-sign",
+   "number": 83,
+   "name": "Neon Sign",
+   "feel": "Glass tubes buzzing on wet brick",
+   "best_for": "Night-time titles, venue openers, and moody channel intros",
+   "family": "texture-craft",
+   "use_cases": [
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {
+    "gpu": "full"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/neon-sign-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/neon-sign.mp4"
+  },
+  {
+   "slug": "picture-book",
+   "number": 84,
+   "name": "Picture Book",
+   "feel": "Gouache storybook with turning pages",
+   "best_for": "Bedtime-gentle stories, fables, and warm step-by-step lessons",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "tutorial"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/picture-book-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/picture-book.mp4"
+  },
+  {
+   "slug": "office-strip",
+   "number": 85,
+   "name": "Office Satire Strip",
+   "feel": "Deadpan cubicle wit, flat ink",
+   "best_for": "Workplace satire, buzzwords, and a dry final-panel punchline",
+   "family": "comics",
+   "use_cases": [
+    "social",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Dilbert (Scott Adams)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/office-strip-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/office-strip.mp4"
+  },
+  {
+   "slug": "absurd-webcomic",
+   "number": 86,
+   "name": "Absurd Webcomic",
+   "feel": "Loud flat cartoons, unhinged overreactions",
+   "best_for": "Relatable gripes, product pain points, and escalating social gags",
+   "family": "comics",
+   "use_cases": [
+    "social",
+    "product"
+   ],
+   "credits": [
+    "Inspired by The Oatmeal (Matthew Inman)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/absurd-webcomic-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/absurd-webcomic.mp4"
+  },
+  {
+   "slug": "stick-webcomic",
+   "number": 87,
+   "name": "Stick-Figure Webcomic",
+   "feel": "Dry nerdy wit in black ink",
+   "best_for": "Wry explainers, tradeoffs, and charts with a punchline",
+   "family": "comics",
+   "use_cases": [
+    "explainer",
+    "data"
+   ],
+   "credits": [
+    "Inspired by xkcd (Randall Munroe)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-webcomic-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stick-webcomic.mp4"
+  },
+  {
+   "slug": "sunday-strip",
+   "number": 88,
+   "name": "Sunday Watercolor Strip",
+   "feel": "Brush ink, washes, imagination unleashed",
+   "best_for": "Childhood daydreams, reality-vs-fantasy turns, and a dry parental punchline",
+   "family": "comics",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Inspired by Calvin and Hobbes (Bill Watterson)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/sunday-strip-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/sunday-strip.mp4"
+  },
+  {
+   "slug": "minimal-strip",
+   "number": 89,
+   "name": "Minimal Line Strip",
+   "feel": "Trembling pen, white space, quiet wit",
+   "best_for": "Gentle philosophical humor and a tender four-panel punchline",
+   "family": "comics",
+   "use_cases": [
+    "story"
+   ],
+   "credits": [
+    "Inspired by Peanuts (Charles M. Schulz)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/minimal-strip-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/minimal-strip.mp4"
+  },
+  {
+   "slug": "single-panel-absurd",
+   "number": 90,
+   "name": "Absurd Single Panel",
+   "feel": "Deadpan rural absurdity, ink and wash",
+   "best_for": "One-line punchlines about nature, science and odd points of view",
+   "family": "comics",
+   "use_cases": [
+    "social"
+   ],
+   "credits": [
+    "Inspired by The Far Side (Gary Larson)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/single-panel-absurd-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/single-panel-absurd.mp4"
+  },
+  {
+   "slug": "round-head-dark",
+   "number": 91,
+   "name": "Round-Head Dark Humor",
+   "feel": "Deadpan round heads, dark punchline",
+   "best_for": "Fast social gags with a dark-but-harmless twist",
+   "family": "comics",
+   "use_cases": [
+    "social"
+   ],
+   "credits": [
+    "Inspired by Cyanide & Happiness"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/round-head-dark-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/round-head-dark.mp4"
+  },
+  {
+   "slug": "relatable-webcomic",
+   "number": 92,
+   "name": "Relatable Webcomic",
+   "feel": "Pastel panels, messy bun, cosy honesty",
+   "best_for": "Everyday confessions, self-care gags and warm relatable punchlines",
+   "family": "comics",
+   "use_cases": [
+    "social",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Sarah's Scribbles (Sarah Andersen)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/relatable-webcomic-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/relatable-webcomic.mp4"
+  },
+  {
+   "slug": "roman-mosaic",
+   "number": 93,
+   "name": "Roman Mosaic",
+   "feel": "Stone tesserae laid row by row",
+   "best_for": "Classical welcomes, grand titles and timeless heritage stories",
+   "family": "world-history",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/roman-mosaic-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/roman-mosaic.mp4"
+  },
+  {
+   "slug": "greek-pottery",
+   "number": 94,
+   "name": "Greek Black-Figure",
+   "feel": "Turning amphora, incised black silhouettes",
+   "best_for": "Ancient history, origin stories, and myths told in profile",
+   "family": "world-history",
+   "use_cases": [
+    "story",
+    "explainer"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/greek-pottery-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/greek-pottery.mp4"
+  },
+  {
+   "slug": "egyptian-papyrus",
+   "number": 95,
+   "name": "Egyptian Papyrus",
+   "feel": "Registers, mineral pigments, cartouche titles",
+   "best_for": "Ancient processes, step-by-step history, and seasonal cycles",
+   "family": "world-history",
+   "use_cases": [
+    "explainer",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/egyptian-papyrus-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/egyptian-papyrus.mp4"
+  },
+  {
+   "slug": "viking-runes",
+   "number": 96,
+   "name": "Norse Runestone",
+   "feel": "Chiselled granite, ochre serpent, torchlight",
+   "best_for": "Epic titles, legacy stories and things built to last",
+   "family": "world-history",
+   "use_cases": [
+    "titles",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/viking-runes-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/viking-runes.mp4"
+  },
+  {
+   "slug": "illuminated-manuscript",
+   "number": 97,
+   "name": "Illuminated Manuscript",
+   "feel": "Gilded initials, blackletter, mischievous marginalia",
+   "best_for": "Medieval titles, recipes, chronicles, and storybook openings",
+   "family": "world-history",
+   "use_cases": [
+    "titles",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/illuminated-manuscript-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/illuminated-manuscript.mp4"
+  },
+  {
+   "slug": "bayeux-tapestry",
+   "number": 98,
+   "name": "Medieval Tapestry",
+   "feel": "Couched wool on linen, stitched captions",
+   "best_for": "Journeys, chronicles, and step-by-step stories told in sequence",
+   "family": "world-history",
+   "use_cases": [
+    "story",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by the Bayeux Tapestry"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/bayeux-tapestry-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/bayeux-tapestry.mp4"
+  },
+  {
+   "slug": "chinese-scroll",
+   "number": 99,
+   "name": "Chinese Handscroll",
+   "feel": "Silk, mineral peaks, cinnabar seal",
+   "best_for": "Journeys, unfolding stories and serene title openers",
+   "family": "world-history",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/chinese-scroll-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/chinese-scroll.mp4"
+  },
+  {
+   "slug": "chinese-papercut",
+   "number": 100,
+   "name": "Chinese Paper-Cut",
+   "feel": "Red lace cut live, then unfolded",
+   "best_for": "Festive titles, greetings and heritage social posts",
+   "family": "world-history",
+   "use_cases": [
+    "titles",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/chinese-papercut-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/chinese-papercut.mp4"
+  },
+  {
+   "slug": "persian-miniature",
+   "number": 101,
+   "name": "Persian Miniature",
+   "feel": "Jewel pigments, gold skies, tilted gardens",
+   "best_for": "Fables, poetic proverbs, and gentle storybook journeys",
+   "family": "world-history",
+   "use_cases": [
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/persian-miniature-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/persian-miniature.mp4"
+  },
+  {
+   "slug": "islamic-geometric",
+   "number": 102,
+   "name": "Geometric Tilework",
+   "feel": "Compass-drawn stars, glazed in cobalt",
+   "best_for": "Elegant titles and explainers about pattern, symmetry and craft",
+   "family": "world-history",
+   "use_cases": [
+    "titles",
+    "explainer"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/islamic-geometric-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/islamic-geometric.mp4"
+  },
+  {
+   "slug": "cave-painting",
+   "number": 103,
+   "name": "Cave Painting",
+   "feel": "Ochre herds revealed by torchlight",
+   "best_for": "Origin stories, deep history, and the roots of storytelling",
+   "family": "world-history",
+   "use_cases": [
+    "story",
+    "explainer"
+   ],
+   "credits": [],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "eventsGpu": "full"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cave-painting-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cave-painting.mp4"
+  },
+  {
+   "slug": "mesoamerican-codex",
+   "number": 104,
+   "name": "Codex",
+   "feel": "Screenfold unfolds, painted animals wake",
+   "best_for": "Journeys, origin stories and history explainers",
+   "family": "world-history",
+   "use_cases": [
+    "story",
+    "explainer"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/mesoamerican-codex-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/mesoamerican-codex.mp4"
+  },
+  {
+   "slug": "madhubani",
+   "number": 105,
+   "name": "Madhubani",
+   "feel": "Double lines, turmeric, fish and peacocks",
+   "best_for": "Folk tales, festive greetings, and nature stories",
+   "family": "world-history",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/madhubani-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/madhubani.mp4"
+  },
+  {
+   "slug": "papel-picado",
+   "number": 106,
+   "name": "Papel Picado",
+   "feel": "Cut tissue, string lights, fiesta dusk",
+   "best_for": "Festive titles, event invites, and celebratory social posts",
+   "family": "world-history",
+   "use_cases": [
+    "titles",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/papel-picado-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/papel-picado.mp4"
+  },
+  {
+   "slug": "flash-cartoon",
+   "number": 107,
+   "name": "Flash Cartoon",
+   "feel": "Mid-2000s web toon, tweened and glossy",
+   "best_for": "Silly social loops, playful intros, and nostalgic web humor",
+   "family": "experimental",
+   "use_cases": [
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/flash-cartoon-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/flash-cartoon.mp4"
+  },
+  {
+   "slug": "existential-stick",
+   "number": 108,
+   "name": "Existential Stick Figures",
+   "feel": "Deadpan pencil lives, sudden colour",
+   "best_for": "Quiet, funny stories about memory and ordinary days",
+   "family": "hand-drawn",
+   "use_cases": [
+    "story"
+   ],
+   "credits": [
+    "Inspired by Don Hertzfeldt"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/existential-stick-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/existential-stick.mp4"
+  },
+  {
+   "slug": "surreal-loop",
+   "number": 109,
+   "name": "Surreal Replication",
+   "feel": "Cloning sheep, kaleidoscopic infinite zoom",
+   "best_for": "Hypnotic loops, playful titles and scroll-stopping social openers",
+   "family": "experimental",
+   "use_cases": [
+    "social",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Cyriak"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/surreal-loop-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/surreal-loop.mp4"
+  },
+  {
+   "slug": "mid-century",
+   "number": 110,
+   "name": "Mid-Century Modern",
+   "feel": "1950s limited animation, dry-brush colour",
+   "best_for": "Retro explainers, jazzy title cards, and stylish openers",
+   "family": "art-movements",
+   "use_cases": [
+    "explainer",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/mid-century-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/mid-century.mp4"
+  },
+  {
+   "slug": "title-sequence",
+   "number": 111,
+   "name": "Cut-Paper Titles",
+   "feel": "Ragged paper bars, jazzy credits",
+   "best_for": "Film openers, series titles, and dramatic chapter cards",
+   "family": "art-movements",
+   "use_cases": [
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Saul Bass's title sequences"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/title-sequence-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/title-sequence.mp4"
+  },
+  {
+   "slug": "symmetric-pastel",
+   "number": 112,
+   "name": "Symmetric Pastel",
+   "feel": "Centred pastel dollhouse, deadpan chapters",
+   "best_for": "Whimsical stories, chapter titles and precise deadpan gags",
+   "family": "flat-graphics",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Wes Anderson's films"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/symmetric-pastel-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/symmetric-pastel.mp4"
+  },
+  {
+   "slug": "saturday-cartoon",
+   "number": 113,
+   "name": "Saturday Morning Cartoon",
+   "feel": "90s TV toon, rubbery takes",
+   "best_for": "Quick gags, character duos, and nostalgic social shorts",
+   "family": "comics",
+   "use_cases": [
+    "social",
+    "story"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/saturday-cartoon-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/saturday-cartoon.mp4"
+  },
+  {
+   "slug": "atomic-wasteland",
+   "number": 114,
+   "name": "Atomic Wasteland",
+   "feel": "Cheerful 50s mascot, burning world",
+   "best_for": "Dark satire, survival tips, and deadpan corporate optimism",
+   "family": "games",
+   "use_cases": [
+    "social",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by Fallout's Pip-Boy and Vault Boy"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/atomic-wasteland-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/atomic-wasteland.mp4"
+  },
+  {
+   "slug": "watercolor-memory",
+   "number": 115,
+   "name": "Watercolor Memory",
+   "feel": "Pencil memory blooming into watercolor",
+   "best_for": "Nostalgic stories, memories and soft title reveals",
+   "family": "generative-3d",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Adapted from Memory Fading Into Watercolor by Techartist (MIT)"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/watercolor-memory-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/watercolor-memory.mp4"
+  },
+  {
+   "slug": "cel-shaded-3d",
+   "number": 116,
+   "name": "Cel-Shaded 3D",
+   "feel": "Toon-shaded 3D with ink outlines",
+   "best_for": "Playful 3D worlds, game-style stories and product scenes",
+   "family": "generative-3d",
+   "use_cases": [
+    "story",
+    "product"
+   ],
+   "credits": [],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous"
+   },
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cel-shaded-3d-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cel-shaded-3d.mp4"
+  },
+  {
+   "slug": "vaporwave",
+   "number": 117,
+   "name": "Vaporwave",
+   "feel": "Pastel marble bust, dreamy VHS",
+   "best_for": "Ironic nostalgia, dreamy title cards, and aesthetic social posts",
+   "family": "nostalgia",
+   "use_cases": [
+    "social",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "eventsGpu": "full"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/vaporwave-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/vaporwave.mp4"
+  },
+  {
+   "slug": "teletext",
+   "number": 118,
+   "name": "Teletext",
+   "feel": "Blocky broadcast pages on a CRT",
+   "best_for": "News roundups, scores, forecasts and data at a glance",
+   "family": "nostalgia",
+   "use_cases": [
+    "news",
+    "data"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/teletext-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/teletext.mp4"
+  },
+  {
+   "slug": "sand-animation",
+   "number": 119,
+   "name": "Sand Animation",
+   "feel": "Backlit sand, shaped by fingertips",
+   "best_for": "Poetic stories, transformations and quiet title sequences",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/sand-animation-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/sand-animation.mp4"
+  },
+  {
+   "slug": "isotype",
+   "number": 120,
+   "name": "Isotype Pictograms",
+   "feel": "Counting people with repeated symbols",
+   "best_for": "Honest comparisons of quantities between groups or years",
+   "family": "technical",
+   "use_cases": [
+    "data",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by Otto Neurath and Gerd Arntz (Isotype)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/isotype-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/isotype.mp4"
+  },
+  {
+   "slug": "de-stijl",
+   "number": 121,
+   "name": "De Stijl",
+   "feel": "Black bars, primary planes, balance",
+   "best_for": "Bold titles, structure, and how parts fit together",
+   "family": "art-movements",
+   "use_cases": [
+    "titles",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by Piet Mondrian and De Stijl"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/de-stijl-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/de-stijl.mp4"
+  },
+  {
+   "slug": "swiss-style",
+   "number": 122,
+   "name": "Swiss Style",
+   "feel": "Strict grid, giant type, red",
+   "best_for": "Event titles, product launches, and clean announcements",
+   "family": "art-movements",
+   "use_cases": [
+    "titles",
+    "product"
+   ],
+   "credits": [
+    "Inspired by International Typographic Style (Josef Müller-Brockmann, Armin Hofmann)"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/swiss-style-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/swiss-style.mp4"
+  },
+  {
+   "slug": "pointillism",
+   "number": 123,
+   "name": "Pointillism",
+   "feel": "Sunlit park built from pure dots",
+   "best_for": "Gentle stories, nostalgic scenes and painterly social posts",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Inspired by Georges Seurat and Paul Signac"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pointillism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pointillism.mp4"
+  },
+  {
+   "slug": "impasto",
+   "number": 124,
+   "name": "Impasto Oil",
+   "feel": "Thick ridged oil strokes, swirling night",
+   "best_for": "Dreamy stories, painterly title cards and night scenes",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Vincent van Gogh"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "full",
+    "schedule": "contiguous"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impasto-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impasto.mp4"
+  },
+  {
+   "slug": "stencil-street",
+   "number": 125,
+   "name": "Stencil Street Art",
+   "feel": "Spray, peel, reveal, red accent",
+   "best_for": "Punchy social posts, protest messages, and witty one-liners",
+   "family": "experimental",
+   "use_cases": [
+    "social",
+    "news"
+   ],
+   "credits": [
+    "Inspired by Banksy's stencil street art"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stencil-street-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/stencil-street.mp4"
+  },
+  {
+   "slug": "oscilloscope",
+   "number": 126,
+   "name": "Oscilloscope",
+   "feel": "Green phosphor beam drawing sound",
+   "best_for": "Tech titles, signal and sound explainers, audio-reactive openers",
+   "family": "technical",
+   "use_cases": [
+    "titles",
+    "explainer"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {
+    "signal": "xy.f32"
+   },
+   "recipe": true,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/oscilloscope-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/oscilloscope.mp4"
+  },
+  {
+   "slug": "felt-stopmotion",
+   "number": 127,
+   "name": "Felt Stop-Motion",
+   "feel": "Fuzzy wool puppets at 12 fps",
+   "best_for": "Gentle stories, kids' content, and cozy social posts",
+   "family": "texture-craft",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/felt-stopmotion-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/felt-stopmotion.mp4"
+  },
+  {
+   "slug": "weather-tv",
+   "number": 128,
+   "name": "90s Weather Report",
+   "feel": "Bevelled map, bouncy icons, synth bed",
+   "best_for": "Forecasts, regional updates and nostalgic data roundups",
+   "family": "nostalgia",
+   "use_cases": [
+    "news",
+    "data"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/weather-tv-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/weather-tv.mp4"
+  },
+  {
+   "slug": "reel-chrome",
+   "number": 129,
+   "name": "Reel Chrome",
+   "feel": "Ember title card, studio chrome",
+   "best_for": "Reels, openers and identity title cards",
+   "family": "polished",
+   "use_cases": [
+    "titles",
+    "social"
+   ],
+   "credits": [
+    "Inspired by the \"Claude motion reel\" teaser posted by @Saccc_c"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/reel-chrome-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/reel-chrome.mp4"
+  },
+  {
+   "slug": "feature-animation-3d",
+   "number": 130,
+   "name": "Feature-Animation 3D",
+   "feel": "Glossy PBR character, studio light",
+   "best_for": "Character shorts and playful product stories",
+   "family": "generative-3d",
+   "use_cases": [
+    "story",
+    "product"
+   ],
+   "credits": [
+    "Inspired by @karanC_12's “Asked for a dot” post"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "full"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/feature-animation-3d-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/feature-animation-3d.mp4"
+  },
+  {
+   "slug": "byzantine",
+   "number": 131,
+   "name": "Byzantine",
+   "feel": "Gold ground, flattened halo, icon",
+   "best_for": "Icons, ceremony and sacred storytelling",
+   "family": "world-history",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by the mosaics of Ravenna and Constantinople"
+   ],
+   "webgl": false,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/byzantine-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/byzantine.mp4"
+  },
+  {
+   "slug": "dada",
+   "number": 132,
+   "name": "Dada",
+   "feel": "Cut-up, absurd, deliberate mistranslation",
+   "best_for": "Anti-advertising, jokes and rule-breaking",
+   "family": "experimental",
+   "use_cases": [
+    "social",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Hannah Höch and Berlin Dada photomontage"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dada-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/dada.mp4"
+  },
+  {
+   "slug": "grainy-flat",
+   "number": 133,
+   "name": "Grainy Flat Vector",
+   "feel": "Grain-shaded shapes, pastel blobs, confetti",
+   "best_for": "Cosy everyday stories, app onboarding and gentle explainers",
+   "family": "flat-graphics",
+   "use_cases": [
+    "story",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by the \"40,000 years of art history in 15 seconds\" reel by @cherry_mx_reds"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/grainy-flat-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/grainy-flat.mp4"
+  },
+  {
+   "slug": "ray-traced-cgi",
+   "number": 134,
+   "name": "Ray-Traced CGI",
+   "feel": "Chrome spheres over an endless checkerboard",
+   "best_for": "Retro tech openers, 90s nostalgia and shiny reveals",
+   "family": "nostalgia",
+   "use_cases": [
+    "titles",
+    "product"
+   ],
+   "credits": [
+    "Inspired by Turner Whitted's 1980 ray-traced spheres"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ray-traced-cgi-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/ray-traced-cgi.mp4"
+  },
+  {
+   "slug": "flat-design",
+   "number": 135,
+   "name": "Flat Design",
+   "feel": "Long shadows, flat UI colours",
+   "best_for": "App launches, feature tours and clean onboarding",
+   "family": "flat-graphics",
+   "use_cases": [
+    "product",
+    "tutorial"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/flat-design-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/flat-design.mp4"
+  },
+  {
+   "slug": "corporate-memphis",
+   "number": 136,
+   "name": "Corporate Memphis",
+   "feel": "Noodle limbs, tiny heads, bold blobs",
+   "best_for": "Team stories, onboarding and friendly service explainers",
+   "family": "flat-graphics",
+   "use_cases": [
+    "explainer",
+    "social"
+   ],
+   "credits": [],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/corporate-memphis-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/corporate-memphis.mp4"
+  },
+  {
+   "slug": "renaissance",
+   "number": 137,
+   "name": "Renaissance",
+   "feel": "Sfumato, gold ground, deep perspective",
+   "best_for": "Origins, discovery and humanist storytelling",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "explainer"
+   ],
+   "credits": [
+    "Inspired by Leonardo da Vinci, Piero della Francesca and the Italian quattrocento"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/renaissance-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/renaissance.mp4"
+  },
+  {
+   "slug": "baroque",
+   "number": 138,
+   "name": "Baroque",
+   "feel": "Chiaroscuro, motion, gilded drama",
+   "best_for": "Reveals, dramatic turns and grand entrances",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Caravaggio and the tenebrist painters of the Baroque"
+   ],
+   "webgl": false,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/baroque-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/baroque.mp4"
+  },
+  {
+   "slug": "neoclassicism",
+   "number": 139,
+   "name": "Neoclassicism",
+   "feel": "Severe line, marble, civic calm",
+   "best_for": "Rules, principles and institutional explainers",
+   "family": "art-movements",
+   "use_cases": [
+    "explainer",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Jacques-Louis David, Antonio Canova and John Flaxman"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/neoclassicism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/neoclassicism.mp4"
+  },
+  {
+   "slug": "romanticism",
+   "number": 140,
+   "name": "Romanticism",
+   "feel": "Storm light, sublime scale, loose brush",
+   "best_for": "Scale, awe and turning points",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Romantic painting — Goya's Black Paintings, Turner's storms and Friedrich's lone figures"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/romanticism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/romanticism.mp4"
+  },
+  {
+   "slug": "impressionism",
+   "number": 141,
+   "name": "Impressionism",
+   "feel": "Broken colour, daylight, plein-air",
+   "best_for": "Everyday scenes, light and passing moments",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Inspired by Claude Monet, Camille Pissarro, Pierre-Auguste Renoir, Berthe Morisot and Alfred Sisley"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impressionism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/impressionism.mp4"
+  },
+  {
+   "slug": "post-impressionism",
+   "number": 142,
+   "name": "Post-Impressionism",
+   "feel": "Impasto, swirl, burning colour",
+   "best_for": "Emotion, energy and expressive reveals",
+   "family": "art-movements",
+   "use_cases": [
+    "story",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Post-Impressionist painting — Van Gogh's impasto and swirling skies, Gauguin and Bernard's cloisonnist outlines, Cézanne's constructive brushwork"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/post-impressionism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/post-impressionism.mp4"
+  },
+  {
+   "slug": "expressionism",
+   "number": 143,
+   "name": "Expressionism",
+   "feel": "Angular line, colour as sound",
+   "best_for": "Tension, ideas and abstract explainers",
+   "family": "art-movements",
+   "use_cases": [
+    "explainer",
+    "story"
+   ],
+   "credits": [
+    "Inspired by Wassily Kandinsky's Improvisations, Franz Marc and Der Blaue Reiter, with the woodcuts of Die Brücke"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/expressionism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/expressionism.mp4"
+  },
+  {
+   "slug": "cubism",
+   "number": 144,
+   "name": "Cubism",
+   "feel": "Faceted planes, one object, many views",
+   "best_for": "Showing several sides of one thing at once",
+   "family": "art-movements",
+   "use_cases": [
+    "explainer",
+    "product"
+   ],
+   "credits": [
+    "Inspired by Pablo Picasso, Georges Braque and Juan Gris"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cubism-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/cubism.mp4"
+  },
+  {
+   "slug": "pop-art",
+   "number": 146,
+   "name": "Pop Art",
+   "feel": "Ben-Day dots, flat colour, repeat",
+   "best_for": "Repetition, consumption and loud product beats",
+   "family": "art-movements",
+   "use_cases": [
+    "social",
+    "product"
+   ],
+   "credits": [
+    "Inspired by Roy Lichtenstein's Ben-Day dot paintings, Andy Warhol's silkscreen repeats and Richard Hamilton's British Pop"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pop-art-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pop-art.mp4"
+  },
+  {
+   "slug": "classical-collage",
+   "number": 147,
+   "name": "Classical Collage",
+   "feel": "White-field collage of classical engravings",
+   "best_for": "Fast brand and product announcements that look print-editorial",
+   "family": "polished",
+   "use_cases": [
+    "product",
+    "titles",
+    "social"
+   ],
+   "credits": [
+    "Inspired by the Claude Opus 5.5 ad posted by Leon Lin (@LexnLin)",
+    "Inspired by the engraved plates of Andreas Vesalius, Albrecht Dürer, Leonardo da Vinci and Johannes Hevelius"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/classical-collage-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/classical-collage.mp4"
+  },
+  {
+   "slug": "terminal-dashboard",
+   "number": 148,
+   "name": "Terminal Dashboard",
+   "feel": "Dense multi-panel TUI with live metrics",
+   "best_for": "Agent runs, benchmarks and cost comparisons told by numbers",
+   "family": "technical",
+   "use_cases": [
+    "data",
+    "explainer",
+    "product"
+   ],
+   "credits": [
+    "Inspired by the multi-model terminal walkthrough posted by delost (@thedelost)",
+    "Inspired by the text-based user interfaces of Unix terminal tools, from curses to today's dashboards"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/terminal-dashboard-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/terminal-dashboard.mp4"
+  },
+  {
+   "slug": "tonal-manga",
+   "number": 149,
+   "name": "Tonal Manga",
+   "feel": "Two-tone manga: paper, halftone, solid ink",
+   "best_for": "Quiet everyday scenes, portraits and editorial storytelling",
+   "family": "comics",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Inspired by the Plainclothes style of the Katagami library, as used in Clanker, I'm Fine by arni",
+    "Inspired by the quiet everyday manga of Jiro Taniguchi and the screentone tradition of Japanese manga"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/tonal-manga-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/tonal-manga.mp4"
+  },
+  {
+   "slug": "mascot-beat-reel",
+   "number": 150,
+   "name": "Mascot Beat Reel",
+   "feel": "Bouncy mascot, one-colour scenes, beat cuts",
+   "best_for": "Brand mascot reels, feature round-ups and music-cut social clips",
+   "family": "generative-3d",
+   "use_cases": [
+    "social",
+    "product",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Ishu Agrawal's “Claude hits the beat” reel"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/mascot-beat-reel-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/mascot-beat-reel.mp4"
+  }
+ ]
+}
