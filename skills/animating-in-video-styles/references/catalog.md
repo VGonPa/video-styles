@@ -115,7 +115,7 @@ Interfaces, terminals, and charts.
 - `oscilloscope` **Oscilloscope** — Green phosphor beam drawing sound. Best for tech titles, signal and sound explainers, audio-reactive openers · titles, explainer
 - `product-ui` **Product UI** — Polished SaaS app demo with cursor, zooms and callouts. Best for feature launches, app walkthroughs, and onboarding · product, tutorial · *no recipe yet*
 - `sci-fi-interface` **Sci-Fi Interface** — Cool HUD, radar, and analysis. Best for measurement, scoring, and diagnostics · data, product · Originally developed by Yasin Özmen · *no recipe yet*
-- `terminal` **Terminal** — Green phosphor command line. Best for technical processes and what happens behind the scenes · explainer, product · Originally developed by Yasin Özmen · *no recipe yet*
+- `terminal` **Terminal** — Green phosphor command line. Best for technical processes and what happens behind the scenes · explainer, product · Originally developed by Yasin Özmen
 
 ## Experimental (`experimental`)
 
