@@ -1,0 +1,873 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mascot Beat Reel</title>
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#151c55;overflow:hidden}canvas{display:block}</style>
+<!-- three.js r159 (MIT), vendored locally -->
+<script src="vendor/three.min.js"></script>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* ==========================================================================
+ * Mascot Beat Reel
+ * One boxy off-white toy (round dot eyes, pink cheeks, mitten arms, two stubby
+ * legs) is cut into six one-idea scenes at 120 bpm. Each scene is a single flat
+ * saturated colour with at most one simple pattern, a different hat, and a giant
+ * slanted condensed label that stamps in whole on its beat, lower-left. The
+ * finale stacks all five hats and bookends on the opening cobalt.
+ *
+ * Layers, composited into #c every frame:
+ *   bg   2D   flat backdrop + pattern (halftone corners, rays, speed lines)
+ *   gl   3D   three.js on a transparent clear: toy render + shadow-only floor
+ *   ov   2D   counter, sticker label, lowercase line
+ * Frames depend only on t (seeded hashes, no clock, no carried state).
+ * ======================================================================== */
+const W = 1920, H = 1080, BEAT = 0.5, END = 10, PI = Math.PI;
+const cl = (x, a = 0, b = 1) => x < a ? a : x > b ? b : x;
+const mix = (a, b, k) => a + (b - a) * k;
+const ramp = (a, b, x) => cl((x - a) / (b - a));
+const smooth = (a, b, x) => { const k = ramp(a, b, x); return k * k * (3 - 2 * k); };
+const outCubic = k => 1 - Math.pow(1 - cl(k), 3);
+const outBack = (k, s = 1.8) => { k = cl(k) - 1; return 1 + k * k * ((s + 1) * k + s); };
+// damped oscillations used for squash, wobble and stamps (all start at the event time dt = 0)
+const decayCos = (dt, w, k) => dt < 0 ? 0 : Math.exp(-k * dt) * Math.cos(w * dt);
+const decaySin = (dt, w, k) => dt < 0 ? 0 : Math.exp(-k * dt) * Math.sin(w * dt);
+// integer hash -> [0, 1)
+function hash(n) {
+  let x = Math.imul((n | 0) ^ 0x5bd1e995, 0x27d4eb2d);
+  x ^= x >>> 15; x = Math.imul(x, 0x165667b1); x ^= x >>> 13; x = Math.imul(x, 0x9e3779b1); x ^= x >>> 16;
+  return (x >>> 0) / 4294967296;
+}
+function seeded(seed) { let i = 0; return () => hash(seed * 7919 + (i++) * 104729); }
+// time since the latest beat, and a kick envelope that is 1 on the beat and falls away
+const beatAge = t => t - Math.floor(t / BEAT + 1e-6) * BEAT;
+const kick = t => Math.exp(-beatAge(t) * 9);
+
+/* ------------------------------------------------------------- timeline */
+// t0/t1 = hard cuts, stamp = label landing, dot = pattern shade, dark = outline/shadow shade, ink = small type
+const SCENES = [
+  { label: 'IDEA', sub: 'a light comes on', t0: 0, t1: 2, stamp: 0.5, bg: '#2F45E8', dot: '#4357F0', dark: '#121A70', ink: '#FFFFFF' },
+  { label: 'BUILD', sub: 'three good hits', t0: 2, t1: 3.5, stamp: 2.0, bg: '#FFC21A', dot: '#FFB000', dark: '#5C3A00', ink: '#3A2200' },
+  { label: 'LUNCH', sub: 'one pancake, flipped', t0: 3.5, t1: 5, stamp: 3.5, bg: '#F0218A', dot: '#D8107A', dark: '#5E0430', ink: '#FFFFFF' },
+  { label: 'PARTY', sub: 'balloons and confetti', t0: 5, t1: 6.5, stamp: 5.0, bg: '#7A2FF0', dot: '#8E4BFF', dark: '#2A0B63', ink: '#FFFFFF' },
+  { label: 'SHIP IT', sub: 'a little boat', t0: 6.5, t1: 8, stamp: 6.5, bg: '#18C6E8', dot: '#0FB3D8', dark: '#063F57', ink: '#04192B' },
+  { label: 'MASCOT BEAT REEL', sub: '', t0: 8, t1: 10, stamp: 8.5, bg: '#2F45E8', dot: '#4C60F2', dark: '#121A70', ink: '#FFFFFF' },
+];
+const sceneAt = t => { for (let i = SCENES.length - 1; i >= 0; i--) if (t >= SCENES[i].t0) return i; return 0; };
+const LAND = 0.5;                                   // 1 IDEA: the mascot lands, the bulb pops up
+const FLASHES = [1.0, 1.5];                         //   the bulb flashes on
+const HITS = [2.0, 2.5, 3.0];                       // 2 BUILD: mallet hits on the nail
+const FLIPS = [3.5, 4.0, 4.5];                      // 3 LUNCH: pancake landings in the pan
+const BALLOONS = [5.0, 5.25, 5.5, 5.75];            // 4 PARTY: balloons pop in
+const BURST = 6.0;                                  //   ...and burst into confetti
+const SURGE = 7.0;                                  // 5 SHIP IT: funnel puff + surge
+const HAT_LAND = [8.0, 8.25, 8.5, 8.75];            // 6: beanie, hard hat, toque, party cone onto the captain's hat
+const TADA = 9.0;
+const FADE = 9.65;
+
+/* ------------------------------------------------------------- layers */
+const out = document.getElementById('c'), octx = out.getContext('2d');
+const mk2d = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c; };
+const bgc = mk2d(), bctx = bgc.getContext('2d');
+const ovc = mk2d(), vctx = ovc.getContext('2d');
+const glc = mk2d();
+const renderer = new THREE.WebGLRenderer({ canvas: glc, alpha: true, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(W, H, false);
+renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.48;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(32, W / H, 0.1, 100);
+
+/* ------------------------------------------------------------- lights */
+const hemi = new THREE.HemisphereLight('#ffffff', '#888888', 1.15); scene.add(hemi);
+const keyL = new THREE.DirectionalLight('#FFF6EC', 2.9);       // near-neutral key: the body stays off-white
+keyL.castShadow = true; keyL.shadow.mapSize.set(2048, 2048);
+keyL.shadow.bias = -0.0004; keyL.shadow.normalBias = 0.02;
+scene.add(keyL, keyL.target);
+const rimL = new THREE.DirectionalLight('#ffffff', 1.5); scene.add(rimL, rimL.target);
+const fillL = new THREE.DirectionalLight('#FFF8F2', 0.9); scene.add(fillL, fillL.target);   // soft, shadowless, from the camera side
+function aimLights(cx, cz, span) {          // key ~68 degrees up, front-left; rim behind right; shadow box around the action
+  keyL.position.set(cx - 1.8, 8.0, cz + 2.7); keyL.target.position.set(cx, 0, cz);
+  fillL.position.set(cx + 0.5, 2.0, cz + 8); fillL.target.position.set(cx, 0.8, cz);
+  rimL.position.set(cx + 3.5, 4.2, cz - 6); rimL.target.position.set(cx, 0.8, cz);
+  const c = keyL.shadow.camera; c.left = -span; c.right = span; c.top = span; c.bottom = -span; c.near = 1; c.far = 22;
+  c.updateProjectionMatrix();
+}
+
+/* ------------------------------------------------------- floor + blobs */
+const floorMat = new THREE.ShadowMaterial({ color: '#000000', opacity: 0.32 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80).rotateX(-PI / 2), floorMat);
+floor.receiveShadow = true; scene.add(floor);
+const blobTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.45, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx;
+})();
+const blobGeo = new THREE.PlaneGeometry(1, 1).rotateX(-PI / 2);
+const blobs = [];
+function makeBlob() {                       // soft contact darkening right under feet and props
+  const m = new THREE.Mesh(blobGeo, new THREE.MeshBasicMaterial({ map: blobTex, color: '#000000', transparent: true,
+    opacity: 0.4, depthWrite: false, toneMapped: false }));
+  m.renderOrder = 1; blobs.push(m); return m;
+}
+function placeBlob(b, x, z, sx, sz, lift, alpha) {
+  const k = 1 / (1 + 1.8 * Math.max(0, lift));
+  b.position.set(x, 0.003, z); b.scale.set(sx * (1 + 0.6 * lift), 1, sz * (1 + 0.6 * lift));
+  b.material.opacity = alpha * k; b.visible = alpha * k > 0.01;
+}
+
+/* ------------------------------------------------------------ geometry */
+// Rounded box: a subdivided cube whose vertices are bunched into the edge bands, then pushed onto
+// a sphere of radius r around the inner box. Normals point away from the inner box (smooth corners).
+function roundBox(w, h, d, r, K = 5) {
+  r = Math.min(r, w / 2, h / 2, d / 2);
+  const n = 2 * K + 1, g = new THREE.BoxGeometry(2, 2, 2, n, n, n);
+  const half = [w / 2, h / 2, d / 2], step = 2 / n;
+  const pos = g.attributes.position, nor = g.attributes.normal, p = [0, 0, 0], q = [0, 0, 0];
+  for (let i = 0; i < pos.count; i++) {
+    for (let a = 0; a < 3; a++) {
+      const idx = Math.round((pos.getComponent(i, a) + 1) / step), hf = half[a], rr = Math.min(r, hf);
+      p[a] = idx <= K ? -hf + rr * idx / K : hf - rr * (n - idx) / K;
+      q[a] = cl(p[a], -hf + rr, hf - rr);
+    }
+    let dx = p[0] - q[0], dy = p[1] - q[1], dz = p[2] - q[2];
+    const L = Math.hypot(dx, dy, dz) || 1; dx /= L; dy /= L; dz /= L;
+    pos.setXYZ(i, q[0] + dx * r, q[1] + dy * r, q[2] + dz * r); nor.setXYZ(i, dx, dy, dz);
+  }
+  return g;
+}
+const mat = (color, rough = 0.55, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, ...extra });
+function mesh(geo, material, x = 0, y = 0, z = 0, parent) {
+  const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
+  if (parent) parent.add(m);
+  return m;
+}
+const halfDisc = (r, h, seg = 24) => new THREE.CylinderGeometry(r, r, h, seg, 1, false, -PI / 2, PI);   // front half (z >= 0)
+const dome = (r, seg = 32) => new THREE.SphereGeometry(r, seg, seg / 2, 0, 2 * PI, 0, PI / 2);
+
+/* -------------------------------------------------------------- mascot */
+// Units: the body is about one unit wide; the floor is y = 0 and the mascot faces +z.
+const SHELL = mat('#F8EFDA', 0.5), EYE = mat('#101015', 0.14), CHEEK = mat('#F7A3B8', 0.6), GLINT = new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false });
+const LEG = 0.24, BODY_H = 1.1, BODY_W = 1.0, BODY_D = 0.85, FACE_Y = BODY_H * 0.62;   // a touch taller than wide
+const G = {
+  body: roundBox(BODY_W, BODY_H, BODY_D, 0.23),
+  arm: new THREE.CapsuleGeometry(0.085, 0.2, 6, 14),
+  hand: new THREE.SphereGeometry(0.115, 20, 14),
+  leg: new THREE.CapsuleGeometry(0.1, 0.12, 6, 14),
+  foot: new THREE.SphereGeometry(0.13, 20, 12),
+  eye: new THREE.SphereGeometry(0.074, 24, 16),
+  cheek: new THREE.SphereGeometry(0.075, 20, 12),
+  glint: new THREE.SphereGeometry(0.019, 10, 8),
+  mouth: new THREE.TorusGeometry(0.05, 0.012, 8, 20, PI),
+};
+function makeMascot() {
+  const root = new THREE.Group();               // floor position + facing
+  const squash = new THREE.Group(); root.add(squash);   // squash/stretch about the floor
+  const body = new THREE.Group(); body.position.y = LEG; squash.add(body);   // lean pivot at the hips
+  mesh(G.body, SHELL, 0, BODY_H / 2, 0, body);
+  const face = new THREE.Group(); face.position.set(0, FACE_Y, BODY_D / 2 - 0.012); body.add(face);
+  for (const s of [-1, 1]) {                    // round glossy eyes with a glint, soft pink cheeks
+    const e = mesh(G.eye, EYE, s * 0.2, 0, 0, face); e.scale.set(1, 1, 0.55);
+    const gl = new THREE.Mesh(G.glint, GLINT); gl.position.set(s * 0.2 + 0.024, 0.03, 0.037); face.add(gl);
+    const ch = mesh(G.cheek, CHEEK, s * 0.31, -0.13, 0.0, face); ch.scale.set(1, 0.62, 0.22);
+  }
+  const mouth = mesh(G.mouth, EYE, 0, -0.14, 0.02, face); mouth.rotation.z = PI; mouth.scale.set(1, 0.8, 0.5);
+  const arms = [], legs = [];
+  for (const s of [-1, 1]) {
+    const sh = new THREE.Group(); sh.position.set(s * (BODY_W / 2 + 0.02), BODY_H * 0.4, 0.02); body.add(sh);
+    mesh(G.arm, SHELL, 0, -0.16, 0, sh);
+    const hand = new THREE.Group(); hand.position.y = -0.33; sh.add(hand);
+    mesh(G.hand, SHELL, 0, 0, 0, hand);
+    sh.userData = { side: s, hand }; arms.push(sh);
+    const hip = new THREE.Group(); hip.position.set(s * 0.24, LEG + 0.02, 0); squash.add(hip);
+    mesh(G.leg, SHELL, 0, -0.1, 0, hip);
+    const ft = mesh(G.foot, SHELL, 0, -LEG + 0.04, 0.05, hip); ft.scale.set(1, 0.55, 1.25);
+    legs.push(hip);
+  }
+  const hatSlot = new THREE.Group(); hatSlot.position.y = BODY_H - 0.015; body.add(hatSlot);
+  return { root, squash, body, face, arms, legs, hatSlot };
+}
+// Pose every joint from scratch each frame (no state carried between frames).
+// arm pose: [raise sideways, swing forward, twist]; positive raise lifts the arm away from the body.
+function poseMascot(m, o = {}) {
+  m.root.position.set(o.x ?? 0, o.y ?? 0, o.z ?? 0);
+  m.root.rotation.set(0, o.yaw ?? 0, 0);
+  m.root.scale.setScalar(o.scale ?? 1);
+  const sq = o.squash ?? 0;                     // > 0 squashes, < 0 stretches; volume roughly kept
+  m.squash.scale.set(1 + sq * 0.5, 1 - sq, 1 + sq * 0.5);
+  m.body.rotation.set(o.pitch ?? 0, o.twist ?? 0, o.roll ?? 0);
+  m.body.position.y = LEG + (o.bodyY ?? 0);
+  m.face.position.x = o.lookX ?? 0; m.face.position.y = FACE_Y + (o.lookY ?? 0);
+  const A = [o.armR ?? [0.12, 0, 0], o.armL ?? [0.12, 0, 0]];    // index 0 = its right (x < 0)
+  m.arms.forEach((sh, i) => { const [r, f, tw] = A[i]; sh.rotation.set(-f, tw, sh.userData.side * r, 'YXZ'); });
+  const Lg = [o.legR ?? 0, o.legL ?? 0];
+  m.legs.forEach((hp, i) => { hp.rotation.set(-Lg[i], 0, 0); });
+  m.root.visible = o.visible ?? true;
+}
+const handWorld = (m, i, v = new THREE.Vector3()) => { m.root.updateMatrixWorld(true); return m.arms[i].userData.hand.getWorldPosition(v); };
+
+/* ---------------------------------------------------------------- hats */
+// Each hat: a group whose origin sits on the head; `top` is where the next hat in a stack sits.
+const HATMAT = {
+  red: mat('#E2323C', 0.55), yellow: mat('#FFD21F', 0.45), green: mat('#2BD96B', 0.45),
+  cobalt: mat('#2A47E0', 0.42), cobaltDark: mat('#1B30A8', 0.45),
+  toque: mat('#FFFFFF', 0.62), toqueBand: mat('#EEF0F6', 0.6),
+  pink: mat('#FF4FA3', 0.5), cream: mat('#FFF2C2', 0.5),
+  white: mat('#FBFAF5', 0.48), navy: mat('#1E2B70', 0.55), visor: mat('#15151C', 0.3),
+  gold: new THREE.MeshStandardMaterial({ color: '#F3B53A', roughness: 0.32, metalness: 0.55 }),
+};
+function hatBeanie() {                              // red propeller beanie
+  const g = new THREE.Group();
+  const d = mesh(dome(0.37), HATMAT.red, 0, 0.0, 0, g); d.scale.set(1, 0.62, 1);
+  mesh(new THREE.TorusGeometry(0.365, 0.035, 10, 44).rotateX(PI / 2), HATMAT.yellow, 0, 0.02, 0, g);
+  mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 8), HATMAT.yellow, 0, 0.27, 0, g);
+  const spin = new THREE.Group(); spin.position.y = 0.33; g.add(spin);
+  mesh(new THREE.SphereGeometry(0.035, 12, 8), HATMAT.yellow, 0, 0, 0, spin);
+  for (const s of [-1, 1]) {
+    const b = mesh(roundBox(0.26, 0.022, 0.085, 0.01, 2), s > 0 ? HATMAT.yellow : HATMAT.green, s * 0.15, 0, 0, spin);
+    b.rotation.x = s * 0.35;
+  }
+  return { g, top: 0.22, spin };
+}
+function hatHard() {                                // cobalt hard hat: tall shell, front peak, ridge over the crown
+  const g = new THREE.Group();
+  mesh(dome(0.37), HATMAT.cobalt, 0, 0.035, 0, g).scale.set(1, 1, 1.08);
+  mesh(new THREE.CylinderGeometry(0.43, 0.43, 0.035, 44), HATMAT.cobalt, 0, 0.03, 0, g);
+  mesh(halfDisc(0.43, 0.035, 32), HATMAT.cobalt, 0, 0.03, 0, g).scale.set(1, 1, 1.4);
+  mesh(new THREE.TorusGeometry(0.37, 0.05, 10, 24, 0.5 * PI).rotateZ(0.25 * PI).rotateY(PI / 2), HATMAT.cobaltDark, 0, 0.035, 0, g).scale.set(1, 1, 1.08);   // ridge over the crown only
+  return { g, top: 0.19 };                         // a hat stacked on it sinks onto the shell, hiding the ridge
+}
+function hatToque() {                               // tall white chef's toque: a band and a puffed crown
+  const g = new THREE.Group();
+  mesh(new THREE.CylinderGeometry(0.33, 0.34, 0.22, 36), HATMAT.toqueBand, 0, 0.11, 0, g);
+  const puffGeo = new THREE.SphereGeometry(0.2, 24, 16);
+  for (let k = 0; k < 6; k++) {
+    const a = k / 6 * 2 * PI;
+    mesh(puffGeo, HATMAT.toque, Math.cos(a) * 0.19, 0.36, Math.sin(a) * 0.19, g).scale.set(1, 1.15, 1);
+  }
+  mesh(new THREE.SphereGeometry(0.25, 28, 18), HATMAT.toque, 0, 0.46, 0, g);
+  return { g, top: 0.68 };
+}
+function hatCone() {                                // striped party cone with a pompom
+  const g = new THREE.Group(), bands = 5, hgt = 0.66, r0 = 0.28;
+  for (let k = 0; k < bands; k++) {
+    const ya = k / bands, yb = (k + 1) / bands;
+    mesh(new THREE.CylinderGeometry(r0 * (1 - yb) + 0.012, r0 * (1 - ya) + 0.012, hgt / bands, 32), k % 2 ? HATMAT.yellow : HATMAT.pink,
+      0, hgt * (ya + yb) / 2, 0, g);
+  }
+  mesh(new THREE.TorusGeometry(0.28, 0.03, 10, 40).rotateX(PI / 2), HATMAT.cream, 0, 0.02, 0, g);
+  mesh(new THREE.SphereGeometry(0.075, 18, 12), HATMAT.cream, 0, hgt + 0.04, 0, g);
+  g.rotation.z = -0.12;
+  return { g, top: hgt + 0.1 };
+}
+function hatCaptain() {                             // white captain's hat, navy band, plain gold anchor
+  const g = new THREE.Group();
+  mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.13, 40), HATMAT.navy, 0, 0.065, 0, g);
+  mesh(new THREE.CylinderGeometry(0.45, 0.39, 0.16, 40), HATMAT.white, 0, 0.205, -0.02, g);
+  const vs = new THREE.Shape();                    // visor: a crescent hugging the band front, hinged there, ~20 degrees down
+  vs.moveTo(0.37, 0); vs.absellipse(0, 0, 0.37, 0.6, 0, PI, false); vs.lineTo(-0.33, 0); vs.absarc(0, 0, 0.33, PI, 0, true);
+  const vg = new THREE.ExtrudeGeometry(vs, { depth: 0.026, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 2, curveSegments: 24 });
+  vg.rotateX(PI / 2).translate(0, 0, -0.3);
+  const hinge = new THREE.Group(); hinge.position.set(0, 0.035, 0.3); hinge.rotation.x = 0.35; g.add(hinge);
+  mesh(vg, HATMAT.visor, 0, 0, 0, hinge);
+  const an = new THREE.Group(); an.position.set(0, 0.07, 0.352); g.add(an);
+  mesh(new THREE.TorusGeometry(0.018, 0.007, 8, 16), HATMAT.gold, 0, 0.042, 0, an);
+  mesh(new THREE.BoxGeometry(0.013, 0.075, 0.012), HATMAT.gold, 0, -0.002, 0, an);
+  mesh(new THREE.BoxGeometry(0.06, 0.011, 0.012), HATMAT.gold, 0, 0.018, 0, an);
+  const hook = mesh(new THREE.TorusGeometry(0.032, 0.008, 8, 20, PI), HATMAT.gold, 0, -0.012, 0, an); hook.rotation.z = PI;
+  return { g, top: 0.28 };
+}
+const HAT_MAKERS = [hatBeanie, hatHard, hatToque, hatCone, hatCaptain];   // scene order
+
+/* ------------------------------------------------------ scene registry */
+// Every scene owns a group of props; setScene shows one group and poses everything inside it.
+const props = SCENES.map(() => { const g = new THREE.Group(); scene.add(g); return g; });
+const meshesOf = o => { const list = []; o.traverse(m => { if (m.isMesh && m.castShadow) list.push(m); }); return list; };
+const setCast = (list, on) => list.forEach(m => { m.castShadow = on; });
+const hero = makeMascot(); scene.add(hero.root);
+hero.meshes = meshesOf(hero.root);                  // collected before any hat is attached
+const heroHats = HAT_MAKERS.map(f => { const h = f(); h.meshes = meshesOf(h.g); hero.hatSlot.add(h.g); return h; });
+const heroBlob = makeBlob(); scene.add(heroBlob);
+const VIEWS = [];                                   // per scene: camera position, look-at, light centre, shadow span
+const POSERS = [];                                  // per scene: (t, local time) -> poses props + hero
+
+/* ========================================================= shared props */
+const UP = new THREE.Vector3(0, 1, 0), TOWARD_CAM = new THREE.Vector3(0, 0, 1);
+const nlerp = (a, b, k) => a.clone().lerp(b, k).normalize();
+const _m4 = new THREE.Matrix4(), _ax = new THREE.Vector3();
+// turn obj so its local +y runs along `dir`, with local +z as close to `hint` as possible
+function orientY(obj, dir, hint = TOWARD_CAM) {
+  const y = dir.clone().normalize(), z = hint.clone().addScaledVector(y, -hint.dot(y)).normalize();
+  obj.quaternion.setFromRotationMatrix(_m4.makeBasis(_ax.crossVectors(y, z), y, z));
+}
+// turn obj so its local +x runs along `dir`, with local +y as close to `hint` as possible
+function orientX(obj, dir, hint = UP) {
+  const x = dir.clone().normalize(), y = hint.clone().addScaledVector(x, -hint.dot(x)).normalize();
+  obj.quaternion.setFromRotationMatrix(_m4.makeBasis(x, y, _ax.crossVectors(x, y)));
+}
+// stretch a unit-tall cylinder between two points (balloon strings)
+function span(obj, a, b) {
+  const d = b.clone().sub(a), len = d.length();
+  obj.position.copy(a).addScaledVector(d, 0.5); orientY(obj, d.normalize()); obj.scale.set(1, Math.max(0.001, len), 1);
+}
+function hop(t, at, up = 0.42, dur = 0.25) {        // ballistic hop from `at`, lands at `at + dur`
+  const u = (t - at) / dur;
+  return u > 0 && u < 1 ? up * 4 * u * (1 - u) : 0;
+}
+// flat burst: short white dashes thrown out around a point, in the camera plane
+const DASH = new THREE.CapsuleGeometry(0.026, 0.17, 3, 8).rotateZ(PI / 2);
+function makeBurst(parent, n = 8) {
+  const g = new THREE.Group(); parent.add(g);
+  for (let k = 0; k < n; k++) {
+    const p = new THREE.Group(); p.rotation.z = k / n * 2 * PI + 0.3; g.add(p);
+    p.add(new THREE.Mesh(DASH, GLINT));
+  }
+  return g;
+}
+function showBurst(g, pos, dt, size = 1) {           // out in 0.09 s, gone by 0.3 s
+  const grow = outCubic(ramp(0, 0.09, dt)), fade = 1 - ramp(0.12, 0.3, dt);
+  g.visible = dt >= 0 && fade > 0;
+  g.position.copy(pos); g.scale.setScalar(size * Math.max(0.001, fade));
+  g.children.forEach(p => { p.children[0].position.x = 0.3 + 0.3 * grow; });
+}
+function starGeo(r1, r2, pts = 5) {
+  const sh = new THREE.Shape();
+  for (let k = 0; k <= pts * 2; k++) {
+    const a = PI / 2 + k * PI / pts, r = k % 2 ? r2 : r1;
+    if (k) sh.lineTo(Math.cos(a) * r, Math.sin(a) * r); else sh.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  return new THREE.ExtrudeGeometry(sh, { depth: 0.03, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.015, bevelSegments: 2 });
+}
+// confetti: flat paper bits thrown from an origin, tumbling under drag and gravity, settling flat on the floor
+const BIT = new THREE.BoxGeometry(0.1, 0.16, 0.014);
+const BIT_MATS = ['#FFD21F', '#FF4FA3', '#2BEA5E', '#18C6E8', '#FFFFFF', '#E2323C'].map(c => mat(c, 0.5, { side: THREE.DoubleSide }));
+// each bit starts somewhere inside a sphere of radius `r` and flies straight out of it (speed s0..s0+s1)
+function makeConfetti(parent, n, seed, r, s0, s1) {
+  const rnd = seeded(seed), list = [];
+  for (let k = 0; k < n; k++) {
+    const b = mesh(BIT, BIT_MATS[k % BIT_MATS.length], 0, 0, 0, parent); b.castShadow = false;
+    const z = rnd() * 2 - 1, a = rnd() * 2 * PI, q = Math.sqrt(1 - z * z);
+    const dir = new THREE.Vector3(q * Math.cos(a), z * 0.8 + 0.25, q * Math.sin(a) * 0.6).normalize();
+    b.userData = { dir, r0: r * (0.35 + 0.65 * rnd()), s: s0 + s1 * rnd(), spin: [rnd() * 14, rnd() * 14, rnd() * 9] };
+    list.push(b);
+  }
+  return list;
+}
+function flyConfetti(list, t, at, origin, grav = 2.2) {
+  list.forEach((b, k) => {
+    const u = b.userData, dt = t - at;
+    b.visible = dt >= 0;
+    if (dt < 0) return;
+    const go = u.r0 + u.s * (1 - Math.exp(-2.6 * dt)) / 2.6, o = origin(k);
+    const y = o.y + u.dir.y * go - grav * dt * dt;
+    b.position.set(o.x + u.dir.x * go, Math.max(0.012, y), o.z + u.dir.z * go);
+    if (y > 0.012) b.rotation.set(u.spin[0] * dt, u.spin[1] * dt, u.spin[2] * dt); else b.rotation.set(PI / 2, 0, u.spin[2]);
+  });
+}
+
+/* ========================================================== scene 1 IDEA */
+// drops in, lands; a big bulb pops up over its head and flashes on twice
+const S1 = { x: 1.0, z: 0.1 };
+{
+  const g = props[0], bulb = new THREE.Group(); g.add(bulb);          // origin at the bulb's tip, glass on top
+  S1.glass = new THREE.MeshStandardMaterial({ color: '#FFF0B0', roughness: 0.28, emissive: '#FFB000', emissiveIntensity: 0 });
+  mesh(new THREE.SphereGeometry(0.36, 36, 24), S1.glass, 0, 0.64, 0, bulb);
+  mesh(new THREE.CylinderGeometry(0.21, 0.15, 0.24, 28), S1.glass, 0, 0.36, 0, bulb);
+  const metal = new THREE.MeshStandardMaterial({ color: '#B4B9C6', roughness: 0.35, metalness: 0.5 });
+  mesh(new THREE.CylinderGeometry(0.135, 0.135, 0.17, 24), metal, 0, 0.17, 0, bulb);
+  for (let k = 0; k < 3; k++) mesh(new THREE.TorusGeometry(0.138, 0.024, 8, 28).rotateX(PI / 2), metal, 0, 0.11 + k * 0.05, 0, bulb);
+  mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.08, 16), mat('#2B2B33', 0.4), 0, 0.05, 0, bulb);
+  S1.rays = new THREE.Group(); S1.rays.position.y = 0.64; bulb.add(S1.rays);
+  const tick = new THREE.CapsuleGeometry(0.045, 0.2, 4, 8), tickMat = new THREE.MeshBasicMaterial({ color: '#FFE45C', toneMapped: false });
+  for (let k = 0; k < 8; k++) {
+    const p = new THREE.Group(); p.rotation.z = k * PI / 4; S1.rays.add(p);
+    const m = new THREE.Mesh(tick, tickMat); m.position.y = 0.5; p.add(m);
+  }
+  S1.glow = new THREE.PointLight('#FFD15C', 0, 5, 1.6); S1.glow.position.y = 0.64; bulb.add(S1.glow);
+  S1.bulb = bulb; setCast(meshesOf(bulb), false);   // airborne: no detached floor shadow
+}
+VIEWS[0] = { pos: [-0.15, 2.52, 6.42], look: [-0.15, 1.56, 0], light: [1.0, 0], span: 3.2 };
+POSERS[0] = (t) => {
+  const DROP = 4.4, fall = t < LAND ? DROP * (1 - (t / LAND) ** 2) : 0, land = t - LAND;   // starts above the frame
+  let squash = t < LAND ? -0.12 * ramp(0, LAND, t) : 0.3 * decayCos(land, 21, 7.5);
+  if (t >= 0.95) squash += 0.07 * decayCos(beatAge(t), 18, 10);
+  const f1 = t - FLASHES[0], f2 = t - FLASHES[1];
+  const look = smooth(0.62, 0.9, t), eureka = smooth(1.4, 1.52, t), jump = hop(t, FLASHES[1], 0.26, 0.25);
+  const startle = f1 >= 0 ? Math.max(0, decayCos(f1, 14, 6)) * (1 - eureka) : 0;
+  poseMascot(hero, { x: S1.x, z: S1.z, y: fall + jump, yaw: -0.18, squash: squash - (jump > 0 ? 0.08 : 0),
+    lookY: 0.07 * look, pitch: -0.1 * look, lookX: -0.02,
+    armR: [mix(0.15, 2.5, eureka) + 0.9 * startle, 0.1, 0], armL: [mix(0.15, 2.5, eureka) + 0.5 * startle, 0.1, 0] });
+  const near = 1 - fall / DROP;                     // its shadow grows in as it comes down
+  if (fall > 0) placeBlob(heroBlob, S1.x, S1.z, 1.35 * (0.4 + 0.6 * near), 1.1 * (0.4 + 0.6 * near), 0, 0.42 * (0.3 + 0.7 * near));
+  else placeBlob(heroBlob, S1.x, S1.z, 1.35, 1.1, jump, 0.42);
+  setCast(hero.meshes, fall < 0.5); setCast(heroHats[0].meshes, fall < 0.5);   // no detached shadow while it drops in
+  heroHats[0].spin.rotation.y = t * 15 + 9 * Math.max(0, t - FLASHES[0]);
+  // the bulb pops up on the landing, then flashes on the next two beats and stays lit
+  const pop = t >= LAND ? Math.max(0.001, outBack((t - LAND) / 0.18, 2.4)) : 0.001;
+  S1.bulb.visible = t >= LAND;
+  S1.bulb.position.set(S1.x - 0.05, 1.86 + 0.03 * Math.sin(t * 5) + 0.15 * jump, S1.z);
+  S1.bulb.scale.setScalar(pop); S1.bulb.rotation.z = 0.14 * decaySin(t - LAND, 14, 5) + 0.05 * decaySin(f2, 16, 6);
+  let glow = 0;
+  if (f1 >= 0) glow = 0.35 + 1.3 * Math.exp(-f1 * 7);
+  if (f2 >= 0) glow = 0.7 + 1.4 * Math.exp(-f2 * 6);
+  glow *= 1 + (f1 >= 0 ? 0.15 * kick(t) : 0);
+  S1.glass.emissiveIntensity = glow; S1.glow.intensity = glow * 1.6;
+  const rays = f2 >= 0 ? outCubic(f2 / 0.1) * (0.94 + 0.06 * kick(t)) : f1 >= 0 ? outCubic(f1 / 0.1) * (1 - ramp(0.22, 0.4, f1)) : 0;
+  S1.rays.visible = rays > 0.01; S1.rays.scale.setScalar(Math.max(0.001, rays));
+  return { hat: 0 };
+};
+
+/* ========================================================= scene 2 BUILD */
+// a big mallet drives a giant nail into a wooden block, a third of the way on each beat
+const S2 = { x: -0.15, z: 0.2, yaw: 0.5, bx: 1.7, bz: 0.0, bh: 0.32, nail0: 0.62, sink: 0.62 / 3, L: 1.3, NH: 0.09, HR: 0.27, HL: 0.72 };
+{
+  const g = props[1], wood = mat('#C98A4B', 0.62), woodDark = mat('#9C6230', 0.6);
+  S2.blk = new THREE.Group(); S2.blk.position.set(S2.bx, 0, S2.bz); g.add(S2.blk);
+  mesh(roundBox(1.3, S2.bh, 1.0, 0.06, 3), wood, 0, S2.bh / 2, 0, S2.blk);
+  for (const fy of [0.34, 0.67]) mesh(new THREE.BoxGeometry(1.22, 0.024, 0.02), woodDark, 0, S2.bh * fy, 0.502, S2.blk);
+  const steel = new THREE.MeshStandardMaterial({ color: '#C3C8D2', roughness: 0.3, metalness: 0.55 });
+  S2.nail = new THREE.Group(); g.add(S2.nail);                       // origin at the top of the nail head
+  mesh(new THREE.CylinderGeometry(0.2, 0.2, S2.NH, 40), steel, 0, -S2.NH / 2, 0, S2.nail);
+  S2.shaft = mesh(new THREE.CylinderGeometry(0.07, 0.07, 1, 20), steel, 0, 0, 0, S2.nail);   // length follows the sinking
+  S2.mallet = new THREE.Group(); g.add(S2.mallet);                   // origin at the handle butt, handle along +y
+  mesh(new THREE.CylinderGeometry(0.06, 0.07, S2.L, 16), mat('#E7BC86', 0.55), 0, S2.L / 2, 0, S2.mallet);
+  mesh(new THREE.CylinderGeometry(S2.HR, S2.HR, S2.HL, 36).rotateZ(PI / 2), mat('#E8343F', 0.5), 0, S2.L, 0, S2.mallet);
+  for (const s of [-1, 1]) mesh(new THREE.CylinderGeometry(S2.HR + 0.012, S2.HR + 0.012, 0.065, 36).rotateZ(PI / 2), mat('#8E1C24', 0.5), s * (S2.HL / 2 - 0.08), S2.L, 0, S2.mallet);
+  S2.star = new THREE.Mesh(starGeo(0.34, 0.15), GLINT); g.add(S2.star);
+  S2.burst = makeBurst(g, 8);
+  S2.blob = makeBlob(); g.add(S2.blob);
+}
+const nailOut = t => S2.nail0 - S2.sink * HITS.reduce((n, h) => n + outCubic(ramp(h, h + 0.05, t)), 0);
+// 1 = mallet raised, 0 = on the nail
+function malletUp(t) {
+  let k = 0; HITS.forEach((h, i) => { if (t >= h) k = i; });
+  const rise = smooth(HITS[k] + 0.06, HITS[k] + 0.3, t), next = HITS[k + 1];
+  if (next == null) return 0.04 * Math.abs(decaySin(t - HITS[k], 30, 14));
+  return rise * (1 - Math.pow(ramp(next - 0.14, next, t), 2)) + 0.04 * Math.abs(decaySin(t - HITS[k], 30, 14));
+}
+const buildPose = (t, a, hit, f) => ({ x: S2.x, z: S2.z, yaw: S2.yaw, pitch: 0.12 * (1 - a) - 0.06 * a, lookY: 0.02 - 0.05 * (1 - a), lookX: 0.04,
+  squash: 0.13 * decayCos(hit, 22, 9) + 0.05 * decayCos(beatAge(t), 18, 10),
+  armL: [mix(0.35, 0.55, a), f, 0], armR: [0.45 + 0.1 * a, 0.35, 0] });   // the gripping arm swings out front
+const _hand = new THREE.Vector3(), _tip = new THREE.Vector3();
+VIEWS[1] = { pos: [-0.35, 2.35, 6.5], look: [-0.35, 1.02, 0], light: [1.0, 0], span: 3.4 };
+POSERS[1] = (t) => {
+  const a = malletUp(t), last = HITS.filter(h => t >= h).pop() ?? HITS[0], hit = t - last;
+  // block + nail
+  S2.blk.scale.set(1 + 0.03 * decayCos(hit, 30, 12), 1 - 0.06 * decayCos(hit, 30, 12), 1);
+  const top = S2.bh * S2.blk.scale.y + nailOut(t) + S2.NH;
+  S2.nail.position.set(S2.bx, top, S2.bz);
+  const len = nailOut(t) + 0.3; S2.shaft.scale.y = len; S2.shaft.position.y = -S2.NH - len / 2;
+  placeBlob(S2.blob, S2.bx, S2.bz, 1.8, 1.4, 0, 0.36);
+  // grip: find the forward swing of the arm that puts the mitten one handle-length from the strike point
+  _tip.set(S2.bx, top + S2.HR, S2.bz);
+  const reach = f => { poseMascot(hero, buildPose(t, 0, hit, f)); return handWorld(hero, 1, _hand).distanceTo(_tip) - S2.L; };
+  let best = 1.2, err = Infinity;
+  for (let k = 0; k <= 25; k++) { const f = 0.4 + k * 0.1, e = reach(f); if (Math.abs(e) < Math.abs(err)) { best = f; err = e; } }
+  for (let k = -5; k <= 5; k++) { const f = best + k * 0.02, e = reach(f); if (Math.abs(e) < Math.abs(err)) { best = f; err = e; } }
+  poseMascot(hero, buildPose(t, a, hit, mix(best, 2.2, a)));
+  placeBlob(heroBlob, S2.x, S2.z, 1.35, 1.1, 0, 0.42);
+  // mallet: the head swings about the mitten and lands square on the nail head
+  handWorld(hero, 1, _hand);
+  const dHit = _tip.clone().sub(_hand).normalize();
+  const dUp = new THREE.Vector3(0.45, 1, -0.45).normalize();   // wind-up: up, back and out to the side
+  const d = nlerp(dHit, dUp, a);
+  S2.mallet.position.copy(_hand).addScaledVector(d, a > 0 ? Math.min(0, err) : _tip.distanceTo(_hand) - S2.L);
+  orientY(S2.mallet, d);
+  // star pop up and to the side of the impact, dashes ringing the nail head (the nail stays in view)
+  const nailTop = new THREE.Vector3(S2.bx, top, S2.bz + 0.25);
+  const grow = outBack(hit / 0.09, 2.6), fade = 1 - ramp(0.16, 0.32, hit);
+  S2.star.visible = fade > 0; S2.star.position.copy(nailTop).add(new THREE.Vector3(0.58, 0.4, 0.1));
+  S2.star.scale.setScalar(Math.max(0.001, grow * fade)); S2.star.rotation.z = 0.4 * hit;
+  showBurst(S2.burst, nailTop, hit, 1.3);
+  return { hat: 1 };
+};
+
+/* ========================================================= scene 3 LUNCH */
+// a pancake flips out of the pan and lands back in it on each beat; butter on the last landing
+const S3 = { x: 0.35, z: 0.05, yaw: 0.3, steam: [] };
+{
+  const g = props[2], iron = mat('#2A2A33', 0.42);
+  S3.pan = new THREE.Group(); g.add(S3.pan);           // origin at the handle end, handle along local +x
+  mesh(roundBox(0.56, 0.065, 0.11, 0.03, 2), mat('#E2323C', 0.5), 0.28, 0, 0, S3.pan);
+  mesh(new THREE.CylinderGeometry(0.45, 0.38, 0.09, 44), iron, 0.98, 0, 0, S3.pan);
+  mesh(new THREE.TorusGeometry(0.44, 0.03, 10, 48).rotateX(PI / 2), iron, 0.98, 0.045, 0, S3.pan);
+  mesh(new THREE.CylinderGeometry(0.41, 0.41, 0.01, 44), mat('#3C3C48', 0.35), 0.98, 0.047, 0, S3.pan);
+  S3.cake = new THREE.Group(); g.add(S3.cake);
+  mesh(new THREE.SphereGeometry(0.31, 36, 14), mat('#F2B657', 0.62), 0, 0, 0, S3.cake).scale.set(1, 0.2, 1);
+  mesh(new THREE.SphereGeometry(0.25, 36, 12), mat('#DE9640', 0.6), 0, 0.014, 0, S3.cake).scale.set(1, 0.17, 1);
+  S3.butter = mesh(roundBox(0.16, 0.085, 0.16, 0.028, 2), mat('#FFE27A', 0.45), 0, 0.09, 0, S3.cake);
+  S3.cakeMeshes = meshesOf(S3.cake);
+  const puff = new THREE.SphereGeometry(1, 18, 12), puffMat = mat('#FFFFFF', 0.85);
+  for (let k = 0; k < 4; k++) { const p = mesh(puff, puffMat, 0, 0, 0, g); p.castShadow = false; S3.steam.push(p); }
+}
+const _pan = new THREE.Vector3();
+VIEWS[2] = { pos: [-0.05, 2.65, 7.6], look: [-0.05, 1.2, 0], light: [0.9, 0], span: 3.4 };
+POSERS[2] = (t) => {
+  let k = 0; FLIPS.forEach((f, i) => { if (t >= f) k = i; });
+  const landed = t - FLIPS[k], next = FLIPS[k + 1], launch = FLIPS[k] + 0.12;
+  const flying = next != null && t >= launch, u = flying ? ramp(launch, next, t) : 0, arc = 4 * u * (1 - u);
+  const toss = next != null ? Math.exp(-(((t - launch) / 0.05) ** 2)) : 0;
+  poseMascot(hero, { x: S3.x, z: S3.z, yaw: S3.yaw, lookY: 0.08 * arc - 0.02, lookX: 0.05,
+    squash: 0.06 * decayCos(beatAge(t), 18, 10) + 0.08 * decayCos(landed, 20, 10), pitch: 0.05 - 0.08 * arc,
+    armL: [0.95 + 0.25 * toss, 0.75, 0], armR: [0.35 + 0.15 * Math.sin(t * 9), 0.2, 0] });
+  placeBlob(heroBlob, S3.x, S3.z, 1.35, 1.1, 0, 0.42);
+  // pan: held out level from the right mitten, flicks up to toss, dips when the pancake lands
+  handWorld(hero, 1, _hand);
+  const tilt = -0.04 + 0.42 * toss - 0.08 * decayCos(landed, 22, 10);
+  S3.pan.position.copy(_hand).add(new THREE.Vector3(0, -0.02 - 0.05 * decayCos(landed, 20, 10), 0));
+  orientX(S3.pan, new THREE.Vector3(Math.cos(tilt), Math.sin(tilt), 0.12)); S3.pan.updateMatrixWorld(true);
+  S3.pan.localToWorld(_pan.set(0.98, 0.1, 0));
+  // pancake: flat in the pan, or flying a high arc with a full flip in the camera plane
+  const flop = decayCos(landed, 26, 9);
+  setCast(S3.cakeMeshes, !flying);
+  S3.cake.position.copy(_pan).addScaledVector(UP, 1.25 * arc);
+  S3.cake.rotation.set(0, 0, flying ? -2 * PI * u : tilt);
+  S3.cake.scale.set(1 + 0.16 * flop, 1 - 0.4 * flop, 1 + 0.16 * flop);
+  const bt = t - (FLIPS[2] + 0.04);
+  S3.butter.visible = bt >= 0;
+  S3.butter.scale.set(1, Math.max(0.001, outBack(bt / 0.14, 2.6)) * (1 - 0.3 * ramp(0.1, 0.5, bt)), 1);
+  S3.butter.position.y = 0.09 - 0.012 * ramp(0.1, 0.5, bt);
+  // a little steam keeps curling up from the pan
+  S3.steam.forEach((p, i) => {
+    const ph = ((t * 1.4 + i / S3.steam.length) % 1 + 1) % 1, r = 0.09 * Math.sin(PI * ph);
+    p.position.set(_pan.x - 0.15 + 0.1 * i + 0.05 * Math.sin(t * 3 + i), _pan.y + 0.15 + 0.75 * ph, _pan.z - 0.05);
+    p.scale.setScalar(Math.max(0.001, r)); p.visible = r > 0.005 && !flying;
+  });
+  return { hat: 2 };
+};
+
+/* ========================================================= scene 4 PARTY */
+// balloons pop in on the beat over a lit dance floor, then all burst into confetti
+const S4 = { x: 1.0, z: -0.1, tiles: [], balloons: [], strings: [], bursts: [] };
+const TILE_BASE = new THREE.Color('#8E50FA'), TILE_LIT = new THREE.Color('#DCC4FF');
+{
+  const g = props[3], tileGeo = new THREE.PlaneGeometry(0.86, 0.86).rotateX(-PI / 2);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) {
+    const m = new THREE.Mesh(tileGeo, new THREE.MeshBasicMaterial({ color: TILE_BASE, toneMapped: false }));
+    m.position.set(0.0 + c * 0.95, -0.01, -2.45 + r * 0.95); m.userData = { r, c }; g.add(m); S4.tiles.push(m);
+  }
+  const cols = ['#FFD21F', '#2FD9F2', '#FF5FA8', '#7CF25A'];
+  [[0.1, 2.25, -0.35], [1.95, 2.35, -0.25], [0.7, 2.8, -0.75], [1.45, 2.95, -0.95]].forEach((p, k) => {
+    const b = new THREE.Group(); g.add(b);
+    const bm = mat(cols[k], 0.22);
+    mesh(new THREE.SphereGeometry(0.31, 32, 24), bm, 0, 0, 0, b).scale.set(1, 1.17, 1);
+    mesh(new THREE.ConeGeometry(0.05, 0.07, 12).rotateX(PI), bm, 0, -0.38, 0, b);
+    b.userData = { p, at: BALLOONS[k], ph: k * 1.7 }; S4.balloons.push(b); setCast(meshesOf(b), false);
+    const s = mesh(new THREE.CylinderGeometry(0.007, 0.007, 1, 6), mat('#FFFFFF', 0.6), 0, 0, 0, g); s.castShadow = false;
+    S4.strings.push(s);
+    S4.bursts.push(makeBurst(g, 9));
+  });
+  S4.conf = makeConfetti(g, 88, 61, 0.32, 2.3, 1.6);   // >= ~600 px/s out of each balloon
+  S4.pops = S4.balloons.map(() => { const d = new THREE.Mesh(new THREE.CircleGeometry(0.36, 32), GLINT); g.add(d); return d; });
+}
+VIEWS[3] = { pos: [-0.2, 2.75, 7.9], look: [-0.2, 1.05, -0.3], light: [0.9, -0.3], span: 3.6 };
+POSERS[3] = (t) => {
+  // floor: a seeded third of the tiles light on each beat and fade with the kick
+  const beat = Math.floor(t / BEAT + 1e-6), p = kick(t);
+  S4.tiles.forEach(m => {
+    const { r, c } = m.userData, lit = hash(beat * 977 + r * 31 + c * 7) < 0.33;
+    m.material.color.lerpColors(TILE_BASE, TILE_LIT, lit ? 0.35 + 0.65 * p : 0);
+  });
+  const jump = hop(t, BURST, 0.4, 0.3), joy = smooth(BURST - 0.06, BURST + 0.04, t);
+  const sway = Math.sin(PI * t / BEAT);
+  poseMascot(hero, { x: S4.x, z: S4.z, y: jump, yaw: -0.12, roll: 0.08 * sway * (1 - joy), lookY: 0.04, lookX: -0.03,
+    squash: 0.08 * decayCos(beatAge(t), 18, 10) - (jump > 0 ? 0.1 : 0) + 0.2 * decayCos(t - BURST - 0.3, 22, 9),
+    armL: [mix(2.55, 2.75, joy), 0.15, 0], armR: [mix(0.5 + 0.9 * Math.max(0, sway), 2.75, joy), 0.15, 0] });
+  placeBlob(heroBlob, S4.x, S4.z, 1.35, 1.1, jump, 0.42);
+  handWorld(hero, 1, _hand);
+  // balloons: inflate in on their beat, bob on their strings, all gone on the burst
+  S4.balloons.forEach((b, k) => {
+    const { p: bp, at, ph } = b.userData, dt = t - at, alive = dt >= 0 && t < BURST;
+    b.visible = alive; S4.strings[k].visible = alive;
+    const pos = new THREE.Vector3(bp[0] + 0.05 * Math.sin(t * 2.6 + ph), bp[1] + 0.06 * Math.sin(t * 3.1 + ph), bp[2]);
+    if (alive) pos.lerpVectors(_hand, pos, outBack(dt / 0.2, 1.6));        // springs up out of the hand
+    b.position.copy(pos);
+    if (alive) {
+      b.scale.setScalar(Math.max(0.001, outBack(dt / 0.16, 2.6)) * (1 + 0.04 * kick(t)));
+      b.rotation.z = 0.1 * Math.sin(t * 2.6 + ph); b.updateMatrixWorld(true);
+      span(S4.strings[k], b.localToWorld(new THREE.Vector3(0, -0.41, 0)), _hand);
+    }
+    showBurst(S4.bursts[k], pos, t - BURST, 1.3);
+    S4.pops[k].visible = t >= BURST && t < BURST + 0.02; S4.pops[k].position.copy(pos);   // one-frame white pop
+  });
+  const origins = S4.balloons.map(b => new THREE.Vector3(b.userData.p[0], b.userData.p[1], b.userData.p[2]));
+  flyConfetti(S4.conf, t, BURST, k => origins[k % 4], 2.0);
+  return { hat: 3 };
+};
+
+/* ======================================================= scene 5 SHIP IT */
+const S5 = { puffs: [], waves: [] };
+const WAVE_K = 2.4;                                     // wave strips: crest spacing 2.6 units
+{
+  const g = props[4];
+  const boat = new THREE.Group(); g.add(boat);
+  const hs = new THREE.Shape();                         // side profile, bow to +x
+  hs.moveTo(-1.0, 0.62); hs.lineTo(1.12, 0.62);
+  hs.quadraticCurveTo(1.0, 0.16, 0.55, 0.02); hs.lineTo(-0.72, 0.02);
+  hs.quadraticCurveTo(-1.02, 0.06, -1.0, 0.62);
+  const hull = new THREE.ExtrudeGeometry(hs, { depth: 1.0, bevelEnabled: true, bevelThickness: 0.07, bevelSize: 0.07, bevelSegments: 4, curveSegments: 18 });
+  hull.translate(0, 0, -0.5);
+  mesh(hull, mat('#E8343F', 0.5), 0, 0, 0, boat);
+  mesh(roundBox(2.3, 0.1, 1.2, 0.05, 3), mat('#FFFFFF', 0.5), 0.05, 0.66, 0, boat);   // white gunwale
+  for (const z of [-0.62, 0.62]) for (let k = 0; k < 3; k++)                          // portholes along both sides
+    mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.03, 20).rotateX(PI / 2), mat('#FFFFFF', 0.4), -0.45 + k * 0.42, 0.36, z, boat);
+  const fun = new THREE.Group(); fun.position.set(-0.68, 0.66, 0); boat.add(fun);
+  mesh(new THREE.CylinderGeometry(0.17, 0.21, 0.62, 28), mat('#FFD21F', 0.42), 0, 0.31, 0, fun);
+  mesh(new THREE.CylinderGeometry(0.175, 0.175, 0.12, 28), mat('#1C1C24', 0.5), 0, 0.57, 0, fun);
+  S5.boat = boat; S5.fun = fun;
+  // flat wave strips (sine top edge), extruded thin like stage cut-outs
+  const waveGeo = (amp) => {
+    const sh = new THREE.Shape(); sh.moveTo(-7, -0.02);
+    for (let x = -7; x <= 7.001; x += 0.08) sh.lineTo(x, 0.2 + amp * Math.sin(x * WAVE_K));
+    sh.lineTo(7, -0.02); sh.lineTo(-7, -0.02);
+    return new THREE.ExtrudeGeometry(sh, { depth: 0.08, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.02, bevelSegments: 2, curveSegments: 4 });
+  };
+  [[-0.95, '#8BE6F7', 0.1, 0.13, 0.2], [0.64, '#0C8CC6', 0.13, 0.12, 1.1], [0.82, '#0A62A3', 0.11, 0.03, 2.0]].forEach(([z, col, amp, y, ph]) => {
+    const w = mesh(waveGeo(amp), mat(col, 0.55), 0, y, z, g); w.userData = { y, ph }; S5.waves.push(w);
+  });
+  const puffGeo = new THREE.SphereGeometry(1, 24, 16), puffMat = mat('#FFFFFF', 0.85);
+  for (let k = 0; k < 6; k++) { const p = mesh(puffGeo, puffMat, 0, 0, 0, g); p.castShadow = false; S5.puffs.push(p); }
+  S5.blob = makeBlob(); g.add(S5.blob);
+}
+// boat x over time: idles, surges forward on SURGE and coasts
+const boatX = t => 0.45 + 0.7 * outCubic(ramp(SURGE, SURGE + 0.3, t)) + 0.05 * Math.sin(t * 2.4);
+VIEWS[4] = { pos: [-0.45, 2.6, 7.8], look: [-0.45, 0.22, 0], light: [0.8, 0], span: 4.2 };
+POSERS[4] = (t) => {
+  const surge = t - SURGE;
+  const bx = boatX(t), by = 0.08 + 0.05 * Math.sin(t * 2 * PI / BEAT * 0.5) - 0.04 * kick(t);
+  const pitch = 0.035 * Math.sin(t * 5.1) + 0.16 * decaySin(surge, 9, 3.4);
+  S5.boat.position.set(bx, by, 0); S5.boat.rotation.set(0, 0, pitch);
+  S5.fun.scale.set(1 + 0.12 * decayCos(surge, 26, 10), 1 - 0.18 * decayCos(surge, 26, 10), 1 + 0.12 * decayCos(surge, 26, 10));
+  // water scrolls past, faster after the surge
+  const flow = 0.9 * (t - 6.5) + 2.2 * Math.max(0, surge);
+  S5.waves.forEach((w, k) => {
+    const per = 2 * PI / WAVE_K, off = ((flow * (1 + 0.25 * k) + w.userData.ph) % per + per) % per;
+    w.position.set(-off, w.userData.y + 0.03 * Math.sin(t * 4 + k), w.position.z);
+  });
+  // the hero rides amidships, leaning back on the surge, cap-hand up to cheer
+  const lean = 0.18 * decaySin(surge, 9, 3.4) + 0.02 * Math.sin(t * 5.1);
+  const cheer = smooth(SURGE - 0.05, SURGE + 0.1, t);
+  const c = Math.cos(pitch), sn = Math.sin(pitch), hx = 0.25, hy = 0.18;
+  poseMascot(hero, { x: bx + hx * c - hy * sn, y: by + hx * sn + hy * c, z: 0.0, yaw: 0.35, roll: pitch + lean * 0.5, pitch: -lean * 0.3,
+    squash: 0.06 * decayCos(beatAge(t), 18, 10) + 0.14 * decayCos(surge, 22, 9), lookX: 0.05,
+    armR: [0.35 + 0.25 * kick(t), 0.2, 0], armL: [mix(0.35, 2.6, cheer) + 0.2 * cheer * Math.sin(t * 22), 0.15, 0] });
+  // funnel puffs: a burst on the surge and a smaller one a beat later
+  const top = new THREE.Vector3(0, 0.66, 0); S5.fun.localToWorld(top.set(0, 0.66, 0));
+  S5.puffs.forEach((p, k) => {
+    const at = k < 4 ? SURGE + k * 0.07 : SURGE + 0.5 + (k - 4) * 0.07, dt = t - at;
+    const life = ramp(0, 0.7, dt), r = (k < 4 ? 0.26 : 0.18) * outBack(dt / 0.12, 2) * (1 - life * life);
+    p.visible = dt >= 0 && r > 0.005;
+    p.position.set(top.x - 1.1 * life - 0.15 * k * life, top.y + 0.12 + 0.42 * outCubic(life) + 0.03 * k, -0.1 + 0.1 * (k % 3));
+    p.scale.setScalar(Math.max(0.001, r));
+  });
+  placeBlob(S5.blob, bx, 0, 2.4, 1.3, by, 0.0);
+  return { hat: 4 };
+};
+
+/* =================================================== scene 6 the stack */
+// cuts in wearing the captain's hat; the other four land on top of it on 8ths, then the stack settles
+const STACK = [4, 0, 1, 2, 3].map(k => {
+  const h = HAT_MAKERS[k](), a = new THREE.Group(); h.meshes = meshesOf(h.g); a.position.y = h.top; h.g.add(a); h.anchor = a; return h;
+});
+STACK.forEach((h, k) => (k ? STACK[k - 1].anchor : hero.hatSlot).add(h.g));
+const STACK_YAW = [0, 0.3, -0.25, 0.2, -0.1];
+const S6 = { x: 1.15 };
+VIEWS[5] = { pos: [-0.45, 3.0, 11.0], look: [-0.45, 0.93, 0], light: [1.15, 0], span: 3.0 };
+POSERS[5] = (t) => {
+  let squash = 0;
+  HAT_LAND.forEach(l => { squash += 0.13 * decayCos(t - l, 22, 10); });
+  const tada = smooth(TADA - 0.1, TADA + 0.1, t);
+  poseMascot(hero, { x: S6.x, z: 0, yaw: -0.12, squash, lookY: 0.03 + 0.03 * tada, lookX: -0.02,
+    armR: [mix(0.35, 2.4, tada), 0.12, 0], armL: [mix(0.35, 2.4, tada), 0.12, 0] });
+  placeBlob(heroBlob, S6.x, 0, 1.35, 1.1, 0, 0.45);
+  STACK.forEach((h, k) => {
+    const land = k ? HAT_LAND[k - 1] : -1, fall = k ? ramp(land - 0.2, land, t) : 1;
+    h.g.visible = !k || t >= land - 0.2;
+    setCast(h.meshes, !k || t >= land - 0.05);       // a falling hat casts no floor shadow until it is nearly down
+    const hit = k ? t - land : -1, c = decayCos(hit, 26, 10);
+    h.g.position.set(0, 1.8 * (1 - fall * fall) + 0.16 * Math.abs(decaySin(hit, 13, 7)), 0);   // dropped from just above, lands with a bounce
+    h.g.scale.set(1 + 0.14 * c, 1 - 0.26 * c, 1 + 0.14 * c);
+    // its own landing wobble plus a smaller echo from every hat that lands on top of it
+    let rz = k ? 0.15 * decaySin(t - land, 16, 11) : 0, rx = k ? 0.06 * decaySin(t - land - 0.03, 14, 11) : 0;
+    for (let j = k + 1; j < STACK.length; j++) rz += 0.045 * decaySin(t - HAT_LAND[j - 1], 16, 12) * (j % 2 ? 1 : -1);
+    h.g.rotation.set(rx, STACK_YAW[k], rz * (k % 2 ? -1 : 1));
+  });
+  STACK[1].spin.rotation.y = t * 15;
+  return { pulse: Math.max(0, ...HAT_LAND.map(l => (t >= l ? 1 - (t - l) / 0.1 : 0))) };   // 3-frame kick per landing
+};
+
+/* ------------------------------------------------------------ backdrop */
+function halftone(x, sc, cx, cy, R, pitch, maxR, pulse) {
+  x.fillStyle = sc.dot;
+  const rows = Math.ceil(R / (pitch * 0.866)) + 1, cols = Math.ceil(R / pitch) + 1;
+  for (let j = -rows; j <= rows; j++) {
+    const y = cy + j * pitch * 0.866;
+    for (let i = -cols; i <= cols; i++) {
+      const px = cx + (i + (j & 1) * 0.5) * pitch, d = Math.hypot(px - cx, y - cy);
+      if (d >= R) continue;
+      const r = maxR * Math.pow(1 - d / R, 0.85) * (1 + 0.22 * pulse);
+      if (r < 0.8) continue;
+      x.beginPath(); x.arc(px, y, r, 0, 2 * PI); x.fill();
+    }
+  }
+}
+const _sp = new THREE.Vector3(), LINE_BASE = new THREE.Color('#4C60F2'), LINE_HOT = new THREE.Color('#8FA0FF'), LINE_KICK = new THREE.Color();
+function screenOf(px, py, pz) { _sp.set(px, py, pz).project(camera); return [(_sp.x + 1) / 2 * W, (1 - _sp.y) / 2 * H]; }
+function paintBackdrop(i, t, res) {
+  const sc = SCENES[i], x = bctx, p = kick(t);
+  x.fillStyle = sc.bg; x.fillRect(0, 0, W, H);
+  if (i <= 2) {                                     // halftone dots in the two corners away from the label
+    for (const [cx, cy] of [[0, 0], [W, H]]) halftone(x, sc, cx, cy, 720, 38, 15, p);
+  } else if (i === 4) {                             // flat two-tone rays turning slowly round the boat
+    const [cx, cy] = screenOf(boatX(t), 1.1, 0), n = 16, a0 = t * 0.22, R = 2800;
+    x.fillStyle = sc.dot;
+    for (let k = 0; k < n; k++) {
+      const a = a0 + k * 2 * PI / n, w = PI / n * (0.92 + 0.12 * p);
+      x.beginPath(); x.moveTo(cx, cy); x.arc(cx, cy, R, a, a + w); x.closePath(); x.fill();
+    }
+  } else if (i === 5) {                             // speed lines on the hero, re-drawn every 2 frames, kicked by each hat
+    const [cx, cy] = screenOf(S6.x, 1.7, 0), rnd = seeded(900 + Math.floor(t * 15 + 1e-6)), R = 2000, q = res.pulse || 0;
+    x.fillStyle = q > 0 ? LINE_KICK.copy(LINE_BASE).lerp(LINE_HOT, 0.55 * q).getStyle() : sc.dot;   // lines brighten, lengthen and thicken on a kick
+    for (let k = 0; k < 120; k++) {
+      const a = rnd() * 2 * PI, w = (0.006 + rnd() * 0.016) * (1 + 0.35 * q), r0 = 400 + rnd() * 300 - 110 * q;
+      x.beginPath();
+      x.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      x.lineTo(cx + Math.cos(a - w) * R, cy + Math.sin(a - w) * R);
+      x.lineTo(cx + Math.cos(a + w) * R, cy + Math.sin(a + w) * R);
+      x.closePath(); x.fill();
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- type */
+// Labels: Anton caps slanted ~10 degrees, lower-left (left edge x 110, baseline y 940), cap height ~182 px,
+// pale fill, thick outline and a hard 10/10 px offset shadow in the scene's dark shade. Baked once,
+// stamped whole. The counter sits just above, the lowercase line to the right on the same baseline.
+const LABEL_X = 110, LABEL_BASE = 940, CAP = 182, SLANT = 0.18, MAX_W = 1500, EDGE = 40, OUTLINE = 11, SHADOW = 10, SUB_PX = 58;
+const labelArt = [];
+function bakeLabel(i) {
+  const sc = SCENES[i], c = document.createElement('canvas'), x = c.getContext('2d');
+  const setFont = px => { x.font = `400 ${px}px Anton`; x.letterSpacing = `${(px * 0.012).toFixed(2)}px`; };
+  setFont(100);
+  const capRatio = x.measureText('H').actualBoundingBoxAscent / 100;
+  const boxW = px => { setFont(px); return x.measureText(sc.label).width + px * capRatio * SLANT + 2 * OUTLINE + SHADOW; };
+  let px = CAP / capRatio;
+  for (let k = 0; k < 3 && boxW(px) > MAX_W; k++) px *= MAX_W / boxW(px);     // fit clamp: <= 1500 px wide at 1.0
+  setFont(px);
+  const cap = px * capRatio, base = x.measureText(sc.label).width, pad = OUTLINE + SHADOW + 6;
+  c.width = Math.ceil(base + cap * SLANT + 2 * pad); c.height = Math.ceil(cap + 2 * pad);
+  setFont(px); x.lineJoin = 'round'; x.textBaseline = 'alphabetic';
+  const ox = pad, oy = pad + cap;                   // baseline-left of the text inside the canvas
+  const pass = (dx, dy, stroke, fill) => {
+    x.save(); x.translate(ox + dx, oy + dy); x.transform(1, 0, -SLANT, 1, 0, 0);
+    if (stroke) x.strokeText(sc.label, 0, 0);
+    if (fill) x.fillText(sc.label, 0, 0);
+    x.restore();
+  };
+  x.strokeStyle = x.fillStyle = sc.dark; x.lineWidth = OUTLINE * 2;
+  pass(SHADOW, SHADOW, true, true);
+  pass(0, 0, true, false);
+  x.fillStyle = '#FFFFFF'; pass(0, 0, false, true);
+  return { c, ox, oy, cap, base };
+}
+// the stamp scales about the label's centre: 1.25 -> 1 with a small overshoot (~5 frames), alpha in
+// 2 frames, a 3 % bump on later beats; the scale is clamped so the box stays EDGE px inside the frame
+function drawType(i, t) {
+  const sc = SCENES[i], x = vctx, L = labelArt[i];
+  x.clearRect(0, 0, W, H);
+  const cdt = t - sc.t0, cs = 1 + 0.18 * decayCos(cdt, 26, 22);
+  x.save(); x.font = '700 36px Montserrat'; x.letterSpacing = '6px'; x.textBaseline = 'alphabetic';
+  x.translate(LABEL_X + 6, LABEL_BASE - L.cap - 40); x.scale(cs, cs);
+  if (sc.ink === '#FFFFFF') { x.fillStyle = sc.dark; x.fillText(`0${i + 1} / 06`, 2, 2); }   // same colour rules as the lowercase line
+  x.fillStyle = sc.ink; x.fillText(`0${i + 1} / 06`, 0, 0); x.restore();
+  if (t < sc.stamp) return;
+  const dt = t - sc.stamp, hw = L.c.width / 2, hh = L.c.height / 2;
+  const cx = LABEL_X - L.ox + hw, cy = LABEL_BASE - L.oy + hh;
+  const sMax = Math.min((cx - EDGE) / hw, (W - EDGE - cx) / hw, (cy - EDGE) / hh, (H - EDGE - cy) / hh);
+  let s = 1 + (Math.min(1.25, sMax) - 1) * decayCos(dt, 30, 24);
+  if (dt > 0.2) s *= 1 + 0.03 * kick(t);
+  s = Math.min(s, sMax);
+  x.save(); x.globalAlpha = cl(dt / 0.067 + 0.5); x.translate(cx, cy); x.scale(s, s);
+  x.drawImage(L.c, -hw, -hh); x.restore();
+  const sdt = t - sc.stamp - BEAT / 2;
+  if (!sc.sub || sdt < 0) return;
+  const ss = 1 + 0.12 * decayCos(sdt, 28, 20);
+  x.save(); x.font = `700 ${SUB_PX}px Montserrat`; x.letterSpacing = '0.5px'; x.globalAlpha = cl(sdt / 0.1);
+  x.translate(LABEL_X + L.base + OUTLINE + 30, LABEL_BASE); x.scale(ss, ss);
+  if (sc.ink === '#FFFFFF') { x.fillStyle = sc.dark; x.fillText(sc.sub, 3, 3); }   // white lines get a hard 3 px shadow
+  x.fillStyle = sc.ink; x.fillText(sc.sub, 0, 0); x.restore();
+}
+
+/* --------------------------------------------------------------- frame */
+const _look = new THREE.Vector3(), BOUNCE = new THREE.Color('#D9D2C8');
+function setScene(t) {
+  const i = sceneAt(t), sc = SCENES[i], v = VIEWS[i];
+  props.forEach((g, k) => { g.visible = k === i; });
+  blobs.forEach(b => { b.visible = false; });
+  STACK.forEach(h => { h.g.visible = false; });
+  camera.position.set(...v.pos); _look.set(...v.look); camera.lookAt(_look);
+  aimLights(v.light[0], v.light[1], v.span);
+  hemi.groundColor.set(sc.bg).lerp(BOUNCE, 0.55);   // backdrop bounce, kept from tinting the body
+  floorMat.color.set(sc.dark); floorMat.opacity = 0.32;
+  blobs.forEach(b => b.material.color.set(sc.dark));
+  setCast(hero.meshes, true); heroHats.forEach(h => setCast(h.meshes, true));
+  const res = POSERS[i](t) || {};
+  heroHats.forEach((h, k) => { h.g.visible = res.hat === k; });
+  return { i, res };
+}
+function renderFrame(t) {
+  const { i, res } = setScene(t);
+  renderer.render(scene, camera);
+  paintBackdrop(i, t, res);
+  drawType(i, t);
+  octx.drawImage(bgc, 0, 0); octx.drawImage(glc, 0, 0); octx.drawImage(ovc, 0, 0);
+  const f = smooth(FADE, END, t);                   // ending: everything fades to flat cobalt
+  if (f > 0) { octx.globalAlpha = f; octx.fillStyle = SCENES[5].bg; octx.fillRect(0, 0, W, H); octx.globalAlpha = 1; }
+}
+
+window.ready = (async () => {
+  await document.fonts.load('400 180px Anton', 'MASCOT BEAT REEL IDEA');
+  await document.fonts.load('600 40px Montserrat', 'a light comes on 01 / 06');
+  await document.fonts.ready;
+  SCENES.forEach((sc, i) => { labelArt[i] = bakeLabel(i); });
+  for (const sc of SCENES) { setScene(sc.t0 + 0.6); renderer.compile(scene, camera); renderer.render(scene, camera); }
+})();
+
+window.draw = ({ t }) => {
+  renderFrame(t);
+  return out.toDataURL('image/jpeg', 0.92).split(',')[1];
+};
+
+// sound cues for audio.py; pans are -1 (left) .. 1 (right)
+window.events = () => {
+  const ev = [];
+  for (let n = 0; n * BEAT < END; n++) ev.push({ k: 'beat', t: n * BEAT, n });
+  SCENES.forEach((sc, i) => {
+    if (i) ev.push({ k: 'cut', t: sc.t0, i });
+    ev.push({ k: 'stamp', t: sc.stamp, i });
+    if (sc.sub) ev.push({ k: 'sub', t: sc.stamp + BEAT / 2, i });
+  });
+  ev.push({ k: 'whirr', t: 0, d: SCENES[0].t1, pan: 0.3 }, { k: 'fall', t: 0, pan: 0.3 }, { k: 'land', t: LAND, pan: 0.3 }, { k: 'bulb', t: LAND, pan: 0.3 });
+  FLASHES.forEach((t, i) => ev.push({ k: 'ding', t, i, pan: 0.3 }));
+  HITS.forEach((t, i) => { ev.push({ k: 'knock', t, i, pan: 0.45 }); if (i) ev.push({ k: 'swing', t: t - 0.14, pan: 0.2 }); });
+  ev.push({ k: 'sizzle', t: SCENES[2].t0, d: SCENES[2].t1 - SCENES[2].t0, pan: 0.4 });
+  FLIPS.forEach((t, i) => { ev.push({ k: 'flop', t, i, pan: 0.45 }); if (i < 2) ev.push({ k: 'toss', t: t + 0.12, pan: 0.45 }); });
+  ev.push({ k: 'butter', t: FLIPS[2] + 0.04, pan: 0.45 });
+  S4.balloons.forEach((b, i) => ev.push({ k: 'squeak', t: BALLOONS[i], i, pan: cl((b.userData.p[0] - 0.9) / 1.4, -1, 1) }));
+  ev.push({ k: 'burst', t: BURST, pan: 0.3 }, { k: 'confetti', t: BURST + 0.03 }, { k: 'hop', t: BURST, pan: 0.3 });
+  ev.push({ k: 'slosh', t: SCENES[4].t0, pan: 0.2 }, { k: 'horn', t: SURGE, pan: 0.1 }, { k: 'puff', t: SURGE, pan: 0.1 },
+    { k: 'slosh', t: SURGE + 0.04, pan: 0.45, big: 1 }, { k: 'puff', t: SURGE + 0.5, pan: 0.0, small: 1 });
+  HAT_LAND.forEach((t, i) => ev.push({ k: 'plonk', t, i, pan: 0.3 }));
+  ev.push({ k: 'swell', t: SCENES[5].t0, d: TADA - SCENES[5].t0 }, { k: 'chord', t: TADA }, { k: 'fade', t: FADE, d: END - FADE });
+  return ev.sort((p, q) => p.t - q.t);
+};
+</script>
+</body>
+</html>

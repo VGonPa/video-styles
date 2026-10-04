@@ -21,7 +21,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Alfa Slab One](https://fonts.google.com/specimen/Alfa+Slab+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [atomic-wasteland](styles/atomic-wasteland), [collage](styles/collage), [dada](styles/dada), [golden-age-comic](styles/golden-age-comic), [linocut](styles/linocut), [mesoamerican-codex](styles/mesoamerican-codex) |
 | [Amatic SC](https://fonts.google.com/specimen/Amatic+SC) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [cave-painting](styles/cave-painting) |
 | [Amiri](https://fonts.google.com/specimen/Amiri) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [persian-miniature](styles/persian-miniature) |
-| [Anton](https://fonts.google.com/specimen/Anton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [constructivism](styles/constructivism), [dada](styles/dada), [newspaper](styles/newspaper), [title-sequence](styles/title-sequence) |
+| [Anton](https://fonts.google.com/specimen/Anton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [constructivism](styles/constructivism), [dada](styles/dada), [mascot-beat-reel](styles/mascot-beat-reel), [newspaper](styles/newspaper), [title-sequence](styles/title-sequence) |
 | [Archivo](https://fonts.google.com/specimen/Archivo) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bauhaus](styles/bauhaus) |
 | [Archivo Black](https://fonts.google.com/specimen/Archivo+Black) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [collage](styles/collage), [dada](styles/dada), [glitch](styles/glitch), [neo-brutalism](styles/neo-brutalism), [risograph](styles/risograph), [weather-tv](styles/weather-tv) |
 | [Bangers](https://fonts.google.com/specimen/Bangers) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [comic-book](styles/comic-book), [digital-comic](styles/digital-comic), [storytime](styles/storytime) |
@@ -47,6 +47,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [EB Garamond](https://fonts.google.com/specimen/EB+Garamond) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [magazine-cartoon](styles/magazine-cartoon), [scientific-plate](styles/scientific-plate) |
 | [Exo 2](https://fonts.google.com/specimen/Exo+2) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [digital-comic](styles/digital-comic), [handheld-lcd](styles/handheld-lcd), [synthwave](styles/synthwave) |
 | [Federo](https://fonts.google.com/specimen/Federo) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-nouveau](styles/art-nouveau) |
+| [Fira Code](https://fonts.google.com/specimen/Fira+Code) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [terminal-dashboard](styles/terminal-dashboard) |
 | [Forum](https://fonts.google.com/specimen/Forum) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [byzantine](styles/byzantine) |
 | [Fraunces](https://fonts.google.com/specimen/Fraunces) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [feature-animation-3d](styles/feature-animation-3d), [liquid-motion](styles/liquid-motion), [paper-cutout](styles/paper-cutout), [post-impressionism](styles/post-impressionism), [retro-1970s](styles/retro-1970s) |
 | [Fredoka](https://fonts.google.com/specimen/Fredoka) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [clay](styles/clay), [felt-stopmotion](styles/felt-stopmotion), [inflated-3d](styles/inflated-3d), [infographic](styles/infographic), [kurzgesagt](styles/kurzgesagt), [retro-1970s](styles/retro-1970s), [surreal-loop](styles/surreal-loop) |
@@ -70,6 +71,8 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Kaushan Script](https://fonts.google.com/specimen/Kaushan+Script) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [impasto](styles/impasto) |
 | [Lato](https://fonts.google.com/specimen/Lato) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [flat-design](styles/flat-design) |
 | [Libre Baskerville](https://fonts.google.com/specimen/Libre+Baskerville) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [single-panel-absurd](styles/single-panel-absurd) |
+| [Libre Caslon Display](https://fonts.google.com/specimen/Libre+Caslon+Display) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [classical-collage](styles/classical-collage) |
+| [Libre Caslon Text](https://fonts.google.com/specimen/Libre+Caslon+Text) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [classical-collage](styles/classical-collage) |
 | [Libre Franklin](https://fonts.google.com/specimen/Libre+Franklin) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [data-visualization](styles/data-visualization) |
 | [Lilita One](https://fonts.google.com/specimen/Lilita+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [cel-shaded-3d](styles/cel-shaded-3d), [clear-line](styles/clear-line) |
 | [Limelight](https://fonts.google.com/specimen/Limelight) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-deco](styles/art-deco) |
@@ -80,7 +83,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Michroma](https://fonts.google.com/specimen/Michroma) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [ray-traced-cgi](styles/ray-traced-cgi) |
 | [Mochiy Pop One](https://fonts.google.com/specimen/Mochiy+Pop+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [kawaii](styles/kawaii) |
 | [Monoton](https://fonts.google.com/specimen/Monoton) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [retro-1970s](styles/retro-1970s) |
-| [Montserrat](https://fonts.google.com/specimen/Montserrat) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bold-captions](styles/bold-captions), [cosmic-epic](styles/cosmic-epic), [vaporwave](styles/vaporwave) |
+| [Montserrat](https://fonts.google.com/specimen/Montserrat) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [bold-captions](styles/bold-captions), [cosmic-epic](styles/cosmic-epic), [mascot-beat-reel](styles/mascot-beat-reel), [vaporwave](styles/vaporwave) |
 | [Mr Dafoe](https://fonts.google.com/specimen/Mr+Dafoe) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [synthwave](styles/synthwave) |
 | [Newsreader](https://fonts.google.com/specimen/Newsreader) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [editorial-illustration](styles/editorial-illustration) |
 | [Nunito](https://fonts.google.com/specimen/Nunito) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [blob-sim](styles/blob-sim), [frutiger-aero](styles/frutiger-aero), [history-comedy](styles/history-comedy) |
@@ -104,6 +107,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [Rubik Mono One](https://fonts.google.com/specimen/Rubik+Mono+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [pop-art](styles/pop-art) |
 | [Russo One](https://fonts.google.com/specimen/Russo+One) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [anime-80s](styles/anime-80s) |
 | [Rye](https://fonts.google.com/specimen/Rye) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [rubber-hose](styles/rubber-hose) |
+| [Shippori Mincho](https://fonts.google.com/specimen/Shippori+Mincho) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [tonal-manga](styles/tonal-manga) |
 | [Short Stack](https://fonts.google.com/specimen/Short+Stack) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [minimal-strip](styles/minimal-strip) |
 | [Shrikhand](https://fonts.google.com/specimen/Shrikhand) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [memphis](styles/memphis), [retro-1970s](styles/retro-1970s), [underground-comix](styles/underground-comix) |
 | [Silkscreen](https://fonts.google.com/specimen/Silkscreen) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [dither-1bit](styles/dither-1bit), [flash-cartoon](styles/flash-cartoon), [voxel](styles/voxel) |
@@ -159,6 +163,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **EB Garamond**: Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/EBGaramond12)
 - **Exo 2**: Copyright 2013 The Exo 2 Project Authors (https://github.com/googlefonts/Exo-2.0)
 - **Federo**: Copyright (c) 2011 by Olexa M. Volochay | Cyreal.org (a@cyreal.org). All rights reserved.
+- **Fira Code**: Copyright 2014-2020 The Fira Code Project Authors (https://github.com/tonsky/FiraCode)
 - **Forum**: Copyright (c) 2011, Denis Masharov <denis.masharov@gmail.com>. This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
 - **Fraunces**: Copyright 2020 The Fraunces Project Authors (github.com/undercasetype/Fraunces)
 - **Fredoka**: Copyright 2016 The Fredoka Project Authors (https://github.com/hafontia/Fredoka-One)
@@ -180,6 +185,8 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Kaushan Script**: Copyright (c) 2011, Pablo Impallari (www.impallari.com|impallari@gmail.com), Copyright (c) 2011, Igino Marini. (www.ikern.com|mail@iginomarini.com), with Reserved Font Name Kaushan Script.
 - **Lato**: Copyright (c) 2011-2015 by tyPoland Lukasz Dziedzic (http://www.typoland.com/) with Reserved Font Name "Lato". Licensed under the SIL Open Font License, Version 1.1 (http://scripts.sil.org/OFL).
 - **Libre Baskerville**: Copyright 2012 The Libre Baskerville Project Authors (https://github.com/impallari/Libre-Baskerville)
+- **Libre Caslon Display**: Copyright 2012 The Libre Caslon Display Authors (https://github.com/impallari/Libre-Caslon-Display)
+- **Libre Caslon Text**: Copyright 2012 The Libre Caslon Text Project Authors (https://github.com/impallari/Libre-Caslon-Text)
 - **Libre Franklin**: Copyright 2020 The Libre Franklin Project Authors (https://github.com/googlefonts/Libre-Franklin)
 - **Lilita One**: Copyright (c) 2011 Juan Montoreano (juan@remolacha.biz), with Reserved Font Names "Lilita One"
 - **Limelight**: Copyright (c) 2010 by Sorkin Type Co (eben@eyebytes.com) with Reserved Font Name Limelight. This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
@@ -214,6 +221,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **Rubik Mono One**: Copyright 2015 The Rubik Project Authors (mail@hubertfischer.com)
 - **Russo One**: Copyright (c) 2011-2012, Jovanny Lemonad (lemonad@jovanny.ru), with Reserved Font Name "Russo"
 - **Rye**: Copyright (c) 2012, Sorkin Type Co (eben@eyebytes.com) with Reserved Font Name 'Rye'
+- **Shippori Mincho**: Copyright 2021 The Shippori Mincho Project Authors (https://github.com/fontdasu/ShipporiMincho)
 - **Short Stack**: Copyright (c) 2011, Sorkin Type Co (www.sorkintype.com eben@eyebytes.com) with Reserved Font Names "Short Stack" and "Short Stack One".
 - **Shrikhand**: Copyright (c) 2015 Jonny Pinhorn (jonpinhorn.typedesign@gmail.com)
 - **Silkscreen**: Copyright 2001 The Silkscreen Project Authors (https://github.com/googlefonts/silkscreen)

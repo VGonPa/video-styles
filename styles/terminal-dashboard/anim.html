@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0;background:#0b0d11}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ── terminal-dashboard · a multi-panel TUI on one character grid ──────────────────────────────────
+// Everything below the title bar is a 106 x 32 cell buffer that is rewritten every frame and then painted:
+// letters with Fira Code (exactly one fillText per cell, so no ligature ever forms), and every box-drawing,
+// block, shade, braille, arrow and status glyph drawn per cell with rects and paths, the way terminal
+// emulators do, so borders and bars join without seams. Nothing moves smoothly: bars step in eighths,
+// counters jump, log lines arrive whole and scroll by whole rows, panels appear and vanish whole.
+const W = 1920, H = 1080, FPS = 30, DUR = 10.4;
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const at = (t, x) => t >= x - 1e-6;
+const easeOut = u => 1 - Math.pow(1 - clamp(u), 3);
+function hash(a, b = 0) {
+  let h = Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1);
+  h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; h = Math.imul(h, 0x297a2d39); h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
+// ── palette ──────────────────────────────────────────────────────────────────────────────────────
+const C = {
+  field: '#0b0d11', border: '#454f5c', text: '#c8cfd8', dim: '#66707d', cdim: '#7d8794',
+  run: '#56c2d6', pass: '#7fd48c', reroute: '#e3b153', stop: '#ee6f68', focus: '#e6ebf0',
+  chip: '#1c222b', bar: '#12161c', barLine: '#1f252e', dots: '#3a414b',
+};
+
+// ── the grid ─────────────────────────────────────────────────────────────────────────────────────
+// Fira Code's advance is exactly 0.6 em, so 30 px type gives an integer 18 px cell; rows are 32 px.
+const CW = 18, CH = 32, COLS = 106, ROWS = 32, TITLE_H = 40;
+const GX = Math.floor((W - COLS * CW) / 2), GY = TITLE_H + Math.floor((H - TITLE_H - ROWS * CH) / 2);
+const FONT = '"Fira Code"';
+let FS = 30, BASE = 25;                 // font px and baseline offset inside a cell, measured in window.ready
+const N = COLS * ROWS;
+const cellCh = new Array(N), cellFg = new Array(N), cellBg = new Array(N), cellWt = new Uint8Array(N);
+// cellPix marks block cells that fill the whole cell (block letters, the cost view's bars) so vertically
+// adjacent cells meet; other bar blocks sit on the text's cap band, so bars on neighbouring rows stay apart.
+const cellPix = new Uint8Array(N);
+
+function wipe() { cellCh.fill(' '); cellFg.fill(C.text); cellBg.fill(null); cellWt.fill(0); cellPix.fill(0); }
+// Write a string at (col,row); characters outside the grid are dropped. Returns the column after it.
+function put(col, row, s, fg = C.text, bold = 0, bg, pix = 0) {
+  for (const ch of s) {
+    if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+      const i = row * COLS + col;
+      cellCh[i] = ch; cellFg[i] = fg; cellWt[i] = bold; cellPix[i] = pix;
+      if (bg !== undefined) cellBg[i] = bg;
+    }
+    col++;
+  }
+  return col;
+}
+// A run of parts: [text, fg, bold, pix].
+function line(col, row, parts, bg) {
+  for (const [s, fg, b, p] of parts) col = put(col, row, s, fg, b, bg, p);
+  return col;
+}
+const len = s => [...s].length;
+const width = parts => parts.reduce((n, [s]) => n + len(s), 0);
+const pad = (s, n) => s + ' '.repeat(Math.max(0, n - len(s)));
+const lpad = (s, n) => ' '.repeat(Math.max(0, n - len(s))) + s;
+
+// ── procedural glyphs ────────────────────────────────────────────────────────────────────────────
+// Light lines are 2 px wide through the cell centre (x+8..9, y+15..16), so a run of cells is one line.
+const LX = 8, LY = 15, MX = LX + 1, MY = LY + 1;
+const U = 1, R = 2, D = 4, L = 8;
+const LIGHT = { '─': R | L, '│': U | D, '├': U | D | R, '┤': U | D | L, '┬': L | R | D, '┴': L | R | U, '┼': 15 };
+const ROUND = { '╭': R | D, '╮': L | D, '╰': U | R, '╯': U | L };
+// Double lines: two 2 px strokes 3 px either side of the same centre.
+const DOUBLE = { '═': R | L, '║': U | D, '╔': R | D, '╗': L | D, '╚': U | R, '╝': U | L };
+const EIGHTH = { '▏': 1, '▎': 2, '▍': 3, '▌': 4, '▋': 5, '▊': 6, '▉': 7, '█': 8 };
+const BAR_Y = 6, BAR_H = 20;
+const BRAILLE_DOTS = [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2], [0, 3], [1, 3]];
+// Characters the font draws: printable ASCII plus the four extras verified in the latin subset.
+const FONT_CHARS = new Set([...Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i)), '·', '×', '—', '−']);
+const shades = new Map();
+function shade(fg) {
+  if (!shades.has(fg)) {
+    const c = document.createElement('canvas'); c.width = c.height = 4;
+    const p = c.getContext('2d'); p.fillStyle = fg; p.fillRect(0, 0, 2, 2);
+    shades.set(fg, g.createPattern(c, 'repeat'));
+  }
+  return shades.get(fg);
+}
+function stroke(pts, lw = 2) {
+  g.beginPath(); g.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+  g.lineWidth = lw; g.stroke();
+}
+function drawLight(x, y, m) {
+  if (m & L) g.fillRect(x, y + LY, LX + 2, 2);
+  if (m & R) g.fillRect(x + LX, y + LY, CW - LX, 2);
+  if (m & U) g.fillRect(x + LX, y, 2, LY + 2);
+  if (m & D) g.fillRect(x + LX, y + LY, 2, CH - LY);
+}
+function drawRound(x, y, m) {
+  const cx = x + MX, cy = y + MY, r = 8, sx = m & R ? 1 : -1, sy = m & D ? 1 : -1;
+  g.beginPath(); g.moveTo(m & R ? x + CW : x, cy); g.lineTo(cx + sx * r, cy);
+  g.arcTo(cx, cy, cx, cy + sy * r, r); g.lineTo(cx, m & D ? y + CH : y);
+  g.lineWidth = 2; g.lineCap = 'butt'; g.stroke();
+}
+function drawDouble(x, y, m) {
+  const a = x + LX - 3, b = x + LX + 3, p = y + LY - 3, q = y + LY + 3;   // outer/inner columns and rows
+  if (m === (R | L)) { g.fillRect(x, p, CW, 2); g.fillRect(x, q, CW, 2); return; }
+  if (m === (U | D)) { g.fillRect(a, y, 2, CH); g.fillRect(b, y, 2, CH); return; }
+  // corners: the outer stroke turns on the far lines, the inner one on the near lines
+  const right = m & R, down = m & D;
+  const vo = right ? a : b, vi = right ? b : a, ho = down ? p : q, hi = down ? q : p;
+  const hx = (v, w) => right ? [v, x + CW - v] : [x, v + 2 - x];
+  const vy = (h) => down ? [h, y + CH - h] : [y, h + 2 - y];
+  let [x0, w0] = hx(vo), [y0, h0] = vy(ho);
+  g.fillRect(x0, ho, w0, 2); g.fillRect(vo, y0, 2, h0);
+  [x0, w0] = hx(vi); [y0, h0] = vy(hi);
+  g.fillRect(x0, hi, w0, 2); g.fillRect(vi, y0, 2, h0);
+}
+// Symbols sit on the text's optical centre (y+17), a pixel under the box lines' centre.
+const SYM = {
+  '▀': (x, y) => g.fillRect(x, y, CW, CH / 2),
+  '▄': (x, y) => g.fillRect(x, y + CH / 2, CW, CH / 2),
+  '▕': (x, y) => g.fillRect(x + CW - 2, y + BAR_Y, 2, BAR_H),
+  '░': (x, y, fg, pix) => { g.fillStyle = shade(fg); pix ? g.fillRect(x, y, CW, CH) : g.fillRect(x, y + BAR_Y, CW, BAR_H); },
+  '→': (x, y) => { g.fillRect(x + 2, y + 16, 14, 2); stroke([[x + 10.5, y + 11.5], [x + 16, y + 17], [x + 10.5, y + 22.5]]); },
+  '←': (x, y) => { g.fillRect(x + 2, y + 16, 14, 2); stroke([[x + 7.5, y + 11.5], [x + 2, y + 17], [x + 7.5, y + 22.5]]); },
+  '↻': (x, y) => {
+    const cx = x + MX, cy = y + 17.5, r = 6, a0 = -Math.PI / 2 + 0.5, a1 = -Math.PI / 2 + 2 * Math.PI - 0.45;
+    g.beginPath(); g.arc(cx, cy, r, a0, a1); g.lineWidth = 2; g.stroke();
+    const ex = cx + r * Math.cos(a1), ey = cy + r * Math.sin(a1), tx = -Math.sin(a1), ty = Math.cos(a1);
+    g.beginPath(); g.moveTo(ex + tx * 5, ey + ty * 5);
+    g.lineTo(ex - tx * 1.5 - ty * 4, ey - ty * 1.5 + tx * 4); g.lineTo(ex - tx * 1.5 + ty * 4, ey - ty * 1.5 - tx * 4);
+    g.closePath(); g.fill();
+  },
+  '●': (x, y) => { g.beginPath(); g.arc(x + MX, y + 17, 6.5, 0, 2 * Math.PI); g.fill(); },
+  '○': (x, y) => { g.beginPath(); g.arc(x + MX, y + 17, 6, 0, 2 * Math.PI); g.lineWidth = 2; g.stroke(); },
+  '■': (x, y) => g.fillRect(x + 3, y + 11, 12, 12),
+  '▸': (x, y) => { g.beginPath(); g.moveTo(x + 6, y + 11.5); g.lineTo(x + 14, y + 17); g.lineTo(x + 6, y + 22.5); g.closePath(); g.fill(); },
+  '✓': (x, y) => stroke([[x + 3, y + 17.5], [x + 7.5, y + 22.5], [x + 15, y + 10.5]], 2.5),
+  '✗': (x, y) => { stroke([[x + 4, y + 11], [x + 14, y + 23]], 2.5); stroke([[x + 14, y + 11], [x + 4, y + 23]], 2.5); },
+};
+function drawCell(ch, x, y, fg, bold, pix) {
+  g.fillStyle = fg; g.strokeStyle = fg;
+  if (LIGHT[ch]) return drawLight(x, y, LIGHT[ch]);
+  if (ROUND[ch]) return drawRound(x, y, ROUND[ch]);
+  if (DOUBLE[ch]) return drawDouble(x, y, DOUBLE[ch]);
+  if (EIGHTH[ch]) return pix ? g.fillRect(x, y, Math.round(CW * EIGHTH[ch] / 8), CH) : g.fillRect(x, y + BAR_Y, Math.round(CW * EIGHTH[ch] / 8), BAR_H);
+  if (SYM[ch]) return SYM[ch](x, y, fg, pix);
+  const cp = ch.codePointAt(0);
+  if (cp >= 0x2800 && cp <= 0x28ff) {
+    BRAILLE_DOTS.forEach(([dc, dr], k) => {
+      if ((cp - 0x2800) & (1 << k)) { g.beginPath(); g.arc(x + 5 + dc * 8, y + 6.5 + dr * 6.5, 2.6, 0, 2 * Math.PI); g.fill(); }
+    });
+    return;
+  }
+  if (!FONT_CHARS.has(ch)) throw new Error(`no glyph for U+${cp.toString(16).toUpperCase()} "${ch}"`);
+  g.font = `${bold ? 600 : 400} ${FS}px ${FONT}`;
+  g.fillText(ch, x, y + BASE);
+}
+
+// Paint the buffer: cell backgrounds (merged into runs), then one glyph per cell.
+function paint() {
+  for (let r = 0; r < ROWS; r++) {
+    let c = 0;
+    while (c < COLS) {
+      const bg = cellBg[r * COLS + c];
+      if (!bg) { c++; continue; }
+      let e = c + 1; while (e < COLS && cellBg[r * COLS + e] === bg) e++;
+      g.fillStyle = bg; g.fillRect(GX + c * CW, GY + r * CH, (e - c) * CW, CH);
+      c = e;
+    }
+  }
+  g.textBaseline = 'alphabetic'; g.textAlign = 'left';
+  for (let i = 0; i < N; i++) {
+    const ch = cellCh[i];
+    if (ch === ' ') continue;
+    drawCell(ch, GX + (i % COLS) * CW, GY + Math.floor(i / COLS) * CH, cellFg[i], cellWt[i], cellPix[i]);
+  }
+}
+
+// ── window chrome: the title bar (outside the grid) ──────────────────────────────────────────────
+function titleBar(title) {
+  g.fillStyle = C.bar; g.fillRect(0, 0, W, TITLE_H);
+  g.fillStyle = C.barLine; g.fillRect(0, TITLE_H - 1, W, 1);
+  g.fillStyle = C.dots;
+  for (let k = 0; k < 3; k++) { g.beginPath(); g.arc(26 + k * 22, TITLE_H / 2, 6, 0, 2 * Math.PI); g.fill(); }
+  // title text: one glyph per 12 px step (20 px type), centred
+  g.font = `400 20px ${FONT}`; g.fillStyle = C.dim; g.textBaseline = 'alphabetic'; g.textAlign = 'left';
+  const chars = [...title], x0 = Math.round(W / 2 - chars.length * 6);
+  chars.forEach((ch, i) => {
+    if (!FONT_CHARS.has(ch)) throw new Error(`no glyph for "${ch}"`);
+    if (ch !== ' ') g.fillText(ch, x0 + i * 12, 27);
+  });
+}
+
+// ── block letters: an original 5 x 7 pixel font, two pixel rows per text row (▀ ▄ █) ──────────────
+const PIX = {
+  A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
+  B: ['11110', '10001', '10001', '11110', '10001', '10001', '11110'],
+  D: ['11100', '10010', '10001', '10001', '10001', '10010', '11100'],
+  E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+  H: ['10001', '10001', '10001', '11111', '10001', '10001', '10001'],
+  I: ['01110', '00100', '00100', '00100', '00100', '00100', '01110'],
+  L: ['10000', '10000', '10000', '10000', '10000', '10000', '11111'],
+  M: ['10001', '11011', '10101', '10101', '10001', '10001', '10001'],
+  N: ['10001', '10001', '11001', '10101', '10011', '10001', '10001'],
+  O: ['01110', '10001', '10001', '10001', '10001', '10001', '01110'],
+  R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'],
+  S: ['01111', '10000', '10000', '01110', '00001', '00001', '11110'],
+  T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
+  0: ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
+  1: ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
+  2: ['01110', '10001', '00001', '00010', '00100', '01000', '11111'],
+  3: ['01110', '10001', '00001', '00110', '00001', '10001', '01110'],
+  4: ['00010', '00110', '01010', '10010', '11111', '00010', '00010'],
+  5: ['11111', '10000', '11110', '00001', '00001', '10001', '01110'],
+  6: ['00110', '01000', '10000', '11110', '10001', '10001', '01110'],
+  7: ['11111', '00001', '00010', '00100', '01000', '01000', '01000'],
+  8: ['01110', '10001', '10001', '01110', '10001', '10001', '01110'],
+  9: ['01110', '10001', '10001', '01111', '00001', '00010', '01100'],
+  '$': ['00100', '01111', '10100', '01110', '00101', '11110', '00100'],
+  '.': ['00000', '00000', '00000', '00000', '00000', '01100', '01100'],
+  '%': ['11000', '11001', '00010', '00100', '01000', '10011', '00011'],
+  '−': ['00000', '00000', '00000', '11111', '00000', '00000', '00000'],
+  '×': ['00000', '10001', '01010', '00100', '01010', '10001', '00000'],
+  ' ': ['00000', '00000', '00000', '00000', '00000', '00000', '00000'],
+};
+const on = (ch, r, k) => r < 7 && PIX[ch][r][k] === '1';
+const bigWidth = (s, scale = 1) => len(s) * (5 + 1) * scale - scale;
+// 1x: each glyph is 5 cols x 4 rows of half blocks. 2x: each font pixel is 2 cols x 1 row of full blocks.
+function big(col, row, s, fg, scale = 1) {
+  for (const ch of s) {
+    if (!PIX[ch]) throw new Error(`no block glyph for "${ch}"`);
+    for (let k = 0; k < 5; k++) {
+      if (scale === 1) {
+        for (let tr = 0; tr < 4; tr++) {
+          const top = on(ch, 2 * tr, k), bot = on(ch, 2 * tr + 1, k);
+          if (top || bot) put(col + k, row + tr, top && bot ? '█' : top ? '▀' : '▄', fg, 0, undefined, 1);
+        }
+      } else {
+        for (let r = 0; r < 7; r++) if (on(ch, r, k)) put(col + 2 * k, row + r, '██', fg, 0, undefined, 1);
+      }
+    }
+    col += 6 * scale;
+  }
+}
+
+// ── panels ───────────────────────────────────────────────────────────────────────────────────────
+// Rounded light border with the title set into the top edge: ╭─ title ──────╮. Content goes through
+// text(), which places it on an inner row and throws if it would not fit inside the border and padding.
+function panel(p, color = C.border) {
+  const { c, r, w, h, title } = p;
+  put(c, r, '╭' + '─'.repeat(w - 2) + '╮', color);
+  for (let y = r + 1; y < r + h - 1; y++) { put(c, y, '│', color); put(c + w - 1, y, '│', color); }
+  put(c, r + h - 1, '╰' + '─'.repeat(w - 2) + '╯', color);
+  put(c + 2, r, ' ' + title + ' ', C.text, 1);
+}
+function focusPanel(p) {
+  const { c, r, w, h, title } = p;
+  put(c, r, '╔' + '═'.repeat(w - 2) + '╗', C.focus);
+  for (let y = r + 1; y < r + h - 1; y++) { put(c, y, '║', C.focus); put(c + w - 1, y, '║', C.focus); }
+  put(c, r + h - 1, '╚' + '═'.repeat(w - 2) + '╝', C.focus);
+  put(c + 2, r, ' ' + title + ' ', C.focus, 1);
+}
+const inner = p => p.w - 4;
+function text(p, row, parts, align = 'left', bg) {
+  const n = width(parts), room = inner(p);
+  if (n > room) throw new Error(`"${parts.map(q => q[0]).join('')}" (${n}) overflows ${p.title} (${room})`);
+  if (row < 0 || row > p.h - 3) throw new Error(`row ${row} outside ${p.title}`);
+  const col = align === 'right' ? p.c + 2 + room - n : align === 'center' ? p.c + 2 + Math.floor((room - n) / 2) : p.c + 2;
+  line(col, p.r + 1 + row, parts, bg);
+}
+// Absolute placement inside a panel, with the same overflow check.
+function place(p, col, row, parts) {
+  if (col < p.c + 2 || col + width(parts) > p.c + p.w - 2) throw new Error(`"${parts.map(q => q[0]).join('')}" overflows ${p.title}`);
+  line(col, row, parts);
+}
+// Fill the inside of a panel with blank cells on a solid background (dialogs).
+function clearInside(p, bg) {
+  for (let y = p.r; y < p.r + p.h; y++) put(p.c, y, ' '.repeat(p.w), C.text, 0, bg);
+}
+// A bar of `cells` (float) filled cells in eighth steps over a dim shaded track `n` cells long, as parts.
+const PARTIAL = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
+function barParts(cells, n, fg, track = C.dim, pix = 0) {
+  const q = Math.round(clamp(cells, 0, n) * 8), full = Math.floor(q / 8), rem = q % 8;
+  const used = full + (rem ? 1 : 0);
+  const parts = [['█'.repeat(full) + PARTIAL[rem], fg, 0, pix]];
+  if (track && used < n) parts.push(['░'.repeat(n - used), track, 0, pix]);
+  else if (used < n) parts.push([' '.repeat(n - used), fg]);
+  return parts;
+}
+const gauge = (cells, n, fg) => [['▕', C.dim], ...barParts(cells, n, fg), ['▏', C.dim]];
+function effortParts(level) {
+  const k = { low: 1, med: 2, high: 3 }[level] || 0;
+  return [['█'.repeat(k), C.text], ['░'.repeat(3 - k), C.dim], [' ' + (level || '—'), level ? C.text : C.dim]];
+}
+
+// ── header strip, bottom bar, cursor ─────────────────────────────────────────────────────────────
+function strip(row, bg) { for (let c = 0; c < COLS; c++) cellBg[row * COLS + c] = bg; }
+// Key/flag chips, right-aligned so the last one ends at column `right`. A pressed chip shows inverse.
+function chips(row, right, list, pressed) {
+  const total = list.reduce((n, s) => n + len(s) + 2, 0) + (list.length - 1);
+  const first = right - total + 1;
+  let col = first;
+  for (const s of list) {
+    const hit = s === pressed;
+    col = put(col, row, ` ${s} `, hit ? C.field : C.cdim, hit ? 1 : 0, hit ? C.focus : C.chip) + 1;
+  }
+  return first;
+}
+// The block cursor is not a glyph: a filled cell painted over the buffer.
+let cursor = null;
+function paintCursor() {
+  if (!cursor) return;
+  g.fillStyle = cursor.fg; g.fillRect(GX + cursor.col * CW, GY + cursor.row * CH + 2, CW, CH - 4);
+}
+
+// ── the typed command ────────────────────────────────────────────────────────────────────────────
+// Key times with seeded jitter, scaled to fill T_TYPE exactly; the command grows by whole characters.
+const PROMPT = '~/bench', CMD = './route --task refactor --effort auto';
+const T_TYPE = [0.45, 1.45], T_ENTER = 1.5;
+const KEY_T = (() => {
+  const gaps = [...CMD].map((ch, i) => (0.65 + 0.7 * hash(i, 77)) * (ch === ' ' ? 1.3 : 1));
+  const sum = gaps.reduce((a, b) => a + b, 0) - gaps[0];
+  let acc = 0;
+  return gaps.map((d, i) => { if (i) acc += d; return T_TYPE[0] + (T_TYPE[1] - T_TYPE[0]) * acc / sum; });
+})();
+const typed = t => KEY_T.filter(k => at(t, k)).length;
+
+// ── the run (seconds of film time) ───────────────────────────────────────────────────────────────
+// On Enter each panel's contents print whole in turn and the run plays out until it completes at 5.66;
+// at 5.92 [c] is pressed and the cost view shows the settled result from 6.00; at 8.03 [o] returns to
+// the finished overview; a dialog prints at 8.40 and holds until the fade.
+const PRINT = { planner: 1.53, router: 1.60, workers: 1.67, log: 1.74, cost: 1.81 };
+const T_KEY_C = 5.92, T_COST = 6.0, T_KEY_O = 8.03, T_BACK = 8.1, T_DIALOG = 8.4, T_FADE = [9.8, 10.4];
+const BAR_ALL = [6.05, 6.60], BAR_ROUTED = [6.65, 7.05], T_SAVING = 7.10, T_CAPTION = 7.17, T_DONE = 5.66;
+const TASK = { t01: 'parse config', t02: 'write tests', t03: 'fix lint', t04: 'update docs', t05: 'refactor auth',
+  t06: 'migrate schema', t07: 'bump deps', t08: 'review diff', t09: 'summarize logs' };
+// Routing decisions: time, task, target, gauge values (complexity, context, risk), kind.
+const ROUTES = [
+  [1.88, 't01', 'small', [0.22, 0.14, 0.08]], [1.98, 't02', 'small', [0.36, 0.25, 0.14]],
+  [2.08, 't03', 'small', [0.18, 0.11, 0.06]], [2.30, 't04', 'small', [0.27, 0.33, 0.10]],
+  [2.56, 't05', 'small', [0.49, 0.41, 0.28]], [2.78, 't05', 'large', [0.81, 0.62, 0.55], 'reroute'],
+  [3.08, 't07', 'small', [0.24, 0.17, 0.47]], [3.34, 't08', 'small', [0.44, 0.58, 0.21]],
+  [3.70, 't09', 'small', [0.21, 0.64, 0.07]], [3.86, 't06', 'large', [0.86, 0.71, 0.66]],
+  [4.34, 't07', 'small', [0.26, 0.17, 0.39], 'retry'],
+];
+// Each small worker's jobs: start, end, task, outcome.
+const JOBS = [
+  [[1.88, 2.26, 't01', 'pass'], [2.30, 3.30, 't04', 'pass'], [3.34, 4.86, 't08', 'pass']],
+  [[1.98, 2.52, 't02', 'pass'], [2.56, 2.78, 't05', 'reroute'], [3.70, 5.38, 't09', 'pass']],
+  [[2.08, 3.04, 't03', 'pass'], [3.08, 3.56, 't07', 'stop'], [4.34, 5.12, 't07', 'pass']],
+];
+const EFFORT = ['med', 'med', 'low'], TOK_RATE = [1.7, 1.4, 1.2];
+// Once a worker is finished: a mark for a rerouted task beside ✓ passed, and its token count.
+const FINAL_NOTE = [null, ['↻', C.reroute], null];
+const ADVISOR_CALLS = [2.00, 3.82];
+// The session log: one entry per printed line.
+const LOG = [
+  { t: 1.74, k: 'plan' },
+  { t: 2.00, k: 'adv', name: 'review plan' },
+  { t: 2.26, id: 't01', to: 'small', st: 'pass', d: 0.4 },
+  { t: 2.52, id: 't02', to: 'small', st: 'pass', d: 0.5 },
+  { t: 2.78, id: 't05', to: 'small', st: 'reroute' },
+  { t: 3.04, id: 't03', to: 'small', st: 'pass', d: 1.0 },
+  { t: 3.30, id: 't04', to: 'small', st: 'pass', d: 1.0 },
+  { t: 3.56, id: 't07', to: 'small', st: 'stop' },
+  { t: 3.82, k: 'adv', name: 'migrate schema' },
+  { t: 4.08, id: 't05', to: 'large', st: 'pass', d: 1.3 },
+  { t: 4.34, id: 't07', to: 'small', st: 'retry' },
+  { t: 4.60, id: 't06', to: 'large', st: 'pass', d: 0.7 },
+  { t: 4.86, id: 't08', to: 'small', st: 'pass', d: 1.5 },
+  { t: 5.12, id: 't07', to: 'small', st: 'pass', d: 0.8 },
+  { t: 5.38, id: 't09', to: 'small', st: 'pass', d: 1.7 },
+  { t: T_DONE, k: 'done' },
+];
+const TOTAL_TOK = 0.64, ALL_TOK = 1.92, USD_PER_M = 15;
+
+const PANELS = {
+  planner: { c: 0, r: 2, w: 33, h: 12, title: 'planner' },
+  router: { c: 33, r: 2, w: 31, h: 12, title: 'router' },
+  workers: { c: 64, r: 2, w: 42, h: 12, title: 'workers' },
+  log: { c: 0, r: 15, w: 64, h: 15, title: 'session log' },
+  cost: { c: 64, r: 15, w: 42, h: 15, title: 'cost · same task' },
+};
+
+// ── live state, all derived from t ───────────────────────────────────────────────────────────────
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+const spinner = t => SPIN[Math.floor(t / 0.08) % SPIN.length];
+const kfmt = v => v >= 100 ? `${Math.round(v)}k` : `${v.toFixed(1)}k`;
+const clockText = t => {
+  const s = clamp(Math.min(t, T_DONE) - T_ENTER, 0, 599), d = Math.floor(s * 10);
+  return `${String(Math.floor(d / 600)).padStart(2, '0')}:${String(Math.floor(d / 10) % 60).padStart(2, '0')}.${d % 10}`;
+};
+const stamp = t => { const s = 3 + Math.floor(t - T_ENTER); return `14:02:${String(s).padStart(2, '0')}`; };
+const passed = t => LOG.filter(e => e.st === 'pass' && at(t, e.t)).length;
+const runState = t => !at(t, T_ENTER) ? 'idle' : at(t, T_DONE) ? 'done' : 'running';
+const STATE_BG = { idle: C.cdim, running: C.run, done: C.pass };
+// Tokens spent by the routed run so far, in millions: the one total that the run line and the cost
+// panel's routed row both print, reaching 0.64M exactly when the run completes. Until then the live value
+// stays under 0.635M, so it never rounds up to the final 0.64M before the run is done.
+const runTok = t => at(t, T_DONE) ? TOTAL_TOK : Math.min(TOTAL_TOK * Math.pow(seg(t, T_ENTER, T_DONE), 1.08), 0.6349);
+const tokText = m => `${m.toFixed(2)}M tok  $${(m * USD_PER_M).toFixed(2)}`;
+
+// Router gauges: each routing eases from the current value to the new one with a small overshoot,
+// quantised to 1/8 cell per frame and never more than 2/8 cell past the target.
+const G_CELLS = 9, G_DUR = 0.4;
+function easeGauge(from, to, u) {
+  u = clamp(u);
+  const k = 1.6, s = 1 + (k + 1) * Math.pow(u - 1, 3) + k * Math.pow(u - 1, 2);
+  const v = from + (to - from) * s;
+  return to >= from ? Math.min(v, to + 0.25) : Math.max(v, to - 0.25);
+}
+function gaugeCells(t, k) {
+  let from = 0, to = 0, t0 = null;
+  for (const r of ROUTES) {
+    if (!at(t, r[0])) break;
+    from = t0 === null ? 0 : easeGauge(from, to, (r[0] - t0) / G_DUR);
+    to = r[3][k] * G_CELLS; t0 = r[0];
+  }
+  return t0 === null ? 0 : Math.round(easeGauge(from, to, (t - t0) / G_DUR) * 8) / 8;
+}
+const lastRoute = t => ROUTES.filter(r => at(t, r[0])).pop();
+function forkCounts(t) {
+  let small = 0, large = 0;
+  for (const r of ROUTES) {
+    if (!at(t, r[0]) || r[4] === 'retry') continue;
+    if (r[4] === 'reroute') { small--; large++; } else if (r[2] === 'small') small++; else large++;
+  }
+  return [small, large];
+}
+// A worker's tokens so far (k) and its status parts.
+function workerTok(w, t) {
+  return JOBS[w].reduce((s, [a, b]) => s + TOK_RATE[w] * clamp(Math.min(t, b) - a, 0, 99), 0) + 0.6 * (w + 1);
+}
+function workerStatus(w, t) {
+  const jobs = JOBS[w], cur = jobs.find(([a, b]) => at(t, a) && !at(t, b));
+  if (cur) return { parts: [[spinner(t + w * 0.13) + ' running', C.run]], tok: true };
+  const done = jobs.filter(([, b]) => at(t, b));
+  if (!done.length) return { parts: [['○ idle', C.cdim]], tok: false };
+  if (done.length === jobs.length) {
+    const note = FINAL_NOTE[w];
+    return { parts: [['✓ passed', C.pass], ...(note ? [[' ' + note[0], note[1]]] : [])], tok: true };
+  }
+  const st = done[done.length - 1][3];
+  if (st === 'reroute') return { parts: [['↻ → large', C.reroute]], tok: true };
+  if (st === 'stop') return { parts: [['■ stopped', C.stop]], tok: true };
+  return { parts: [['✓ passed', C.pass]], tok: true };
+}
+
+// ── layout A: the overview ───────────────────────────────────────────────────────────────────────
+const label = (s, n) => [pad(s, n), C.cdim];
+const NONE = ['—', C.dim];
+function header(t) {
+  strip(0, C.text);
+  const cast = put(1, 0, 'bench · plan → route → run · planner large · workers small ×3 · advisor large', C.field, 1);
+  const st = runState(t), clock = ` ${clockText(t)} `, chip = ` ● ${st} `;
+  const c0 = COLS - len(clock) - len(chip);
+  if (cast >= c0) throw new Error('header overflows');
+  put(c0, 0, chip, C.field, 1, STATE_BG[st]);
+  put(c0 + len(chip), 0, clock, C.field, 1);
+}
+function plannerPanel(t) {
+  const p = PANELS.planner, live = at(t, PRINT.planner), st = runState(t);
+  panel(p);
+  const ctx = live ? 38 + 3.4 * clamp(Math.min(t, T_DONE) - T_ENTER, 0, 9) : 0;
+  const tick = Math.floor(Math.min(t, T_DONE) / 0.3);
+  text(p, 1, [label('model', 8), live ? ['large', C.text, 1] : NONE]);
+  text(p, 2, [label('effort', 8), ...effortParts(live ? 'high' : null)]);
+  text(p, 3, [label('ctx', 8), ...gauge(ctx / 200 * 10, 10, C.text), [' ' + (live ? `${Math.floor(ctx)}k/200k` : '—'), live ? C.text : C.dim]]);
+  text(p, 4, [label('tok/s', 8), live ? [(61.4 + 4 * (hash(tick, 5) - 0.5) * (st === 'done' ? 0 : 1)).toFixed(1), C.text, 1] : NONE]);
+  const io = clamp(Math.min(t, T_DONE) - T_ENTER, 0, 9);
+  text(p, 5, live ? [label('in', 3), [pad(kfmt(12.4 + 2.6 * io), 7), C.text], label('out', 4), [kfmt(3.1 + 0.9 * io), C.text]]
+    : [label('in', 3), [pad('—', 7), C.dim], label('out', 4), NONE]);
+  const n = passed(t);
+  if (!live) text(p, 8, [['○ idle', C.cdim]]);
+  else if (st === 'done') text(p, 8, [['✓ done', C.pass, 1], [` · ${n}/9 passed`, C.cdim]]);
+  else text(p, 8, [[spinner(t) + ' running', C.run, 1], [` · ${n}/9 passed`, C.cdim]]);
+}
+function routerPanel(t) {
+  const p = PANELS.router, live = at(t, PRINT.router);
+  panel(p);
+  ['complexity', 'context', 'risk'].forEach((name, k) => {
+    const cells = live ? gaugeCells(t, k) : 0;
+    text(p, 1 + k, [label(name, 11), ...gauge(cells, G_CELLS, C.text), [' ' + (live ? (cells / G_CELLS).toFixed(2) : '—'), live ? C.text : C.dim]]);
+  });
+  const r = live ? lastRoute(t) : null;
+  text(p, 5, r ? [label('task', 6), [r[1] + ' ', C.cdim], [TASK[r[1]], C.text]] : [label('task', 6), NONE]);
+  if (!r) text(p, 6, [label('route', 6), NONE]);
+  else if (r[4] === 'reroute') text(p, 6, [label('route', 6), ['↻ → large', C.reroute, 1]]);
+  else text(p, 6, [label('route', 6), ['→ ' + r[2], C.run, 1], ...(r[4] === 'retry' ? [['  retry', C.cdim]] : [])]);
+  const [s, l] = live ? forkCounts(t) : [0, 0];
+  text(p, 8, [['fork ', C.cdim], ['→ small ', C.text], [String(s), C.text, 1], [' │ ', C.border], ['→ large ', C.text], [String(l), C.text, 1]]);
+}
+function workersPanel(t) {
+  const p = PANELS.workers, live = at(t, PRINT.workers);
+  panel(p);
+  for (let w = 0; w < 3; w++) {
+    const s = live ? workerStatus(w, t) : { parts: [['○ idle', C.cdim]], tok: false };
+    text(p, 1 + w, [[`worker ${w + 1}  `, C.text], ...effortParts(live ? EFFORT[w] : null).map((q, i) => i === 2 ? [pad(q[0], 7), q[1]] : q), ...s.parts]);
+    if (s.tok) text(p, 1 + w, [[lpad(kfmt(workerTok(w, t)), 5), C.cdim]], 'right');
+  }
+  const calls = live ? ADVISOR_CALLS.filter(c => at(t, c)).length : 0;
+  const busy = live && ADVISOR_CALLS.some(c => at(t, c - 0.24) && !at(t, c));
+  text(p, 5, [['advisor   ', C.text], ...effortParts(live ? 'high' : null).map((q, i) => i === 2 ? [pad(q[0], 7), q[1]] : q),
+    ...(busy ? [[spinner(t) + ' ', C.run]] : []), ['calls ', C.cdim], [String(calls), C.text, 1]]);
+  const tally = (st, end) => live ? JOBS.reduce((n, js) => n + js.filter(j => j[3] === st && at(t, j[1])).length, 0) + end : 0;
+  const pass = live ? passed(t) : 0, rr = tally('reroute', 0), sp = tally('stop', 0);
+  text(p, 8, [['passed ', C.cdim], [String(pass), C.pass, 1], ['   rerouted ', C.cdim], [String(rr), C.reroute, 1], ['   stopped ', C.cdim], [String(sp), C.stop, 1]]);
+}
+function logLine(e) {
+  const time = [stamp(e.t) + '  ', C.cdim];
+  if (e.k === 'plan') return [time, ['plan ', C.cdim], ['9 steps · effort auto', C.text]];
+  if (e.k === 'done') return [time, ['run complete', C.pass, 1], [' · 9 tasks · 0 failed', C.text]];
+  if (e.k === 'adv') return [time, ['adv  ', C.cdim], [pad(e.name, 16), C.text], ['→ large', C.run], ['  ', C.text], ['▸ advisor', C.cdim]];
+  const st = e.st === 'pass' ? [['✓ passed', C.pass], ['  ' + e.d.toFixed(1) + 's', C.cdim]]
+    : { reroute: [['↻ rerouted', C.reroute]], stop: [['■ stopped', C.stop]], retry: [['▸ retry', C.run]] }[e.st];
+  return [time, [e.id + '  ', C.cdim], [pad(TASK[e.id], 16), C.text], ['→ ' + e.to, C.run], ['  ', C.text], ...st];
+}
+const LOG_ROWS = 10;
+function logPanel(t) {
+  const p = PANELS.log;
+  panel(p);
+  text(p, 0, [['time      id   task            route    status', C.dim]]);
+  const shown = at(t, PRINT.log) ? LOG.filter(e => at(t, e.t)) : [];
+  shown.slice(-LOG_ROWS).forEach((e, i) => {
+    const parts = logLine(e);
+    if (width(parts) > 56) throw new Error('log line over 56 cols');
+    text(p, 1 + i, parts);
+  });
+  const live = at(t, PRINT.log), tok = live ? runTok(t) : 0, n = live ? passed(t) : 0;
+  text(p, 12, [['run  ', C.cdim], ...gauge(n / 9 * 24, 24, C.text), live ? [`  ${n}/9  `, C.text, 1] : ['  —    ', C.dim],
+    [live ? tokText(tok) : '— tok  $—', live ? C.cdim : C.dim]]);
+}
+// The all-large baseline is static; the routed row accrues with the run (same total as the run line,
+// bar on the same scale: 36 cells = 1.92M); the saving prints once the run is done.
+const COST_CELLS = 36;
+function costPanel(t) {
+  const p = PANELS.cost, live = at(t, PRINT.cost), tok = live ? runTok(t) : 0;
+  panel(p);
+  const val = m => live ? [lpad(tokText(m), 18), C.text] : [lpad('— tok  $—', 18), C.dim];
+  text(p, 1, [['all large', C.text, 1]]); text(p, 1, [val(ALL_TOK)], 'right');
+  text(p, 2, barParts(live ? COST_CELLS : 0, COST_CELLS, C.cdim));
+  text(p, 4, [['routed', C.text, 1]]); text(p, 4, [val(tok)], 'right');
+  text(p, 5, barParts(tok / ALL_TOK * COST_CELLS, COST_CELLS, C.pass));
+  text(p, 8, [['saving', C.cdim]]);
+  text(p, 8, [at(t, T_DONE) ? ['−67%', C.pass, 1] : NONE], 'right');
+}
+function layoutA(t) {
+  plannerPanel(t); routerPanel(t); workersPanel(t); logPanel(t); costPanel(t);
+}
+
+// ── layout B: the cost view ──────────────────────────────────────────────────────────────────────
+// The header stays; one focused panel takes the main area. Two full-height bars grow in eighth steps
+// (3:1), each value prints when its bar lands, then the 2x block-letter saving and its caption.
+const COSTVIEW = { c: 0, r: 2, w: 106, h: 28, title: 'cost · same task' };
+const CV_BAR_COL = 16, CV_ALL = 66, CV_ROUTED = 22, CV_VAL_COL = 84;
+function costView(t) {
+  const p = COSTVIEW;
+  focusPanel(p);
+  const rows = [[5, 'all large', CV_ALL, ALL_TOK, BAR_ALL, C.cdim], [8, 'routed', CV_ROUTED, TOTAL_TOK, BAR_ROUTED, C.pass]];
+  for (const [row, name, cells, m, [a, b], fg] of rows) {
+    const y = p.r + 1 + row, grown = cells * easeOut(seg(t, a, b));
+    place(p, p.c + 4, y, [[name, C.text, 1]]);
+    place(p, CV_BAR_COL, y, barParts(at(t, a) ? grown : 0, CV_ALL, fg, C.dim, 1));
+    if (at(t, b)) place(p, CV_VAL_COL, y, [[lpad(`${m.toFixed(2)}M tok`, 9), C.text, 1], [lpad(`$${(m * USD_PER_M).toFixed(2)}`, 8), C.text, 1]]);
+  }
+  if (at(t, T_SAVING)) big(Math.floor((COLS - bigWidth('−67%', 2)) / 2), p.r + 1 + 12, '−67%', C.pass, 2);
+  if (at(t, T_CAPTION)) {
+    const cap = 'same task · same output · 9 steps';
+    place(p, Math.floor((COLS - len(cap)) / 2), p.r + 1 + 20, [[cap, C.cdim]]);
+  }
+}
+
+// ── the closing dialog ───────────────────────────────────────────────────────────────────────────
+const DIALOG = { c: 22, r: 8, w: 61, h: 15, title: 'run complete' };
+// While the dialog is up the screen behind it is redrawn at half intensity, as modal TUIs do.
+const DIM_MIX = 0.5, dimmed = new Map();
+function dimColor(hex) {
+  if (!dimmed.has(hex)) {
+    const v = k => parseInt(hex.slice(k, k + 2), 16), f = k => parseInt(C.field.slice(k, k + 2), 16);
+    dimmed.set(hex, '#' + [1, 3, 5].map(k => Math.round(v(k) + (f(k) - v(k)) * DIM_MIX).toString(16).padStart(2, '0')).join(''));
+  }
+  return dimmed.get(hex);
+}
+function dialog() {
+  const p = DIALOG;
+  for (let i = 0; i < N; i++) { cellFg[i] = dimColor(cellFg[i]); if (cellBg[i]) cellBg[i] = dimColor(cellBg[i]); }
+  clearInside(p, C.field);
+  focusPanel(p);
+  big(p.c + Math.floor((p.w - bigWidth('TERMINAL')) / 2), p.r + 2, 'TERMINAL', C.focus);
+  big(p.c + Math.floor((p.w - bigWidth('DASHBOARD')) / 2), p.r + 7, 'DASHBOARD', C.focus);
+  text(p, 11, [['9 tasks · 9 passed · 0.64M tok · $9.60', C.cdim]], 'center');
+}
+
+// ── bottom bar ───────────────────────────────────────────────────────────────────────────────────
+function bottomBar(t) {
+  const k = typed(t), end = line(0, ROWS - 1, [[PROMPT, C.text, 1], [' $ ', C.cdim], [CMD.slice(0, k), C.text]]);
+  const typing = at(t, KEY_T[0]) && !at(t, T_ENTER);
+  const blink = typing || ((t - (at(t, T_ENTER) ? T_ENTER : 0)) % 1) < 0.5;
+  cursor = blink ? { col: end, row: ROWS - 1, fg: at(t, T_DIALOG) ? dimColor(C.text) : C.text } : null;
+  const inCost = at(t, T_COST) && !at(t, T_BACK);
+  const key = inCost ? '[o] overview' : '[c] cost';
+  const pressed = (at(t, T_KEY_C) && !at(t, T_COST)) || (at(t, T_KEY_O) && !at(t, T_BACK)) ? key : null;
+  if (chips(ROWS - 1, COLS - 1, ['effort:auto', 'route:on', key, '[q] quit'], pressed) <= end + 1) throw new Error('bottom bar overflows');
+}
+
+// ── frame ────────────────────────────────────────────────────────────────────────────────────────
+function frame(t) {
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  g.fillStyle = C.field; g.fillRect(0, 0, W, H);
+  titleBar(at(t, T_ENTER) ? `~/bench — route — ${COLS}×${ROWS}` : `~/bench — ${COLS}×${ROWS}`);
+  wipe(); cursor = null;
+  header(t);
+  if (at(t, T_COST) && !at(t, T_BACK)) costView(t); else layoutA(t);
+  bottomBar(t);
+  if (at(t, T_DIALOG)) dialog();
+  paint(); paintCursor();
+  const dark = Math.max(1 - seg(t, 0, 0.4), Math.pow(seg(t, T_FADE[0], T_FADE[1] - 1.5 / FPS), 1.4));
+  if (dark > 0) { g.fillStyle = `rgba(0,0,0,${dark})`; g.fillRect(0, 0, W, H); }
+}
+
+// ── sound cues for audio.py ──────────────────────────────────────────────────────────────────────
+const panX = col => +clamp((GX + (col + 0.5) * CW) / W * 2 - 1, -1, 1).toFixed(3);
+window.events = () => {
+  const ev = [{ k: 'bed', t: 0, end: DUR }, { k: 'fade', t: T_FADE[0] }];
+  KEY_T.forEach((k, i) => ev.push({ k: 'key', t: +k.toFixed(4), p: panX(len(PROMPT) + 3 + i) }));
+  ev.push({ k: 'enter', t: T_ENTER, p: panX(len(PROMPT) + 3 + len(CMD)) });
+  const chipCol = COLS - 26;
+  ev.push({ k: 'key', t: T_KEY_C, p: panX(chipCol) }, { k: 'key', t: T_KEY_O, p: panX(chipCol) });
+  Object.entries(PRINT).forEach(([name, t], i) => {
+    const q = PANELS[name];
+    ev.push({ k: 'blip', t, m: [76, 79, 83, 86, 88][i], p: panX(q.c + q.w / 2) });
+  });
+  for (const e of LOG) {
+    if (!(e.t < T_KEY_C)) continue;
+    ev.push({ k: 'tick', t: e.t, p: panX(PANELS.log.c + 2 + width(logLine(e))) });
+    const p = panX(PANELS.workers.c + 24);
+    if (e.st === 'pass') ev.push({ k: 'pass', t: e.t, p });
+    if (e.st === 'reroute') ev.push({ k: 'reroute', t: e.t, p });
+    if (e.st === 'stop') ev.push({ k: 'stop', t: e.t, p });
+  }
+  ev.push({ k: 'thunk', t: T_COST }, { k: 'thunk', t: T_BACK });
+  ev.push({ k: 'glide', t: BAR_ALL[0], d: BAR_ALL[1] - BAR_ALL[0], m0: 50, m1: 62, p: -0.1 });
+  ev.push({ k: 'glide', t: BAR_ROUTED[0], d: BAR_ROUTED[1] - BAR_ROUTED[0], m0: 50, m1: 55, p: -0.25 });
+  ev.push({ k: 'pass', t: T_SAVING, p: 0 }, { k: 'tick', t: T_CAPTION, p: 0 }, { k: 'pass', t: T_DONE, p: panX(COLS - 15) });
+  ev.push({ k: 'chord', t: T_DIALOG });
+  return ev.sort((a, b) => a.t - b.t);
+};
+window.ready = (async () => {
+  await Promise.all([document.fonts.load(`400 30px ${FONT}`), document.fonts.load(`600 30px ${FONT}`), document.fonts.load(`400 20px ${FONT}`)]);
+  g.font = `400 100px ${FONT}`;
+  FS = CW / (g.measureText('0').width / 100);
+  g.font = `400 ${FS}px ${FONT}`;
+  BASE = Math.round(CH / 2 + g.measureText('H').actualBoundingBoxAscent / 2);
+})();
+window.draw = ({ t }) => { frame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+</script>
+</body></html>

@@ -2889,6 +2889,94 @@
    "recipe": false,
    "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pop-art-preview.gif",
    "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/pop-art.mp4"
+  },
+  {
+   "slug": "classical-collage",
+   "number": 147,
+   "name": "Classical Collage",
+   "feel": "White-field collage of classical engravings",
+   "best_for": "Fast brand and product announcements that look print-editorial",
+   "family": "polished",
+   "use_cases": [
+    "product",
+    "titles",
+    "social"
+   ],
+   "credits": [
+    "Inspired by the Claude Opus 5.5 ad posted by Leon Lin (@LexnLin)",
+    "Inspired by the engraved plates of Andreas Vesalius, Albrecht Dürer, Leonardo da Vinci and Johannes Hevelius"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/classical-collage-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/classical-collage.mp4"
+  },
+  {
+   "slug": "terminal-dashboard",
+   "number": 148,
+   "name": "Terminal Dashboard",
+   "feel": "Dense multi-panel TUI with live metrics",
+   "best_for": "Agent runs, benchmarks and cost comparisons told by numbers",
+   "family": "technical",
+   "use_cases": [
+    "data",
+    "explainer",
+    "product"
+   ],
+   "credits": [
+    "Inspired by the multi-model terminal walkthrough posted by delost (@thedelost)",
+    "Inspired by the text-based user interfaces of Unix terminal tools, from curses to today's dashboards"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/terminal-dashboard-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/terminal-dashboard.mp4"
+  },
+  {
+   "slug": "tonal-manga",
+   "number": 149,
+   "name": "Tonal Manga",
+   "feel": "Two-tone manga: paper, halftone, solid ink",
+   "best_for": "Quiet everyday scenes, portraits and editorial storytelling",
+   "family": "comics",
+   "use_cases": [
+    "story",
+    "social"
+   ],
+   "credits": [
+    "Inspired by the Plainclothes style of the Katagami library, as used in Clanker, I'm Fine by arni",
+    "Inspired by the quiet everyday manga of Jiro Taniguchi and the screentone tradition of Japanese manga"
+   ],
+   "webgl": false,
+   "render": {},
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/tonal-manga-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/tonal-manga.mp4"
+  },
+  {
+   "slug": "mascot-beat-reel",
+   "number": 150,
+   "name": "Mascot Beat Reel",
+   "feel": "Bouncy mascot, one-colour scenes, beat cuts",
+   "best_for": "Brand mascot reels, feature round-ups and music-cut social clips",
+   "family": "generative-3d",
+   "use_cases": [
+    "social",
+    "product",
+    "titles"
+   ],
+   "credits": [
+    "Inspired by Ishu Agrawal's “Claude hits the beat” reel"
+   ],
+   "webgl": true,
+   "render": {
+    "gpu": "metal"
+   },
+   "recipe": false,
+   "preview": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/mascot-beat-reel-preview.gif",
+   "video": "https://github.com/VGonPa/video-styles/releases/download/v1.0.0/mascot-beat-reel.mp4"
   }
  ]
 }
