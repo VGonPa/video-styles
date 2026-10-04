@@ -7,6 +7,10 @@ length and possibly in 9:16, that a viewer would recognise as this style.
 
 ## How to write one
 
+- **Style, not content.** The recipe describes the style: rules that transfer to any subject (palette, line,
+  texture, type, composition, camera, motion, editing, sound). The demo's subject, story, objects and plot moments
+  appear only as labelled examples ("in the demo: …"), never as the rule itself. Test: could another agent make a
+  film on an entirely different subject (a bakery, a train, an app) from the recipe alone?
 - **Look before you write.** Fetch the style into a scratch folder and render it:
   `python3 skills/animating-in-video-styles/scripts/fetch_style.py <slug> /tmp/<slug>-ref`, then
   `bash skills/animating-in-video-styles/scripts/contact_sheet.sh /tmp/<slug>-ref` and stills at 0.5, 1.5 and
@@ -158,5 +162,9 @@ Someone other than the author reviews every recipe. Check:
    alone, and could recompose it for 9:16 from Composition and Adapting: render the recipe's 9:16 values in a
    scratch copy and look (sun, title, characters in frame; nothing unpainted; text clear of the bands).
 6. It is concise, explains the why, names no line numbers and repeats nothing the catalog already holds.
+7. Style, not content: every rule describes the style, transferable to any subject; the demo's subject, story,
+   objects and plot moments appear only as labelled examples. Ask whether another agent could make a film on an
+   entirely different subject (a bakery, a train, an app) from the recipe alone; if not, the verdict is CHANGES
+   REQUIRED, naming each passage that states demo content as a rule and how to restate it as style.
 
 The reviewer writes a report of required changes; the author fixes them; a new reviewer checks the next round.
