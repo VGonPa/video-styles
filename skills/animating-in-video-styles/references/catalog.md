@@ -97,7 +97,7 @@ Recreations of older media and eras.
 - `newspaper` **Newspaper Headline** — Broadsheet front page, ink and halftone. Best for breaking facts, surprising findings, and documentary hooks · news, social · *no recipe yet*
 - `ray-traced-cgi` **Ray-Traced CGI** — Chrome spheres over an endless checkerboard. Best for retro tech openers, 90s nostalgia and shiny reveals · titles, product · Inspired by Turner Whitted's 1980 ray-traced spheres · *WebGL* · *no recipe yet*
 - `retro-desktop` **Retro Desktop** — Mid-90s desktop on a CRT. Best for nostalgic stories, tech humor, and step-by-step computer tutorials · story, tutorial · *no recipe yet*
-- `synthwave` **Synthwave** — Neon grid, chrome logo, sunset. Best for retro-futurist openers, series titles, and hype reels · titles, social · *no recipe yet*
+- `synthwave` **Synthwave** — Neon grid, chrome logo, sunset. Best for retro-futurist openers, series titles, and hype reels · titles, social
 - `teletext` **Teletext** — Blocky broadcast pages on a CRT. Best for news roundups, scores, forecasts and data at a glance · news, data · *no recipe yet*
 - `vaporwave` **Vaporwave** — Pastel marble bust, dreamy VHS. Best for ironic nostalgia, dreamy title cards, and aesthetic social posts · social, titles · *WebGL* · *no recipe yet*
 - `vhs-camcorder` **VHS Camcorder** — 90s home video on a VCR. Best for nostalgic memories, throwbacks, and found-footage hooks · story, social · *no recipe yet*
