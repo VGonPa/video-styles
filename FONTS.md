@@ -46,6 +46,7 @@ repository (`ofl/` or `apache/`) on 2026-10-01.
 | [EB Garamond](https://fonts.google.com/specimen/EB+Garamond) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [magazine-cartoon](styles/magazine-cartoon), [scientific-plate](styles/scientific-plate) |
 | [Exo 2](https://fonts.google.com/specimen/Exo+2) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [digital-comic](styles/digital-comic), [handheld-lcd](styles/handheld-lcd), [synthwave](styles/synthwave) |
 | [Federo](https://fonts.google.com/specimen/Federo) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [art-nouveau](styles/art-nouveau) |
+| [Fira Code](https://fonts.google.com/specimen/Fira+Code) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [terminal-dashboard](styles/terminal-dashboard) |
 | [Forum](https://fonts.google.com/specimen/Forum) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [byzantine](styles/byzantine) |
 | [Fraunces](https://fonts.google.com/specimen/Fraunces) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [feature-animation-3d](styles/feature-animation-3d), [liquid-motion](styles/liquid-motion), [paper-cutout](styles/paper-cutout), [post-impressionism](styles/post-impressionism), [retro-1970s](styles/retro-1970s) |
 | [Fredoka](https://fonts.google.com/specimen/Fredoka) | [SIL OFL 1.1](licenses/OFL-1.1.txt) | [clay](styles/clay), [inflated-3d](styles/inflated-3d), [infographic](styles/infographic), [kurzgesagt](styles/kurzgesagt), [retro-1970s](styles/retro-1970s), [surreal-loop](styles/surreal-loop) |
@@ -158,6 +159,7 @@ As recorded in each family's `METADATA.pb` in the google/fonts repository.
 - **EB Garamond**: Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/EBGaramond12)
 - **Exo 2**: Copyright 2013 The Exo 2 Project Authors (https://github.com/googlefonts/Exo-2.0)
 - **Federo**: Copyright (c) 2011 by Olexa M. Volochay | Cyreal.org (a@cyreal.org). All rights reserved.
+- **Fira Code**: Copyright 2014-2020 The Fira Code Project Authors (https://github.com/tonsky/FiraCode)
 - **Forum**: Copyright (c) 2011, Denis Masharov <denis.masharov@gmail.com>. This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
 - **Fraunces**: Copyright 2020 The Fraunces Project Authors (github.com/undercasetype/Fraunces)
 - **Fredoka**: Copyright 2016 The Fredoka Project Authors (https://github.com/hafontia/Fredoka-One)
